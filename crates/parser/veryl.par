@@ -735,7 +735,9 @@ ReturnStatement: Return Expression Semicolon;
 
 BreakStatement: Break Semicolon;
 
-ForStatement: For Identifier In [ Rev ] Range [ Step AssignmentOperator Expression ] StatementBlock;
+ForStatement: For ForIterator { Comma ForIterator } StatementBlock;
+
+ForIterator: Identifier In [ Rev ] Range [ Step AssignmentOperator Expression ];
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
@@ -972,7 +974,7 @@ InterfaceItem: GenerateItem | MixinDeclaration | ModportDeclaration;
 
 GenerateIfDeclaration: If Expression GenerateNamedBlock { Else If Expression GenerateOptionalNamedBlock } [ Else GenerateOptionalNamedBlock ];
 
-GenerateForDeclaration: For Identifier In [ Rev ] Range [ Step AssignmentOperator Expression ] GenerateNamedBlock;
+GenerateForDeclaration: For ForIterator { Comma ForIterator } GenerateNamedBlock;
 
 GenerateBlockDeclaration: GenerateNamedBlock;
 

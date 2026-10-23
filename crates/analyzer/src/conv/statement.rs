@@ -1,10 +1,11 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
 use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::utils::{
-    CaseOperand, TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type,
-    build_for_range, build_for_statement, case_patterns, check_assign_before_definition,
-    check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_case_target,
-    eval_expr, eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
+    CaseOperand, ForIteratorInfo, TbMethodCallPosition, TypePosition, argument_list,
+    assign_rhs_context_type, build_const_for_range, build_for_range, build_for_statement,
+    case_patterns, check_assign_before_definition, check_assign_clock_domain,
+    eval_array_range_assign, eval_assign_statement, eval_case_target, eval_expr, eval_variable,
+    expand_connect, expand_connect_const, function_call, get_return_str,
     hoist_component_method_call, single_function_call_factor, switch_condition, tb_method_call,
     to_hier_assign_destination, try_infer_decl_type, try_infer_var_assign,
 };
@@ -885,28 +886,55 @@ impl Conv<&ForStatement> for ir::StatementBlock {
             return Ok(ir::StatementBlock::default());
         }
 
-        let token: TokenRange = (&value.identifier.identifier_token).into();
+        let iterators = value.iterators();
+        let multi_dimension = iterators.len() > 1;
 
-        let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref()) else {
-            return Err(ir_error!(token));
-        };
+        // Every range is built before any iterator is defined, so a range
+        // reading an iterator of the same loop is not a constant.
+        let mut for_iterators = Vec::with_capacity(iterators.len());
+        for x in iterators {
+            let token: TokenRange = (&x.identifier.identifier_token).into();
 
-        let SymbolKind::Variable(ref x) = symbol.found.kind else {
-            unreachable!();
-        };
-        let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
-        let clock_domain = x.clock_domain;
+            let Ok(symbol) = symbol_table::resolve(x.identifier.as_ref()) else {
+                return Err(ir_error!(token));
+            };
 
-        let rev = value.for_statement_opt.is_some();
+            let SymbolKind::Variable(ref property) = symbol.found.kind else {
+                unreachable!();
+            };
+            let r#type = property
+                .r#type
+                .to_ir_type(context, TypePosition::Variable)?;
+            let clock_domain = property.clock_domain;
 
-        let step = value
-            .for_statement_opt0
-            .as_ref()
-            .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
+            let rev = x.for_iterator_opt.is_some();
 
-        let for_range = build_for_range(context, &value.range, rev, step)?;
+            let step = x
+                .for_iterator_opt0
+                .as_ref()
+                .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
 
-        build_for_statement(context, value, &r#type, clock_domain, for_range, token)
+            // A multi-dimensional loop is emitted as one flattened loop, whose
+            // iteration count must be an elaboration-time constant.
+            let for_range = if multi_dimension {
+                if step.is_some() {
+                    // Reported by CheckStatement.
+                    return Err(ir_error!(token));
+                }
+                build_const_for_range(context, &x.range, rev)?
+            } else {
+                build_for_range(context, &x.range, rev, step)?
+            };
+
+            for_iterators.push(ForIteratorInfo {
+                identifier: x.identifier.as_ref(),
+                r#type,
+                clock_domain,
+                range: for_range,
+            });
+        }
+
+        build_for_statement(context, value, for_iterators)
     }
 }
 

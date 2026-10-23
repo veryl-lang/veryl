@@ -79,6 +79,19 @@ module veryl_testcase_Module07;
                 break;
             end
         end
+
+        // multi-dimensional for statement
+        for (int __i_j = 0; __i_j < 2 * 3; __i_j++) begin
+            int i ;
+            int j ;
+            i  = __i_j / 3;
+            j  = 3 - __i_j % 3;
+            a  = i;
+            aa = i + j;
+            if (i == 1 && j == 1) begin
+                break;
+            end
+        end
     end
 
     logic        a00;

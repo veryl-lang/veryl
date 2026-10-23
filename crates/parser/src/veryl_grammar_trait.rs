@@ -672,6 +672,30 @@ impl ArrayLiteralItem {
     }
 }
 
+impl ForStatement {
+    pub fn iterators(&self) -> Vec<&ForIterator> {
+        let mut ret = vec![self.for_iterator.as_ref()];
+        ret.extend(
+            self.for_statement_list
+                .iter()
+                .map(|x| x.for_iterator.as_ref()),
+        );
+        ret
+    }
+}
+
+impl GenerateForDeclaration {
+    pub fn iterators(&self) -> Vec<&ForIterator> {
+        let mut ret = vec![self.for_iterator.as_ref()];
+        ret.extend(
+            self.generate_for_declaration_list
+                .iter()
+                .map(|x| x.for_iterator.as_ref()),
+        );
+        ret
+    }
+}
+
 impl CaseExpression {
     pub fn collect_factors(&self) -> Vec<&Factor> {
         let mut ret = self.expression.collect_factors();

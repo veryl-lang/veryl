@@ -139,6 +139,57 @@ pub struct Emitter {
     // ----- Modport expansion -----------------------------------------------
     modport_connections_tables: Vec<ExpandModportConnectionsTable>,
     modport_ports_table: Option<ExpandedModportPortTable>,
+
+    // ----- Multi-dimensional for -------------------------------------------
+    /// Iterators of a multi-dimensional `for` whose recovery the next block
+    /// emits at its top.
+    flattened_for: Option<FlattenedFor>,
+}
+
+/// A `for` of several iterators is emitted as one loop over a flattened index,
+/// from which each iterator is recovered.
+#[derive(Clone)]
+struct FlattenedFor {
+    index: String,
+    iterators: Vec<ForIterator>,
+}
+
+impl FlattenedFor {
+    fn new(iterators: &[&ForIterator]) -> Self {
+        let names: Vec<_> = iterators
+            .iter()
+            .map(|x| x.identifier.identifier_token.token.to_string())
+            .collect();
+        Self {
+            index: format!("__{}", names.join("_")),
+            iterators: iterators.iter().map(|x| (*x).clone()).collect(),
+        }
+    }
+}
+
+fn for_iterator_end(arg: &ForIterator) -> (&Expression, bool) {
+    if let Some(x) = &arg.range.range_opt {
+        let inclusive = matches!(*x.range_operator, RangeOperator::DotDotEqu(_));
+        (&x.expression, inclusive)
+    } else {
+        (&arg.range.expression, true)
+    }
+}
+
+fn base_less_number(arg: &Expression) -> Option<u64> {
+    if let Some(Factor::Number(x)) = arg.unwrap_factor()
+        && let Number::IntegralNumber(x) = x.number.as_ref()
+        && let IntegralNumber::BaseLess(x) = x.integral_number.as_ref()
+    {
+        x.base_less
+            .base_less_token
+            .to_string()
+            .replace('_', "")
+            .parse()
+            .ok()
+    } else {
+        None
+    }
 }
 
 impl Default for Emitter {
@@ -202,6 +253,7 @@ impl Default for Emitter {
 
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
+            flattened_for: None,
         }
     }
 }
@@ -1531,6 +1583,132 @@ impl Emitter {
         self.group_end();
     }
 
+    /// Emits `arg` as an operand of an arithmetic operator.
+    fn emit_for_operand(&mut self, arg: &Expression) {
+        if arg.unwrap_factor().is_none() {
+            self.str("(");
+            self.expression(arg);
+            self.str(")");
+        } else {
+            self.expression(arg);
+        }
+    }
+
+    /// Emits the iteration count of `arg` as an operand. An empty range counts
+    /// 0, not the wrapped difference of its bounds.
+    fn emit_for_count(&mut self, arg: &ForIterator) {
+        let start = &arg.range.expression;
+        let (end, inclusive) = for_iterator_end(arg);
+        match (base_less_number(start), base_less_number(end)) {
+            (Some(start), Some(end)) => {
+                let end = if inclusive { end + 1 } else { end };
+                self.str(&end.saturating_sub(start).to_string());
+            }
+            (Some(0), _) => {
+                if inclusive {
+                    self.str("(");
+                    self.emit_for_operand(end);
+                    self.str(" + 1)");
+                } else {
+                    self.emit_for_operand(end);
+                }
+            }
+            _ => {
+                self.str("((");
+                self.emit_for_operand(end);
+                self.str(if inclusive { " >= " } else { " > " });
+                self.emit_for_operand(start);
+                self.str(") ? ");
+                self.emit_for_operand(end);
+                self.str(" - ");
+                self.emit_for_operand(start);
+                if inclusive {
+                    self.str(" + 1");
+                }
+                self.str(" : 0)");
+            }
+        }
+    }
+
+    fn emit_for_counts(&mut self, iterators: &[ForIterator]) {
+        for (i, x) in iterators.iter().enumerate() {
+            if i != 0 {
+                self.str(" * ");
+            }
+            self.emit_for_count(x);
+        }
+    }
+
+    /// Emits the header of a flattened loop, after `for (`.
+    fn emit_flattened_for_header(&mut self, arg: &FlattenedFor, kind: &str) {
+        self.str(kind);
+        self.space(1);
+        self.str(&arg.index);
+        self.str(" = 0; ");
+        self.str(&arg.index);
+        self.str(" < ");
+        // The bounds are emitted more than once, so none of them carries its
+        // comments or source mapping.
+        self.force_duplicated = true;
+        self.emit_for_counts(&arg.iterators);
+        self.force_duplicated = false;
+        self.str("; ");
+        self.str(&arg.index);
+        self.str("++)");
+    }
+
+    /// Emits the position of the `k`-th iterator of `arg` within its range.
+    fn emit_for_offset(&mut self, arg: &FlattenedFor, k: usize) {
+        let inner = &arg.iterators[k + 1..];
+        if inner.is_empty() {
+            self.str(&arg.index);
+            self.str(" % ");
+            self.emit_for_count(&arg.iterators[k]);
+            return;
+        }
+
+        // The outermost iterator never exceeds its count, so it needs no `%`.
+        let outermost = k == 0;
+        if !outermost {
+            self.str("(");
+        }
+        self.str(&arg.index);
+        self.str(" / ");
+        if inner.len() > 1 {
+            self.str("(");
+            self.emit_for_counts(inner);
+            self.str(")");
+        } else {
+            self.emit_for_count(&inner[0]);
+        }
+        if !outermost {
+            self.str(") % ");
+            self.emit_for_count(&arg.iterators[k]);
+        }
+    }
+
+    /// Emits the value of the `k`-th iterator of `arg` recovered from the
+    /// flattened index.
+    fn emit_for_iterator_value(&mut self, arg: &FlattenedFor, k: usize) {
+        let x = &arg.iterators[k];
+        let start = &x.range.expression;
+        let (end, inclusive) = for_iterator_end(x);
+
+        self.force_duplicated = true;
+        if x.for_iterator_opt.is_some() {
+            self.emit_for_operand(end);
+            if !inclusive {
+                self.str(" - 1");
+            }
+            self.str(" - ");
+        } else if base_less_number(start) != Some(0) {
+            self.emit_for_operand(start);
+            self.str(" + ");
+        }
+        self.emit_for_offset(arg, k);
+        self.force_duplicated = false;
+    }
+
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
         self.in_generate_block.push(());
 
@@ -1548,11 +1726,30 @@ impl Emitter {
         self.identifier(&arg.identifier);
         self.src_line = arg.l_brace.l_brace_token.token.line;
         self.deferred_comment(&comments, true);
+
+        // Iterators of a multi-dimensional loop are recovered from its index.
+        let flattened = self.flattened_for.take();
+        let n_iterators = flattened.as_ref().map(|x| x.iterators.len()).unwrap_or(0);
+        if let Some(flattened) = &flattened {
+            // See `emit_statement_block`.
+            let src_line = self.src_line;
+            for (i, x) in flattened.iterators.iter().enumerate() {
+                self.newline_list(i);
+                self.str("localparam int");
+                self.space(1);
+                self.identifier(&x.identifier);
+                self.str(" = ");
+                self.emit_for_iterator_value(flattened, i);
+                self.str(";");
+            }
+            self.src_line = src_line;
+        }
+
         for (i, x) in arg.generate_named_block_list.iter().enumerate() {
-            self.newline_list(i);
+            self.newline_list(n_iterators + i);
             self.generate_group(&x.generate_group);
         }
-        self.newline_list_post(arg.generate_named_block_list.is_empty());
+        self.newline_list_post(arg.generate_named_block_list.is_empty() && n_iterators == 0);
         self.token(&arg.r_brace.r_brace_token.replace("end"));
 
         self.in_generate_block.pop();
@@ -1575,6 +1772,33 @@ impl Emitter {
 
         let mut base = n_typedefs;
         let mut n_newlines = n_typedefs;
+
+        // Iterators of a multi-dimensional loop are declared like `var`s of the
+        // block, and recovered from its index before the body.
+        let flattened = self.flattened_for.take();
+        // The iterators are written in the header of the loop, so they must not
+        // move the source line the blank lines of the body are kept against.
+        let src_line = self.src_line;
+        if let Some(flattened) = &flattened {
+            for x in &flattened.iterators {
+                self.newline_list(n_newlines);
+                self.clear_adjust_line();
+                self.str("int");
+                self.space(1);
+                self.align_start(align_kind::IDENTIFIER);
+                self.identifier(&x.identifier);
+                self.align_finish(align_kind::IDENTIFIER);
+                self.align_start(align_kind::ARRAY);
+                let loc = self.align_last_location(align_kind::IDENTIFIER);
+                self.align_dummy_location(align_kind::ARRAY, loc);
+                self.align_finish(align_kind::ARRAY);
+                self.str(";");
+                base += 1;
+                n_newlines += 1;
+            }
+            self.src_line = src_line;
+        }
+
         let mut suppress_newline = false;
         for x in &arg.statement_block_list {
             (base, n_newlines) = self.hoist_declarations_in_group(
@@ -1586,6 +1810,27 @@ impl Emitter {
         }
 
         let mut n_newlines = 0;
+        if let Some(flattened) = &flattened {
+            let src_line = self.src_line;
+            for (i, x) in flattened.iterators.iter().enumerate() {
+                self.newline_list(base + n_newlines);
+                n_newlines += 1;
+                self.align_start(align_kind::IDENTIFIER);
+                self.force_duplicated = true;
+                self.identifier(&x.identifier);
+                self.force_duplicated = false;
+                self.align_finish(align_kind::IDENTIFIER);
+                self.space(1);
+                self.align_start(align_kind::ASSIGNMENT);
+                self.str("=");
+                self.align_finish(align_kind::ASSIGNMENT);
+                self.space(1);
+                self.emit_for_iterator_value(flattened, i);
+                self.str(";");
+            }
+            self.src_line = src_line;
+        }
+
         let mut suppress_newline = false;
         for x in &arg.statement_block_list {
             self.emit_statement_block_group(
@@ -1595,7 +1840,9 @@ impl Emitter {
                 &mut suppress_newline,
             );
         }
-        self.newline_list_post(arg.statement_block_list.is_empty() && n_typedefs == 0);
+        self.newline_list_post(
+            arg.statement_block_list.is_empty() && n_typedefs == 0 && flattened.is_none(),
+        );
         self.token(&arg.r_brace.r_brace_token.replace(end_kw));
     }
 
@@ -4710,20 +4957,34 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ForStatement'
     fn for_statement(&mut self, arg: &ForStatement) {
-        let ascending_order = arg.for_statement_opt.is_none();
-        let include_end = if let Some(x) = &arg.range.range_opt {
+        let iterators = arg.iterators();
+        if iterators.len() > 1 {
+            let flattened = FlattenedFor::new(&iterators);
+            self.r#for(&arg.r#for);
+            self.space(1);
+            self.str("(");
+            self.emit_flattened_for_header(&flattened, "int");
+            self.space(1);
+            self.flattened_for = Some(flattened);
+            self.statement_block(&arg.statement_block);
+            return;
+        }
+
+        let iterator = arg.for_iterator.as_ref();
+        let ascending_order = iterator.for_iterator_opt.is_none();
+        let include_end = if let Some(x) = &iterator.range.range_opt {
             matches!(*x.range_operator, RangeOperator::DotDotEqu(_))
         } else {
             true
         };
-        let (beg, end) = if let Some(x) = &arg.range.range_opt {
+        let (beg, end) = if let Some(x) = &iterator.range.range_opt {
             if ascending_order {
-                (&arg.range.expression, &x.expression)
+                (&iterator.range.expression, &x.expression)
             } else {
-                (&x.expression, &arg.range.expression)
+                (&x.expression, &iterator.range.expression)
             }
         } else {
-            (&arg.range.expression, &arg.range.expression)
+            (&iterator.range.expression, &iterator.range.expression)
         };
 
         self.r#for(&arg.r#for);
@@ -4731,7 +4992,7 @@ impl VerylWalker for Emitter {
         self.str("(");
         self.str("int");
         self.space(1);
-        self.identifier(&arg.identifier);
+        self.identifier(&iterator.identifier);
         self.space(1);
         self.str("=");
         self.space(1);
@@ -4749,7 +5010,7 @@ impl VerylWalker for Emitter {
         }
         self.str(";");
         self.space(1);
-        self.identifier(&arg.identifier);
+        self.identifier(&iterator.identifier);
         self.space(1);
         match (ascending_order, include_end) {
             (true, true) => self.str("<="),
@@ -4760,8 +5021,8 @@ impl VerylWalker for Emitter {
         self.expression(end);
         self.str(";");
         self.space(1);
-        if let Some(ref x) = arg.for_statement_opt0 {
-            self.identifier(&arg.identifier);
+        if let Some(ref x) = iterator.for_iterator_opt0 {
+            self.identifier(&iterator.identifier);
             self.space(1);
             if ascending_order {
                 self.assignment_operator(&x.assignment_operator);
@@ -4779,7 +5040,7 @@ impl VerylWalker for Emitter {
             self.space(1);
             self.expression(&x.expression);
         } else {
-            self.identifier(&arg.identifier);
+            self.identifier(&iterator.identifier);
             if ascending_order {
                 self.str("++");
             } else {
@@ -6580,20 +6841,34 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'GenerateForDeclaration'
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) {
-        let ascending_order = arg.generate_for_declaration_opt.is_none();
-        let include_end = if let Some(x) = &arg.range.range_opt {
+        let iterators = arg.iterators();
+        if iterators.len() > 1 {
+            let flattened = FlattenedFor::new(&iterators);
+            self.r#for(&arg.r#for);
+            self.space(1);
+            self.str("(");
+            self.emit_flattened_for_header(&flattened, "genvar");
+            self.space(1);
+            self.flattened_for = Some(flattened);
+            self.generate_named_block(&arg.generate_named_block);
+            return;
+        }
+
+        let iterator = arg.for_iterator.as_ref();
+        let ascending_order = iterator.for_iterator_opt.is_none();
+        let include_end = if let Some(x) = &iterator.range.range_opt {
             matches!(*x.range_operator, RangeOperator::DotDotEqu(_))
         } else {
             true
         };
-        let (beg, end) = if let Some(x) = &arg.range.range_opt {
+        let (beg, end) = if let Some(x) = &iterator.range.range_opt {
             if ascending_order {
-                (&arg.range.expression, &x.expression)
+                (&iterator.range.expression, &x.expression)
             } else {
-                (&x.expression, &arg.range.expression)
+                (&x.expression, &iterator.range.expression)
             }
         } else {
-            (&arg.range.expression, &arg.range.expression)
+            (&iterator.range.expression, &iterator.range.expression)
         };
 
         self.r#for(&arg.r#for);
@@ -6601,7 +6876,7 @@ impl VerylWalker for Emitter {
         self.str("(");
         self.str("genvar");
         self.space(1);
-        self.identifier(&arg.identifier);
+        self.identifier(&iterator.identifier);
         self.space(1);
         self.str("=");
         self.space(1);
@@ -6619,7 +6894,7 @@ impl VerylWalker for Emitter {
         }
         self.str(";");
         self.space(1);
-        self.identifier(&arg.identifier);
+        self.identifier(&iterator.identifier);
         self.space(1);
         match (ascending_order, include_end) {
             (true, true) => self.str("<="),
@@ -6630,8 +6905,8 @@ impl VerylWalker for Emitter {
         self.expression(end);
         self.str(";");
         self.space(1);
-        if let Some(ref x) = arg.generate_for_declaration_opt0 {
-            self.identifier(&arg.identifier);
+        if let Some(ref x) = iterator.for_iterator_opt0 {
+            self.identifier(&iterator.identifier);
             self.space(1);
             if ascending_order {
                 self.assignment_operator(&x.assignment_operator);
@@ -6649,7 +6924,7 @@ impl VerylWalker for Emitter {
             self.space(1);
             self.expression(&x.expression);
         } else {
-            self.identifier(&arg.identifier);
+            self.identifier(&iterator.identifier);
             if ascending_order {
                 self.str("++");
             } else {

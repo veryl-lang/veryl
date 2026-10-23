@@ -294,11 +294,11 @@ pub fn lower_constant_loop_body(
             *budget = budget.checked_sub(1)?;
             if let Statement::For(x) = stmt
                 && !has_own_break(&x.body)
-                && !bound_reads_written(&x.range, written)
-                && let Some(iterations) = x.range.eval_iter(context)
+                && !x.ranges().any(|range| bound_reads_written(range, written))
+                && let Some(iterations) = x.eval_iter(context)
             {
                 for iteration in iterations {
-                    let body = specialize_iteration(context, x, iteration)?;
+                    let body = specialize_iteration(context, x, &iteration)?;
                     out.extend(lower(context, &body, budget, changed, keep_reset, written)?);
                 }
                 *changed = true;
@@ -422,10 +422,13 @@ fn peel_top(
     looped: &ir::ForStatement,
     confined: &HashSet<VarId>,
 ) -> Option<(Vec<Statement>, KnownValues)> {
-    if range_has_call(&looped.range) || stmts_have_call(&looped.body) {
+    let [iterator] = looped.iterators.as_slice() else {
+        return None;
+    };
+    if range_has_call(&iterator.range) || stmts_have_call(&looped.body) {
         return None;
     }
-    let Iterations::Known(iterations) = eval_range(context, env, &looped.range)? else {
+    let Iterations::Known(iterations) = eval_range(context, env, &iterator.range)? else {
         return None;
     };
     let mut peeler = Peeler {
@@ -507,16 +510,19 @@ impl Peeler<'_> {
         iterations: Vec<usize>,
         subs: &[(VarId, Value)],
     ) -> Option<(Vec<Statement>, KnownValues)> {
-        if !self.confined.contains(&looped.var_id) || !looped.var_type.array.is_empty() {
+        let [iterator] = looped.iterators.as_slice() else {
+            return None;
+        };
+        if !self.confined.contains(&iterator.var_id) || !iterator.var_type.array.is_empty() {
             return None;
         }
-        let width = looped.var_type.total_width()?;
+        let width = iterator.var_type.total_width()?;
         if !(1..=64).contains(&width) {
             return None;
         }
-        let signed = looped.var_type.signed;
+        let signed = iterator.var_type.signed;
         let mut subs = subs.to_vec();
-        subs.push((looped.var_id, Value::new(0, width, signed)));
+        subs.push((iterator.var_id, Value::new(0, width, signed)));
         let mut ret = vec![];
         for k in iterations {
             self.visit()?;
@@ -526,13 +532,13 @@ impl Peeler<'_> {
             }
             let value = Value::new(k as u64, width, signed);
             subs.last_mut()?.1 = value.clone();
-            env.vars.insert(looped.var_id, k as u64);
+            env.vars.insert(iterator.var_id, k as u64);
             let flow = self.specialize(context, &mut env, &looped.body, &subs, &mut ret)?;
             if let Flow::Break = flow {
                 break;
             }
         }
-        env.vars.remove(&looped.var_id);
+        env.vars.remove(&iterator.var_id);
         Some((ret, env))
     }
 
@@ -612,9 +618,14 @@ impl Peeler<'_> {
                     })
                 }
                 Statement::For(x) => {
-                    let mut range = x.range.clone();
-                    Subst::new(context, subs).range(&mut range)?;
-                    if let Iterations::Known(iterations) = eval_range(context, env, &range)?
+                    let mut iterators = x.iterators.clone();
+                    let mut subst = Subst::new(context, subs);
+                    for iterator in &mut iterators {
+                        subst.range(&mut iterator.range)?;
+                    }
+                    if let [iterator] = iterators.as_slice()
+                        && let Iterations::Known(iterations) =
+                            eval_range(context, env, &iterator.range)?
                         && let Some((copies, after)) =
                             self.peel(context, env.clone(), x, iterations, subs)
                     {
@@ -623,10 +634,7 @@ impl Peeler<'_> {
                         continue;
                     }
                     Statement::For(Box::new(ir::ForStatement {
-                        var_id: x.var_id,
-                        var_name: x.var_name,
-                        var_type: x.var_type.clone(),
-                        range,
+                        iterators,
                         body: substituted(context, &x.body, subs)?,
                         token: x.token,
                     }))
@@ -671,7 +679,10 @@ fn confined_iterators(
             collect_loops(candidates, &mut loops);
         }
     }
-    let ids: HashSet<VarId> = loops.iter().map(|x| x.var_id).collect();
+    let ids: HashSet<VarId> = loops
+        .iter()
+        .flat_map(|x| x.iterators.iter().map(|x| x.var_id))
+        .collect();
     // Reads of each iterator anywhere, less those inside its own loop.
     let mut outside: HashMap<VarId, usize> = HashMap::default();
     let mut count = |id: VarId| {
@@ -689,14 +700,16 @@ fn confined_iterators(
     }
     let mut confined = HashSet::default();
     for x in &loops {
-        let mut inside = 0;
-        let mut own = |id: VarId| inside += usize::from(id == x.var_id);
-        range_reads(&x.range, &mut own);
-        visit_reads(&x.body, &mut own);
-        let mut written = false;
-        visit_writes(&x.body, &mut |id| written |= id == x.var_id);
-        if !written && outside.get(&x.var_id).copied().unwrap_or(0) == inside {
-            confined.insert(x.var_id);
+        for iterator in &x.iterators {
+            let mut inside = 0;
+            let mut own = |id: VarId| inside += usize::from(id == iterator.var_id);
+            x.ranges().for_each(|range| range_reads(range, &mut own));
+            visit_reads(&x.body, &mut own);
+            let mut written = false;
+            visit_writes(&x.body, &mut |id| written |= id == iterator.var_id);
+            if !written && outside.get(&iterator.var_id).copied().unwrap_or(0) == inside {
+                confined.insert(iterator.var_id);
+            }
         }
     }
     confined
@@ -825,13 +838,16 @@ pub(crate) fn specialize_expression(
 pub(crate) fn specialize_iteration(
     context: &mut Context,
     statement: &ir::ForStatement,
-    iteration: usize,
+    iteration: &[usize],
 ) -> Option<Vec<Statement>> {
-    let width = statement.var_type.total_width()?;
-    let values = [(
-        statement.var_id,
-        Value::new(iteration as u64, width, statement.var_type.signed),
-    )];
+    let mut values = Vec::with_capacity(statement.iterators.len());
+    for (iterator, value) in statement.iterators.iter().zip(iteration) {
+        let width = iterator.var_type.total_width()?;
+        values.push((
+            iterator.var_id,
+            Value::new(*value as u64, width, iterator.var_type.signed),
+        ));
+    }
     let mut body = statement.body.clone();
     let mut subst = Subst {
         context,
@@ -985,7 +1001,9 @@ impl<'a> Subst<'a> {
                     self.stmts(&mut x.default)?;
                 }
                 Statement::For(x) => {
-                    self.range(&mut x.range)?;
+                    for range in x.ranges_mut() {
+                        self.range(range)?;
+                    }
                     self.stmts(&mut x.body)?;
                 }
                 Statement::Break | Statement::Null | Statement::Unsupported(_) => {}
@@ -1598,7 +1616,7 @@ fn apply(context: &mut Context, env: &mut KnownValues, stmts: &[Statement]) -> b
                 }
             }
             Statement::For(x) => {
-                if range_has_call(&x.range) || stmts_have_call(&x.body) {
+                if x.ranges().any(range_has_call) || stmts_have_call(&x.body) {
                     env.forget_all();
                 } else {
                     forget_writes(env, &x.body);
@@ -1710,7 +1728,7 @@ fn stmts_have_call(stmts: &[Statement]) -> bool {
                     .any(|a| a.patterns.iter().any(pattern_has_call) || stmts_have_call(&a.body))
                 || stmts_have_call(&x.default)
         }
-        Statement::For(x) => range_has_call(&x.range) || stmts_have_call(&x.body),
+        Statement::For(x) => x.ranges().any(range_has_call) || stmts_have_call(&x.body),
         Statement::IfReset(_)
         | Statement::FunctionCall(_)
         | Statement::SystemFunctionCall(_)
@@ -1791,7 +1809,7 @@ fn visit_reads(stmts: &[Statement], f: &mut impl FnMut(VarId)) -> bool {
                 x.arms.iter().all(|a| visit_reads(&a.body, f)) && visit_reads(&x.default, f)
             }
             Statement::For(x) => {
-                range_reads(&x.range, f);
+                x.ranges().for_each(|range| range_reads(range, f));
                 visit_reads(&x.body, f)
             }
             Statement::FunctionCall(x) => {

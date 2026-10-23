@@ -708,9 +708,13 @@ impl<'a> Builder<'a> {
                 }
                 Statement::For(statement) => {
                     let mut condition = HashSet::default();
-                    self.range_reads(&statement.range, &mut condition, controls);
+                    for range in statement.ranges() {
+                        self.range_reads(range, &mut condition, controls);
+                    }
                     let inner = self.condition(controls, &condition);
-                    self.write_whole(statement.var_id, &inner);
+                    for iterator in &statement.iterators {
+                        self.write_whole(iterator.var_id, &inner);
+                    }
                     if statements_break(&statement.body) {
                         self.early_exit(&inner, |this, inner| {
                             this.statements(&statement.body, inner)

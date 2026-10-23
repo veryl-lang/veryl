@@ -49,5 +49,15 @@ module veryl_testcase_Module08;
             a <= i;
         end
     end
+
+    // multi-dimensional for declaration
+    for (genvar __i_j = 0; __i_j < 2 * 3; __i_j++) begin :label5
+        localparam int i = __i_j / 3;
+        localparam int j = 3 - 1 - __i_j % 3;
+        logic a;
+        always_ff @ (posedge i_clk) begin
+            a <= i + j;
+        end
+    end
 endmodule
 //# sourceMappingURL=../map/08_generate_declaration.sv.map
