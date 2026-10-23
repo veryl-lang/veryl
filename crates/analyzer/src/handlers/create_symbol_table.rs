@@ -153,7 +153,7 @@ pub struct CreateSymbolTable {
     point: HandlerPoint,
     module_namspace_depth: usize,
     default_block: Option<StrId>,
-    for_identifier: Option<Token>,
+    for_identifiers: Vec<Token>,
     anonymous_block: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
@@ -1061,27 +1061,29 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (_, name) = self.get_anonymous_block_name(None);
                 self.push_namespace(name);
 
-                let r#type = SymType {
-                    modifier: Vec::new(),
-                    kind: TypeKind::I32,
-                    width: Vec::new(),
-                    array: Vec::new(),
-                    array_type: None,
-                    is_const: false,
-                    token: TokenRange::default(),
-                };
+                for x in arg.iterators() {
+                    let r#type = SymType {
+                        modifier: Vec::new(),
+                        kind: TypeKind::I32,
+                        width: Vec::new(),
+                        array: Vec::new(),
+                        array_type: None,
+                        is_const: false,
+                        token: TokenRange::default(),
+                    };
 
-                let affiliation = self.affiliation.last().cloned().unwrap();
-                let property = VariableProperty {
-                    r#type,
-                    affiliation,
-                    prefix: None,
-                    suffix: None,
-                    clock_domain: SymClockDomain::None,
-                    loop_variable: true,
-                };
-                let kind = SymbolKind::Variable(property);
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+                    let affiliation = self.affiliation.last().cloned().unwrap();
+                    let property = VariableProperty {
+                        r#type,
+                        affiliation,
+                        prefix: None,
+                        suffix: None,
+                        clock_domain: SymClockDomain::None,
+                        loop_variable: true,
+                    };
+                    let kind = SymbolKind::Variable(property);
+                    self.insert_symbol(&x.identifier.identifier_token.token, kind, false);
+                }
             }
             HandlerPoint::After => {
                 self.pop_namespace();
@@ -2248,7 +2250,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.for_identifier = Some(arg.identifier.identifier_token.token);
+            self.for_identifiers = arg
+                .iterators()
+                .iter()
+                .map(|x| x.identifier.identifier_token.token)
+                .collect();
         }
         Ok(())
     }
@@ -2266,9 +2272,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.default_block = Some(name);
                 self.push_namespace(name);
 
-                if let Some(x) = self.for_identifier {
+                for x in std::mem::take(&mut self.for_identifiers) {
                     self.insert_symbol(&x, SymbolKind::Genvar, false);
-                    self.for_identifier = None;
                 }
             }
             HandlerPoint::After => {

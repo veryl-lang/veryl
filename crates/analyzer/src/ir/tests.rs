@@ -622,6 +622,62 @@ fn generate_for() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    module ModuleB {
+        for i in 0..2, j in rev 0..2 :g {
+            let a: logic = i;
+            let b: logic = j;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleB {
+  const var0(g[0].i): bit<32> = 32'h00000000;
+  const var1(g[0].j): bit<32> = 32'h00000001;
+  let var2(g[0].a): logic = 1'hx;
+  let var3(g[0].b): logic = 1'hx;
+  const var4(g[1].i): bit<32> = 32'h00000000;
+  const var5(g[1].j): bit<32> = 32'h00000000;
+  let var6(g[1].a): logic = 1'hx;
+  let var7(g[1].b): logic = 1'hx;
+  const var8(g[2].i): bit<32> = 32'h00000001;
+  const var9(g[2].j): bit<32> = 32'h00000001;
+  let var10(g[2].a): logic = 1'hx;
+  let var11(g[2].b): logic = 1'hx;
+  const var12(g[3].i): bit<32> = 32'h00000001;
+  const var13(g[3].j): bit<32> = 32'h00000000;
+  let var14(g[3].a): logic = 1'hx;
+  let var15(g[3].b): logic = 1'hx;
+
+  comb {
+    var2 = 32'h00000000;
+  }
+  comb {
+    var3 = 32'h00000001;
+  }
+  comb {
+    var6 = 32'h00000000;
+  }
+  comb {
+    var7 = 32'h00000000;
+  }
+  comb {
+    var10 = 32'h00000001;
+  }
+  comb {
+    var11 = 32'h00000001;
+  }
+  comb {
+    var14 = 32'h00000001;
+  }
+  comb {
+    var15 = 32'h00000000;
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
@@ -837,6 +893,38 @@ fn comb_for() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    module ModuleB {
+        var a: logic<4>[2, 3];
+
+        always_comb {
+            for i in 0..2, j in rev 0..=2 {
+                a[i][j] = 3 * i + j;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleB {
+  var var0[0](a): logic<4> = 4'hx;
+  var var0[1](a): logic<4> = 4'hx;
+  var var0[2](a): logic<4> = 4'hx;
+  var var0[3](a): logic<4> = 4'hx;
+  var var0[4](a): logic<4> = 4'hx;
+  var var0[5](a): logic<4> = 4'hx;
+  const var1(i): signed bit<32> = 32'shxxxxxxxx;
+  const var2(j): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    for i in 0..2, j in rev 0..=2 {
+      var0[var1][var2] = ((32'sh00000003 * var1) + var2);
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
@@ -904,6 +992,108 @@ fn const_function_with_static_for() {
     assert!(
         ir.contains("0000000a"),
         "const B should be evaluated to 10 (0xa):\n{}",
+        ir,
+    );
+
+    let code = r#"
+    module ModuleA {
+        function order() -> u32 {
+            var acc: u32;
+            acc = 0;
+            for i in 1..3, j in rev 0..2 {
+                acc = acc * 10 + i * 2 + j;
+            }
+            return acc;
+        }
+        const C: u32 = order();
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    Analyzer::analyze_post_pass2(&ir);
+    let ir = ir.to_string();
+    // (i, j) = (1, 1), (1, 0), (2, 1), (2, 0) -> 3254 = 0xcb6
+    assert!(
+        ir.contains("00000cb6"),
+        "const C should be evaluated to 3254 (0xcb6):\n{}",
+        ir,
+    );
+
+    let code = r#"
+    module ModuleA {
+        function order() -> u32 {
+            var acc: u32;
+            acc = 0;
+            for i in 1..3, j in rev 0..2 {
+                if i == 2 && j == 1 {
+                    break;
+                }
+                acc = acc * 10 + i * 2 + j;
+            }
+            return acc;
+        }
+        const D: u32 = order();
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    Analyzer::analyze_post_pass2(&ir);
+    let ir = ir.to_string();
+    // break exits the whole loop: (1, 1), (1, 0) -> 32 = 0x20
+    assert!(
+        ir.contains("00000020"),
+        "const D should be evaluated to 32 (0x20):\n{}",
+        ir,
+    );
+
+    let code = r#"
+    module ModuleA {
+        function order() -> u32 {
+            var acc: u32;
+            acc = 0;
+            for i in 1..=2, j in 0..2, k in rev 1..=2 {
+                acc = acc * 16 + (i - 1) * 4 + j * 2 + (k - 1);
+            }
+            return acc;
+        }
+        const E: u32 = order();
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    Analyzer::analyze_post_pass2(&ir);
+    let ir = ir.to_string();
+    // (i, j, k) = (1, 0, 2), (1, 0, 1), (1, 1, 2), ... -> 0x10325476
+    assert!(
+        ir.contains("10325476"),
+        "const E should be evaluated to 0x10325476:\n{}",
         ir,
     );
 }
@@ -4263,7 +4453,7 @@ fn peeled_copy_matches_iteration_specialization() {
     context.variables = module.variables.clone();
     let unrolled: Vec<String> = (0..8)
         .flat_map(|iteration| {
-            crate::ir::peel::specialize_iteration(&mut context, looped, iteration).unwrap()
+            crate::ir::peel::specialize_iteration(&mut context, looped, &[iteration]).unwrap()
         })
         .map(|statement| stmt(&statement))
         .collect();

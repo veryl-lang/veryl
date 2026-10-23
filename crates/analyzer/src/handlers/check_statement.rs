@@ -1,4 +1,4 @@
-use crate::analyzer_error::{AnalyzerError, InvalidForRangeKind};
+use crate::analyzer_error::{AnalyzerError, InvalidForRangeKind, InvalidForStepKind};
 use crate::attribute::Attribute;
 use crate::attribute_table;
 use veryl_parser::ParolError;
@@ -23,6 +23,31 @@ pub struct CheckStatement {
 impl CheckStatement {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn check_for_iterators(&mut self, iterators: &[&ForIterator]) {
+        for x in iterators {
+            if x.range.range_opt.is_none() {
+                let token: TokenRange = x.range.as_ref().into();
+                self.errors.push(AnalyzerError::invalid_for_range(
+                    InvalidForRangeKind::BareExpression,
+                    &token,
+                ));
+            }
+
+            // A multi-dimensional loop is emitted as one flattened loop, so
+            // each iterator must advance by 1.
+            if iterators.len() > 1
+                && let Some(step) = &x.for_iterator_opt0
+            {
+                let mut token: TokenRange = step.step.step_token.token.into();
+                token.set_end(step.expression.as_ref().into());
+                self.errors.push(AnalyzerError::invalid_for_step(
+                    InvalidForStepKind::MultiDimension,
+                    &token,
+                ));
+            }
+        }
     }
 }
 
@@ -126,13 +151,7 @@ impl VerylGrammarTrait for CheckStatement {
         match self.point {
             HandlerPoint::Before => {
                 self.statement_depth_in_loop += 1;
-                if arg.range.range_opt.is_none() {
-                    let token: TokenRange = arg.range.as_ref().into();
-                    self.errors.push(AnalyzerError::invalid_for_range(
-                        InvalidForRangeKind::BareExpression,
-                        &token,
-                    ));
-                }
+                self.check_for_iterators(&arg.iterators());
             }
             HandlerPoint::After => self.statement_depth_in_loop -= 1,
         }
@@ -140,14 +159,8 @@ impl VerylGrammarTrait for CheckStatement {
     }
 
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point
-            && arg.range.range_opt.is_none()
-        {
-            let token: TokenRange = arg.range.as_ref().into();
-            self.errors.push(AnalyzerError::invalid_for_range(
-                InvalidForRangeKind::BareExpression,
-                &token,
-            ));
+        if let HandlerPoint::Before = self.point {
+            self.check_for_iterators(&arg.iterators());
         }
         Ok(())
     }

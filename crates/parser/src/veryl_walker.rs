@@ -1948,19 +1948,30 @@ pub trait VerylWalker {
     fn for_statement(&mut self, arg: &ForStatement) {
         before!(self, for_statement, arg);
         self.r#for(&arg.r#for);
+        self.for_iterator(&arg.for_iterator);
+        for x in &arg.for_statement_list {
+            self.comma(&x.comma);
+            self.for_iterator(&x.for_iterator);
+        }
+        self.statement_block(&arg.statement_block);
+        after!(self, for_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'ForIterator'
+    fn for_iterator(&mut self, arg: &ForIterator) {
+        before!(self, for_iterator, arg);
         self.identifier(&arg.identifier);
         self.r#in(&arg.r#in);
-        if let Some(ref x) = arg.for_statement_opt {
+        if let Some(ref x) = arg.for_iterator_opt {
             self.rev(&x.rev);
         }
         self.range(&arg.range);
-        if let Some(ref x) = arg.for_statement_opt0 {
+        if let Some(ref x) = arg.for_iterator_opt0 {
             self.step(&x.step);
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
         }
-        self.statement_block(&arg.statement_block);
-        after!(self, for_statement, arg);
+        after!(self, for_iterator, arg);
     }
 
     /// Semantic action for non-terminal 'CaseStatement'
@@ -3156,16 +3167,10 @@ pub trait VerylWalker {
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) {
         before!(self, generate_for_declaration, arg);
         self.r#for(&arg.r#for);
-        self.identifier(&arg.identifier);
-        self.r#in(&arg.r#in);
-        if let Some(ref x) = arg.generate_for_declaration_opt {
-            self.rev(&x.rev);
-        }
-        self.range(&arg.range);
-        if let Some(ref x) = arg.generate_for_declaration_opt0 {
-            self.step(&x.step);
-            self.assignment_operator(&x.assignment_operator);
-            self.expression(&x.expression);
+        self.for_iterator(&arg.for_iterator);
+        for x in &arg.generate_for_declaration_list {
+            self.comma(&x.comma);
+            self.for_iterator(&x.for_iterator);
         }
         self.generate_named_block(&arg.generate_named_block);
         after!(self, generate_for_declaration, arg);

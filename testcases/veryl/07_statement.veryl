@@ -79,6 +79,15 @@ module Module07 {
                 break;
             }
         }
+
+        // multi-dimensional for statement
+        for i in 0..2, j in rev 1..=3 {
+            a  = i;
+            aa = i + j;
+            if i == 1 && j == 1 {
+                break;
+            }
+        }
     }
 
     var a00: logic       ;

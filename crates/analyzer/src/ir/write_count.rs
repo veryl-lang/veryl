@@ -21,7 +21,7 @@ use crate::conv::Context;
 use crate::ir::ff_table::Refered;
 use crate::ir::{AssignDestination, Declaration, FfTable, Statement, VarId, VarKind};
 use crate::symbol::Affiliation;
-use crate::value::{Value, ValueBigUint};
+use crate::value::ValueBigUint;
 
 /// Elements that must keep their register, per `(declaration index, VarId)`.
 #[derive(Clone, Debug, Default)]
@@ -233,18 +233,13 @@ impl Walk<'_> {
             Statement::IfReset(x) => self.branches(&x.true_side, &x.false_side, written),
             Statement::Case(x) => self.seq(&x.lower_to_nested_if(), written),
             Statement::For(x) => {
-                if let Some(iter) = x.range.eval_iter(self.context) {
+                if let Some(iter) = x.eval_iter(self.context) {
                     for i in iter {
-                        if let Some(var) = self.context.variable_mut(&x.var_id)
-                            && let Some(total_width) = x.var_type.total_width()
-                        {
-                            let val = Value::new(i as u64, total_width, x.var_type.signed);
-                            var.set_value(&[], val, None);
-                        }
+                        x.set_iterator_values(self.context, &i);
                         let body = if super::peel::has_own_break(&x.body) {
                             None
                         } else {
-                            super::peel::specialize_iteration(self.context, x, i)
+                            super::peel::specialize_iteration(self.context, x, &i)
                         };
                         self.seq(body.as_deref().unwrap_or(&x.body), written);
                     }

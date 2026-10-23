@@ -125,7 +125,7 @@ fn count_writes_one(
             merge_branches_max(&t, &f, &mut result);
         }
         Statement::For(f) => {
-            let iterations = f.range.eval_iter(ctx);
+            let iterations = f.eval_iter(ctx);
             if iterations.as_ref().is_some_and(Vec::is_empty) {
                 return result;
             }

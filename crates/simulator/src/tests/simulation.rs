@@ -18636,6 +18636,43 @@ fn for_break_in_comb() {
             config.use_4state,
         );
     }
+
+    // A `break` in a multi-dimensional loop leaves every dimension.
+    let code = r#"
+    module Top (
+        d  : input  logic<6>,
+        idx: output logic<8>,
+    ) {
+        always_comb {
+            idx = 15;
+            for i in 0..2, j in rev 0..3 {
+                if d[i * 3 + j] {
+                    idx = (i * 4 + j) as 8;
+                    break;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (d, idx) in [(0b000000, 15), (0b000110, 2), (0b011000, 5), (0b100001, 0)] {
+            sim.set("d", Value::new(d, 6, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("idx").unwrap(),
+                Value::new(idx, 8, false),
+                "multi-dimensional d={d:06b}: JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
 }
 
 /// Static for-loop with `break` following an assignment in the body:
@@ -18871,6 +18908,38 @@ fn constant_loop_lowering_unrolls_a_loop_in_a_function() {
         sim.step(&Event::clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(3, 3, false), "{config:?}");
         assert_eq!(sim.get("z").unwrap(), Value::new(3, 3, false), "{config:?}");
+    }
+
+    // A multi-dimensional loop is unrolled into every combination.
+    let code = r#"
+    module Top (a: input logic<6>, y: output logic<8>) {
+        function count_set (
+            v: input logic<6>,
+        ) -> logic<8> {
+            var n: logic<8>;
+            n = 0;
+            for i in 0..2, j in rev 1..=3 {
+                if v[i * 3 + j - 1] {
+                    n = n + (i * 3 + j) as 8;
+                }
+            }
+            return n;
+        }
+        assign y = count_set(a);
+    }
+    "#;
+    assert_eq!(loops(&analyze(code, &no_jit).comb_statements), 0);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0b10_0101, 6, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        // Bits 0, 2 and 5 are set: 1 + 3 + 6.
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(10, 8, false),
+            "{config:?}"
+        );
     }
 }
 
@@ -19168,6 +19237,49 @@ fn const_decided_break_loop_is_peeled() {
                 "{config:?}"
             );
         }
+    }
+
+    // A multi-dimensional loop is not peeled, but runs as one flattened loop.
+    let code = r#"
+    module Top (
+        o_n: output logic<32>,
+        o_s: output logic<32>,
+    ) {
+        var n : u32;
+        var st: u32;
+        always_comb {
+            n  = 0;
+            st = 0;
+            for i in 0..3, j in 0..3 {
+                if n >= 4 {
+                    break;
+                }
+                n  = n + 1;
+                st = st * 10 + i * 3 + j;
+            }
+        }
+        assign o_n = n;
+        assign o_s = st;
+    }
+    "#;
+
+    assert_eq!(runtime_loops(code, "Top"), 1);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o_n").unwrap(),
+            Value::new(4, 32, false),
+            "{config:?}"
+        );
+        // (i, j) = (0, 0), (0, 1), (0, 2), (1, 0)
+        assert_eq!(
+            sim.get("o_s").unwrap(),
+            Value::new(123, 32, false),
+            "{config:?}"
+        );
     }
 }
 

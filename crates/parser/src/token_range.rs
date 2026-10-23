@@ -968,6 +968,18 @@ impl_token_range!(BreakStatement, r#break, semicolon);
 impl_token_range!(ForStatement, r#for, statement_block);
 impl_token_range!(CaseStatement, r#case, r_brace);
 
+impl From<&ForIterator> for TokenRange {
+    fn from(value: &ForIterator) -> Self {
+        let mut ret: TokenRange = value.identifier.as_ref().into();
+        if let Some(x) = &value.for_iterator_opt0 {
+            ret.set_end(x.expression.as_ref().into());
+        } else {
+            ret.set_end(value.range.as_ref().into());
+        }
+        ret
+    }
+}
+
 impl From<&CaseItem> for TokenRange {
     fn from(value: &CaseItem) -> Self {
         let mut ret: TokenRange = match value.case_item_group.as_ref() {

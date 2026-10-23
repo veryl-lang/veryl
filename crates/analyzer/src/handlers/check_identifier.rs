@@ -547,14 +547,7 @@ impl VerylGrammarTrait for CheckIdentifier {
     }
 
     // Loop variables and block labels are emitted by name too.
-    fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token.token, Kind::LoopVar)
-        }
-        Ok(())
-    }
-
-    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
+    fn for_iterator(&mut self, arg: &ForIterator) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::LoopVar)
         }

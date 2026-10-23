@@ -11,3 +11,8 @@ updates:
   groups:
     minor-patch:
       update-types: ["minor", "patch"]
+  ignore:
+  # parol 5.0.3 generates lookahead DFAs with cycles, which hangs the error
+  # recovery of the generated parser. Drop this once a fixed version is released.
+  - dependency-name: "parol"
+    versions: ["5.0.3"]

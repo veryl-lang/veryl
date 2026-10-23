@@ -4506,6 +4506,66 @@ fn priority_encoder_netlist_matches_golden_model_exhaustively() {
     }
 }
 
+/// A multi-dimensional loop is unrolled into every combination of its
+/// iterators, outermost first; verify the netlist against a golden model for
+/// every input.
+#[test]
+fn multi_dim_for_netlist_matches_golden_model_exhaustively() {
+    let code = r#"
+        module Top (
+            i: input  logic<6>,
+            o: output logic<3>,
+        ) {
+            always_comb {
+                o = 7;
+                for x in 0..2, y in rev 0..3 {
+                    if i[x * 3 + y] {
+                        o = (x * 3 + y) as 3;
+                    }
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("gate ir").module;
+
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    let in_nets = port("i");
+    let out_nets = port("o");
+
+    for mask in 0u32..(1 << 6) {
+        let inputs: std::collections::HashMap<_, _> = in_nets
+            .iter()
+            .enumerate()
+            .map(|(k, &n)| (n, (mask >> k) & 1 == 1))
+            .collect();
+        let mut memo = std::collections::HashMap::new();
+        // The position of the set bit visited last.
+        let mut expect = 7;
+        for x in 0..2 {
+            for y in (0..3).rev() {
+                if (mask >> (x * 3 + y)) & 1 == 1 {
+                    expect = x * 3 + y;
+                }
+            }
+        }
+        for (k, &n) in out_nets.iter().enumerate() {
+            assert_eq!(
+                eval_net(&gate, n, &inputs, &mut memo),
+                (expect >> k) & 1 == 1,
+                "o[{k}] mismatch at i={mask:#08b}"
+            );
+        }
+    }
+}
+
 /// The count-scan rebuild rewrites a serial conditional-increment counter
 /// (count-trailing-zeros) into `seed + popcount(conditions)`; verify the
 /// final netlist, through the full pipeline including fusion, against a
