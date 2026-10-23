@@ -6067,16 +6067,8 @@ impl Conv<&air::Module> for ProtoModule {
                     blocklist.insert(*o);
                 }
             }
-            let mut ins = vec![];
-            for external in &all_external_components {
-                for connect in &external.connects {
-                    connect.expr.gather_variable_offsets(&mut ins);
-                }
-            }
-            for o in &ins {
-                if let VarOffset::Comb(x) = o {
-                    blocklist.insert(*x);
-                }
+            for o in component_comb_offsets(&all_external_components) {
+                blocklist.insert(o.raw());
             }
             blocklist
         } else {
@@ -6129,13 +6121,7 @@ impl Conv<&air::Module> for ProtoModule {
             }
             // Component input connections read these offsets but appear in no
             // statement list.
-            for external in &all_external_components {
-                for connect in &external.connects {
-                    let mut ins = vec![];
-                    connect.expr.gather_variable_offsets(&mut ins);
-                    protect.extend(ins);
-                }
-            }
+            protect.extend(component_comb_offsets(&all_external_components));
             protect
         } else {
             HashSet::default()
@@ -6157,11 +6143,7 @@ impl Conv<&air::Module> for ProtoModule {
                 for (_, off, _, _, _) in &nested_derived_clock_candidates {
                     extra_offsets.push(*off);
                 }
-                for external in &all_external_components {
-                    for connect in &external.connects {
-                        connect.expr.gather_variable_offsets(&mut extra_offsets);
-                    }
-                }
+                extra_offsets.extend(component_comb_offsets(&all_external_components));
                 Some(extra_offsets)
             } else {
                 None
@@ -6559,7 +6541,7 @@ impl Conv<&air::Module> for ProtoModule {
         // events + derived-clock candidates are in scope, precompute the comb
         // offsets the emitter must NOT localize — event-touched, in a
         // runtime-indexed array range, or externally-visible (port / user-var
-        // / clock).
+        // / clock / component connect).
         // LocalizeInfo = (blocklist offsets, array ranges).
         type LocalizeInfo = (HashSet<isize>, Vec<(isize, usize, isize)>);
         // Wasm registers no AOT-C backend, so there is nothing to localize;
@@ -6595,6 +6577,8 @@ impl Conv<&air::Module> for ProtoModule {
             for (_, off, _, _, _) in &nested_derived_clock_candidates {
                 block_vo.insert(*off);
             }
+            // A component reads its input connections from comb_values too.
+            block_vo.extend(component_comb_offsets(&all_external_components));
             let mut block: HashSet<isize> = HashSet::default();
             for vo in &block_vo {
                 if !vo.is_ff() {
@@ -7554,6 +7538,21 @@ fn declared_reset_kind(kind: &air::TypeKind) -> Option<(bool, bool)> {
         air::TypeKind::ResetSyncHigh => Some((false, true)),
         _ => None,
     }
+}
+
+/// Comb storage components reach from Rust, outside any statement list.
+fn component_comb_offsets(components: &[ProtoExternalComponent]) -> Vec<VarOffset> {
+    let unfolded = BigArrayFold::default();
+    let mut out = Vec::new();
+    for c in components {
+        for connect in &c.connects {
+            connect
+                .expr
+                .gather_variable_offsets_expanded(&unfolded, &mut out);
+        }
+    }
+    out.retain(|o| !o.is_ff());
+    out
 }
 
 /// Offsets of the reset-typed variables in one module's meta.
