@@ -256,7 +256,7 @@ fn copied_source(
     None
 }
 
-/// `src` of a one-bit `dst = src`, also as the `src & 1` a logic-to-clock
+/// `src` of a one-bit `dst = src`, also under the `& 1` a logic-to-clock
 /// conversion lowers to.
 fn copy_source(stmt: &ProtoStatement) -> Option<VarOffset> {
     let ProtoStatement::Assign(a) = stmt else {
@@ -270,22 +270,28 @@ fn copy_source(stmt: &ProtoStatement) -> Option<VarOffset> {
     {
         return None;
     }
+    copied_bit(&a.expr)
+}
+
+/// The one-bit variable `e` copies.  Inlining a chain of copies leaves one
+/// `& 1` per link.
+fn copied_bit(e: &ProtoExpression) -> Option<VarOffset> {
     let is_one = |e: &ProtoExpression| matches!(e, ProtoExpression::Value { value, width: 1, .. } if value.to_u64() == Some(1));
-    match &a.expr {
+    match e {
         ProtoExpression::Binary {
             x,
             op: Op::BitAnd,
             y,
             width: 1,
             ..
-        } if is_one(y) => one_bit_variable(x),
+        } if is_one(y) => copied_bit(x),
         ProtoExpression::Binary {
             x,
             op: Op::BitAnd,
             y,
             width: 1,
             ..
-        } if is_one(x) => one_bit_variable(y),
+        } if is_one(x) => copied_bit(y),
         e => one_bit_variable(e),
     }
 }
@@ -351,5 +357,81 @@ fn collect_comb_closure(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::Value;
+    use crate::ir::expression::ExpressionContext;
+
+    fn ctx() -> ExpressionContext {
+        ExpressionContext {
+            width: 1,
+            signed: false,
+        }
+    }
+
+    fn bit(offset: isize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(offset),
+            select: None,
+            dynamic_select: None,
+            width: 1,
+            var_full_width: 1,
+            expr_context: ctx(),
+        }
+    }
+
+    fn and(x: ProtoExpression, y: ProtoExpression) -> ProtoExpression {
+        ProtoExpression::Binary {
+            x: Box::new(x),
+            op: Op::BitAnd,
+            y: Box::new(y),
+            width: 1,
+            expr_context: ctx(),
+        }
+    }
+
+    fn one() -> ProtoExpression {
+        ProtoExpression::Value {
+            value: Value::new(1, 1, false),
+            width: 1,
+            expr_context: ctx(),
+        }
+    }
+
+    #[test]
+    fn a_copy_wrapped_once_per_inlined_link_is_still_a_copy() {
+        let stacked = and(and(and(bit(8), one()), one()), one());
+        assert_eq!(copied_bit(&stacked), Some(VarOffset::Comb(8)));
+        assert_eq!(
+            copied_bit(&and(one(), and(bit(8), one()))),
+            Some(VarOffset::Comb(8))
+        );
+    }
+
+    #[test]
+    fn a_gate_under_the_wrappers_is_not_a_copy() {
+        let gated = and(and(bit(8), bit(16)), one());
+        assert_eq!(copied_bit(&gated), None);
+        assert_eq!(copied_bit(&and(and(bit(8), one()), bit(16))), None);
+        let inverted = ProtoExpression::Unary {
+            op: Op::BitNot,
+            x: Box::new(bit(8)),
+            width: 1,
+            expr_context: ctx(),
+        };
+        assert_eq!(copied_bit(&and(inverted, one())), None);
+        let wide = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(8),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 8,
+            expr_context: ctx(),
+        };
+        assert_eq!(copied_bit(&and(wide, one())), None);
     }
 }

@@ -1784,6 +1784,65 @@ fn copied_clock_joins_the_master_event() {
 }
 
 #[test]
+fn clock_copied_through_inlined_logic_wires_joins_the_master_event() {
+    // `let` wires are inlined, unlike `var` and clock ports, so the copy
+    // stacks a `& 1` per link.
+    let code = r#"
+    module Leaf (
+        i_clk: input  '_ logic   ,
+        i_d  : input     logic<8>,
+        o_q  : output    logic<8>,
+    ) {
+        let w0: logic      = i_clk;
+        let w1: logic      = w0;
+        let k : '_ clock   = w1;
+        always_ff (k) {
+            o_q = i_d;
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock  ,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        let l0: logic = i_clk;
+        let l1: logic = l0;
+        always_ff (i_clk) {
+            o_a = o_a + 1;
+        }
+        inst u: Leaf (
+            i_clk: l1 ,
+            i_d  : o_a,
+            o_q  : o_b,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // 4-state compiles the copies into one block before the schedule
+        // reads them.
+        if !config.use_4state {
+            assert!(
+                sim.ir.derived_clock_schedule.clocks.is_empty(),
+                "the copied clock must not be monitored as a derived clock",
+            );
+            assert_eq!(sim.ir.derived_clock_schedule.aliases.len(), 1);
+        }
+        let clk = sim.get_clock("i_clk").unwrap();
+        sim.set("o_a", Value::new(0, 8, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(4, 8, false));
+    }
+}
+
+#[test]
 fn gated_clock_is_not_a_copy() {
     let code = r#"
     module Top (
