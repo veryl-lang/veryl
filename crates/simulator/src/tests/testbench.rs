@@ -2643,6 +2643,43 @@ fn tb_random_native() {
     let _ = std::fs::remove_file(&out_path);
 }
 
+#[test]
+fn tb_random_always_ff_native() {
+    let code = r#"
+    #[test(test_random_ff)]
+    module test_random_ff {
+        inst clk: $tb::clock_gen;
+        var r: $tb::random::<u32>;
+        var expected_rng: $tb::random::<u32>;
+        var x: u32;
+        var expected: u32;
+
+        always_ff (clk) {
+            x = r.get_range(1, 10);
+        }
+
+        initial {
+            r.seed(1234);
+            expected_rng.seed(1234);
+            expected = expected_rng.get_range(1, 10);
+            expected = expected_rng.get_range(1, 10);
+            expected = expected_rng.get_range(1, 10);
+            clk.next(3);
+            $assert(x == expected, "random method did not run on every clock edge");
+            $assert(x >= 1 && x <= 10, "x is out of range");
+            $finish();
+        }
+    }
+    "#;
+    let config = Config::default();
+    let ir = analyze_top(code, &config, "test_random_ff").expect("analyze");
+    let module_name = ir.name.to_string();
+    assert_eq!(
+        run_native_testbench(ir, None, module_name).unwrap(),
+        TestResult::Pass
+    );
+}
+
 fn run_queue_tb(code: &str, top: &str, config: &Config) -> TestResult {
     let ir = analyze_top(code, config, top).expect("analyze");
     let module_name = ir.name.to_string();
