@@ -40,6 +40,26 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
     steps:
       - uses: actions/checkout@v6
+      # Windows file I/O is slow on the build outputs. On Windows the build runs
+      # in a copy of the workspace on a trusted Dev Drive (ReFS, no Defender
+      # filter). target/ must be a real directory there: rust-cache archives
+      # nothing behind a junction or mount point. Test scratch files go on the
+      # drive too, outside the workspace so a scratch crate is not taken for a
+      # workspace member.
+      - uses: samypr100/setup-dev-drive@v4
+        if: runner.os == 'Windows'
+        with:
+          drive-size: 40GB
+          trusted-dev-drive: true
+          workspace-copy: true
+      - name: Put temporary files on the Dev Drive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tmp = Join-Path $env:DEV_DRIVE tmp
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          "TMP=$tmp" >> $env:GITHUB_ENV
+          "TEMP=$tmp" >> $env:GITHUB_ENV
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
@@ -54,6 +74,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.target }}-sccache-o1
+          workspaces: ${{ env.DEV_DRIVE_WORKSPACE && format('{0} -> target', env.DEV_DRIVE_WORKSPACE) || '. -> target' }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: mozilla-actions/sccache-action@v0.0.10
         with:
@@ -72,6 +93,7 @@ jobs:
       - name: Run tests
         # bash keeps the quoted `"*"` intact on Windows too
         shell: bash
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE || github.workspace }}
         run: >-
           cargo test --locked --target ${{ matrix.target }}
           --config 'profile.dev.package."*".opt-level=1'
