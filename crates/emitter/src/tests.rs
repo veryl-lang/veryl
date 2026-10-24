@@ -4,6 +4,40 @@ use veryl_analyzer::{Analyzer, Context, attribute_table, symbol_table};
 use veryl_metadata::{ClockType, Metadata, ProjectProperty, ResetType};
 use veryl_parser::Parser;
 
+#[test]
+fn array_literal_mixed_items_emit_valid_systemverilog() {
+    let code = r#"
+module Top (
+    x : input  logic<8>,
+    o0: output logic<8>,
+    o1: output logic<8>,
+    o2: output logic<8>,
+    o3: output logic<8>,
+) {
+    const COUNT: u32 = 2;
+    var a: logic<8> [4];
+    var b: logic<8> [4];
+    var c: logic<8> [4];
+    always_comb {
+        a = '{8'h11, 8'h22, default: 8'hFF};
+        b = '{x repeat COUNT, default: 8'h00};
+        c = '{x repeat 2, 8'h01, 8'h02};
+    }
+    assign o0 = a[0];
+    assign o1 = a[2];
+    assign o2 = b[1];
+    assign o3 = c[3];
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert!(ret.contains("a = '{0: 8'h11, 1: 8'h22, default: 8'hFF};"));
+    assert!(ret.contains("b = '{0: x, 1: x, default: 8'h00};"));
+    assert!(ret.contains("c = '{x, x, 8'h01, 8'h02};"));
+}
+
 #[track_caller]
 fn emit(metadata: &Metadata, code: &str) -> String {
     emit_project(metadata, "prj", code)
