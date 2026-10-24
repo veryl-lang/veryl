@@ -5,9 +5,10 @@ use super::graph::{DependencyGraph, compatible_cycle, strongly_connected_compone
 use super::model::{
     AxisBounds, ModuleCombSummary, SummaryRegion, bounds_domain, domain_bounds, image,
 };
-use super::region::{ArraySpan, NodeKey, PackedSpan};
+use super::region::NodeKey;
 use super::ssa::PositionDomain;
 use super::steps::Steps;
+use crate::ir::span::{ArraySpan, PackedSpan};
 use crate::ir::{Component, Declaration, Module, Signature, VarId, VarPath, Variable};
 use crate::symbol::SymbolId;
 use crate::{AnalyzerError, HashMap, HashSet};

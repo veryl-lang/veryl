@@ -1,9 +1,9 @@
 //! Shared dependency and module-summary data model.
 
-use super::region::{ArraySpan, PackedSpan};
 use super::ssa::PathCondition;
 use super::ssa::PositionDomain;
 use crate::ir::VarId;
+use crate::ir::span::{ArraySpan, PackedSpan};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct SummaryRegion {

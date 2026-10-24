@@ -6,6 +6,7 @@ use crate::conv::Context;
 use crate::ir::assign_table::{AssignTable, AssignTableEntry, ReferencedEntry};
 use crate::ir::{
     Declaration, FfTable, Function, Signature, Type, VarId, VarIndex, VarKind, VarPath, Variable,
+    WriteSummary,
 };
 use crate::symbol::ClockDomain;
 use crate::value::ValueBigUint;
@@ -42,6 +43,9 @@ pub struct Module {
     /// Keep independent driving processes separate when ports alias at a
     /// later instance boundary, including through pass-through modules.
     pub interface_assignment_processes: Vec<HashMap<VarId, AssignTableEntry>>,
+    /// Regions written by each driving process, including the processes of
+    /// children lifted through interface bindings.
+    pub write_summary: WriteSummary,
     pub declarations: Vec<Declaration>,
     pub suppress_unassigned: bool,
     /// Per-declaration `AssignTable.refernced` snapshot, captured at the end
@@ -89,13 +93,13 @@ impl Module {
             // accumulated reads/writes are still in place here.
             let snapshot = std::mem::take(&mut new_table.refernced);
             self.per_decl_refs.insert(i, snapshot);
-            assign_table.merge_by_or_from(context, &mut new_table, true, true);
+            assign_table.merge_by_or(&mut new_table);
         }
 
         for x in self.functions.values() {
             let mut new_table = AssignTable::new(context);
             x.eval_assign(context, &mut new_table);
-            assign_table.merge_by_or(context, &mut new_table, false);
+            assign_table.merge_by_or(&mut new_table);
         }
 
         let mut variables = self.variables.clone();

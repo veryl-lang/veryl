@@ -822,7 +822,7 @@ impl AssignDestination {
                             let maybe = !is_const | assign_context.is_system_verilog();
                             // Exclude SV connects: the direction may be a read.
                             let dynamic = !is_const && !assign_context.is_system_verilog();
-                            let _ = assign_table.insert_assign(
+                            assign_table.insert_assign(
                                 &variable,
                                 index,
                                 mask.clone(),
@@ -1152,8 +1152,8 @@ impl IfStatement {
             true_table.check_uncoverd(context, &false_table, &base_tables);
         }
 
-        true_table.merge_by_or(context, &mut false_table, false);
-        assign_table.merge_by_or(context, &mut true_table, false);
+        true_table.merge_by_or(&mut false_table);
+        assign_table.merge_by_or(&mut true_table);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
@@ -1233,8 +1233,8 @@ impl IfResetStatement {
             true_table.check_missing_reset(context, &false_table);
         }
 
-        true_table.merge_by_or(context, &mut false_table, false);
-        assign_table.merge_by_or(context, &mut true_table, false);
+        true_table.merge_by_or(&mut false_table);
+        assign_table.merge_by_or(&mut true_table);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
@@ -1496,10 +1496,10 @@ impl CaseStatement {
 
         let mut acc = branch_tables.pop().expect("default_table");
         for mut t in branch_tables.into_iter().rev() {
-            t.merge_by_or(context, &mut acc, false);
+            t.merge_by_or(&mut acc);
             acc = t;
         }
-        assign_table.merge_by_or(context, &mut acc, false);
+        assign_table.merge_by_or(&mut acc);
         assign_table.refernced = final_referenced;
     }
 

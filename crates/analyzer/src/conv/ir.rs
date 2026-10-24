@@ -244,7 +244,7 @@ fn collect_interface_assignments(
             if !table.table.is_empty() {
                 processes.push(table.table.clone());
             }
-            assignments.merge_by_or_from(context, &mut table, false, true);
+            assignments.merge_by_or(&mut table);
         }
     }
     context.rollback_analysis_transaction();
@@ -398,6 +398,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         declarations.retain(|x| !x.is_null());
         let (interface_assignments, interface_assignment_processes) =
             collect_interface_assignments(&mut context, &declarations);
+        let write_summary = ir::WriteSummary::new(&mut context, &declarations);
         let interface_members = collect_interface_members(&context);
         let port_types = context.drain_port_types();
         let variables = context.drain_variables();
@@ -425,6 +426,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
             interface_members,
             interface_assignments,
             interface_assignment_processes,
+            write_summary,
             declarations,
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),
@@ -655,6 +657,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             interface_members,
             interface_assignments: HashMap::default(),
             interface_assignment_processes: vec![],
+            write_summary: ir::WriteSummary::default(),
             declarations: vec![],
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),
