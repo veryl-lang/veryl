@@ -4871,6 +4871,34 @@ pub fn function_call(
             }
         }
 
+        // IEEE 1800-2023 13.4: a function with an output argument can't be
+        // called outside a procedural statement, and a port connection is
+        // emitted as an expression.
+        if c.in_inst_port
+            && let Some(symbol) = &symbol
+            && let SymbolKind::Function(function) = &symbol.kind
+            && let Some(output_port) = function.ports.iter().find(|port| {
+                symbol_table::get(port.symbol).is_some_and(|symbol| {
+                    matches!(
+                        symbol.kind,
+                        SymbolKind::Port(ref port)
+                            if matches!(
+                                port.direction,
+                                symbol::Direction::Output | symbol::Direction::Inout
+                            )
+                    )
+                })
+            })
+        {
+            let declaration = TokenRange::from(&output_port.token.token);
+            c.insert_error(AnalyzerError::function_output_in_port_connection(
+                &func.name.to_string(),
+                &output_port.token.token.text.to_string(),
+                &token,
+                Some(&declaration),
+            ));
+        }
+
         let mut comptime = func.r#type.clone();
         comptime.token = token;
 
