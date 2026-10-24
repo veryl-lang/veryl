@@ -50,7 +50,7 @@ impl LsIncremental {
         let hash = veryl_cache::content_hash(text.as_bytes());
 
         let entry = self.store.entry(&src);
-        if !entry.is_some_and(|x| x.hash == hash && x.fragment.is_some()) {
+        if !entry.is_some_and(|x| x.file_hash == hash && x.fragment.is_some()) {
             return false;
         }
         let Some(bytes) = entry.and_then(|x| self.store.load(x)) else {

@@ -3084,12 +3084,27 @@ fn reads_written_window(a: &ProtoAssignStatement, lo: usize, hi: usize) -> bool 
         .any(|&(off, range)| off == a.dst && range.is_none_or(|(rhi, rlo)| rlo <= hi && lo <= rhi))
 }
 
-/// Every variable a bit-parallel expression reads, with where bit 0 of the
-/// value sits in that variable: a leaf may be a SLICE, and its cuts then need
-/// translating into the expression's coordinates before they can be used.
-/// Reading the same `base` [`ProtoExpression::bit_parallel_window`] uses keeps
-/// the two in step.
-fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)>) -> bool {
+/// A variable leaf of a bit-parallel expression.
+struct BitParallelSource {
+    var: VarOffset,
+    /// Where bit 0 of the leaf sits in `var`: a leaf may be a SLICE.
+    base: usize,
+    /// Where bit 0 of the leaf sits in the value: a leaf may be one element
+    /// of a concatenation.
+    at: usize,
+    width: usize,
+}
+
+/// Every variable a bit-parallel expression reads, with where it sits in both
+/// the variable and the value: its cuts need translating into the
+/// expression's coordinates before they can be used.  Reading the same
+/// windows [`ProtoExpression::bit_parallel_window`] uses keeps the two in
+/// step.
+fn bit_parallel_sources(
+    expr: &ProtoExpression,
+    at: usize,
+    out: &mut Vec<BitParallelSource>,
+) -> bool {
     let width = expr.width();
     match expr {
         ProtoExpression::Variable {
@@ -3105,12 +3120,19 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)
                 Some((shi, slo)) if shi >= slo && *w == shi - slo + 1 => *slo,
                 _ => return false,
             };
-            out.push((*var_offset, base));
+            out.push(BitParallelSource {
+                var: *var_offset,
+                base,
+                at,
+                width,
+            });
             true
         }
+        // A constant reads nothing, so it offers no cut and imposes none.
+        ProtoExpression::Value { value, .. } => value.width() == width,
         ProtoExpression::Unary {
             op: Op::BitNot, x, ..
-        } => x.width() == width && bit_parallel_sources(x, out),
+        } => x.width() == width && bit_parallel_sources(x, at, out),
         ProtoExpression::Binary {
             x,
             op: Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
@@ -3119,8 +3141,27 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)
         } => {
             x.width() == width
                 && y.width() == width
-                && bit_parallel_sources(x, out)
-                && bit_parallel_sources(y, out)
+                && bit_parallel_sources(x, at, out)
+                && bit_parallel_sources(y, at, out)
+        }
+        // A child instance reads a variable split into parts as the
+        // concatenation of them, so an operator over it sees one.
+        ProtoExpression::Concatenation { elements, .. } => {
+            let total: usize = elements.iter().map(|(_, r, w)| r * w).sum();
+            if total != width {
+                return false;
+            }
+            // Elements are most-significant first.
+            let mut hi = at + width;
+            for (expr, repeat, w) in elements {
+                for _ in 0..*repeat {
+                    hi -= w;
+                    if expr.width() != *w || !bit_parallel_sources(expr, hi, out) {
+                        return false;
+                    }
+                }
+            }
+            true
         }
         // The condition is scalar: every window reads it whole, so it offers no
         // cut and imposes none.  Only the arms carry bits across.
@@ -3131,8 +3172,8 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)
         } => {
             true_expr.width() == width
                 && false_expr.width() == width
-                && bit_parallel_sources(true_expr, out)
-                && bit_parallel_sources(false_expr, out)
+                && bit_parallel_sources(true_expr, at, out)
+                && bit_parallel_sources(false_expr, at, out)
         }
         _ => false,
     }
@@ -3165,35 +3206,41 @@ fn split_one_copy(
     if a.dynamic_select.is_some() || a.rhs_select.is_some() || a.expr.width() != width {
         return None;
     }
-    let mut sources: Vec<(VarOffset, usize)> = Vec::new();
-    if !bit_parallel_sources(&a.expr, &mut sources) {
+    let mut sources: Vec<BitParallelSource> = Vec::new();
+    if !bit_parallel_sources(&a.expr, 0, &mut sources) {
         return None;
     }
     // A move between disjoint parts of one variable welds them like any copy.
     if reads_written_window(a, dst_base, dst_base + width - 1) {
         return None;
     }
-    // A source written with unknown bits contributes no cut, but it does not
-    // stop the others from cutting: each part still reads it whole, so the
-    // dependency it carries is unchanged.
+    // A written source cuts the value where it starts and ends, which is where
+    // an element of a concatenation does.  One written with unknown bits
+    // contributes no cut inside it, but it does not stop the others from
+    // cutting: each part still reads it whole, so the dependency it carries
+    // is unchanged.
     let mut cuts: Vec<usize> = vec![0, width];
-    let mut any_known = false;
-    for (src, base) in &sources {
-        if let Some(Some(known)) = bounds.get(src) {
-            any_known = true;
+    for src in &sources {
+        let Some(known) = bounds.get(&src.var) else {
+            continue;
+        };
+        cuts.push(src.at);
+        cuts.push(src.at + src.width);
+        if let Some(known) = known {
             // Boundaries are in the source variable's coordinates; a boundary
             // outside the window read is not a cut of this copy.
             cuts.extend(
                 known
                     .iter()
-                    .filter_map(|b| b.checked_sub(*base))
-                    .filter(|b| *b <= width),
+                    .filter_map(|b| b.checked_sub(src.base))
+                    .filter(|b| *b <= src.width)
+                    .map(|b| b + src.at),
             );
         }
     }
     cuts.sort_unstable();
     cuts.dedup();
-    if !any_known || !(3..=max_parts.saturating_add(1)).contains(&cuts.len()) {
+    if !(3..=max_parts.saturating_add(1)).contains(&cuts.len()) {
         return None;
     }
     let mut parts: Vec<ProtoStatement> = Vec::with_capacity(cuts.len() - 1);
@@ -6020,16 +6067,8 @@ impl Conv<&air::Module> for ProtoModule {
                     blocklist.insert(*o);
                 }
             }
-            let mut ins = vec![];
-            for external in &all_external_components {
-                for connect in &external.connects {
-                    connect.expr.gather_variable_offsets(&mut ins);
-                }
-            }
-            for o in &ins {
-                if let VarOffset::Comb(x) = o {
-                    blocklist.insert(*x);
-                }
+            for o in component_comb_offsets(&all_external_components) {
+                blocklist.insert(o.raw());
             }
             blocklist
         } else {
@@ -6082,13 +6121,7 @@ impl Conv<&air::Module> for ProtoModule {
             }
             // Component input connections read these offsets but appear in no
             // statement list.
-            for external in &all_external_components {
-                for connect in &external.connects {
-                    let mut ins = vec![];
-                    connect.expr.gather_variable_offsets(&mut ins);
-                    protect.extend(ins);
-                }
-            }
+            protect.extend(component_comb_offsets(&all_external_components));
             protect
         } else {
             HashSet::default()
@@ -6110,11 +6143,7 @@ impl Conv<&air::Module> for ProtoModule {
                 for (_, off, _, _, _) in &nested_derived_clock_candidates {
                     extra_offsets.push(*off);
                 }
-                for external in &all_external_components {
-                    for connect in &external.connects {
-                        connect.expr.gather_variable_offsets(&mut extra_offsets);
-                    }
-                }
+                extra_offsets.extend(component_comb_offsets(&all_external_components));
                 Some(extra_offsets)
             } else {
                 None
@@ -6512,7 +6541,7 @@ impl Conv<&air::Module> for ProtoModule {
         // events + derived-clock candidates are in scope, precompute the comb
         // offsets the emitter must NOT localize — event-touched, in a
         // runtime-indexed array range, or externally-visible (port / user-var
-        // / clock).
+        // / clock / component connect).
         // LocalizeInfo = (blocklist offsets, array ranges).
         type LocalizeInfo = (HashSet<isize>, Vec<(isize, usize, isize)>);
         // Wasm registers no AOT-C backend, so there is nothing to localize;
@@ -6548,6 +6577,8 @@ impl Conv<&air::Module> for ProtoModule {
             for (_, off, _, _, _) in &nested_derived_clock_candidates {
                 block_vo.insert(*off);
             }
+            // A component reads its input connections from comb_values too.
+            block_vo.extend(component_comb_offsets(&all_external_components));
             let mut block: HashSet<isize> = HashSet::default();
             for vo in &block_vo {
                 if !vo.is_ff() {
@@ -7507,6 +7538,21 @@ fn declared_reset_kind(kind: &air::TypeKind) -> Option<(bool, bool)> {
         air::TypeKind::ResetSyncHigh => Some((false, true)),
         _ => None,
     }
+}
+
+/// Comb storage components reach from Rust, outside any statement list.
+fn component_comb_offsets(components: &[ProtoExternalComponent]) -> Vec<VarOffset> {
+    let unfolded = BigArrayFold::default();
+    let mut out = Vec::new();
+    for c in components {
+        for connect in &c.connects {
+            connect
+                .expr
+                .gather_variable_offsets_expanded(&unfolded, &mut out);
+        }
+    }
+    out.retain(|o| !o.is_ff());
+    out
 }
 
 /// Offsets of the reset-typed variables in one module's meta.
