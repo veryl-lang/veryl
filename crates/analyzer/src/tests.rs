@@ -1498,6 +1498,73 @@ fn duplicated_identifier() {
         errors[0],
         AnalyzerError::DuplicatedIdentifier { .. }
     ));
+
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in 0..2, i in 0..3 {
+                o += i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in 0..2, j in 0..3, i in 0..4 {
+                o += i + j;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        for i in 0..2, i in 0..3 :g {
+            let _a: logic = i;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        for i in 0..2, j in 0..3 :g {
+            var j: logic;
+            assign j = i;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
 }
 
 #[test]
@@ -2830,6 +2897,38 @@ fn invalid_for_range() {
     );
 
     let code = r#"
+    module ModuleA {
+        always_comb {
+            for i in 0..2, j in 4 {
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForRange { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        for i in 0..2, j in 4 :blk {
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForRange { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
     module ModuleA (
         o: output logic<32>,
     ) {
@@ -2854,6 +2953,149 @@ fn invalid_for_range() {
             .any(|e| matches!(e, AnalyzerError::InvalidForRange { .. })),
         "{errors:?}"
     );
+}
+
+#[test]
+fn multi_dim_for() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in 0..2, j in 0..3 {
+                o += i + j;
+            }
+            for i in rev 1..=2, j in 2..4, k in rev 0..2 {
+                o += i + j + k;
+                if i == 1 {
+                    break;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA::<W: u32> #(
+        param N: u32 = 2,
+    ) (
+        o: output logic<32>,
+    ) {
+        const M: u32 = 3;
+
+        for g in 0..2 :outer {
+            for i in 0..N, j in g..M :inner {
+                let _a: logic = i + j;
+            }
+        }
+
+        always_comb {
+            o = 0;
+            for i in 0..N, j in M..=W {
+                o += i + j;
+            }
+        }
+    }
+
+    module ModuleB (
+        o: output logic<32>,
+    ) {
+        inst u: ModuleA::<4> (
+            o,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Each element is assigned exactly once.
+    let code = r#"
+    module ModuleA (
+        o: output logic<6>,
+    ) {
+        for i in 1..3, j in rev 0..=2 :g {
+            assign o[(i - 1) * 3 + j] = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn multi_dim_for_step_rejected() {
+    use crate::analyzer_error::InvalidForStepKind;
+
+    let codes = [
+        r#"
+        module ModuleA (
+            o: output logic<32>,
+        ) {
+            always_comb {
+                o = 0;
+                for i in 0..2, j in 0..4 step += 2 {
+                    o += i + j;
+                }
+            }
+        }
+        "#,
+        r#"
+        module ModuleA (
+            o: output logic<32>,
+        ) {
+            always_comb {
+                o = 0;
+                for i in 0..4 step += 2, j in 0..2 {
+                    o += i + j;
+                }
+            }
+        }
+        "#,
+        r#"
+        module ModuleA {
+            for i in 0..2, j in 0..4 step += 2 :g {
+                let _a: logic = i + j;
+            }
+        }
+        "#,
+    ];
+
+    for code in codes {
+        let errors = analyze(code);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                AnalyzerError::InvalidForStep {
+                    cause: InvalidForStepKind::MultiDimension,
+                    ..
+                }
+            )),
+            "{code}\n{errors:?}"
+        );
+    }
+
+    // A single dimension loop still accepts `step`.
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in 0..4 step += 2 {
+                o += i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -7714,6 +7956,21 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // A genvar is not visible from the ranges of its own generate `for`.
+    let code = r#"
+    module ModuleA {
+        for i in 0..4, j in 0..i :g {
+            let _a: logic = i + j;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
 }
 
 #[test]
@@ -18334,6 +18591,144 @@ fn unevaluable_value_for_range() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
+    // non-const variable used as the second range bound of multi-dimensional generate for
+    // (end and start bound)
+    let code = r#"
+    module ModuleA {
+        let a: logic<10> = 0;
+        for i in 0..2, j in 0..a :label {
+            assign a[i * 5 + j] = i + j;
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let a: logic<10> = 0;
+        for i in 0..2, j in a..5 :label {
+            assign a[i * 5 + j] = i + j;
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // loop variable of the same `for` used as range bound of multi-dimensional for
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in 0..4, j in 0..i {
+                o += j;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // variable used as range bound of multi-dimensional for
+    let code = r#"
+    module ModuleA (
+        i_n: input  logic<4> ,
+        o  : output logic<32>,
+    ) {
+        var n: logic<4>;
+        assign n = i_n;
+        always_comb {
+            o = 0;
+            for i in 0..n, j in 0..2 {
+                o += i + j;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // port used as range bound of multi-dimensional for
+    let code = r#"
+    module ModuleA (
+        i_n: input  logic<4> ,
+        o  : output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in 0..2, j in 0..i_n {
+                o += i + j;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // port used as start bound of multi-dimensional for
+    let code = r#"
+    module ModuleA (
+        i_n: input  logic<4> ,
+        o  : output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in i_n..4, j in 0..2 {
+                o += i + j;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // loop variable of an enclosing procedural `for` used as range bound of multi-dimensional for
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for k in 0..4 {
+                for i in 0..k, j in 0..2 {
+                    o += i + j;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // non-const variable used as single dimension for range bound should be fine
+    let code = r#"
+    module ModuleA (
+        i_n: input  logic<4> ,
+        o  : output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            for i in 0..i_n {
+                o += i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let unevaluable_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::UnevaluableValue { .. }))
+        .collect();
+    assert!(unevaluable_errors.is_empty());
+
     // const variable used as generate for range bound should be fine
     let code = r#"
     module ModuleA {
@@ -23355,6 +23750,34 @@ fn sv_keyword_usage_loop_var_and_label() {
     ) {
         for within in 0..4 :g {
             assign o_x[within] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4, 2>,
+    ) {
+        always_comb {
+            for i in 0..4, within in 0..2 {
+                o_x[i][within] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4, 2>,
+    ) {
+        for i in 0..4, within in 0..2 :g {
+            assign o_x[i][within] = 0;
         }
     }
     "#;

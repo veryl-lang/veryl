@@ -4774,6 +4774,147 @@ fn reverse_range_bound_is_parenthesized() {
         ret.contains("j = W - 1") && !ret.contains("(W) - 1"),
         "single-factor bound needs no parentheses: {ret}"
     );
+
+    // A multi-dimensional loop uses the bound in the iteration count and in
+    // the recovery of the iterator, so both must be parenthesized.
+    let code = r#"module ModuleC (
+    o: output logic<32>,
+) {
+    const W: u32 = 4;
+    always_comb {
+        o = 0;
+        for i in 0..2, j in rev 0..W << 1 {
+            o += i + j;
+        }
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("__i_j < 2 * (W << 1);")
+            && ret.contains("j = (W << 1) - 1 - __i_j % (W << 1);"),
+        "non-atomic bound must be parenthesized: {ret}"
+    );
+}
+
+#[test]
+fn multi_dim_for_statement() {
+    let code = r#"module ModuleA #(
+    param M: u32 = 1,
+    param N: u32 = 4,
+) (
+    o: output logic<32>,
+) {
+    always_comb {
+        o = 0;
+        for i in 0..2, j in 0..3, k in 0..4 {
+            o = o + i + j + k;
+        }
+        for i in rev 1..3, j in 2..=4 {
+            o = o + i + j;
+        }
+        for i in 0..N, j in M..N {
+            o = o + i + j;
+        }
+        for i in 0..2, j in 0..2 {
+            var t: logic<32>;
+            t = i + j;
+            o = o + t;
+            if t == 2 {
+                break;
+            }
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA #(
+    parameter int unsigned M = 1,
+    parameter int unsigned N = 4
+) (
+    output var logic [32-1:0] o
+);
+    always_comb begin
+        o = 0;
+        for (int __i_j_k = 0; __i_j_k < 2 * 3 * 4; __i_j_k++) begin
+            int i;
+            int j;
+            int k;
+            i = __i_j_k / (3 * 4);
+            j = (__i_j_k / 4) % 3;
+            k = __i_j_k % 4;
+            o = o + i + j + k;
+        end
+        for (int __i_j = 0; __i_j < 2 * 3; __i_j++) begin
+            int i;
+            int j;
+            i = 3 - 1 - __i_j / 3;
+            j = 2 + __i_j % 3;
+            o = o + i + j;
+        end
+        for (int __i_j = 0; __i_j < N * ((N > M) ? N - M : 0); __i_j++) begin
+            int i;
+            int j;
+            i = __i_j / ((N > M) ? N - M : 0);
+            j = M + __i_j % ((N > M) ? N - M : 0);
+            o = o + i + j;
+        end
+        for (int __i_j = 0; __i_j < 2 * 2; __i_j++) begin
+            int i;
+            int j;
+            logic [32-1:0] t;
+            i = __i_j / 2;
+            j = __i_j % 2;
+            t = i + j;
+            o = o + t;
+            if (t == 2) begin
+                break;
+            end
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn multi_dim_generate_for() {
+    let code = r#"module ModuleA #(
+    param N: u32 = 2,
+) (
+    o: output logic<6>,
+) {
+    for i in 0..N, j in rev 1..=3 :g {
+        assign o[i * 3 + j - 1] = 1;
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA #(
+    parameter int unsigned N = 2
+) (
+    output var logic [6-1:0] o
+);
+    for (genvar __i_j = 0; __i_j < N * 3; __i_j++) begin :g
+        localparam int i = __i_j / 3;
+        localparam int j = 3 - __i_j % 3;
+        always_comb o[i * 3 + j - 1] = 1;
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]

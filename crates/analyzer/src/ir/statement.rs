@@ -41,12 +41,143 @@ pub enum Statement {
 
 #[derive(Clone)]
 pub struct ForStatement {
+    /// Iterators of the loop, outermost first. A multi-dimensional loop is
+    /// still one loop: its `break` leaves every dimension.
+    pub iterators: Vec<ForIterator>,
+    pub body: Vec<Statement>,
+    pub token: TokenRange,
+}
+
+#[derive(Clone)]
+pub struct ForIterator {
     pub var_id: VarId,
     pub var_name: StrId,
     pub var_type: Type,
     pub range: ForRange,
-    pub body: Vec<Statement>,
-    pub token: TokenRange,
+}
+
+impl fmt::Display for ForIterator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let range_op = if let ForRange::Reverse { .. } = &self.range {
+            "rev "
+        } else {
+            ""
+        };
+        let (start, end, inclusive, step_info) = match &self.range {
+            ForRange::Forward {
+                start,
+                end,
+                inclusive,
+                step,
+            } => (
+                start,
+                end,
+                *inclusive,
+                if *step == 1 {
+                    None
+                } else {
+                    Some(format!("+= {step}"))
+                },
+            ),
+            ForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                ..
+            } => (start, end, *inclusive, None),
+            ForRange::Stepped {
+                start,
+                end,
+                inclusive,
+                step,
+                op,
+            } => (start, end, *inclusive, Some(format!("{op}= {step}"))),
+        };
+        let dots = if inclusive { "..=" } else { ".." };
+        write!(f, "{} in {range_op}{start}{dots}{end}", self.var_name)?;
+        if let Some(step_str) = step_info {
+            write!(f, " step {step_str}")?;
+        }
+        Ok(())
+    }
+}
+
+impl ForStatement {
+    pub fn ranges(&self) -> impl Iterator<Item = &ForRange> {
+        self.iterators.iter().map(|x| &x.range)
+    }
+
+    pub fn ranges_mut(&mut self) -> impl Iterator<Item = &mut ForRange> {
+        self.iterators.iter_mut().map(|x| &mut x.range)
+    }
+
+    /// Stores the iterator values of one iteration, outermost first.
+    pub fn set_iterator_values(&self, context: &mut Context, values: &[usize]) {
+        for (iterator, value) in self.iterators.iter().zip(values) {
+            if let Some(var) = context.variable_mut(&iterator.var_id)
+                && let Some(total_width) = iterator.var_type.total_width()
+            {
+                let val = Value::new(*value as u64, total_width, iterator.var_type.signed);
+                var.set_value(&[], val, None);
+            }
+        }
+    }
+
+    /// The iterator values of every iteration, each outermost first.
+    pub fn eval_iter(&self, context: &mut Context) -> Option<Vec<Vec<usize>>> {
+        let limit = context.config.evaluate_size_limit;
+        let mut ret: Vec<Vec<usize>> = vec![vec![]];
+        for x in &self.iterators {
+            let values = x.range.eval_iter(context)?;
+            if ret.len().saturating_mul(values.len()) > limit {
+                return None;
+            }
+            ret = ret
+                .iter()
+                .flat_map(|outer| {
+                    values.iter().map(move |value| {
+                        let mut x = outer.clone();
+                        x.push(*value);
+                        x
+                    })
+                })
+                .collect();
+        }
+        Some(ret)
+    }
+
+    /// True when the iteration count exceeds evaluate_size_limit although
+    /// every range has const-evaluable bounds.
+    pub fn is_over_size_limit(&self, context: &mut Context) -> bool {
+        if self
+            .iterators
+            .iter()
+            .any(|x| x.range.is_over_size_limit(context))
+        {
+            return true;
+        }
+        let limit = context.config.evaluate_size_limit;
+        let mut total: usize = 1;
+        for x in &self.iterators {
+            let Some(values) = x.range.eval_iter(context) else {
+                return false;
+            };
+            total = total.saturating_mul(values.len());
+        }
+        total > limit
+    }
+
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        from_ff: bool,
+    ) {
+        for x in self.ranges() {
+            x.gather_ff(context, table, decl, from_ff);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -468,23 +599,16 @@ impl Statement {
             Statement::IfReset(_) => ControlFlow::Continue,
             Statement::Case(x) => x.eval_value(context),
             Statement::For(x) => {
-                if let Some(iter) = x.range.eval_iter(context) {
-                    'outer: for i in iter {
-                        if let Some(var) = context.variable_mut(&x.var_id)
-                            && let Some(total_width) = x.var_type.total_width()
-                        {
-                            let val = Value::new(i as u64, total_width, x.var_type.signed);
-                            var.set_value(&[], val, None);
-                        }
+                if let Some(iter) = x.eval_iter(context) {
+                    'outer: for values in iter {
+                        x.set_iterator_values(context, &values);
                         for s in &x.body {
                             if s.eval_value(context) == ControlFlow::Break {
                                 break 'outer;
                             }
                         }
                     }
-                } else if context.comptime_for_overflow.is_none()
-                    && x.range.is_over_size_limit(context)
-                {
+                } else if context.comptime_for_overflow.is_none() && x.is_over_size_limit(context) {
                     // Over-limit range: skipping the body would fold the const
                     // to its pre-loop value. The eval path swallows errors, so
                     // record it here for analyzer.rs to surface.
@@ -522,10 +646,10 @@ impl Statement {
             Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
             Statement::For(x) => {
                 if !super::peel::has_own_break(&x.body)
-                    && let Some(iterations) = x.range.eval_iter(context)
+                    && let Some(iterations) = x.eval_iter(context)
                 {
                     for iteration in iterations {
-                        let body = super::peel::specialize_iteration(context, x, iteration);
+                        let body = super::peel::specialize_iteration(context, x, &iteration);
                         for s in body.as_deref().unwrap_or(&x.body) {
                             s.eval_assign(context, assign_table, assign_context, base_tables);
                         }
@@ -559,12 +683,12 @@ impl Statement {
             Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None, true),
             Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, true),
             Statement::For(x) => {
-                x.range.gather_ff(context, table, decl, true);
+                x.gather_ff(context, table, decl, true);
                 if !super::peel::has_own_break(&x.body)
-                    && let Some(iterations) = x.range.eval_iter(context)
+                    && let Some(iterations) = x.eval_iter(context)
                 {
                     for iteration in iterations {
-                        let body = super::peel::specialize_iteration(context, x, iteration);
+                        let body = super::peel::specialize_iteration(context, x, &iteration);
                         for s in body.as_deref().unwrap_or(&x.body) {
                             s.gather_ff(context, table, decl);
                         }
@@ -610,7 +734,7 @@ impl Statement {
             Statement::FunctionCall(x) => x.gather_ff_comb_assign(context, table, decl),
             Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, false),
             Statement::For(x) => {
-                x.range.gather_ff(context, table, decl, false);
+                x.gather_ff(context, table, decl, false);
                 for s in &x.body {
                     s.gather_ff_comb_assign(context, table, decl);
                 }
@@ -692,51 +816,8 @@ impl fmt::Display for Statement {
                 }
             },
             Statement::For(x) => {
-                let range_op = if let ForRange::Reverse { .. } = &x.range {
-                    "rev "
-                } else {
-                    ""
-                };
-                let (start, end, inclusive, step_info) = match &x.range {
-                    ForRange::Forward {
-                        start,
-                        end,
-                        inclusive,
-                        step,
-                    } => (
-                        start,
-                        end,
-                        *inclusive,
-                        if *step == 1 {
-                            None
-                        } else {
-                            Some(format!("+= {step}"))
-                        },
-                    ),
-                    ForRange::Reverse {
-                        start,
-                        end,
-                        inclusive,
-                        ..
-                    } => (start, end, *inclusive, None),
-                    ForRange::Stepped {
-                        start,
-                        end,
-                        inclusive,
-                        step,
-                        op,
-                    } => (start, end, *inclusive, Some(format!("{op}= {step}"))),
-                };
-                let dots = if inclusive { "..=" } else { ".." };
-                if let Some(step_str) = step_info {
-                    writeln!(
-                        f,
-                        "for {} in {range_op}{start}{dots}{end} step {step_str} {{",
-                        x.var_name
-                    )?;
-                } else {
-                    writeln!(f, "for {} in {range_op}{start}{dots}{end} {{", x.var_name)?;
-                }
+                let iterators: Vec<_> = x.iterators.iter().map(|x| x.to_string()).collect();
+                writeln!(f, "for {} {{", iterators.join(", "))?;
                 for s in &x.body {
                     writeln!(f, "  {s}")?;
                 }

@@ -1996,6 +1996,16 @@ pub fn eval_generate_for_range(
     for_range.eval_iter(context).ok_or_else(|| ir_error!(token))
 }
 
+/// Build a `ForRange` whose bounds must be constants, as a multi-dimensional
+/// loop requires.
+pub fn build_const_for_range(
+    context: &mut Context,
+    range: &Range,
+    rev: bool,
+) -> IrResult<ir::ForRange> {
+    build_for_range_inner(context, range, rev, None, true)
+}
+
 /// Build a `ForRange` from syntactic elements of a for-loop.
 pub fn build_for_range(
     context: &mut Context,
@@ -2162,52 +2172,69 @@ fn build_for_range_inner(
     }
 }
 
+pub struct ForIteratorInfo<'a> {
+    pub identifier: &'a Identifier,
+    pub r#type: ir::Type,
+    pub clock_domain: ClockDomain,
+    pub range: ir::ForRange,
+}
+
 /// Preserve a procedural loop, including constant ranges, in the shared IR.
 pub fn build_for_statement(
     context: &mut Context,
     value: &ForStatement,
-    r#type: &ir::Type,
-    clock_domain: ClockDomain,
-    for_range: ir::ForRange,
-    token: TokenRange,
+    iterators: Vec<ForIteratorInfo>,
 ) -> IrResult<ir::StatementBlock> {
-    let var_name = value.identifier.text();
+    let token: TokenRange = (&value.for_iterator.identifier.identifier_token).into();
 
-    let index = value.identifier.text();
-    let path = VarPath::new(index);
-    let kind = VarKind::Const;
-    let comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
+    let mut ir_iterators = Vec::with_capacity(iterators.len());
+    for x in iterators {
+        let token: TokenRange = (&x.identifier.identifier_token).into();
+        let var_name = x.identifier.text();
 
-    let loop_var_id = context.insert_var_path(path.clone(), comptime.clone());
-    let values = if let Some(total_width) = r#type.total_width() {
-        vec![Value::new_x(total_width, r#type.signed)]
-    } else {
-        vec![]
-    };
-    let array_limit = context.config.evaluate_array_limit;
-    let variable = Variable::new(
-        loop_var_id,
-        path,
-        kind,
-        comptime.r#type.clone(),
-        values,
-        context.get_affiliation(),
-        &token,
-        array_limit,
-    );
-    context.insert_variable(loop_var_id, variable);
+        let path = VarPath::new(var_name);
+        let kind = VarKind::Const;
+        let comptime = Comptime::from_type(x.r#type.clone(), x.clock_domain, token);
 
-    context.for_ranges.push((loop_var_id, for_range.clone()));
+        let loop_var_id = context.insert_var_path(path.clone(), comptime.clone());
+        let values = if let Some(total_width) = x.r#type.total_width() {
+            vec![Value::new_x(total_width, x.r#type.signed)]
+        } else {
+            vec![]
+        };
+        let array_limit = context.config.evaluate_array_limit;
+        let variable = Variable::new(
+            loop_var_id,
+            path,
+            kind,
+            comptime.r#type.clone(),
+            values,
+            context.get_affiliation(),
+            &token,
+            array_limit,
+        );
+        context.insert_variable(loop_var_id, variable);
+
+        ir_iterators.push(ir::ForIterator {
+            var_id: loop_var_id,
+            var_name,
+            var_type: x.r#type,
+            range: x.range,
+        });
+    }
+
+    for x in &ir_iterators {
+        context.for_ranges.push((x.var_id, x.range.clone()));
+    }
     let body: IrResult<ir::StatementBlock> = Conv::conv(context, value.statement_block.as_ref());
-    context.for_ranges.pop();
+    for _ in &ir_iterators {
+        context.for_ranges.pop();
+    }
     let body = body?;
 
     Ok(ir::StatementBlock(vec![ir::Statement::For(Box::new(
         ir::ForStatement {
-            var_id: loop_var_id,
-            var_name,
-            var_type: r#type.clone(),
-            range: for_range,
+            iterators: ir_iterators,
             body: body.0,
             token,
         },

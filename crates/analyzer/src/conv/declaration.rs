@@ -307,43 +307,73 @@ impl Conv<&GenerateOptionalNamedBlock> for ir::DeclarationBlock {
 
 impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
     fn conv(context: &mut Context, value: &GenerateForDeclaration) -> IrResult<Self> {
-        let token: TokenRange = (&value.identifier.identifier_token).into();
         let label = value.generate_named_block.identifier.text();
+        let iterators = value.iterators();
+        let multi_dimension = iterators.len() > 1;
 
-        let rev = value.generate_for_declaration_opt.is_some();
-        let step = value
-            .generate_for_declaration_opt0
-            .as_ref()
-            .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
+        // Every range is evaluated before any genvar is defined, so a range
+        // reading a genvar of the same loop is not a constant.
+        let mut ranges = Vec::with_capacity(iterators.len());
+        for x in iterators {
+            let token: TokenRange = (&x.identifier.identifier_token).into();
+            let rev = x.for_iterator_opt.is_some();
+            let step = x
+                .for_iterator_opt0
+                .as_ref()
+                .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
+            if multi_dimension && step.is_some() {
+                // Reported by CheckStatement.
+                return Err(ir_error!(token));
+            }
+            let range = eval_generate_for_range(context, &x.range, rev, step, token)?;
+            ranges.push((x.identifier.text(), token, range));
+        }
 
-        let range = eval_generate_for_range(context, &value.range, rev, step, token)?;
+        // Iterations in the order of nested loops, the first iterator outermost.
+        let mut iterations: Vec<Vec<usize>> = vec![vec![]];
+        for (_, _, range) in &ranges {
+            iterations = iterations
+                .iter()
+                .flat_map(|outer| {
+                    range.iter().map(move |i| {
+                        let mut x = outer.clone();
+                        x.push(*i);
+                        x
+                    })
+                })
+                .collect();
+        }
 
         let mut ret = ir::DeclarationBlock::default();
 
-        for i in range {
-            let label = crate::conv::generate_block_label(label, i);
-
-            let index = value.identifier.text();
-            let path = VarPath::new(index);
-            let kind = VarKind::Const;
-            let comptime = Comptime::create_value(Value::new(i as u64, 32, false), token);
+        for (index, values) in iterations.iter().enumerate() {
+            // A multi-dimensional loop is emitted as one flattened loop, whose
+            // blocks are labeled by the flattened index.
+            let label_index = if multi_dimension { index } else { values[0] };
+            let label = crate::conv::generate_block_label(label, label_index);
 
             context.push_hierarchy(label);
 
             let block = context.block(|c| {
-                let id = c.insert_var_path(path.clone(), comptime.clone());
-                let array_limit = c.config.evaluate_array_limit;
-                let variable = Variable::new(
-                    id,
-                    path,
-                    kind,
-                    comptime.r#type.clone(),
-                    vec![comptime.get_value().unwrap().clone()],
-                    c.get_affiliation(),
-                    &token,
-                    array_limit,
-                );
-                c.insert_variable(id, variable);
+                for ((name, token, _), i) in ranges.iter().zip(values) {
+                    let path = VarPath::new(*name);
+                    let kind = VarKind::Const;
+                    let comptime = Comptime::create_value(Value::new(*i as u64, 32, false), *token);
+
+                    let id = c.insert_var_path(path.clone(), comptime.clone());
+                    let array_limit = c.config.evaluate_array_limit;
+                    let variable = Variable::new(
+                        id,
+                        path,
+                        kind,
+                        comptime.r#type.clone(),
+                        vec![comptime.get_value().unwrap().clone()],
+                        c.get_affiliation(),
+                        token,
+                        array_limit,
+                    );
+                    c.insert_variable(id, variable);
+                }
 
                 let block: IrResult<ir::DeclarationBlock> =
                     Conv::conv(c, value.generate_named_block.as_ref());

@@ -1619,25 +1619,35 @@ impl VerylWalker for Formatter {
     fn for_statement(&mut self, arg: &ForStatement) {
         self.r#for(&arg.r#for);
         self.space(1);
+        self.for_iterator(&arg.for_iterator);
+        for x in &arg.for_statement_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.for_iterator(&x.for_iterator);
+        }
+        self.space(1);
+        self.statement_block(&arg.statement_block);
+    }
+
+    /// Semantic action for non-terminal 'ForIterator'
+    fn for_iterator(&mut self, arg: &ForIterator) {
         self.identifier(&arg.identifier);
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
-        if let Some(ref x) = arg.for_statement_opt {
+        if let Some(ref x) = arg.for_iterator_opt {
             self.rev(&x.rev);
             self.space(1);
         }
         self.range(&arg.range);
-        self.space(1);
-        if let Some(ref x) = arg.for_statement_opt0 {
+        if let Some(ref x) = arg.for_iterator_opt0 {
+            self.space(1);
             self.step(&x.step);
             self.space(1);
             self.assignment_operator(&x.assignment_operator);
             self.space(1);
             self.expression(&x.expression);
-            self.space(1);
         }
-        self.statement_block(&arg.statement_block);
     }
 
     /// Semantic action for non-terminal 'CaseStatement'
@@ -2975,24 +2985,13 @@ impl VerylWalker for Formatter {
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) {
         self.r#for(&arg.r#for);
         self.space(1);
-        self.identifier(&arg.identifier);
-        self.space(1);
-        self.r#in(&arg.r#in);
-        self.space(1);
-        if let Some(ref x) = arg.generate_for_declaration_opt {
-            self.rev(&x.rev);
+        self.for_iterator(&arg.for_iterator);
+        for x in &arg.generate_for_declaration_list {
+            self.comma(&x.comma);
             self.space(1);
+            self.for_iterator(&x.for_iterator);
         }
-        self.range(&arg.range);
         self.space(1);
-        if let Some(ref x) = arg.generate_for_declaration_opt0 {
-            self.step(&x.step);
-            self.space(1);
-            self.assignment_operator(&x.assignment_operator);
-            self.space(1);
-            self.expression(&x.expression);
-            self.space(1);
-        }
         self.generate_named_block(&arg.generate_named_block);
     }
 

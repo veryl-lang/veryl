@@ -2344,6 +2344,56 @@ fn tb_stepped_for_loop_shift_step() {
     }
 }
 
+// A multi-dimensional loop in a test module is not unrolled, so it runs as
+// one flattened loop.
+#[test]
+fn tb_multi_dim_for_loop() {
+    let code = r#"
+    #[test(test_multi_dim)]
+    module test_multi_dim {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var sum: u32;
+        var cnt: u32;
+
+        initial {
+            rst.assert();
+            sum = 0;
+            cnt = 0;
+            // (i, j) = (1, 2), (1, 1), (1, 0), (2, 2), (2, 1) -> break at (2, 0)
+            for i in 1..=2, j in rev 0..3 {
+                if i == 2 && j == 0 {
+                    break;
+                }
+                sum = sum * 10 + (i * 3 + j) as 32;
+                cnt += 1;
+            }
+            $assert(cnt == 5, "multi-dimensional for-loop ran a wrong count");
+            $assert(sum == 54387, "multi-dimensional for-loop ran in a wrong order");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_multi_dim");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_multi_dim_for_loop failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
 // Regression: the WaveDrom output check compared via `payload_u64()`, so a
 // >64-bit mismatch in the high bits falsely PASSED; it now compares the full
 // value.

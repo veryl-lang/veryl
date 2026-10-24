@@ -979,6 +979,49 @@ fn format_is_idempotent_for_assign_lhs_alignment_near_max_width() {
 }
 
 #[test]
+fn format_multi_dim_for() {
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M (
+    o: output logic<32>,
+) {
+    always_comb {
+        o = 0;
+        for i  in 0..2 ,j in rev 0..3{
+            o += i + j;
+        }
+    }
+    for i in 0..2,j  in  0..3   :g {
+        let _a: logic = i + j;
+    }
+}
+"#;
+
+    let expect = r#"module M (
+    o: output logic<32>,
+) {
+    always_comb {
+        o = 0;
+        for i in 0..2, j in rev 0..3 {
+            o += i + j;
+        }
+    }
+    for i in 0..2, j in 0..3 :g {
+        let _a: logic = i + j;
+    }
+}
+"#;
+
+    let first = format(&metadata, code);
+    assert_eq!(first, expect);
+    let second = format(&metadata, &first);
+    assert_eq!(
+        first, second,
+        "format is not idempotent:\nfirst:\n{first}\nsecond:\n{second}"
+    );
+}
+
+#[test]
 fn format_is_idempotent_for_inst_next_to_hierarchical_assign() {
     let metadata = Metadata::create_default("prj").unwrap();
 
