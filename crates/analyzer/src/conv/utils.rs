@@ -4875,15 +4875,16 @@ pub fn function_call(
         // called outside a procedural statement, and a port connection is
         // emitted as an expression.
         if c.in_inst_port
+            && !c.is_affiliated(Affiliation::Function)
             && let Some(symbol) = &symbol
             && let SymbolKind::Function(function) = &symbol.kind
             && let Some(output_port) = function.ports.iter().find(|port| {
-                symbol_table::get(port.symbol).is_some_and(|symbol| {
+                symbol_table::get(port.symbol).is_some_and(|x| {
                     matches!(
-                        symbol.kind,
-                        SymbolKind::Port(ref port)
+                        x.kind,
+                        SymbolKind::Port(ref p)
                             if matches!(
-                                port.direction,
+                                p.direction,
                                 symbol::Direction::Output | symbol::Direction::Inout
                             )
                     )

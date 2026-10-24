@@ -138,7 +138,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(function_output_in_port_connection),
-        help("call \"{function}\" in always_comb and connect the result to the port"),
+        help("assign the result of \"{function}\" to a variable first, then connect that variable to the port"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error(

@@ -19,4 +19,4 @@ function_output_in_port_connection (https://doc.veryl-lang.org/book/07_appendix/
     ·         ╰── "y" is declared as an output here
  16 │     ) -> logic<8> {
     ╰────
-  help: call "write_seen" in always_comb and connect the result to the port
+  help: assign the result of "write_seen" to a variable first, then connect that variable to the port
