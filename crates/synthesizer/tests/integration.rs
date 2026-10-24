@@ -113,6 +113,38 @@ fn simple_dff() {
 }
 
 #[test]
+fn constant_reset_loop_folds_iterator_dependent_function_calls() {
+    let code = r#"
+        module Top (
+            clk: input clock,
+            rst: input reset,
+            d: input logic<8>,
+            q: output logic<8>,
+        ) {
+            function reset_value(index: input i32) -> logic<8> {
+                return (index + 10) as 8;
+            }
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..4 {
+                        q = reset_value(i);
+                    }
+                } else {
+                    q = d;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize retained reset loop");
+    assert_eq!(gate.module.ffs.len(), 8);
+    for ff in &gate.module.ffs {
+        let (_, bit) = ff.origin.expect("output bit origin");
+        assert_eq!(ff.reset_value, (13 >> bit) & 1 != 0, "bit={bit}");
+    }
+}
+
+#[test]
 fn ripple_carry_adder() {
     let code = r#"
         module Top (
@@ -4334,6 +4366,78 @@ fn eval_net(
     v
 }
 
+#[test]
+fn relational_comparison_uses_operand_signedness() {
+    for (a_signed, b_signed) in [(true, true), (true, false), (false, true), (false, false)] {
+        let a_type = if a_signed { "signed " } else { "" };
+        let b_type = if b_signed { "signed " } else { "" };
+        let code = format!(
+            r#"
+        module Top (
+            a: input {a_type}logic<4>,
+            b: input {b_type}logic<4>,
+            lt: output logic,
+            le: output logic,
+            gt: output logic,
+            ge: output logic,
+            widened: output logic<8>,
+        ) {{
+            assign lt = a <: b;
+            assign le = a <= b;
+            assign gt = a >: b;
+            assign ge = a >= b;
+            assign widened = (a <: b) as 1;
+        }}
+        "#
+        );
+        let (ir, top) = analyze(&code, "Top");
+        let gate = build_gate_ir(&ir, top).expect("gate ir").module;
+        let port = |name: &str| {
+            &gate
+                .ports
+                .iter()
+                .find(|p| p.name.to_string() == name)
+                .unwrap()
+                .nets
+        };
+        for a in 0..16u32 {
+            for b in 0..16u32 {
+                let mut inputs = std::collections::HashMap::new();
+                for (name, value) in [("a", a), ("b", b)] {
+                    for (i, &net) in port(name).iter().enumerate() {
+                        inputs.insert(net, (value >> i) & 1 != 0);
+                    }
+                }
+                let value = |bits: u32| {
+                    if a_signed && b_signed && bits >= 8 {
+                        bits as i32 - 16
+                    } else {
+                        bits as i32
+                    }
+                };
+                let (a_value, b_value) = (value(a), value(b));
+                let mut memo = std::collections::HashMap::new();
+                for (name, expected) in [
+                    ("lt", a_value < b_value),
+                    ("le", a_value <= b_value),
+                    ("gt", a_value > b_value),
+                    ("ge", a_value >= b_value),
+                    ("widened", a_value < b_value),
+                ] {
+                    let actual = port(name).iter().enumerate().fold(0u32, |acc, (i, &net)| {
+                        acc | ((eval_net(&gate, net, &inputs, &mut memo) as u32) << i)
+                    });
+                    assert_eq!(
+                        actual,
+                        u32::from(expected),
+                        "{name}: a={a}, b={b}, a_signed={a_signed}, b_signed={b_signed}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// The depth restructuring rewrites a priority encoder wholesale (ripple →
 /// Sklansky prefix network); verify the final netlist, through the full
 /// pipeline including fusion, against a golden model for every input.
@@ -5260,6 +5364,50 @@ fn dynamic_bit_select_on_struct_member_writes_the_addressed_bit() {
 }
 
 #[test]
+fn inst_multidimensional_array_slice_input_port_keeps_element_order() {
+    let code = r#"
+        module Top(d: input logic<4>[4, 2], o: output logic<16>) {
+            inst u: Leaf(i: d[1+:2], o: o);
+        }
+        module Leaf(i: input logic<4>[2, 2], o: output logic<16>) {
+            assign o = {i[1][1], i[1][0], i[0][1], i[0][0]};
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let d = &gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "d")
+        .unwrap()
+        .nets;
+    let o = &gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "o")
+        .unwrap()
+        .nets;
+    assert_eq!(d.len(), 32);
+    assert_eq!(o.len(), 16);
+
+    for active in 0..d.len() {
+        let inputs = d
+            .iter()
+            .enumerate()
+            .map(|(i, &net)| (net, i == active))
+            .collect();
+        let mut memo = std::collections::HashMap::new();
+        for (bit, &net) in o.iter().enumerate() {
+            assert_eq!(
+                eval_net(&gate, net, &inputs, &mut memo),
+                active == bit + 8,
+                "input bit {active}, output bit {bit}"
+            );
+        }
+    }
+}
+
+#[test]
 fn inst_unpacked_array_slice_output_port_keeps_element_order() {
     // A concat destructure is MSB-first; applying that order to an element-wise
     // slice swaps the elements.
@@ -5324,4 +5472,361 @@ fn inst_unpacked_array_slice_output_port_keeps_element_order() {
         }
     }
     assert_eq!(checked, 2, "both outputs must be present");
+}
+
+#[test]
+fn array_slice_negative_index_does_not_alias_a_large_array() {
+    let code = r#"
+        module Top(d: input logic[64], idx: input signed logic<4>,
+                   plus: output logic<2>, minus: output logic<2>, stepped: output logic<2>) {
+            inst p: Pair(i: d[idx+:2], o: plus);
+            inst m: Pair(i: d[idx-:2], o: minus);
+            inst s: Pair(i: d[idx step 2], o: stepped);
+        }
+        module Pair(i: input logic[2], o: output logic<2>) {
+            assign o = {i[1], i[0]};
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        &gate
+            .ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap()
+            .nets
+    };
+    for position in -8i32..8 {
+        for active in 0..64 {
+            let inputs = port("d")
+                .iter()
+                .enumerate()
+                .map(|(i, &n)| (n, i == active))
+                .chain(
+                    port("idx")
+                        .iter()
+                        .enumerate()
+                        .map(|(bit, &n)| (n, (position >> bit) & 1 != 0)),
+                )
+                .collect();
+            let mut memo = std::collections::HashMap::new();
+            for (name, start) in [
+                ("plus", position),
+                ("minus", position - 1),
+                ("stepped", position * 2),
+            ] {
+                for (offset, &net) in port(name).iter().enumerate() {
+                    let coordinate = start + offset as i32;
+                    assert_eq!(
+                        eval_net(&gate, net, &inputs, &mut memo),
+                        coordinate == active as i32,
+                        "position={position}, active={active}, port={name}, offset={offset}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn dynamic_array_slice_keeps_inner_indices_in_their_row() {
+    let code = r#"
+        module Top(d: input logic<4>[2, 4], idx: input signed logic<4>, o: output logic<8>) {
+            inst u: Leaf(i: d[1][idx+:2], o: o);
+        }
+        module Leaf(i: input logic<4>[2], o: output logic<8>) {
+            assign o = {i[1], i[0]};
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        &gate
+            .ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap()
+            .nets
+    };
+    let d = port("d");
+    let idx = port("idx");
+    let o = port("o");
+    for position in -2i32..6 {
+        for active in 0..d.len() {
+            let inputs = d
+                .iter()
+                .enumerate()
+                .map(|(i, &n)| (n, i == active))
+                .chain(
+                    idx.iter()
+                        .enumerate()
+                        .map(|(bit, &n)| (n, (position >> bit) & 1 != 0)),
+                )
+                .collect();
+            let mut memo = std::collections::HashMap::new();
+            for (bit, &net) in o.iter().enumerate() {
+                let element = position + (bit / 4) as i32;
+                let expected =
+                    (0..4).contains(&element) && active == (4 + element as usize) * 4 + bit % 4;
+                assert_eq!(
+                    eval_net(&gate, net, &inputs, &mut memo),
+                    expected,
+                    "position={position}, active={active}, bit={bit}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn reset_loop_sets_every_array_element() {
+    // Regression: a reset write to an array element dropped every reset value
+    // of the FF, so the array's FFs all reset to 0.
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            we : input  logic,
+            idx: input  logic<7>,
+            d  : input  logic<2>,
+            q  : output logic<2>,
+        ) {
+            var ctr: logic<2> [100];
+            assign q = ctr[idx];
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..100 {
+                        ctr[i] = 2'b10;
+                    }
+                } else if we {
+                    ctr[idx] = d;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    assert_eq!(gate.module.ffs.len(), 200);
+    assert_eq!(
+        gate.module.ffs.iter().filter(|f| f.reset_value).count(),
+        100
+    );
+}
+
+#[test]
+fn reset_of_a_struct_member_in_an_array_lands_on_the_member() {
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            idx: input  logic<2>,
+            q  : output logic<2>,
+        ) {
+            struct pair {
+                hi: logic,
+                lo: logic,
+            }
+            var arr: pair [4];
+            assign q = {arr[idx].hi, arr[idx].lo};
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..4 {
+                        arr[i].hi = 1'b1;
+                    }
+                } else {
+                    arr[idx].hi = ~arr[idx].hi;
+                    arr[idx].lo = ~arr[idx].lo;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let set: Vec<usize> = gate
+        .module
+        .ffs
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.reset_value)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(gate.module.ffs.len(), 8);
+    assert_eq!(set, vec![1, 3, 5, 7]);
+}
+
+#[test]
+fn reset_of_a_concatenated_destination_does_not_spill_into_other_elements() {
+    // The concatenation is not split into its destinations, so the block keeps
+    // no reset value rather than one smeared over arr[0] to arr[3].
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            idx: input  logic<2>,
+            q  : output logic<2>,
+        ) {
+            var arr: logic<2> [4];
+            assign q = arr[idx];
+            always_ff (clk, rst) {
+                if_reset {
+                    {arr[0], arr[1]} = 4'b1001;
+                } else {
+                    arr[idx] = ~arr[idx];
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    assert_eq!(gate.module.ffs.len(), 8);
+    assert!(gate.module.ffs[4..].iter().all(|f| !f.reset_value));
+}
+
+#[test]
+fn coordinates_that_cannot_leave_their_dimension_keep_addressing_it() {
+    // Both coordinates span exactly their dimension, so the mux tree's own
+    // zero padding covers the range and no validity gate is built.
+    let code = r#"
+        module Top(d: input logic<2>[4, 2], row: input logic<2>, column: input logic,
+                   o: output logic<2>) {
+            assign o = d[row][column];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        &gate
+            .ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap()
+            .nets
+    };
+    let d = port("d");
+    assert_eq!(d.len(), 16);
+    for row in 0..4usize {
+        for column in 0..2usize {
+            for active in 0..d.len() {
+                let inputs = d
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &n)| (n, i == active))
+                    .chain(
+                        port("row")
+                            .iter()
+                            .enumerate()
+                            .map(|(bit, &n)| (n, (row >> bit) & 1 != 0)),
+                    )
+                    .chain(port("column").iter().map(|&n| (n, column != 0)))
+                    .collect();
+                let mut memo = std::collections::HashMap::new();
+                for (bit, &net) in port("o").iter().enumerate() {
+                    assert_eq!(
+                        eval_net(&gate, net, &inputs, &mut memo),
+                        active == (row * 2 + column) * 2 + bit,
+                        "row={row}, column={column}, active={active}, bit={bit}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn single_element_dimension_still_rejects_an_out_of_range_selector() {
+    // `dynamic_mux_tree` resolves no selector bit for a one-element dimension,
+    // so its range check cannot be left to the padding.
+    let code = r#"
+        module Top(d: input logic<2>[1, 2], row: input logic, column: input logic,
+                   o: output logic<2>) {
+            assign o = d[row][column];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        &gate
+            .ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap()
+            .nets
+    };
+    let d = port("d");
+    assert_eq!(d.len(), 4);
+    for row in 0..2usize {
+        for column in 0..2usize {
+            for active in 0..d.len() {
+                let inputs = d
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &n)| (n, i == active))
+                    .chain(port("row").iter().map(|&n| (n, row != 0)))
+                    .chain(port("column").iter().map(|&n| (n, column != 0)))
+                    .collect();
+                let mut memo = std::collections::HashMap::new();
+                for (bit, &net) in port("o").iter().enumerate() {
+                    assert_eq!(
+                        eval_net(&gate, net, &inputs, &mut memo),
+                        row == 0 && active == column * 2 + bit,
+                        "row={row}, column={column}, active={active}, bit={bit}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn reset_value_literal() {
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module Top (
+            o_hold0   : output reset_async_high,
+            o_hold1   : output reset_async_low,
+            o_hold2   : output reset_sync_high,
+            o_hold3   : output reset_sync_low,
+            o_hold4   : output reset,
+            o_release0: output reset_async_high,
+            o_release1: output reset_async_low,
+            o_release2: output reset_sync_high,
+            o_release3: output reset_sync_low,
+            o_release4: output reset,
+        ) {
+            assign o_hold0    = reset_active;
+            assign o_hold1    = reset_active;
+            assign o_hold2    = reset_active;
+            assign o_hold3    = reset_active;
+            assign o_hold4    = reset_active;
+            assign o_release0 = reset_inactive;
+            assign o_release1 = reset_inactive;
+            assign o_release2 = reset_inactive;
+            assign o_release3 = reset_inactive;
+            assign o_release4 = reset_inactive;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    // `reset` without explicit polarity is active-low.
+    for (name, exp) in [
+        ("o_hold0", NET_CONST1),
+        ("o_hold1", NET_CONST0),
+        ("o_hold2", NET_CONST1),
+        ("o_hold3", NET_CONST0),
+        ("o_hold4", NET_CONST0),
+        ("o_release0", NET_CONST0),
+        ("o_release1", NET_CONST1),
+        ("o_release2", NET_CONST0),
+        ("o_release3", NET_CONST1),
+        ("o_release4", NET_CONST1),
+    ] {
+        let port = gate
+            .module
+            .ports
+            .iter()
+            .find(|p| format!("{}", p.name) == name)
+            .unwrap();
+        assert_eq!(port.nets, [exp], "{name}");
+    }
 }

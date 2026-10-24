@@ -40,6 +40,26 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
     steps:
       - uses: actions/checkout@v6
+      # Windows file I/O is slow on the build outputs. On Windows the build runs
+      # in a copy of the workspace on a trusted Dev Drive (ReFS, no Defender
+      # filter). target/ must be a real directory there: rust-cache archives
+      # nothing behind a junction or mount point. Test scratch files go on the
+      # drive too, outside the workspace so a scratch crate is not taken for a
+      # workspace member.
+      - uses: samypr100/setup-dev-drive@v4
+        if: runner.os == 'Windows'
+        with:
+          drive-size: 40GB
+          trusted-dev-drive: true
+          workspace-copy: true
+      - name: Put temporary files on the Dev Drive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tmp = Join-Path $env:DEV_DRIVE tmp
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          "TMP=$tmp" >> $env:GITHUB_ENV
+          "TEMP=$tmp" >> $env:GITHUB_ENV
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
@@ -53,7 +73,8 @@ jobs:
       # changes every crate's fingerprint. Master saves; PRs restore read-only.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ matrix.target }}-sccache
+          shared-key: ${{ matrix.target }}-sccache-o1
+          workspaces: ${{ env.DEV_DRIVE_WORKSPACE && format('{0} -> target', env.DEV_DRIVE_WORKSPACE) || '. -> target' }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: mozilla-actions/sccache-action@v0.0.10
         with:
@@ -66,8 +87,19 @@ jobs:
           path: ${{ github.workspace }}/.sccache
           key: sccache-${{ matrix.target }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.target }}-
+      # The heavy analyzer and simulator tests are compute bound; opt-level 1
+      # cuts their run time far more than it adds to the build. The simulator's
+      # hot paths sit in dependencies, so those are raised too.
       - name: Run tests
-        run: cargo test --locked --target ${{ matrix.target }}
+        # bash keeps the quoted `"*"` intact on Windows too
+        shell: bash
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE || github.workspace }}
+        run: >-
+          cargo test --locked --target ${{ matrix.target }}
+          --config 'profile.dev.package."*".opt-level=1'
+          --config 'profile.dev.package.veryl-parser.opt-level=1'
+          --config 'profile.dev.package.veryl-analyzer.opt-level=1'
+          --config 'profile.dev.package.veryl-simulator.opt-level=1'
       - name: sccache stats
         if: always()
         run: sccache --show-stats
@@ -269,3 +301,17 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run highlightgen
         run: cargo run --bin highlightgen -- check
+
+  highlightjs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: support/highlightjs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Build and test highlightjs package
+        run: npm test

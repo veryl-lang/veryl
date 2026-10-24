@@ -46,7 +46,7 @@ module veryl_testcase_Module12_2 (
     logic          a  ;
     logic          aa ;
     logic          aaa;
-    logic          b  ; always_comb b   = 1;
+    logic [1-1:0]  b  ; always_comb b   = 1;
     logic [10-1:0] c  ; always_comb c   = 1;
 
     // always_ff declaration with default polarity

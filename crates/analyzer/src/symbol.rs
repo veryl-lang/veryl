@@ -913,13 +913,7 @@ impl Symbol {
             SymbolKind::GenericInstance(x) => symbol_table::get(x.base)
                 .map(|x| x.is_variable_type())
                 .unwrap_or(false),
-            // `$tb::file` and `$tb::random` are testbench resources declared as `var`.
-            SymbolKind::TbComponent(x) => {
-                matches!(
-                    x.kind,
-                    TbComponentKind::File | TbComponentKind::Random | TbComponentKind::External(_)
-                )
-            }
+            SymbolKind::TbComponent(x) => x.kind.is_variable(),
             _ => false,
         }
     }
@@ -949,6 +943,8 @@ impl Symbol {
         matches!(
             type_kind,
             TypeKind::Type
+                | TypeKind::Bit
+                | TypeKind::Logic
                 | TypeKind::U8
                 | TypeKind::U16
                 | TypeKind::U32
@@ -1553,6 +1549,14 @@ impl Type {
 
     pub fn is_inferred(&self) -> bool {
         matches!(self.kind, TypeKind::Inferred)
+    }
+
+    /// A `logic`/`bit` declared with no width and no array: a scalar in the
+    /// SystemVerilog sense, which has no dimension to select.
+    pub fn is_scalar(&self) -> bool {
+        matches!(self.kind, TypeKind::Bit | TypeKind::Logic)
+            && self.width.is_empty()
+            && self.array.is_empty()
     }
 
     pub fn can_be_default_clock(&self) -> bool {
@@ -2983,9 +2987,30 @@ pub enum TbComponentKind {
     /// element type is a generic argument (see `TbComponentProperty`), so it
     /// is resolved through the normal generic pipeline.
     Random,
+    /// Queue declared as `var q: $tb::queue::<T, N>;`. `T` is the element
+    /// type and `N` the capacity (`0` for unbounded).
+    Queue,
     /// User-defined verification component declared in `[[components]]` of
     /// Veryl.toml; the payload is the component name.
     External(StrId),
+}
+
+impl TbComponentKind {
+    /// Whether the component can be declared with `var`.
+    pub fn is_variable(&self) -> bool {
+        matches!(
+            self,
+            TbComponentKind::File
+                | TbComponentKind::Random
+                | TbComponentKind::Queue
+                | TbComponentKind::External(_)
+        )
+    }
+
+    /// Whether the component takes generic arguments.
+    pub fn is_generic(&self) -> bool {
+        matches!(self, TbComponentKind::Random | TbComponentKind::Queue)
+    }
 }
 
 impl std::fmt::Display for TbComponentKind {
@@ -2995,6 +3020,7 @@ impl std::fmt::Display for TbComponentKind {
             TbComponentKind::ResetGen => write!(f, "reset_gen"),
             TbComponentKind::File => write!(f, "file"),
             TbComponentKind::Random => write!(f, "random"),
+            TbComponentKind::Queue => write!(f, "queue"),
             TbComponentKind::External(name) => write!(f, "{name}"),
         }
     }
@@ -3004,8 +3030,8 @@ impl std::fmt::Display for TbComponentKind {
 pub struct TbComponentProperty {
     pub kind: TbComponentKind,
     /// Generic type parameters, held like other symbols' `generic_parameters`.
-    /// Only `$tb::random::<T>` carries one (the synthesized `T`); the other
-    /// builtins and external components leave this empty.
+    /// Only `$tb::random::<T>` and `$tb::queue::<T, N>` carry them (synthesized
+    /// parameters); the other builtins and external components leave this empty.
     pub generic_parameters: Vec<SymbolId>,
 }
 

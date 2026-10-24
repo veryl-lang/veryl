@@ -11,4 +11,4 @@ unknown_embed_lang (https://doc.veryl-lang.org/book/07_appendix/02_semantic_erro
    ·                  ╰── Error location
  2 │ }}}
    ╰────
-  help:
+  help: valid embed languages are: sv|py

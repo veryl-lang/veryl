@@ -254,7 +254,7 @@ pub(crate) fn lookup_wasm_component(
     // Capability enforcement from the declared manifest. No manifest means
     // no declaration to hold the component to: file stays allowed. A
     // manifest that exists but cannot be parsed must not fail open.
-    let manifest = match crate::component::loader::library_manifest(path) {
+    let manifest = match crate::component::loader::library_manifest(path)? {
         Some(json) => crate::component::loader::parse_library_manifest_json(&json, type_name)
             .map_err(load_err)?,
         None => None,

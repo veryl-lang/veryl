@@ -1,0 +1,15 @@
+[project]
+name    = "veryl_sample_b"
+version = "0.1.0"
+
+[build]
+clock_type    = "posedge"
+reset_type    = "async_low"
+filelist_type = "absolute"
+target        = {type = "source"}
+
+[format]
+indent_width = 4
+
+[dependencies]
+sample_c = {path = "../sample_c"}

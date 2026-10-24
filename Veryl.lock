@@ -45,8 +45,17 @@ revision = "52fc06237c5b70d42d67ea0910874ba111a6ef98"
 [projects.properties]
 
 [[projects]]
+name = "veryl_sample4"
+source = "testcases/sample_projects/sample_a"
+dependencies = []
+
+[projects.properties]
+QUX_0 = 16
+QUX_1 = false
+
+[[projects]]
 name = "veryl_sample5"
-source = "testcases/sample"
+source = "testcases/sample_projects/sample_a"
 dependencies = []
 
 [projects.properties]
@@ -54,10 +63,18 @@ QUX_0 = 32
 QUX_1 = true
 
 [[projects]]
-name = "veryl_sample4"
-source = "testcases/sample"
+name = "veryl_sample_b"
+source = "testcases/sample_projects/sample_b"
+
+[projects.properties]
+
+[[projects.dependencies]]
+name = "sample_c"
+source = "testcases/sample_projects/sample_c"
+
+[[projects]]
+name = "sample_c"
+source = "testcases/sample_projects/sample_c"
 dependencies = []
 
 [projects.properties]
-QUX_0 = 16
-QUX_1 = false

@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+statement_after_if_reset (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#statement_after_if_reset)
+
+  ⚠ statement after if_reset may not be synthesizable with asynchronous reset
+    ╭─[../../testcases/error/statement_after_if_reset.veryl:15:9]
+ 14 │             }
+ 15 │ ╭─▶         if b {
+ 16 │ │               y = 1;
+ 17 │ ├─▶         }
+    · ╰──── Outside the if_reset/else chain
+ 18 │         }
+    ╰────
+  help: move the statement into an else branch of if_reset, or into a separate always_ff without reset

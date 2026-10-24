@@ -2643,6 +2643,198 @@ fn tb_random_native() {
     let _ = std::fs::remove_file(&out_path);
 }
 
+fn run_queue_tb(code: &str, top: &str, config: &Config) -> TestResult {
+    let ir = analyze_top(code, config, top).expect("analyze");
+    let module_name = ir.name.to_string();
+    run_native_testbench(ir, None, module_name).unwrap()
+}
+
+#[test]
+fn tb_queue_native() {
+    let code = r#"
+    package pkg {
+        const DEPTH: u32 = 2;
+        struct pair_t {
+            a: bit<4>,
+            b: bit<8>,
+        }
+    }
+    #[test(test_queue)]
+    module test_queue {
+        gen wide_t: type = bit<100>;
+        var q: $tb::queue::<u32>;
+        var b: $tb::queue::<u8, pkg::DEPTH>;
+        var s: $tb::queue::<i8>;
+        var w: $tb::queue::<wide_t>;
+        var p: $tb::queue::<pkg::pair_t>;
+        var x: u32;
+        var n: i8;
+        var z: wide_t;
+        var v: pkg::pair_t;
+        var a: u8;
+        initial {
+            // push/pop at both ends and peek
+            $assert(q.is_empty() == 1);
+            q.push_back(1);
+            q.push_back(2);
+            q.push_front(0);
+            $assert(q.size() == 3);
+            $assert(q.is_full() == 0);
+            $assert(q.front() == 0);
+            $assert(q.back() == 2);
+            x = q.pop_front();
+            $assert(x == 0);
+            $assert(q.pop_back() == 2);
+            q.drop_back();
+            $assert(q.is_empty() == 1);
+
+            // drop and clear
+            q.push_back(3);
+            q.push_back(4);
+            q.drop_front();
+            $assert(q.front() == 4);
+            q.clear();
+            $assert(q.size() == 0);
+
+            // reading an empty queue returns 0 for a 2-state element
+            q.push_back(5);
+            x = q.pop_front();
+            x = q.pop_front();
+            $assert(x == 0);
+            x = 6;
+            x = q.front();
+            $assert(x == 0);
+            q.drop_front();
+            q.drop_back();
+            $assert(q.size() == 0);
+
+            // a bounded queue drops the pushed value when full
+            b.push_back(1);
+            b.push_back(2);
+            $assert(b.is_full() == 1);
+            b.push_back(3);
+            b.push_front(4);
+            $assert(b.size() == 2);
+            $assert(b.pop_front() == 1);
+            $assert(b.pop_front() == 2);
+            $assert(b.is_full() == 0);
+
+            // the pushed value is evaluated in the element width
+            a = 200;
+            b.push_back(a + 100);
+            $assert(b.pop_front() == 44);
+
+            // signed, wide and struct elements
+            s.push_back(-3);
+            n = s.pop_front();
+            $assert(n == -3);
+            w.push_back(100'h8_0000_0000_0000_0000_0000_0001);
+            z = w.pop_front();
+            $assert(z == 100'h8_0000_0000_0000_0000_0000_0001);
+            v.a = 4'ha;
+            v.b = 8'hbc;
+            p.push_back(v);
+            v = 0;
+            v = p.pop_front();
+            $assert(v.a == 4'ha && v.b == 8'hbc);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let result = run_queue_tb(code, "test_queue", &config);
+        assert_eq!(
+            result,
+            TestResult::Pass,
+            "jit={}, 4state={}",
+            config.use_jit,
+            config.use_4state
+        );
+    }
+}
+
+#[test]
+fn tb_queue_shared_by_initial_blocks() {
+    // A queue is shared by the `initial` blocks of a test module.
+    let code = r#"
+    #[test(test_queue_shared)]
+    module test_queue_shared {
+        inst clk: $tb::clock_gen;
+        var q: $tb::queue::<u32>;
+
+        initial {
+            for i in 0..4 {
+                q.push_back(i);
+                clk.next();
+            }
+        }
+
+        initial {
+            clk.next(8);
+            $assert(q.size() == 4);
+            for i in 0..4 {
+                $assert(q.pop_front() == i);
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let result = run_queue_tb(code, "test_queue_shared", &config);
+        assert_eq!(
+            result,
+            TestResult::Pass,
+            "jit={}, 4state={}",
+            config.use_jit,
+            config.use_4state
+        );
+    }
+}
+
+#[test]
+fn tb_queue_four_state() {
+    // A 4-state element keeps X/Z, and reading an empty queue returns X.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_tb_queue_four_state.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    #[test(test_queue_4state)]
+    module test_queue_4state {{
+        gen l4_t: type = logic<4>;
+        var q: $tb::queue::<l4_t>;
+        var f: $tb::file;
+        var y: logic<4>;
+        initial {{
+            f.open("{0}");
+            y = q.pop_front();
+            f.write("%b\n", y);
+            q.push_back(4'b10xz);
+            y = q.front();
+            f.write("%b\n", y);
+            y = q.pop_front() | 4'b0000;
+            f.write("%b\n", y);
+            f.close();
+            $finish();
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all().into_iter().filter(|c| c.use_4state) {
+        let _ = std::fs::remove_file(&out_path);
+        let result = run_queue_tb(&code, "test_queue_4state", &config);
+        assert_eq!(result, TestResult::Pass);
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "xxxx\n10xz\n10xx\n", "jit={}", config.use_jit);
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
 #[test]
 fn tb_file_write_without_open_is_dropped() {
     // write/flush/close on a handle that was never opened are silent no-ops
@@ -3100,11 +3292,11 @@ fn tb_dirty_filter_skips_private_writes() {
     }
 }
 
-/// How many testbench statements the settle filter proves private, or `None`
+/// How many testbench statements the tb settle filter proves private, or `None`
 /// when the design does not analyze under `config`.
 #[track_caller]
 fn tb_clean_count(code: &str, config: &Config, top: &str) -> Option<usize> {
-    let ir = analyze_top(code, config, top).ok()?;
+    let ir = analyze_top(code, config, top).expect("analyze");
     let sim = Simulator::new(ir, None);
     let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
@@ -3266,6 +3458,292 @@ fn tb_chunk_does_not_outrun_the_settle() {
             run_testbench(&mut sim, &tb),
             TestResult::Pass,
             "config={config:?}"
+        );
+    }
+}
+
+/// Each `initial` block of a test module keeps its own statement list and
+/// runs as its own process; at one instant they run in declaration order.
+#[test]
+fn initial_blocks_are_separate_processes() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_two_initials)]
+    module test_two_initials {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        var seen : logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            seen = 8'd7;
+            rst.assert();
+        }
+
+        initial {
+            $assert(seen == 8'd7, "the first block runs first");
+            clk.next(8);
+            $assert(o_cnt == 8'd5, "eight shared edges, three of them in reset");
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_two_initials")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        assert!(ir.event_statements.contains_key(&Event::Initial));
+        assert!(ir.event_statements.contains_key(&Event::InitialBlock(1)));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// A block that ends at once (a nested `$readmemh` initial, say) leaves the
+/// other process to take every later edge on its own, reset window included.
+#[test]
+fn an_early_ending_process_leaves_the_edges_to_the_survivor() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_early_end)]
+    module test_early_end {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        var seen : logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            seen = 8'd7;
+        }
+
+        initial {
+            rst.assert();
+            clk.next(8);
+            $assert(seen == 8'd7, "the first block ran");
+            $assert(o_cnt == 8'd8, "eleven edges, three of them in reset: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_early_end")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// Two generators due at the same instant fire in one step: each domain
+/// reads the other's pre-edge value, so a swap swaps.
+#[test]
+fn simultaneous_clock_edges_fire_as_one_step() {
+    let code = r#"
+    module Swap (
+        clk_a: input 'ca clock,
+        clk_b: input 'cb clock,
+        rst: input '_ reset_sync_high,
+        oa: output 'ca logic,
+        ob: output 'cb logic,
+    ) {
+        var a_r: 'ca logic;
+        var b_r: 'cb logic;
+        unsafe (cdc) {
+            always_ff (clk_a, rst) {
+                if_reset {
+                    a_r = 1;
+                } else {
+                    a_r = b_r;
+                }
+            }
+        }
+        unsafe (cdc) {
+            always_ff (clk_b, rst) {
+                if_reset {
+                    b_r = 0;
+                } else {
+                    b_r = a_r;
+                }
+            }
+        }
+        assign oa = a_r;
+        assign ob = b_r;
+    }
+
+    #[test(test_swap)]
+    module test_swap {
+        inst ga: $tb::clock_gen;
+        inst gb: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk: ga);
+        var oa: 'ca logic;
+        var ob: 'cb logic;
+        inst dut: Swap (clk_a: ga, clk_b: gb, rst, oa, ob);
+
+        initial {
+            rst.assert(2);
+            ga.next(1);
+        }
+
+        initial {
+            gb.next(3);
+            $assert(oa == 0, "a took b's pre-edge value: oa=%d", oa);
+            $assert(ob == 1, "b took a's pre-edge value: ob=%d", ob);
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_swap") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// Two processes waiting on one clock count the same edges, and the ones
+/// released at an instant run in declaration order.
+#[test]
+fn processes_share_a_clock_and_run_in_order() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_shared_clock)]
+    module test_shared_clock {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        var seen : logic;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            seen = 0;
+            rst.assert();
+            clk.next(5);
+            seen = 1;
+        }
+
+        initial {
+            clk.next(8);
+            $assert(seen == 1, "the first process ran first at this instant");
+            $assert(o_cnt == 8'd5, "eight shared edges, three of them in reset: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_shared_clock") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// A process resuming later than another clock's edges must see those edges
+/// taken first: candidates are ordered by time, not by kind.
+#[test]
+fn slow_clock_process_resumes_after_the_fast_clock_edges() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_slow_fast)]
+    module test_slow_fast {
+        inst ga: $tb::clock_gen #(period: 10);
+        inst gb: $tb::clock_gen #(period: 2);
+        inst rst: $tb::reset_gen (clk: gb);
+        var cnt: logic<8>;
+        inst dut: Counter (i_clk: gb, i_rst: rst, o_cnt: cnt);
+
+        initial {
+            rst.assert(1);
+            gb.next(4);
+        }
+
+        initial {
+            ga.next(1);
+            $assert(cnt == 8'd4, "four fast edges before the slow process resumed: %d", cnt);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_slow_fast") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
         );
     }
 }

@@ -132,6 +132,6 @@ impl VerylGrammarTrait for CheckEmbedInclude {
     }
 }
 
-const EMBED_WAY: [&str; 2] = ["inline", "cocotb"];
-const EMBED_LANG: [&str; 2] = ["sv", "py"];
-const INCLUDE_WAY: [&str; 2] = ["inline", "cocotb"];
+pub const EMBED_WAY: [&str; 2] = ["inline", "cocotb"];
+pub const EMBED_LANG: [&str; 2] = ["sv", "py"];
+pub const INCLUDE_WAY: [&str; 2] = ["inline", "cocotb"];

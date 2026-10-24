@@ -1,0 +1,3 @@
+package e_03_pkg {
+    const W: u32 = 8;
+}

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+referring_inactive_definition (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#referring_inactive_definition)
+
+  × "a" is referred where its definition is inactive.
+   ╭─[../../testcases/error/referring_inactive_definition.veryl:4:21]
+ 3 │     let a : logic = 1;
+ 4 │     let _b: logic = a;
+   ·                     ┬
+   ·                     ╰── Error location
+ 5 │ }
+   ╰────
+  help: guard the reference as the definition is guarded

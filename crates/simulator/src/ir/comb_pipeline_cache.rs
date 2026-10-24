@@ -16,18 +16,28 @@
 //! and the DCE dead-offset set, so the caller reproduces the exact miss-path
 //! result — including the in-place dead-var drop on the event statements.
 //!
-//! Single-flight (like `backend::inst`'s `GLOBAL_STMT_CACHE`): the first test to
+//! Single-flight (like `backend::inst`'s `DutReuseCache`): the first test to
 //! reach a key computes while parallel peers block on the condvar, so a fleet of
 //! tests launched together share one compute instead of all missing at once.
 //!
-//! Gated to `config.dut_reuse` (CLI only). Content-keyed, so — unlike a pointer
-//! key — it is immune to `air::Ir` address reuse across a process.
+//! Gated to `config.dut_reuse` and owned by a `BuildSession`. Content keys
+//! identify equivalent work within that session; the session fixes the IR and
+//! configuration, including the backend selection the content does not encode.
 
 use super::statement::{ProtoStatement, ProtoStatements};
 use super::variable::VarOffset;
 use crate::HashMap;
-use crate::backend::CompiledWhole;
-use std::sync::{Arc, Condvar, LazyLock, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+
+/// Why a comb list needs more than one settle pass.
+pub struct MultiPass {
+    /// Whether some granularity of the dependency analysis ordered it; if
+    /// one did, the extra passes are the simulator's own error.
+    pub linearized: bool,
+    /// Statements on a backward edge, both the reader and the later writer it
+    /// reads, in source order; truncated to the first few.
+    pub participants: Vec<veryl_parser::token_range::TokenRange>,
+}
 
 /// Memoised result of the whole comb pipeline for one comb-list key.
 pub struct CombPipeline {
@@ -36,6 +46,8 @@ pub struct CombPipeline {
     /// per test — the dominant per-test cost the cache would otherwise add.
     pub pre_jit_stmts: Arc<Vec<ProtoStatement>>,
     pub required_comb_passes: usize,
+    /// Set when `required_comb_passes` is above one.
+    pub multi_pass: Option<MultiPass>,
     /// Compiled comb (`try_jit_no_cache` output). Its chunk artifacts bake in
     /// absolute offsets, valid verbatim because a key match implies an
     /// identical comb layout (delta = 0). Mostly `Compiled(Arc)` blocks, so a
@@ -57,16 +69,28 @@ pub struct CombPipeline {
     pub fused_offsets: Vec<isize>,
     /// Non-trivial SCC count (debug/test-only diagnostic; 0 in release).
     pub nontrivial_comb_scc: usize,
+    /// The comb half of the AOT-C localize info: also a pure function of
+    /// `pre_jit_stmts` (see `dead_var_dce::localize_comb_ranges`).
+    pub localize_comb_ranges: Vec<(isize, usize, isize)>,
+    /// Every comb offset `pre_jit_stmts` touches, kept so a hit does not
+    /// re-walk the shared DUT's comb list per test.
+    pub comb_touched_offsets: Arc<crate::HashSet<VarOffset>>,
+    /// What `field_unfuse` allocated and recorded in `Context::comb_reloc`.
+    /// The pass runs on the miss path only (the key pins its decisions by
+    /// their inputs), so a hit reserves the same span, which the cached
+    /// statements address, and restores the same ownership records.
+    pub unfuse_comb_bytes: usize,
+    pub unfuse_comb_reloc: Vec<(isize, isize, usize)>,
     /// Comb bytes the version-split pass reserved for its rename temps.
     /// The pipeline does not run on a hit, so the caller must reserve them
     /// itself — the cached statements address those offsets, and a key
     /// match implies the same layout, so the same reservation reproduces it
     /// exactly (the instance-reuse path does the same with `comb_size`).
     pub vsplit_temp_bytes: usize,
-    /// Cone-gate segments: block ranges refer to
-    /// `comb_statements` and compare ranges are FINAL (post-relayout) comb
-    /// offsets, so a cache hit reuses them verbatim.  Empty when ungated.
-    pub cone_segments: Arc<Vec<crate::ir::opt::cone_gate::ConeSegment>>,
+    /// The instance tree and storage owners the cone order was built over,
+    /// in the FINAL storage space; the dataflow plan and the event gates
+    /// attribute statements to subtrees with it.
+    pub cone_inputs: Option<Arc<crate::ir::opt::owners::OwnerInputs>>,
 }
 
 enum Slot {
@@ -74,9 +98,11 @@ enum Slot {
     Done(Arc<CombPipeline>),
 }
 
-static CACHE: LazyLock<Mutex<HashMap<u128, Slot>>> =
-    LazyLock::new(|| Mutex::new(HashMap::default()));
-static CV: LazyLock<Condvar> = LazyLock::new(Condvar::new);
+#[derive(Default)]
+pub(crate) struct CombPipelineCache {
+    entries: Mutex<HashMap<u128, Slot>>,
+    ready: Condvar,
+}
 
 /// Outcome of consulting the cache for one comb-list key.
 pub enum Outcome {
@@ -93,6 +119,7 @@ pub enum Outcome {
 /// Single-flight claim on a key's slot. `store` publishes the result; `Drop`
 /// releases an unfulfilled claim.
 pub struct Claim {
+    cache: Arc<CombPipelineCache>,
     key: u128,
     fulfilled: bool,
 }
@@ -102,10 +129,10 @@ impl Claim {
     /// thread uses the same allocation it just cached, no extra clone).
     pub fn store(mut self, result: CombPipeline) -> Arc<CombPipeline> {
         let entry = Arc::new(result);
-        let mut cache = CACHE.lock().unwrap();
+        let mut cache = self.cache.entries.lock().unwrap();
         cache.insert(self.key, Slot::Done(Arc::clone(&entry)));
         self.fulfilled = true;
-        CV.notify_all();
+        self.cache.ready.notify_all();
         entry
     }
 }
@@ -113,102 +140,40 @@ impl Claim {
 impl Drop for Claim {
     fn drop(&mut self) {
         if !self.fulfilled {
-            let mut cache = CACHE.lock().unwrap();
+            let mut cache = self.cache.entries.lock().unwrap();
             cache.remove(&self.key);
-            CV.notify_all();
+            self.cache.ready.notify_all();
         }
     }
 }
 
-// ── Whole-comb backend (AOT-C `.so`) cache ──────────────────────────────────
-//
-// `CombPipeline` memoises the sort/DCE/JIT rerun but NOT the backend compile
-// (`Backend::compile_whole_comb`), which re-emits + re-fingerprints the whole
-// shared-DUT comb per test — the dominant per-test build cost at suite scale.
-// Keyed by the same structural `u128`: a match implies a byte-identical comb
-// list (offsets included), so the emitted `.so` is reusable verbatim. A decline
-// (`None`) is cached too, so a declining DUT is emitted+probed once, not per test.
-type WholeComb = Option<Arc<dyn CompiledWhole>>;
-
-enum WholeSlot {
-    Computing,
-    Done(WholeComb),
-}
-
-static WHOLE_CACHE: LazyLock<Mutex<HashMap<u128, WholeSlot>>> =
-    LazyLock::new(|| Mutex::new(HashMap::default()));
-static WHOLE_CV: LazyLock<Condvar> = LazyLock::new(Condvar::new);
-
-/// Single-flight memoisation of the whole-comb compile: `compute` runs only on
-/// the first miss for `key`, and parallel peers block on the condvar until it
-/// publishes. A claim is released if `compute` unwinds, so a panic doesn't hang
-/// blocked peers.
-pub fn whole_comb_get_or_compute(
-    key: u128,
-    dut_reuse: bool,
-    compute: impl FnOnce() -> WholeComb,
-) -> WholeComb {
-    if !dut_reuse {
-        return compute();
-    }
-    let mut cache = WHOLE_CACHE.lock().unwrap();
-    loop {
-        match cache.get(&key) {
-            Some(WholeSlot::Done(v)) => return v.clone(),
-            Some(WholeSlot::Computing) => cache = WHOLE_CV.wait(cache).unwrap(),
-            None => {
-                cache.insert(key, WholeSlot::Computing);
-                break;
-            }
+impl CombPipelineCache {
+    /// Consult the cache. On a hit, clone out the memoised pipeline. On a miss,
+    /// claim the slot single-flight: peers requesting the same key block until this
+    /// thread publishes via the returned guard.
+    pub(crate) fn try_get_or_claim(self: &Arc<Self>, key: u128, dut_reuse: bool) -> Outcome {
+        if !dut_reuse {
+            return Outcome::Disabled;
         }
-    }
-    drop(cache);
-
-    // Release the claim on unwind so blocked peers retry instead of hanging.
-    struct Guard(u128, bool);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            if !self.1 {
-                let mut cache = WHOLE_CACHE.lock().unwrap();
-                cache.remove(&self.0);
-                WHOLE_CV.notify_all();
-            }
-        }
-    }
-    let mut guard = Guard(key, false);
-    let result = compute();
-    guard.1 = true;
-
-    let mut cache = WHOLE_CACHE.lock().unwrap();
-    cache.insert(key, WholeSlot::Done(result.clone()));
-    WHOLE_CV.notify_all();
-    result
-}
-
-/// Consult the cache. On a hit, clone out the memoised pipeline. On a miss,
-/// claim the slot single-flight: peers requesting the same key block until this
-/// thread publishes via the returned guard.
-pub fn try_get_or_claim(key: u128, dut_reuse: bool) -> Outcome {
-    if !dut_reuse {
-        return Outcome::Disabled;
-    }
-    let mut cache = CACHE.lock().unwrap();
-    loop {
-        match cache.get(&key) {
-            Some(Slot::Done(entry)) => {
-                let entry = Arc::clone(entry);
-                drop(cache);
-                return Outcome::Hit(entry);
-            }
-            Some(Slot::Computing) => {
-                cache = CV.wait(cache).unwrap();
-            }
-            None => {
-                cache.insert(key, Slot::Computing);
-                return Outcome::Compute(Claim {
-                    key,
-                    fulfilled: false,
-                });
+        let mut cache = self.entries.lock().unwrap();
+        loop {
+            match cache.get(&key) {
+                Some(Slot::Done(entry)) => {
+                    let entry = Arc::clone(entry);
+                    drop(cache);
+                    return Outcome::Hit(entry);
+                }
+                Some(Slot::Computing) => {
+                    cache = self.ready.wait(cache).unwrap();
+                }
+                None => {
+                    cache.insert(key, Slot::Computing);
+                    return Outcome::Compute(Claim {
+                        cache: Arc::clone(self),
+                        key,
+                        fulfilled: false,
+                    });
+                }
             }
         }
     }

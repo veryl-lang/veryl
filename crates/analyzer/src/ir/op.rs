@@ -162,17 +162,18 @@ impl Op {
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
             },
-            Op::Eq | Op::EqWildcard | Op::Ne | Op::NeWildcard | Op::LogicAnd | Op::LogicOr => {
-                ExpressionContext {
-                    width: 1,
-                    signed: false,
-                    is_const: x.is_const & y.is_const,
-                    is_global: x.is_global & y.is_global,
-                }
-            }
-            Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => ExpressionContext {
+            Op::Eq
+            | Op::EqWildcard
+            | Op::Ne
+            | Op::NeWildcard
+            | Op::LogicAnd
+            | Op::LogicOr
+            | Op::Greater
+            | Op::GreaterEq
+            | Op::Less
+            | Op::LessEq => ExpressionContext {
                 width: 1,
-                signed: x.signed & y.signed,
+                signed: false,
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
             },
@@ -205,9 +206,10 @@ impl Op {
         Type::new(TypeKind::Unknown)
     }
 
-    fn invalid_logical_operand(&self, context: &mut Context, x: &Comptime) -> Type {
+    /// Only a warning: the operand still has a truth value, so the result
+    /// keeps its type.
+    fn invalid_logical_operand(&self, context: &mut Context, x: &Comptime) {
         context.insert_error(AnalyzerError::invalid_logical_operand(true, &x.token));
-        Type::new(TypeKind::Unknown)
     }
 
     pub fn eval_type_unary(&self, context: &mut Context, x: &Comptime, dst: &mut Comptime) {
@@ -229,8 +231,7 @@ impl Op {
 
         // logical operand should be 1-bit
         if (self == &Op::LogicNot) && !x.r#type.is_binary() {
-            dst.r#type = self.invalid_logical_operand(context, x);
-            return;
+            self.invalid_logical_operand(context, x);
         }
 
         match self {
@@ -244,10 +245,7 @@ impl Op {
                 dst.r#type.signed = false;
                 dst.r#type.set_concrete_width(Shape::new(vec![Some(1)]));
             }
-            Op::BitNot => {
-                dst.r#type.signed = false;
-            }
-            Op::Add | Op::Sub => (),
+            Op::Add | Op::Sub | Op::BitNot => (),
             _ => unreachable!(),
         }
 
@@ -295,12 +293,10 @@ impl Op {
         // logical operand should be 1-bit
         if matches!(self, Op::LogicAnd | Op::LogicOr) {
             if !x.r#type.is_binary() {
-                dst.r#type = self.invalid_logical_operand(context, x);
-                return;
+                self.invalid_logical_operand(context, x);
             }
             if !y.r#type.is_binary() {
-                dst.r#type = self.invalid_logical_operand(context, y);
-                return;
+                self.invalid_logical_operand(context, y);
             }
         }
 
@@ -326,6 +322,7 @@ impl Op {
 
         match self {
             Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                dst.r#type.signed = x.r#type.signed && y.r#type.signed;
                 if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
                     dst.r#type.kind = y.r#type.kind.clone();
                 } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
@@ -338,6 +335,11 @@ impl Op {
                 dst.r#type.strip_clock_reset();
             }
             Op::Pow | Op::Div | Op::Rem | Op::Mul | Op::Add | Op::Sub => {
+                // The exponent is self-determined; other arithmetic results
+                // are signed only when both operands are signed.
+                if *self != Op::Pow {
+                    dst.r#type.signed = x.r#type.signed && y.r#type.signed;
+                }
                 if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
                     dst.r#type.kind = y.r#type.kind.clone();
                 } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
@@ -365,6 +367,7 @@ impl Op {
             | Op::NeWildcard
             | Op::LogicAnd
             | Op::LogicOr => {
+                dst.r#type.signed = false;
                 // Inheriting an Enum/Struct kind here would make
                 // `total_width()` report the operand's width instead of 1.
                 dst.r#type.kind = if x.r#type.is_2state() && y.r#type.is_2state() {
@@ -447,6 +450,9 @@ impl Op {
     ) {
         dst.r#type = x.r#type.clone();
 
+        // The result takes its signedness from the branches, not the condition.
+        dst.r#type.signed = y.r#type.signed && z.r#type.signed;
+
         // array / type can't be operated
         if x.r#type.is_array() | x.r#type.is_type() {
             dst.r#type = self.invalid_operand(context, x);
@@ -463,8 +469,7 @@ impl Op {
 
         // condition should be 1-bit
         if !x.r#type.is_binary() {
-            dst.r#type = self.invalid_logical_operand(context, x);
-            return;
+            self.invalid_logical_operand(context, x);
         }
 
         check_clock_domain(context, x, y, &dst.token.beg);
@@ -500,7 +505,7 @@ impl Op {
         x: &mut [(Expression, Option<Expression>)],
         dst: &mut Comptime,
     ) {
-        let mut width = Some(0);
+        let mut width: Option<usize> = Some(0);
         let mut is_const = true;
         let mut is_global = true;
         let mut kind = TypeKind::Bit;
@@ -539,7 +544,8 @@ impl Op {
                     if let Some(total_width) = expr.r#type.total_width()
                         && let Some(width) = &mut width
                     {
-                        *width += total_width * repeat.to_usize().unwrap_or(0);
+                        let repeat = repeat.to_usize_saturating().unwrap_or(0);
+                        *width = (*width).saturating_add(total_width.saturating_mul(repeat));
                     } else {
                         width = None;
                     }
@@ -1384,7 +1390,9 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = (x.payload & !x.mask_xz != 0) && (y.payload & !y.mask_xz != 0);
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
+                        let is_zero = (x.payload == 0 && x.mask_xz == 0)
+                            || (y.payload == 0 && y.mask_xz == 0);
+                        let is_x = !is_zero && (x.mask_xz != 0 || y.mask_xz != 0);
 
                         (is_one, is_x)
                     }
@@ -1393,7 +1401,9 @@ impl Op {
                         let y_mask = mask_cache.get(y.width as usize);
                         let is_one = (x.payload() & (x.mask_xz() ^ x_mask) != b0())
                             && (y.payload() & (y.mask_xz() ^ y_mask) != b0());
-                        let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
+                        let is_zero = (x.payload() == &b0() && x.mask_xz() == &b0())
+                            || (y.payload() == &b0() && y.mask_xz() == &b0());
+                        let is_x = !is_zero && (x.mask_xz() != &b0() || y.mask_xz() != &b0());
 
                         (is_one, is_x)
                     }
@@ -1434,7 +1444,7 @@ impl Op {
             }
             Op::LogicShiftR => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1466,7 +1476,7 @@ impl Op {
             }
             Op::LogicShiftL => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1506,7 +1516,7 @@ impl Op {
             }
             Op::ArithShiftR => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1571,7 +1581,7 @@ impl Op {
             }
             Op::ArithShiftL => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1657,7 +1667,7 @@ impl Op {
                 // Like the shift arms, accept a >64-bit exponent value
                 // (Value::to_usize is None for every BigUint): non-x/z wide
                 // exponents convert, saturating at usize::MAX.
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {

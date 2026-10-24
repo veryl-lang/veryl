@@ -1,0 +1,12 @@
+module mismatch_case_label (
+    i_a: input  i8      ,
+    o_y: output logic<8>,
+) {
+    always_comb {
+        case i_a {
+            -1     : o_y = 1;
+            8'h80  : o_y = 2;
+            default: o_y = 0;
+        }
+    }
+}

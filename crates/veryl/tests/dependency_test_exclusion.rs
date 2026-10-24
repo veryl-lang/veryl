@@ -102,7 +102,7 @@ fn dependency_tests_are_excluded() {
 
     let options = AnalyzeOptions {
         defines: &[],
-        emit_mode: false,
+        output_intent: veryl::incremental::OutputIntent::Never,
         incremental: false,
         fail_fast: true,
     };

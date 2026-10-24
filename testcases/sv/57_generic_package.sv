@@ -50,12 +50,15 @@ package veryl_testcase___Package57F__Module57F;
 endpackage
 
 package veryl_testcase___Package57G__i32;
+    typedef int T;
     typedef int TYPE;
 endpackage
 package veryl_testcase___Package57G__u32;
+    typedef int unsigned T;
     typedef int unsigned TYPE;
 endpackage
 package veryl_testcase___Package57G__lbool;
+    typedef logic T;
     typedef logic TYPE;
 endpackage
 

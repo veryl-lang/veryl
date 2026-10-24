@@ -1,3 +1,7 @@
+package veryl_testcase_Package21;
+    localparam logic [32-1:0] M = 2;
+endpackage
+
 module veryl_testcase_Module21;
     logic         a;
     logic [2-1:0] b;
@@ -27,5 +31,7 @@ module veryl_testcase_Module21;
     for (genvar i = 1; i < 4; i++) begin :g
         logic [2-1:0] _e; always_comb _e = i'(c);
     end
+
+    logic [2-1:0] _f; always_comb _f = veryl_testcase_Package21::M'(c);
 endmodule
 //# sourceMappingURL=../map/21_cast.sv.map

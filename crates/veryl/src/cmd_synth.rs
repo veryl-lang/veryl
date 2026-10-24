@@ -1,3 +1,4 @@
+use crate::incremental::OutputIntent;
 use crate::pipeline::{self, AnalyzeOptions};
 use crate::{Format, OptSynth, check_format_version};
 use log::warn;
@@ -98,7 +99,7 @@ impl CmdSynth {
         // Abort on a fatal error: synthesizing a broken design is meaningless.
         let options = AnalyzeOptions {
             defines: &[],
-            emit_mode: false,
+            output_intent: OutputIntent::Never,
             incremental: false,
             fail_fast: true,
         };

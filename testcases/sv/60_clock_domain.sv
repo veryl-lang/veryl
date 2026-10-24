@@ -31,4 +31,37 @@ module veryl_testcase_Module60C (
     always_comb o_dat = i_dat;
     always_comb o_thr = i_thr;
 endmodule
+
+interface veryl_testcase_Interface60D;
+    logic dat;
+endinterface
+
+module veryl_testcase_Module60D (
+    input  var logic i_clk_hclk  ,
+    input  var logic i_rst_hclk_n,
+    input  var logic i_dat_hclk  ,
+    output var logic o_dat_hclk  ,
+    input  var logic i_dat_xclk  ,
+    output var logic o_dat_xclk  ,
+    input  var logic i_dat_data  ,
+    output var logic o_dat_data  
+);
+    logic r_dat;
+    logic w_dat; always_comb w_dat = i_dat_xclk;
+
+    veryl_testcase_Interface60D u_if ();
+
+    always_ff @ (posedge i_clk_hclk, negedge i_rst_hclk_n) begin
+        if (!i_rst_hclk_n) begin
+            r_dat <= 0;
+        end else begin
+            r_dat <= i_dat_hclk;
+        end
+    end
+
+    always_comb o_dat_hclk = r_dat;
+    always_comb o_dat_xclk = w_dat;
+    always_comb u_if.dat   = i_dat_data;
+    always_comb o_dat_data = u_if.dat;
+endmodule
 //# sourceMappingURL=../map/60_clock_domain.sv.map

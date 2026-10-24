@@ -3,6 +3,7 @@ mod context;
 pub mod conv_profiler;
 pub mod declaration;
 pub mod expression;
+mod function_return;
 pub mod instance;
 pub mod ir;
 pub mod statement;

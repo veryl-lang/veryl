@@ -386,12 +386,27 @@ fn fits_flat(d: &Doc, outer: &[Frame<'_>], budget: isize) -> bool {
     if budget < 0 {
         return false;
     }
-    let mut work: Vec<(&Doc, bool)> = Vec::with_capacity(outer.len() + 8);
-    for frame in outer.iter() {
-        work.push((frame.doc, false));
-    }
-    work.push((d, true));
-    while let Some((x, in_start)) = work.pop() {
+    // Copying the outer stack or a `Concat`'s items up front costs their
+    // length on every Group, which is quadratic in one large module.
+    let mut outer = outer.iter().rev();
+    let mut work: Vec<(std::slice::Iter<'_, Doc>, bool)> = Vec::with_capacity(16);
+    work.push((std::slice::from_ref(d).iter(), true));
+    loop {
+        let (x, in_start) = match work.last_mut() {
+            Some((items, in_start)) => match items.next() {
+                Some(x) => (x, *in_start),
+                None => {
+                    work.pop();
+                    continue;
+                }
+            },
+            None => match outer.next() {
+                Some(frame) => (frame.doc, false),
+                None => break,
+            },
+        };
+        #[cfg(test)]
+        FITS_PEAK.with(|n| n.set(n.get().max(work.len())));
         if budget < 0 {
             return false;
         }
@@ -401,12 +416,10 @@ fn fits_flat(d: &Doc, outer: &[Frame<'_>], budget: isize) -> bool {
                 budget -= s.chars().count() as isize;
             }
             Doc::Concat(items) => {
-                for item in items.iter().rev() {
-                    work.push((item, in_start));
-                }
+                work.push((items.iter(), in_start));
             }
             Doc::Indent(_, inner) | Doc::Group(inner) | Doc::ForceFlat(inner) => {
-                work.push((inner, in_start));
+                work.push((std::slice::from_ref(&**inner).iter(), in_start));
             }
             Doc::Line(sep) => {
                 if in_start {
@@ -443,6 +456,11 @@ fn fits_flat(d: &Doc, outer: &[Frame<'_>], budget: isize) -> bool {
         }
     }
     budget >= 0
+}
+
+#[cfg(test)]
+thread_local! {
+    static FITS_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Strip trailing whitespace from each line of `s`.
@@ -577,5 +595,26 @@ mod tests {
             text("u32"),
         ])));
         assert_eq!(render(&broken, &opts(6)), "aaaaaaaa   :\n    u32");
+    }
+
+    #[test]
+    fn fits_flat_lookahead_is_bounded_by_width() {
+        // A long continuation and a long item list, as in one large module
+        // body, must not be copied onto the work stack.
+        let item = text("x");
+        let outer: Vec<Frame<'_>> = (0..100_000)
+            .map(|_| Frame {
+                indent: 0,
+                mode: Mode::Break,
+                doc: &item,
+            })
+            .collect();
+        let long = concat((0..100_000).map(|_| text("y")).collect());
+        for d in [group(text("a")), group(long)] {
+            FITS_PEAK.with(|n| n.set(0));
+            assert!(!fits_flat(&d, &outer, 80));
+            let peak = FITS_PEAK.with(|n| n.get());
+            assert!(peak <= 8, "work stack reached {peak}");
+        }
     }
 }

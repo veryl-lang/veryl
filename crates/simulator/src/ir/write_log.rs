@@ -97,6 +97,10 @@ pub struct WriteLogBuffer {
     /// additional narrow/wide entries.  Called once from the AOT-C event
     /// prologue so the per-push code stays unchecked.
     pub reserve: unsafe extern "C" fn(*mut WriteLogBuffer, u32, u32),
+    /// The dataflow dirty words that compiled event stores mark, or null
+    /// when the module settles without dataflow or the whole-settle entry is
+    /// running the settles.
+    pub df_dirty: *mut u64,
     /// Owning storage — keeps `narrow_entries_ptr` valid.
     _narrow_owner: Box<[WriteLogEntry]>,
     /// Owning storage — keeps `wide_entries_ptr` valid.
@@ -140,6 +144,7 @@ pub const WRITE_LOG_OFFSET_GROW_PUSH_WIDE: i32 =
     std::mem::offset_of!(WriteLogBuffer, grow_push_wide) as i32;
 #[allow(dead_code)]
 pub const WRITE_LOG_OFFSET_RESERVE: i32 = std::mem::offset_of!(WriteLogBuffer, reserve) as i32;
+pub const WRITE_LOG_OFFSET_DF_DIRTY: i32 = std::mem::offset_of!(WriteLogBuffer, df_dirty) as i32;
 
 #[allow(dead_code)]
 pub const WRITE_LOG_ENTRY_SIZE: i32 = std::mem::size_of::<WriteLogEntry>() as i32;
@@ -191,6 +196,7 @@ impl WriteLogBuffer {
             grow_push_narrow: write_log_grow_push_narrow,
             grow_push_wide: write_log_grow_push_wide,
             reserve: write_log_reserve,
+            df_dirty: std::ptr::null_mut(),
             _narrow_owner: narrow,
             _wide_owner: wide,
         }
@@ -261,7 +267,12 @@ impl WriteLogBuffer {
     /// Append a wide entry, growing the pool when full.
     ///
     /// Safety: `payload` must be valid for reads of `native_bytes` (≤ 56) bytes.
-    unsafe fn push_wide(&mut self, offset: u32, payload: *const u8, native_bytes: usize) {
+    pub(crate) unsafe fn push_wide(
+        &mut self,
+        offset: u32,
+        payload: *const u8,
+        native_bytes: usize,
+    ) {
         if self.wide_count >= self.wide_capacity {
             self.grow_wide_to(self.wide_capacity as usize + 1);
         }
@@ -283,6 +294,21 @@ impl WriteLogBuffer {
             *self.wide_entries_ptr.add(idx) = entry;
         }
         self.wide_count += 1;
+    }
+
+    /// `push_wide` over a byte range, one entry per payload-sized chunk.
+    pub(crate) unsafe fn push_wide_range(
+        &mut self,
+        offset: u32,
+        payload: *const u8,
+        nbytes: usize,
+    ) {
+        let mut done = 0usize;
+        while done < nbytes {
+            let chunk = (nbytes - done).min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
+            unsafe { self.push_wide(offset + done as u32, payload.add(done), chunk) };
+            done += chunk;
+        }
     }
 
     pub fn narrow_capacity(&self) -> usize {
@@ -337,20 +363,18 @@ impl WriteLogBuffer {
 /// in insertion order so multiple writes to the same offset apply
 /// last-write-wins, matching JIT/interpret semantics.
 ///
-/// One body serves both public entry points (the settle filter alternates
-/// between them at runtime on `comb_dirty`), monomorphized so the plain
-/// commit pays nothing for the compare the watched one splices in — a drift
-/// between two hand-kept copies would be a silent filter-on vs filter-off
-/// divergence.
+/// One body serves both public entry points, monomorphized so the plain
+/// commit pays nothing for the compare the marking one splices in: a drift
+/// between two hand-kept copies would commit differently with a waveform or
+/// the dataflow fallback than without.
 #[inline(always)]
-fn commit_from_log_impl<const WATCHED: bool>(
+fn commit_from_log_impl<const MARKING: bool>(
     ff_values: &mut [u8],
     buffer: &WriteLogBuffer,
-    mut watched: impl FnMut(usize, usize) -> bool,
-) -> bool {
+    mut changed: impl FnMut(usize, usize),
+) {
     let len = ff_values.len();
     let dst = ff_values.as_mut_ptr();
-    let mut hit = false;
 
     // Narrow path: single word store per width class.
     let narrow_limit = buffer.narrow_count as usize;
@@ -365,28 +389,26 @@ fn commit_from_log_impl<const WATCHED: bool>(
             let p = dst.add(offset);
             match nb {
                 8 => {
-                    if WATCHED && !hit && (p as *const u64).read_unaligned() != entry.payload {
-                        hit = watched(offset, nb);
+                    if MARKING && (p as *const u64).read_unaligned() != entry.payload {
+                        changed(offset, nb);
                     }
                     (p as *mut u64).write_unaligned(entry.payload);
                 }
                 4 => {
-                    if WATCHED && !hit && (p as *const u32).read_unaligned() != entry.payload as u32
-                    {
-                        hit = watched(offset, nb);
+                    if MARKING && (p as *const u32).read_unaligned() != entry.payload as u32 {
+                        changed(offset, nb);
                     }
                     (p as *mut u32).write_unaligned(entry.payload as u32);
                 }
                 2 => {
-                    if WATCHED && !hit && (p as *const u16).read_unaligned() != entry.payload as u16
-                    {
-                        hit = watched(offset, nb);
+                    if MARKING && (p as *const u16).read_unaligned() != entry.payload as u16 {
+                        changed(offset, nb);
                     }
                     (p as *mut u16).write_unaligned(entry.payload as u16);
                 }
                 1 => {
-                    if WATCHED && !hit && *p != entry.payload as u8 {
-                        hit = watched(offset, nb);
+                    if MARKING && *p != entry.payload as u8 {
+                        changed(offset, nb);
                     }
                     *p = entry.payload as u8;
                 }
@@ -416,8 +438,8 @@ fn commit_from_log_impl<const WATCHED: bool>(
             macro_rules! store_one {
                 ($t:ty) => {{
                     let v = (s as *const $t).read_unaligned();
-                    if WATCHED && !hit && (p as *const $t).read_unaligned() != v {
-                        hit = watched(offset, nb);
+                    if MARKING && (p as *const $t).read_unaligned() != v {
+                        changed(offset, nb);
                     }
                     (p as *mut $t).write_unaligned(v);
                 }};
@@ -427,12 +449,11 @@ fn commit_from_log_impl<const WATCHED: bool>(
                     let tail = nb - $w;
                     let lo = (s as *const $t).read_unaligned();
                     let hi_v = (s.add(tail) as *const $t).read_unaligned();
-                    if WATCHED
-                        && !hit
+                    if MARKING
                         && ((p as *const $t).read_unaligned() != lo
                             || (p.add(tail) as *const $t).read_unaligned() != hi_v)
                     {
-                        hit = watched(offset, nb);
+                        changed(offset, nb);
                     }
                     (p as *mut $t).write_unaligned(lo);
                     (p.add(tail) as *mut $t).write_unaligned(hi_v);
@@ -446,11 +467,9 @@ fn commit_from_log_impl<const WATCHED: bool>(
                 // store through it is UB under Stacked Borrows.
                 let p = dst.add(offset);
                 let s = entry.payload.as_ptr();
-                if WATCHED
-                    && !hit
-                    && std::slice::from_raw_parts(p, nb) != std::slice::from_raw_parts(s, nb)
+                if MARKING && std::slice::from_raw_parts(p, nb) != std::slice::from_raw_parts(s, nb)
                 {
-                    hit = watched(offset, nb);
+                    changed(offset, nb);
                 }
                 std::ptr::copy_nonoverlapping(s, p, nb);
                 continue;
@@ -458,8 +477,8 @@ fn commit_from_log_impl<const WATCHED: bool>(
             match nb {
                 1 => {
                     let v = *s;
-                    if WATCHED && !hit && *p != v {
-                        hit = watched(offset, nb);
+                    if MARKING && *p != v {
+                        changed(offset, nb);
                     }
                     *p = v;
                 }
@@ -473,30 +492,27 @@ fn commit_from_log_impl<const WATCHED: bool>(
             }
         }
     }
-    hit
 }
 
 /// See [`commit_from_log_impl`].
 #[inline]
 pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
-    commit_from_log_impl::<false>(ff_values, buffer, |_, _| false);
+    commit_from_log_impl::<false>(ff_values, buffer, |_, _| {});
 }
 
-/// [`commit_from_log_impl`] with a change probe for the settle filter: each
-/// entry's payload is compared against the bytes it overwrites, and the
-/// return value says whether any byte that actually CHANGED lies where
-/// `watched` answers true.  After the first watched change the remaining
-/// entries commit without comparing.
+/// [`commit_from_log_impl`] with a change probe: `changed` is called for
+/// EVERY entry whose payload differs from the bytes it overwrites, which is
+/// what a waveform gate or a reader mark needs, since an entry it does not
+/// hear about is a change it would skip.
 ///
 /// A write that changes bytes and a later same-cycle write that restores
-/// them still reports a watched change — a false positive that only costs
-/// one settle, never a missed one.
-pub fn ff_commit_from_log_watched(
+/// them are both reported: a false positive, never a missed change.
+pub fn ff_commit_from_log_marking(
     ff_values: &mut [u8],
     buffer: &WriteLogBuffer,
-    watched: &mut dyn FnMut(usize, usize) -> bool,
-) -> bool {
-    commit_from_log_impl::<true>(ff_values, buffer, watched)
+    changed: &mut dyn FnMut(usize, usize),
+) {
+    commit_from_log_impl::<true>(ff_values, buffer, changed)
 }
 
 use std::cell::Cell;
@@ -566,24 +582,19 @@ pub(crate) unsafe extern "C" fn event_write_log_push_static(
 /// Safety: caller must ensure `payload` is valid for reads of
 /// `native_bytes` bytes; the helper is only invoked while the TLS is
 /// installed.
-pub(crate) unsafe fn event_write_log_push_wide(
+/// Chunked by the entry payload size, with the log resolved once rather than
+/// per chunk.
+pub(crate) unsafe fn event_write_log_push_wide_range(
     offset: u32,
     payload: *const u8,
-    native_bytes: usize,
+    nbytes: usize,
 ) {
-    debug_assert!(
-        native_bytes <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES,
-        "wide payload {} exceeds entry capacity",
-        native_bytes
-    );
     EVENT_WRITE_LOG.with(|cell| {
         let Some(ptr) = cell.get() else {
             return;
         };
         let buf = unsafe { &mut *ptr.as_ptr() };
-        unsafe {
-            buf.push_wide(offset, payload, native_bytes);
-        }
+        unsafe { buf.push_wide_range(offset, payload, nbytes) };
     });
 }
 
@@ -701,7 +712,7 @@ mod tests {
         let payload = [0xaau8; 32];
         unsafe {
             set_event_write_log(&mut buf);
-            event_write_log_push_wide(0x2000, payload.as_ptr(), 32);
+            event_write_log_push_wide_range(0x2000, payload.as_ptr(), 32);
             clear_event_write_log();
         }
         assert_eq!(buf.wide_count, 1);
@@ -752,25 +763,37 @@ mod tests {
         );
     }
 
-    /// The watched commit's compare is typed on the specialised sizes and a
+    /// Entries the marking commit reports, as `(offset, len)`.
+    fn marked(ff: &mut [u8], buf: &WriteLogBuffer) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        ff_commit_from_log_marking(ff, buf, &mut |off, len| out.push((off, len)));
+        out
+    }
+
+    /// The marking commit's compare is typed on the specialised sizes and a
     /// slice compare on the rest.  A compare that looked at fewer bytes than
-    /// it stores would silently under-report changes to the settle filter, so
-    /// every size is probed on its LAST byte.
+    /// it stores would silently under-report changes, so every size is probed
+    /// on its LAST byte.
     #[test]
-    fn wide_watched_compare_sees_the_last_byte_at_every_size() {
+    fn wide_marking_compare_sees_the_last_byte_at_every_size() {
         for nb in 1..=WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES {
             let payload = vec![0x5a_u8; nb];
             let mut buf = WriteLogBuffer::with_capacity(0, 1);
             unsafe { write_log_grow_push_wide(&mut buf, 0, payload.as_ptr(), nb as u32) };
 
             let mut same = payload.clone();
-            let hit = ff_commit_from_log_watched(&mut same, &buf, &mut |_, _| true);
-            assert!(!hit, "nb={nb} reported a change against identical bytes");
+            assert!(
+                marked(&mut same, &buf).is_empty(),
+                "nb={nb} reported a change against identical bytes"
+            );
 
             let mut differs = payload.clone();
             differs[nb - 1] ^= 0xff;
-            let hit = ff_commit_from_log_watched(&mut differs, &buf, &mut |_, _| true);
-            assert!(hit, "nb={nb} missed a change in the last byte");
+            assert_eq!(
+                marked(&mut differs, &buf),
+                vec![(0, nb)],
+                "nb={nb} missed a change in the last byte"
+            );
             assert_eq!(differs, payload, "nb={nb} did not commit the payload");
         }
     }
@@ -801,7 +824,7 @@ mod tests {
             set_event_write_log(&mut buf);
             for i in 0..70u32 {
                 let payload = [i as u8; 16];
-                event_write_log_push_wide(i * 16, payload.as_ptr(), 16);
+                event_write_log_push_wide_range(i * 16, payload.as_ptr(), 16);
             }
             clear_event_write_log();
         }
@@ -851,43 +874,35 @@ mod tests {
     }
 
     #[test]
-    fn watched_commit_reports_only_watched_changes() {
-        // Watch the first 16 bytes.
-        let watched = |off: usize, _len: usize| off < 16;
-
+    fn marking_commit_reports_every_changed_entry() {
         // Same-value write: committed, not reported.
         let mut buf = WriteLogBuffer::with_capacity(4, 2);
         let mut ff = vec![0u8; 64];
         unsafe { write_log_grow_push_narrow(&mut buf, 0, 0, 8) };
-        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+        assert!(marked(&mut ff, &buf).is_empty());
 
-        // Changed but unwatched: committed, not reported.
+        // Changed narrow entries: each one reported and committed.
         let mut buf = WriteLogBuffer::with_capacity(4, 2);
-        unsafe { write_log_grow_push_narrow(&mut buf, 32, 0x1234, 4) };
-        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+        unsafe {
+            write_log_grow_push_narrow(&mut buf, 32, 0x1234, 4);
+            write_log_grow_push_narrow(&mut buf, 8, 0xff, 1);
+        }
+        assert_eq!(marked(&mut ff, &buf), vec![(32, 4), (8, 1)]);
         assert_eq!(ff[32], 0x34);
-
-        // Changed and watched (narrow): reported.
-        let mut buf = WriteLogBuffer::with_capacity(4, 2);
-        unsafe { write_log_grow_push_narrow(&mut buf, 8, 0xff, 1) };
-        assert!(ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
         assert_eq!(ff[8], 0xff);
 
-        // Wide entry: unchanged then changed.
+        // Wide entry: changed, then a re-commit of the same bytes.
         let payload = [0xa5u8; 16];
         let mut buf = WriteLogBuffer::with_capacity(4, 2);
         unsafe { write_log_grow_push_wide(&mut buf, 0, payload.as_ptr(), 16) };
-        assert!(ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+        assert_eq!(marked(&mut ff, &buf), vec![(0, 16)]);
         assert_eq!(&ff[0..16], &payload);
-        // Re-commit of the same bytes: no report.
-        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+        assert!(marked(&mut ff, &buf).is_empty());
 
         // Out-of-bounds entries are skipped like `ff_commit_from_log`.
         let mut buf = WriteLogBuffer::with_capacity(4, 2);
         unsafe { write_log_grow_push_narrow(&mut buf, 63, 0xff, 8) };
-        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut {
-            |_, _| true
-        }));
+        assert!(marked(&mut ff, &buf).is_empty());
     }
 
     #[test]

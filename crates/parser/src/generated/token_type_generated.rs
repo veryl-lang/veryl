@@ -111,6 +111,8 @@ pub enum TokenType {
     ResetAsyncLow,
     ResetSyncHigh,
     ResetSyncLow,
+    ResetActive,
+    ResetInactive,
     Return,
     Rev,
     Break,
@@ -206,6 +208,8 @@ impl TokenType {
                 | TokenType::ResetAsyncLow
                 | TokenType::ResetSyncHigh
                 | TokenType::ResetSyncLow
+                | TokenType::ResetActive
+                | TokenType::ResetInactive
                 | TokenType::Return
                 | TokenType::Rev
                 | TokenType::Break
@@ -229,6 +233,41 @@ impl TokenType {
                 | TokenType::Union
                 | TokenType::Unsafe
                 | TokenType::Var
+        )
+    }
+
+    pub fn is_type_keyword(&self) -> bool {
+        matches!(
+            self,
+            TokenType::Bit
+                | TokenType::BBool
+                | TokenType::LBool
+                | TokenType::Clock
+                | TokenType::ClockPosedge
+                | TokenType::ClockNegedge
+                | TokenType::F32
+                | TokenType::F64
+                | TokenType::I8
+                | TokenType::I16
+                | TokenType::I32
+                | TokenType::I64
+                | TokenType::Logic
+                | TokenType::Reset
+                | TokenType::ResetAsyncHigh
+                | TokenType::ResetAsyncLow
+                | TokenType::ResetSyncHigh
+                | TokenType::ResetSyncLow
+                | TokenType::Signed
+                | TokenType::String
+                | TokenType::Tri
+                | TokenType::P8
+                | TokenType::P16
+                | TokenType::P32
+                | TokenType::P64
+                | TokenType::U8
+                | TokenType::U16
+                | TokenType::U32
+                | TokenType::U64
         )
     }
 }
@@ -347,6 +386,8 @@ impl From<&str> for TokenType {
             "ResetAsyncLowTerm" => TokenType::ResetAsyncLow,
             "ResetSyncHighTerm" => TokenType::ResetSyncHigh,
             "ResetSyncLowTerm" => TokenType::ResetSyncLow,
+            "ResetActiveTerm" => TokenType::ResetActive,
+            "ResetInactiveTerm" => TokenType::ResetInactive,
             "ReturnTerm" => TokenType::Return,
             "RevTerm" => TokenType::Rev,
             "BreakTerm" => TokenType::Break,
@@ -492,6 +533,8 @@ impl std::fmt::Display for TokenType {
             TokenType::ResetAsyncLow => "reset_async_low",
             TokenType::ResetSyncHigh => "reset_sync_high",
             TokenType::ResetSyncLow => "reset_sync_low",
+            TokenType::ResetActive => "reset_active",
+            TokenType::ResetInactive => "reset_inactive",
             TokenType::Return => "return",
             TokenType::Rev => "rev",
             TokenType::Break => "break",

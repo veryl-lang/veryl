@@ -1,4 +1,4 @@
-use crate::cmd_build::CmdBuild;
+use crate::cmd_build::{CmdBuild, EmitPolicy};
 use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
 use crate::{Format, OptBuild, OptTest, check_format_version};
 use log::{error, info, warn};
@@ -10,7 +10,10 @@ use veryl_metadata::WaveFormFormat;
 use veryl_metadata::{ComponentBackendKind, FilelistType, Metadata, SimType, WaveFormTarget};
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::text_table;
-use veryl_simulator::ir::{ComponentLibrary, Config, Ir, ProtoModuleCache, build_ir_cached};
+use veryl_simulator::component::loader::native_loading_supported;
+use veryl_simulator::ir::{
+    BuildSession, ComponentLibrary, Config, Ir, ProtoModuleCache, build_ir_cached,
+};
 use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
@@ -38,7 +41,7 @@ struct TestSuiteReport {
     /// exact; non-empty is not a measure -- compare timings on `dispatch`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     degraded_modules: Vec<String>,
-    /// Per-module dispatch tallies for the whole-comb / whole-event handles:
+    /// Per-module dispatch tallies for the dataflow / whole-event handles:
     /// how many dispatches ran the requested artifact vs fell back.  Present
     /// only for modules that held such a handle.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -49,7 +52,7 @@ struct TestSuiteReport {
     tests: Vec<TestReport>,
 }
 
-/// One module's whole-* dispatch tally; see `TestSuiteReport::dispatch`.
+/// One module's AOT-C dispatch tally; see `TestSuiteReport::dispatch`.
 #[derive(serde::Serialize)]
 struct DispatchReport {
     /// `kind:module`, matching the `degraded_modules` spelling.
@@ -68,18 +71,18 @@ struct TestReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
     runtime_s: f64,
-    /// Simulation-only wall time: `Simulator::new`, component init, memory
-    /// preload and the cycle loop — the boundary a warm build re-runs.  What
+    /// Simulation-only wall time: the memory preload and the cycle loop.  What
     /// the elaborated design alone determines stays out of it, whether that is
-    /// the IR build and AOT compile before the run or the testbench derivation
-    /// inside it; `runtime_s` covers those.
+    /// the IR build and AOT compile before the run or the per-run build inside
+    /// it; `runtime_s` covers those.
     /// `None` for non-native tests and native tests that never reached execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     sim_s: Option<f64>,
-    /// The build work `sim_s` excludes but the run still did: deriving the
-    /// testbench from the IR, redone on every invocation even where the IR
-    /// build and the AOT compile are cached.  Diagnostic; `sim_s + derive_s`
-    /// is the whole run span.  Reported whenever `sim_s` is.
+    /// The build work `sim_s` excludes but the run still did: constructing and
+    /// initialising the simulator and deriving the testbench from the IR,
+    /// redone on every invocation even where the IR build and the AOT compile
+    /// are cached.  Diagnostic; `sim_s + derive_s` is the whole run span.
+    /// Reported whenever `sim_s` is.
     #[serde(skip_serializing_if = "Option::is_none")]
     derive_s: Option<f64>,
     /// Captured `$display`/`$write` output.
@@ -183,11 +186,22 @@ fn create_wave_dumper(
             let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
                 message: format!("failed to create waveform file {}: {e}", path.display()),
             })?;
-            WaveDumper::new_vcd(Box::new(file))
+            // The `vcd` crate writes straight through, so an unbuffered file
+            // turns every value into its own write syscall.
+            WaveDumper::new_vcd(Box::new(std::io::BufWriter::with_capacity(1 << 20, file)))
         }
         WaveFormFormat::Fst => WaveDumper::new_fst(&path_str),
     };
     Ok(dumper.with_path(path))
+}
+
+/// A guard, so the handoff also runs when `exec` fails or panics.
+struct DetachPendingCompiles;
+
+impl Drop for DetachPendingCompiles {
+    fn drop(&mut self) {
+        veryl_simulator::backend::aot_c::detach_pending_compiles();
+    }
 }
 
 impl CmdTest {
@@ -196,6 +210,7 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
+        let _detach = DetachPendingCompiles;
         // A dump wants every comb word.  These passes leave the words no later
         // reader needs holding stale or initial values, so waveforms would
         // disagree with a full settle while the run still passes.  Before
@@ -257,6 +272,7 @@ impl CmdTest {
             Some(&mut ir),
             self.opt.test.as_deref(),
             &combined_defines,
+            EmitPolicy::SkipIfNativeOnly,
         )?;
 
         let tests = symbol_table::get_tests(&metadata.project.name);
@@ -327,6 +343,7 @@ impl CmdTest {
         let mut config = Config {
             use_jit,
             disable_ff_opt: self.opt.disable_ff_opt,
+            allow_multi_pass: self.opt.allow_multi_pass,
             aot_c,
             aot_c_event: aot_c,
             aot_c_async: aot_c && !validate,
@@ -354,16 +371,22 @@ impl CmdTest {
             ..Config::default()
         };
         config.apply_env();
-        // Warn once if cc is requested but absent; the fallback is otherwise silent.
+        // Both fallbacks are otherwise silent. A statically linked build
+        // cannot load what it compiles, so a present compiler changes nothing.
         #[cfg(not(target_family = "wasm"))]
-        if config.aot_c && !veryl_simulator::backend::aot_c::cc_available() {
+        if config.aot_c && !native_loading_supported() {
+            warn!(
+                "--backend cc: {}; falling back to the Cranelift JIT backend",
+                static_build_reason()
+            );
+            config.fall_back_to_cranelift();
+        } else if config.aot_c && !veryl_simulator::backend::aot_c::cc_available() {
             warn!(
                 "--backend cc: no C compiler found (set VERYL_AOT_CC, or install cc/gcc); \
                  falling back to the Cranelift JIT backend"
             );
+            config.fall_back_to_cranelift();
         }
-        let mut proto_cache = ProtoModuleCache::default();
-
         check_format_version(self.opt.format, self.opt.format_version)?;
         let json = matches!(self.opt.format, Format::Json);
         let backend_name = match self.opt.backend {
@@ -431,18 +454,21 @@ impl CmdTest {
                     (Some(x), Some(y)) => y.partial_cmp(&x).unwrap_or(std::cmp::Ordering::Equal),
                 }
             });
-            if config.dut_reuse {
-                let tops: Vec<_> = pending_native.iter().filter_map(|p| p.top).collect();
-                veryl_simulator::backend::inst::compute_recurring_set(&ir, &tops);
-            }
+            let tops: Vec<_> = pending_native
+                .iter()
+                .filter_map(|p| {
+                    p.top
+                        .or_else(|| resource_table::get_str_id(p.test_name.clone()))
+                })
+                .collect();
+            let session = BuildSession::new(&ir, &config, &tops);
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let resource_snapshot = resource_table::export_tables();
             // `SimulatorError` snapshots source text from `text_table` eagerly
             // at construction time; without this, worker errors carry no source.
             let text_snapshot = text_table::export_tables();
 
-            let ir_ref = &ir;
-            let config_ref = &config;
+            let session_ref = &session;
             let opt_ref = &self.opt;
             let metadata_ref: &Metadata = metadata;
             // Workers print each finished test's block under this lock, so results
@@ -466,7 +492,7 @@ impl CmdTest {
                                 text_table::import_tables(text_snap);
                                 // Per-thread cache avoids locking; cross-test
                                 // reuse is rare since each top name is unique.
-                                let mut thread_cache = ProtoModuleCache::default();
+                                let mut thread_cache = ProtoModuleCache::new(session_ref);
                                 let (mut tally_pass, mut tally_fail) = (0, 0);
                                 let mut tally_waves: Vec<PathBuf> = Vec::new();
                                 let mut tally_timings: Vec<(String, f64)> = Vec::new();
@@ -486,13 +512,11 @@ impl CmdTest {
                                     let t_build = std::time::Instant::now();
                                     let t0 = std::time::Instant::now();
                                     let build_result = prepare_native_test(
-                                        ir_ref,
                                         &pending.test_name,
                                         &pending.top,
                                         opt_ref,
                                         pending.test_path,
                                         metadata_ref,
-                                        config_ref,
                                         &mut thread_cache,
                                     );
                                     #[cfg(feature = "profile")]
@@ -531,7 +555,7 @@ impl CmdTest {
                                     if let Some(secs) = run_secs {
                                         tally_timings.push((pending.test_name.clone(), secs));
                                     }
-                                    // The derivation belongs with the build.
+                                    // The per-run build belongs with the build.
                                     let sim_s = run_secs.map(|s| (s - derive_secs).max(0.0));
                                     let derive_s = sim_s.map(|_| derive_secs);
                                     #[cfg(feature = "profile")]
@@ -683,20 +707,21 @@ impl CmdTest {
             }
         }
 
+        let doc_tops: Vec<_> = doc_tests.iter().map(|dt| dt.module_name).collect();
+        let doc_session = BuildSession::new(&ir, &config, &doc_tops);
+        let mut proto_cache = ProtoModuleCache::new(&doc_session);
         for dt in &doc_tests {
             let module_name = dt.module_name.to_string();
             info!("Executing doc test ({module_name})");
 
             let t0 = std::time::Instant::now();
             let result = run_doc_test(
-                &ir,
                 &module_name,
                 &dt.wavedrom_json,
                 &dt.ports,
                 self.opt.wave,
                 dt.path,
                 metadata,
-                &config,
                 &mut proto_cache,
             );
             let runtime_s = t0.elapsed().as_secs_f64();
@@ -786,11 +811,31 @@ impl CmdTest {
 pub fn build_component_manifests(metadata: &Metadata) {
     if metadata.components.is_empty()
         || metadata.test.component_backend == Some(ComponentBackendKind::Wasm)
-        || !cargo_available()
     {
         return;
     }
     let project_root = metadata.project_path();
+    // With no way to read the interface out of a freshly built library, the
+    // committed manifest and the prebuilt wasm are the only sources left.
+    // Reporting anything wider would fire on every command of a project that
+    // works fine.
+    if !native_loading_supported() {
+        for def in &metadata.components {
+            let crate_dir = project_root.join(&def.path);
+            if def.wasm.is_none() && veryl_metadata::read_committed_manifests(&crate_dir).is_none()
+            {
+                warn!(
+                    "Component package ({}): {}; its components are unavailable",
+                    def.path.display(),
+                    static_build_reason()
+                );
+            }
+        }
+        return;
+    }
+    if !cargo_available() {
+        return;
+    }
     let target_dir = project_root.join("target/veryl-components");
     for def in &metadata.components {
         let crate_dir = project_root.join(&def.path);
@@ -812,6 +857,17 @@ fn cargo_available() -> bool {
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())
+}
+
+/// NixOS gets its own hint because the released dynamically linked binary
+/// does not run there either, so the way out is a different install.
+pub(crate) fn static_build_reason() -> String {
+    let mut reason =
+        "this veryl build is statically linked and cannot load dynamic libraries".to_string();
+    if std::path::Path::new("/etc/NIXOS").exists() {
+        reason.push_str(" (on NixOS, install veryl from nixpkgs or enable `programs.nix-ld`)");
+    }
+    reason
 }
 
 /// Builds every `[[components]]` cargo package (release, shared target
@@ -868,6 +924,7 @@ fn build_component_libraries(
 
     let choice = metadata.test.component_backend;
     let cargo_available = cargo_available();
+    let native_available = native_loading_supported();
 
     let mut libraries = std::collections::HashMap::new();
     for ComponentJob {
@@ -880,7 +937,13 @@ fn build_component_libraries(
     } in jobs
     {
         let use_wasm = match choice {
-            Some(ComponentBackendKind::Native) => false,
+            Some(ComponentBackendKind::Native) => {
+                if !native_available {
+                    error!("Component package ({label}): {}", static_build_reason());
+                    continue;
+                }
+                false
+            }
             Some(ComponentBackendKind::Wasm) => {
                 if wasm.is_none() {
                     error!("Component package ({label}) declares no `wasm =` prebuilt binary");
@@ -889,7 +952,19 @@ fn build_component_libraries(
                 true
             }
             None => {
-                if cargo_available {
+                if !native_available {
+                    if wasm.is_none() {
+                        error!(
+                            "Component package ({label}): {}; declare a `wasm =` prebuilt to use it",
+                            static_build_reason()
+                        );
+                        continue;
+                    }
+                    info!(
+                        "Component package ({label}): statically linked veryl, using the prebuilt wasm"
+                    );
+                    true
+                } else if cargo_available {
                     false
                 } else if wasm.is_some() {
                     info!("Component package ({label}): cargo not found, using the prebuilt wasm");
@@ -1108,11 +1183,18 @@ pub(crate) fn build_component_artifact(
     // cannot survive through a stale file.
     let mut manifest_json = None;
     if !wasm && let Some(path) = &artifact {
-        manifest_json = veryl_simulator::component::loader::library_manifest(path);
-        if manifest_json.is_none() {
-            warn!(
-                "Component ({name}) library does not export a veryl manifest; analysis-time interface checks are disabled"
-            );
+        match veryl_simulator::component::loader::library_manifest(path) {
+            Ok(json) => {
+                manifest_json = json;
+                if manifest_json.is_none() {
+                    warn!(
+                        "Component ({name}) library does not export a veryl manifest; analysis-time interface checks are disabled"
+                    );
+                }
+            }
+            Err(e) => warn!(
+                "Component ({name}) library cannot be loaded ({e}); analysis-time interface checks are disabled"
+            ),
         }
         if let Some(sidecar) = veryl_metadata::component_crate_name(crate_dir)
             .map(|n| veryl_metadata::sidecar_manifest_path(target_dir, &n))
@@ -1184,16 +1266,13 @@ fn paths_refer_to_same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
         }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn prepare_native_test(
-    ir: &veryl_analyzer::ir::Ir,
     test_name: &str,
     top: &Option<resource_table::StrId>,
     opt: &OptTest,
     test_path: PathId,
     metadata: &Metadata,
-    config: &Config,
-    cache: &mut ProtoModuleCache,
+    cache: &mut ProtoModuleCache<'_>,
 ) -> std::result::Result<NativeTestJob, SimulatorError> {
     let top_name = if let Some(top_str) = top {
         top_str.to_string()
@@ -1206,7 +1285,7 @@ fn prepare_native_test(
             module_name: top_name.clone(),
         }
     })?;
-    let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
+    let sim_ir = build_ir_cached(top_str_id, cache)?;
 
     let module_name = sim_ir.name.to_string();
 
@@ -1223,17 +1302,14 @@ fn prepare_native_test(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_doc_test(
-    ir: &veryl_analyzer::ir::Ir,
     module_name: &str,
     wavedrom_json: &str,
     ports: &[(String, String)],
     wave: bool,
     source_path: PathId,
     metadata: &Metadata,
-    config: &Config,
-    cache: &mut ProtoModuleCache,
+    cache: &mut ProtoModuleCache<'_>,
 ) -> std::result::Result<Option<PathBuf>, SimulatorError> {
     let mut scenario = parse_wavedrom(wavedrom_json).map_err(|e| SimulatorError::TestFailed {
         message: format!("WaveDrom parse error in {module_name}: {e}"),
@@ -1245,7 +1321,7 @@ fn run_doc_test(
             module_name: module_name.to_string(),
         }
     })?;
-    let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
+    let sim_ir = build_ir_cached(top_str_id, cache)?;
 
     let dump = if wave {
         let doc_name = format!("{}_doc", module_name);
@@ -1261,7 +1337,7 @@ fn run_doc_test(
         sim.ir
             .event_statements
             .keys()
-            .find(|e| matches!(e, veryl_simulator::ir::Event::Clock(_)))
+            .find(|e| matches!(e, veryl_simulator::ir::Event::Clock(..)))
             .cloned()
             .unwrap_or(veryl_simulator::ir::Event::Initial)
     };
@@ -1289,7 +1365,7 @@ fn run_doc_test(
             sim.ir
                 .reset_ports()
                 .first()
-                .map(|id| veryl_simulator::ir::Event::Reset(*id))
+                .map(|id| veryl_simulator::ir::Event::reset(*id))
         });
 
     remap_signal_names(&mut scenario, ports);

@@ -1,4 +1,4 @@
-use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
+use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, InstanceNote};
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
@@ -25,6 +25,10 @@ pub struct Config {
     pub instance_depth_limit: usize,
     pub instance_total_limit: usize,
     pub function_instance_depth_limit: usize,
+    /// Recursion bound for `eval_factor_path`. Distinct from the function
+    /// limit above: a `const` chain costs one level per link and is not a
+    /// function instantiation at all.
+    pub symbol_eval_depth_limit: usize,
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
     pub defines: HashSet<StrId>,
@@ -66,6 +70,7 @@ impl Default for Config {
             instance_depth_limit: 1024,
             instance_total_limit: 1024 * 1024,
             function_instance_depth_limit: 24,
+            symbol_eval_depth_limit: 48,
             evaluate_size_limit: 1024 * 1024,
             evaluate_array_limit: 128,
             defines: HashSet::default(),
@@ -76,6 +81,9 @@ impl Default for Config {
 #[derive(Default)]
 pub struct Context {
     pub config: Config,
+    /// Constant procedural ranges in scope while converting a retained body.
+    /// Used to prove a condition uniform without duplicating that body.
+    pub(crate) for_ranges: Vec<(VarId, crate::ir::ForRange)>,
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
     pub func_paths: HashMap<FuncPath, VarId>,
@@ -85,6 +93,7 @@ pub struct Context {
     pub converting_funcs: Vec<SymbolId>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
+    pub(crate) function_value_cache: crate::ir::FunctionValueCache,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
     pub modports: HashMap<StrId, Vec<(StrId, Direction)>>,
     pub declarations: Vec<Declaration>,
@@ -93,7 +102,7 @@ pub struct Context {
     pub inst_signatures: HashMap<StrId, Signature>,
     pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
-    /// Recursion depth of `eval_factor_path`, bounded by `function_instance_depth_limit`.
+    /// Recursion depth of `eval_factor_path`, bounded by `symbol_eval_depth_limit`.
     pub function_eval_depth: usize,
     /// Recorded when `function_eval_depth`'s limit is hit, since the eval path
     /// may swallow an inserted error.
@@ -121,6 +130,9 @@ pub struct Context {
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
     pub allow_component_as_factor: bool,
+    /// Depth of `size_in_component_scope`.
+    component_sizing: usize,
+    global_func_callers: Vec<Namespace>,
     pub in_test_module: bool,
     pub in_dependency: bool,
     pub in_global_func: Option<Token>,
@@ -167,7 +179,7 @@ pub struct Context {
     hierarchical_functions: Vec<Vec<FuncPath>>,
     shadowed_variables: HashMap<VarPath, Vec<(VarId, Comptime)>>,
     affiliation: Vec<Affiliation>,
-    overrides: Vec<HashMap<VarPath, (Comptime, Expression)>>,
+    overrides: Vec<ParameterOverride>,
     generic_maps: Vec<Vec<GenericMap>>,
     /// Typedefs currently being expanded into an IR type, to break cyclic
     /// `type A = B; type B = A` chains that `eval_type` would otherwise follow
@@ -176,6 +188,13 @@ pub struct Context {
     errors: Vec<AnalyzerError>,
     profiler: Option<Arc<Mutex<ConvProfile>>>,
     project_name: Option<String>,
+}
+
+/// Namespace-tagged so a same-named parameter of another component is not
+/// answered from this frame.
+struct ParameterOverride {
+    namespace: Namespace,
+    values: HashMap<VarPath, (Comptime, Expression)>,
 }
 
 struct AnalysisTransaction {
@@ -274,9 +293,11 @@ impl Context {
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
+        std::mem::swap(&mut self.global_func_callers, &mut tgt.global_func_callers);
         self.disalbe_const_opt = tgt.disalbe_const_opt;
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
+        self.component_sizing = tgt.component_sizing;
         self.config = tgt.config.clone();
         self.profiler = tgt.profiler.clone();
         self.project_name = tgt.project_name.clone();
@@ -315,9 +336,21 @@ impl Context {
         }
     }
 
-    pub fn get_override(&self, x: &VarPath) -> Option<&(Comptime, Expression)> {
-        let overrides = self.overrides.last()?;
-        overrides.get(x)
+    /// Innermost-first, so a component instantiated inside another
+    /// instantiation of itself reads its own values. `matched` rather than
+    /// `==`: a parameter under an `#[ifdef]` carries that define context while
+    /// the frame carries the component's, and the two name one scope unless the
+    /// contexts exclude each other.
+    pub fn get_override(
+        &self,
+        namespace: &Namespace,
+        x: &VarPath,
+    ) -> Option<&(Comptime, Expression)> {
+        self.overrides
+            .iter()
+            .rev()
+            .find(|o| o.namespace.matched(namespace))
+            .and_then(|o| o.values.get(x))
     }
 
     pub fn get_variable_info(&self, id: VarId) -> Option<VariableInfo> {
@@ -553,9 +586,43 @@ impl Context {
             }
         }
 
-        if !replaced && !self.errors.contains(&error) {
-            self.errors.push(error);
+        if !replaced {
+            let note = self.instance_note();
+            let existing = self
+                .errors
+                .iter_mut()
+                .position(|x| x.same_report(&mut error));
+            if let Some(existing) = existing {
+                // Raised without an override too, so no instance explains it.
+                if note.is_none() {
+                    *self.errors[existing].instance_mut() = None;
+                }
+            } else {
+                *error.instance_mut() = note;
+                self.errors.push(error);
+            }
         }
+    }
+
+    fn instance_note(&self) -> Option<InstanceNote> {
+        // Only where the values are written and where they arrive matter;
+        // a recursive instantiation would otherwise list every level.
+        const KEPT_AT_EACH_END: usize = 2;
+
+        let frames = self.instance_history.overridden_frames();
+        let (_, outermost_site) = frames.first()?;
+        let mut path: Vec<_> = frames
+            .iter()
+            .map(|(sig, site)| format!("{}: {}", site.beg.text, sig.to_overridden_string()))
+            .collect();
+        if path.len() > KEPT_AT_EACH_END * 2 + 1 {
+            let elided = path.len() - KEPT_AT_EACH_END * 2;
+            path.splice(
+                KEPT_AT_EACH_END..path.len() - KEPT_AT_EACH_END,
+                [format!("({elided} more)")],
+            );
+        }
+        Some(InstanceNote::new(path.join(" -> "), outermost_site))
     }
 
     pub fn insert_modport(&mut self, name: StrId, members: Vec<(StrId, Direction)>) {
@@ -687,6 +754,14 @@ impl Context {
         }
     }
 
+    /// A select dimension is relative to its path segment, so a member access
+    /// starts the count again.
+    pub fn reset_select_dim(&mut self) {
+        if let Some(x) = self.select_dims.last_mut() {
+            *x = 0;
+        }
+    }
+
     pub fn get_select_dim(&self) -> Option<usize> {
         self.select_dims.last().copied()
     }
@@ -802,8 +877,12 @@ impl Context {
         f(self)
     }
 
-    pub fn push_instance_history(&mut self, x: Signature) -> Result<bool, InstanceHistoryError> {
-        self.instance_history.push(x, &self.config)
+    pub fn push_instance_history(
+        &mut self,
+        x: Signature,
+        site: Option<TokenRange>,
+    ) -> Result<bool, InstanceHistoryError> {
+        self.instance_history.push(x, site, &self.config)
     }
 
     pub fn pop_instance_history(&mut self) {
@@ -868,12 +947,27 @@ impl Context {
         self.affiliation.pop();
     }
 
-    pub fn push_override(&mut self, x: HashMap<VarPath, (Comptime, Expression)>) {
-        self.overrides.push(x);
+    pub fn push_override(
+        &mut self,
+        namespace: Namespace,
+        values: HashMap<VarPath, (Comptime, Expression)>,
+    ) {
+        self.overrides.push(ParameterOverride { namespace, values });
     }
 
     pub fn pop_override(&mut self) {
         self.overrides.pop();
+    }
+
+    pub fn take_override(&mut self) -> HashMap<VarPath, (Comptime, Expression)> {
+        self.overrides.pop().map(|x| x.values).unwrap_or_default()
+    }
+
+    /// The parameters declared after this one are sized under its value.
+    pub fn insert_override(&mut self, path: VarPath, value: (Comptime, Expression)) {
+        if let Some(x) = self.overrides.last_mut() {
+            x.values.insert(path, value);
+        }
     }
 
     pub fn push_generic_map(&mut self, x: Vec<GenericMap>) {
@@ -916,6 +1010,35 @@ impl Context {
 
     pub fn pop_namespace(&mut self) {
         self.namespaces.pop();
+    }
+
+    pub fn push_global_func_caller(&mut self, namespace: Namespace) {
+        self.global_func_callers.push(namespace);
+    }
+
+    pub fn pop_global_func_caller(&mut self) {
+        self.global_func_callers.pop();
+    }
+
+    /// Whether the namespace is a caller's one.
+    pub fn is_global_func_caller(&self, namespace: &Namespace) -> bool {
+        self.global_func_callers
+            .iter()
+            .any(|x| namespace.included(x))
+    }
+
+    pub fn enter_component_sizing(&mut self) {
+        self.component_sizing += 1;
+    }
+
+    pub fn leave_component_sizing(&mut self) {
+        self.component_sizing -= 1;
+    }
+
+    /// Whether the component's own variables are out of reach on purpose, so
+    /// that resolving through the symbol route says nothing about order.
+    pub fn sizing_component_width(&self) -> bool {
+        self.component_sizing > 0
     }
 
     pub fn current_namespace(&self) -> Option<Namespace> {

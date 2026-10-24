@@ -5,6 +5,10 @@ mod declaration;
 mod expression;
 mod ff_table;
 mod function;
+pub mod peel;
+pub(crate) use function::FunctionValueCache;
+#[cfg(test)]
+pub(crate) use function::VALUE_EVALUATIONS;
 mod interface;
 #[allow(clippy::module_inception)]
 mod ir;
@@ -18,17 +22,20 @@ mod utils;
 mod variable;
 mod width_expr;
 mod write_count;
-pub use assign_table::ReferencedEntry;
+pub(crate) use assign_table::AssignTable;
+pub use assign_table::{AssignTableEntry, ReferencedEntry};
 pub use comptime::{
-    Comptime, ExpressionContext, InstanceKind, PartSelectPath, Type, TypeKind, TypeKindEnum,
-    TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
+    Comptime, ExpressionContext, InstanceKind, MemberSelectDomain, PartSelectPath, Type, TypeKind,
+    TypeKindEnum, TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
 };
 pub use declaration::{
     CombDeclaration, Declaration, DeclarationBlock, ExternalConnect, ExternalDeclaration,
     ExternalParamValue, FfClock, FfDeclaration, FfReset, FinalDeclaration, InitialDeclaration,
     InstDeclaration, InstInput, InstInterfaceBinding, InstOutput, qualified_prefix_len,
 };
-pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef};
+pub use expression::{
+    ArrayLiteralItem, Expression, Factor, HierVarRef, ResetPolarity, ResetValueKind,
+};
 pub use ff_table::FfTable;
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
@@ -39,11 +46,12 @@ pub use shape::{Shape, ShapeRef};
 pub use signature::Signature;
 pub use statement::{
     AssignDestination, AssignStatement, CaseArm, CasePattern, CaseStatement, ControlFlow, ForBound,
-    ForRange, ForStatement, IfResetStatement, IfStatement, Statement, StatementBlock, TbMethod,
-    TbMethodCall,
+    ForRange, ForStatement, HierAssignDestination, IfResetStatement, IfStatement, QueueOp,
+    Statement, StatementBlock, TbMethod, TbMethodCall,
 };
 pub use system_function::{
-    AssertKind, Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind,
+    AssertKind, Input as SystemFunctionInput, Output as SystemFunctionOutput, SystemFunctionCall,
+    SystemFunctionKind,
 };
 pub use utils::convert_cast;
 pub use variable::{

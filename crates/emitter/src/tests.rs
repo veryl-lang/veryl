@@ -2879,11 +2879,13 @@ alias module  C_MODULE = c_module::<B_PKG>;
     let expect = r#"
 
 package prj___a_pkg__lbool;
+    typedef logic a_type;
     localparam type A_TYPE = logic;
 endpackage
 
 
 package prj___b_pkg__lbool;
+    typedef logic a_type;
 
 
 endpackage
@@ -3136,6 +3138,132 @@ endmodule
 }
 
 #[test]
+fn local_concatenation_assignment_in_always_ff() {
+    let code = r#"module ModuleA (
+    clk: input clock,
+    data: input logic<8>,
+    result: output logic<8>,
+) {
+    struct Nibbles {
+        hi: logic<4>,
+        lo: logic<4>,
+    }
+
+    var reg_hi: logic<4>;
+    var reg_lo: logic<4>;
+
+    always_ff {
+        var hi: logic<4>;
+        var lo: logic<4>;
+        var parts: logic<4>[2];
+        var nibbles: Nibbles;
+        {hi, lo} = data;
+        {parts[0], parts[1]} = data;
+        {nibbles.hi, nibbles.lo} = data;
+        {reg_hi, reg_lo} = data;
+        result = {lo, hi};
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input  var logic         clk   ,
+    input  var logic [8-1:0] data  ,
+    output var logic [8-1:0] result
+);
+    typedef struct packed {
+        logic [4-1:0] hi;
+        logic [4-1:0] lo;
+    } Nibbles;
+
+    logic [4-1:0] reg_hi;
+    logic [4-1:0] reg_lo;
+
+    always_ff @ (posedge clk) begin
+        logic   [4-1:0] hi                          ;
+        logic   [4-1:0] lo                          ;
+        logic   [4-1:0] parts                    [2];
+        Nibbles         nibbles                     ;
+        {hi, lo}                 =  data;
+        {parts[0], parts[1]}     =  data;
+        {nibbles.hi, nibbles.lo} =  data;
+        {reg_hi, reg_lo}         <= data;
+        result                   <= {lo, hi};
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn local_concatenation_assignment_in_nested_statement_block() {
+    let code = r#"module ModuleA (
+    clk: input clock,
+    data: input logic<8>,
+    result: output logic<8>,
+) {
+    var reg_hi: logic<4>;
+    var reg_lo: logic<4>;
+
+    always_ff {
+        if data[0] {
+            var hi: logic<4>;
+            var lo: logic<4>;
+            {hi, lo} = data;
+            {reg_hi, reg_lo} = {lo, hi};
+        } else {
+            for _i in 0..2 {
+                var hi: logic<4>;
+                var lo: logic<4>;
+                {hi, lo} = data;
+                result = {hi, lo};
+            }
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input  var logic         clk   ,
+    input  var logic [8-1:0] data  ,
+    output var logic [8-1:0] result
+);
+    logic [4-1:0] reg_hi;
+    logic [4-1:0] reg_lo;
+
+    always_ff @ (posedge clk) begin
+        if (data[0]) begin
+            logic [4-1:0] hi              ;
+            logic [4-1:0] lo              ;
+            {hi, lo}         =  data;
+            {reg_hi, reg_lo} <= {lo, hi};
+        end else begin
+            for (int _i = 0; _i < 2; _i++) begin
+                logic [4-1:0] hi      ;
+                logic [4-1:0] lo      ;
+                {hi, lo} =  data;
+                result   <= {hi, lo};
+            end
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn nested_concatenation() {
     let code = r#"module ModuleA {
     let _a: u32 = {1'b1};
@@ -3304,6 +3432,105 @@ module ModuleA {
             default: _c = 4;
         endcase
     end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn case_expression() {
+    let code = r#"
+module ModuleA {
+    const A: bit   = 0;
+    const B: u32   = 1;
+    const C: logic = 2;
+
+    var x: logic<2>;
+
+    let _a: u32 = case x {
+        A      : 0,
+        B, 2   : 1,
+        A + 1  : 2,
+        default: 3,
+    };
+
+    let _b: u32 = case x {
+        A      : 0,
+        B, C   : 1,
+        3      : 2,
+        default: 3,
+    };
+
+    let _c: u32 = case x {
+        A      : 0,
+        2'b1x  : 1,
+        default: 2,
+    };
+
+    let _d: u32 = case x {
+        A      : 0,
+        B      : 1,
+        2..=3  : 2,
+        default: 3,
+    };
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    localparam bit          A = 0;
+    localparam int unsigned B = 1;
+    localparam logic        C = 2;
+
+    logic [2-1:0] x;
+
+    int unsigned _a; always_comb _a = (((x) == (A)) ? (
+        0
+    ) : ((x) == (B)) ? (
+        1
+    ) : ((x) == (2)) ? (
+        1
+    ) : ((x) == (A + 1)) ? (
+        2
+    ) : (
+        3
+    ));
+
+    int unsigned _b; always_comb _b = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (B)) ? (
+        1
+    ) : ((x) ==? (C)) ? (
+        1
+    ) : ((x) ==? (3)) ? (
+        2
+    ) : (
+        3
+    ));
+
+    int unsigned _c; always_comb _c = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (2'b1x)) ? (
+        1
+    ) : (
+        2
+    ));
+
+    int unsigned _d; always_comb _d = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (B)) ? (
+        1
+    ) : ((x) inside {[2:3]}) ? (
+        2
+    ) : (
+        3
+    ));
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -3521,38 +3748,48 @@ module ModuleC {
 module prj___ModuleB__i16 #(
     parameter int unsigned V = 1
 );
+    typedef shortint T;
     localparam bit A = __func_b__V__bbool();
     localparam shortint B = __func_b__V__i16();
 
     function automatic bit __func_a__V__bbool;
-        return bit'(V);
+        typedef bit T;
+        return T'(V);
     endfunction
     function automatic shortint __func_a__V__i16;
-        return shortint'(V);
+        typedef shortint T;
+        return T'(V);
     endfunction
     function automatic bit __func_b__V__bbool;
+        typedef bit T;
         return __func_a__V__bbool();
     endfunction
     function automatic shortint __func_b__V__i16;
+        typedef shortint T;
         return __func_a__V__i16();
     endfunction
 endmodule
 module prj___ModuleB__i32 #(
     parameter int unsigned V = 1
 );
+    typedef int T;
     localparam bit A = __func_b__V__bbool();
     localparam int B = __func_b__V__i32();
 
     function automatic bit __func_a__V__bbool;
-        return bit'(V);
+        typedef bit T;
+        return T'(V);
     endfunction
     function automatic int __func_a__V__i32;
-        return int'(V);
+        typedef int T;
+        return T'(V);
     endfunction
     function automatic bit __func_b__V__bbool;
+        typedef bit T;
         return __func_a__V__bbool();
     endfunction
     function automatic int __func_b__V__i32;
+        typedef int T;
         return __func_a__V__i32();
     endfunction
 endmodule
@@ -3667,11 +3904,13 @@ fn gen_declaration() {
     input var logic [2-1:0]        a,
     input var logic [3-1:0][4-1:0] b
 );
+    typedef logic [3-1:0][4-1:0] T;
 endmodule
 module prj___ModuleB__1__2__3__4;
 
 
 
+    typedef logic [3-1:0][4-1:0] TYPE_B;
 
     logic [2-1:0]        a; always_comb a = '0;
     logic [3-1:0][4-1:0] b; always_comb b = '0;
@@ -3745,9 +3984,8 @@ module ModuleA {
 "#;
 
     let expect = r#"module prj_ModuleA;
-
-
-
+    typedef logic [8-1:0] TA;
+    typedef logic [16-1:0][8-1:0] TB;
     logic [16-1:0][8-1:0]         _a; always_comb _a = 0;
     logic [32-1:0][16-1:0][8-1:0] _b; always_comb _b = 0;
 endmodule
@@ -4193,6 +4431,33 @@ fn regression_sv_attribute_backslash_unescape() {
     assert!(
         !code.contains("a\\\\b"),
         "sv attribute must not emit a doubled backslash, got:\n{code}"
+    );
+}
+
+#[test]
+fn msb_on_struct_array_uses_the_unpacked_dimension() {
+    // Pins the emitted dimension against the constant the analyzer folds.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M (
+    o: output logic<8>,
+) {
+    struct S {
+        a: logic<8>,
+    }
+    var b: S [2];
+    always_comb {
+        b[0].a = 0;
+        b[1].a = 0;
+        o      = b[msb].a;
+    }
+}
+"#;
+
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("b[($size(b, 1) - 1)].a"),
+        "msb on a struct array must use the unpacked dimension:\n{ret}"
     );
 }
 
@@ -5281,5 +5546,370 @@ endmodule
     let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn generate_block_label_and_leading_comment() {
+    // A label written on an earlier line must not widen the gap below it.
+    let code = r#"module ModuleA {
+    :label_a {
+        // on the same line as the label
+        let _a: logic = 1;
+    }
+
+    :label_b
+
+
+    {
+        // three lines below the label
+        let _b: logic = 1;
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    if (1) begin :label_a
+        // on the same line as the label
+        logic _a; always_comb _a = 1;
+    end
+
+    if (1) begin :label_b
+        // three lines below the label
+        logic _b; always_comb _b = 1;
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn generate_block_leading_comment_is_stripped() {
+    let code = r#"module ModuleA {
+    :label_a {
+        // stripped with every other comment
+        let _a: logic = 1;
+    }
+}
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.build.strip_comments = true;
+
+    let ret = emit(&metadata, code);
+
+    assert!(!ret.contains("stripped with every other comment"));
+    assert!(ret.contains("begin :label_a"));
+}
+
+/// A `gen` declaration bound with `type` has no name in the generated SV, so a
+/// cast through it used to expand into `logic [5-1:0]'(0)`, which is not a legal
+/// SystemVerilog cast. The declaration must produce a `typedef` instead, and the
+/// cast must name it. Every other position keeps the expanded type.
+/// (refs: veryl-lang/veryl#3479)
+#[test]
+fn gen_type_declaration_is_emitted_as_typedef() {
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module ModuleA {
+    gen T: type = logic<5>;
+    let _a: T = 0 as T;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    typedef logic [5-1:0] T;
+    logic [5-1:0] _a; always_comb _a = T'(0);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
+
+    // A `gen` declaration inside a generate block belongs to that block's scope,
+    // so its `typedef` is emitted there too.
+    let code = r#"module ModuleA {
+    for i in 0..2 :g {
+        gen T: type = logic<5>;
+        let _a: T = 0 as T;
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    for (genvar i = 0; i < 2; i++) begin :g
+        typedef logic [5-1:0] T;
+        logic [5-1:0] _a; always_comb _a = T'(0);
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
+
+    // A `gen` declaration passed as a generic argument is resolved to the type
+    // itself at the instantiation, so the generic instance carries no name for
+    // it either. Each instance needs its own `typedef` at the head of its body.
+    let code = r#"module ModuleA {
+    gen T: type = logic<5>;
+
+    inst u: ModuleB::<T>;
+    let _a: logic = FuncA::<T>(0);
+}
+module ModuleB::<T: type> {
+    let _b: T = 0 as T;
+}
+function FuncA::<T: type> (a: input logic) -> logic {
+    let b: T = a as T;
+    return b[0];
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    typedef logic [5-1:0] T;
+
+    prj___ModuleB__logic_5 u  ();
+    logic                  _a; always_comb _a = __FuncA__logic_5(0);
+
+    function automatic logic __FuncA__logic_5(
+        input var logic a
+    ) ;
+        typedef logic [5-1:0] T;
+        logic [5-1:0] b;
+        b = T'(a);
+        return b[0];
+    endfunction
+endmodule
+module prj___ModuleB__logic_5;
+    typedef logic [5-1:0] T;
+    logic [5-1:0] _b; always_comb _b = T'(0);
+endmodule
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
+
+    // A generic argument that is already a named type needs no `typedef`; the
+    // cast keeps naming the type directly.
+    let code = r#"package PkgA {
+    enum EnumA: logic<2> {
+        A,
+        B,
+    }
+}
+module ModuleA {
+    inst u: ModuleB::<PkgA::EnumA>;
+}
+module ModuleB::<T: type> {
+    let _a: T = 0 as T;
+}
+"#;
+
+    let expect = r#"package prj_PkgA;
+    typedef enum logic [2-1:0] {
+        EnumA_A,
+        EnumA_B
+    } EnumA;
+endpackage
+module prj_ModuleA;
+    prj___ModuleB__PkgA_EnumA u ();
+endmodule
+module prj___ModuleB__PkgA_EnumA;
+    prj_PkgA::EnumA _a; always_comb _a = prj_PkgA::EnumA'(0);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
+}
+
+#[test]
+fn reset_value_literal_polarity() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset_async_high,
+    i_rst1: input reset_async_low,
+    i_rst2: input reset_sync_high,
+    i_rst3: input reset_sync_low,
+) {}
+
+module ModuleB {
+    inst u0: ModuleA (
+        i_rst0: reset_active,
+        i_rst1: reset_active,
+        i_rst2: reset_active,
+        i_rst3: reset_active,
+    );
+    inst u1: ModuleA (
+        i_rst0: reset_inactive,
+        i_rst1: reset_inactive,
+        i_rst2: reset_inactive,
+        i_rst3: reset_inactive,
+    );
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1,
+    input var logic i_rst2,
+    input var logic i_rst3
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u0 (
+        .i_rst0 (1'b1),
+        .i_rst1 (1'b0),
+        .i_rst2 (1'b1),
+        .i_rst3 (1'b0)
+    );
+    prj_ModuleA u1 (
+        .i_rst0 (1'b0),
+        .i_rst1 (1'b1),
+        .i_rst2 (1'b0),
+        .i_rst3 (1'b1)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn reset_value_literal_reset_type() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset,
+    i_rst1: input reset,
+) {}
+
+module ModuleB {
+    inst u: ModuleA (
+        i_rst0: reset_active,
+        i_rst1: reset_inactive,
+    );
+}
+"#;
+
+    for (reset_type, hold, release) in [
+        (ResetType::AsyncHigh, "1'b1", "1'b0"),
+        (ResetType::AsyncLow, "1'b0", "1'b1"),
+        (ResetType::SyncHigh, "1'b1", "1'b0"),
+        (ResetType::SyncLow, "1'b0", "1'b1"),
+    ] {
+        let expect = format!(
+            r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u (
+        .i_rst0 ({hold}),
+        .i_rst1 ({release})
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#
+        );
+
+        let mut metadata = Metadata::create_default("prj").unwrap();
+        metadata.build.reset_type = reset_type;
+        let ret = emit(&metadata, code);
+
+        assert_eq!(ret, expect);
+    }
+}
+
+#[test]
+fn reset_value_literal_context() {
+    let code = r#"interface InterfaceA {
+    var rst: reset_async_low;
+    modport mp {
+        rst: output,
+    }
+}
+
+module ModuleA (
+    i_rst : input  reset_sync_low,
+    i_rsts: input  reset_async_high[2],
+    if_a  : modport InterfaceA::mp,
+    o_rst0: output reset_async_low,
+    o_rst1: output reset_sync_high,
+    o_a   : output logic<4>,
+) {
+    struct StructA {
+        rst: reset_sync_high,
+    }
+
+    let a: reset_async_high = reset_active;
+    var b: StructA;
+
+    assign b.rst    = reset_inactive;
+    assign if_a.rst = (reset_active);
+    assign o_rst0   = reset_inactive;
+
+    always_comb {
+        o_rst1 = reset_active;
+    }
+
+    assign o_a[0] = a == reset_active;
+    assign o_a[1] = reset_inactive != i_rst;
+    assign o_a[2] = i_rsts[1] == reset_inactive;
+    assign o_a[3] = b.rst != reset_active;
+}
+"#;
+
+    let expect = r#"interface prj_InterfaceA;
+    logic rst;
+    modport mp (
+        output rst
+    );
+endinterface
+
+module prj_ModuleA (
+    input var logic                 i_rst     ,
+    input var logic                 i_rsts [2],
+    prj_InterfaceA.mp         if_a      ,
+    output var logic                 o_rst0    ,
+    output var logic                 o_rst1    ,
+    output var logic         [4-1:0] o_a   
+);
+    typedef struct packed {
+        logic rst;
+    } StructA;
+
+    logic   a; always_comb a = 1'b1;
+    StructA b;
+
+    always_comb b.rst    = 1'b0;
+    always_comb if_a.rst = (1'b0);
+    always_comb o_rst0   = 1'b1;
+
+    always_comb begin
+        o_rst1 = 1'b1;
+    end
+
+    always_comb o_a[0] = a == 1'b1;
+    always_comb o_a[1] = 1'b1 != i_rst;
+    always_comb o_a[2] = i_rsts[1] == 1'b0;
+    always_comb o_a[3] = b.rst != 1'b1;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
     assert_eq!(ret, expect);
 }

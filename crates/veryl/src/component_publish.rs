@@ -10,13 +10,14 @@
 //! unchanged crate leaves the committed files untouched, keeping a clean
 //! tree clean.
 
-use crate::cmd_test::build_component_artifact;
+use crate::cmd_test::{build_component_artifact, static_build_reason};
 use log::{info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 use veryl_metadata::Metadata;
 use veryl_metadata::{append_wasm_custom_section, wasm_custom_section};
+use veryl_simulator::component::loader::native_loading_supported;
 
 /// Files that `cargo package --list` reports but that must not enter the
 /// source hash: cargo's synthetic packaging entries, and the committed
@@ -244,7 +245,22 @@ pub fn update_committed_manifests(metadata: &Metadata) -> Result<Vec<PathBuf>> {
             .map(|w| root.join(w))
             .filter(|p| p.is_file());
         let json = match &wasm {
-            Some(path) => veryl_simulator::component::loader::library_manifest(path),
+            Some(path) => match veryl_simulator::component::loader::library_manifest(path) {
+                Ok(json) => json,
+                Err(e) => {
+                    warn!(
+                        "Component package ({name}) prebuilt wasm cannot be read ({e}); committed manifest not written"
+                    );
+                    continue;
+                }
+            },
+            None if !native_loading_supported() => {
+                warn!(
+                    "Component package ({name}): {}; committed manifest not written (declare a `wasm =` prebuilt, or publish with a dynamically linked veryl)",
+                    static_build_reason()
+                );
+                continue;
+            }
             None => {
                 match build_component_artifact(&name.to_string(), &crate_dir, &target_dir, false) {
                     Some((_, json)) => json,

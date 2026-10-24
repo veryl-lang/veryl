@@ -1,0 +1,9 @@
+pub module sample_b_top (
+    i_d: input  logic<sample_b_pkg::WIDTH>,
+    o_d: output logic<sample_b_pkg::WIDTH>,
+) {
+    inst u: sample_b_generic::<sample_b_pkg::WIDTH> (
+        i_d: i_d,
+        o_d: o_d,
+    );
+}

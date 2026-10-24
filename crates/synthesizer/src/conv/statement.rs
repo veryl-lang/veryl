@@ -133,7 +133,7 @@ fn record_ram_write(
 ) -> Result<(), SynthesizerError> {
     let cand = ctx.ram_vars[&dst.id];
     let idx_expr =
-        dst.index.0.first().ok_or_else(|| {
+        dst.index.indices.first().ok_or_else(|| {
             SynthesizerError::internal(format!("RAM write {} has no index", dst.id))
         })?;
     let idx_bits = arith::index_bits_for(cand.depth);
@@ -164,7 +164,7 @@ fn record_masked_ram_write(
 ) -> Result<(), SynthesizerError> {
     let cand = ctx.ram_vars[&dst.id];
     let idx_expr =
-        dst.index.0.first().ok_or_else(|| {
+        dst.index.indices.first().ok_or_else(|| {
             SynthesizerError::internal(format!("RAM write {} has no index", dst.id))
         })?;
     let idx_bits = arith::index_bits_for(cand.depth);
@@ -210,7 +210,7 @@ fn record_subword_ram_write(
     let cand = ctx.ram_vars[&dst.id];
     let (lo, hi) = const_subword_range(ctx, dst)?;
     let idx_expr =
-        dst.index.0.first().ok_or_else(|| {
+        dst.index.indices.first().ok_or_else(|| {
             SynthesizerError::internal(format!("RAM write {} has no index", dst.id))
         })?;
     let idx_bits = arith::index_bits_for(cand.depth);
@@ -378,7 +378,7 @@ fn is_whole_array_dst(
     scalar_width: usize,
     total_width: usize,
 ) -> bool {
-    dst.index.0.is_empty()
+    dst.index.indices.is_empty()
         && dst.select.is_empty()
         && dst.comptime.part_select.is_none()
         && total_width > scalar_width
@@ -561,7 +561,7 @@ pub(crate) fn write_to_dst(
         },
     }
 
-    let index_kind = if dst.index.0.is_empty() {
+    let index_kind = if dst.index.indices.is_empty() {
         IndexKind::Static(0)
     } else if dst.index.is_const() {
         let indices = dst.index.eval_value(&mut ctx.eval_ctx).ok_or_else(|| {
@@ -592,7 +592,7 @@ pub(crate) fn write_to_dst(
             )));
         }
         let idx_bits = arith::index_bits_for(num_elements);
-        let idx_nets = synthesize_expr(ctx, &dst.index.0[0], current, idx_bits)?;
+        let idx_nets = synthesize_expr(ctx, &dst.index.indices[0], current, idx_bits)?;
         IndexKind::Dynamic {
             idx_nets,
             num_elements,

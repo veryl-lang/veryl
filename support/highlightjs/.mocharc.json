@@ -1,0 +1,4 @@
+{
+  "spec": "test/markup.js",
+  "checkLeaks": true
+}

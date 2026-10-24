@@ -179,8 +179,8 @@ fn gated_clock_mux() {
 /// flips on every input clock posedge, so the gated clock pulses on
 /// every other input cycle — equivalent to a /2 divider.  Exercises
 /// the path where the derived clock's value depends on an FF output
-/// (the partial-settle must rerun after `ff_commit` to see the new
-/// toggle value).
+/// (the comb must settle again after `ff_commit` for the clock to see the
+/// new toggle value).
 #[test]
 fn ff_derived_divider() {
     let code = r#"
@@ -222,8 +222,8 @@ fn ff_derived_divider() {
 }
 
 /// FF output propagated through two comb-derived clocks in series.
-/// Verifies that the dependency closure includes transitively-reachable
-/// comb stmts (div_a feeds div_b).
+/// Verifies that a clock derived from another derived clock (div_a feeds
+/// div_b) sees its source's settled value.
 #[test]
 fn ff_copy_clock() {
     let code = r#"
@@ -261,7 +261,7 @@ fn ff_copy_clock() {
 
 /// /2 → /4 chain of FF dividers built from logic toggles + gated
 /// clocks.  Exercises the fixpoint loop: `div2` rising fires
-/// `always_ff (div2)` which toggles `tog_4`, after which the partial
+/// `always_ff (div2)` which toggles `tog_4`, after which the
 /// re-settle must reflect the new value of `div4` so the second
 /// always_ff fires on the same simulator step.
 #[test]
@@ -717,14 +717,11 @@ fn packed_struct_array_dynamic_field_ff() {
     }
 }
 
-/// The eval closure inherits the comb list's order, and a scope the
-/// dependency sort could not linearize leaves a reader ahead of its
-/// producer there.  One pass then evaluates the gate from the value its
-/// producer held before this edge, the rising edge is never seen, and every
-/// flop on the gated clock stops.  Reversing the chunk reproduces that order
-/// on a design small enough to state the expected counts for.
+/// A second-stage gate reading the first must see the first's value from
+/// this edge, not the previous one: a gate evaluated from the stale value
+/// never sees the rising edge, and the second domain stops.
 #[test]
-fn gated_clock_closure_order_with_a_backward_edge() {
+fn second_stage_gate_sees_the_first_stage_of_the_same_edge() {
     let code = r#"
     module Top (
         i_clk: input  '_ clock,
@@ -745,51 +742,15 @@ fn gated_clock_closure_order_with_a_backward_edge() {
     }
     "#;
 
-    let mut exercised = 0;
     for config in Config::all() {
         dbg!(&config);
-        let mut ir = analyze(code, &config);
-        // A single batched chunk has no order to reverse; those configs
-        // cannot carry the defect, so they are not evidence either way.
-        if ir.derived_clock_eval_stmts.len() < 2 {
-            continue;
-        }
-        exercised += 1;
-        ir.derived_clock_eval_stmts.reverse();
-        // Any order of N statements converges in N passes.
-        let passes = ir.derived_clock_eval_stmts.len();
-        ir.derived_clock_eval_passes = passes;
-
-        // NEGATIVE CONTROL: the same reversed chunk with the single pass the
-        // closure used to get.  Without this the test would also pass on an
-        // order that never needed the extra passes.
-        let mut one = analyze(code, &config);
-        one.derived_clock_eval_stmts.reverse();
-        one.derived_clock_eval_passes = 1;
-        let mut sim_one = Simulator::new(one, None);
-        let clk_one = sim_one.get_clock("i_clk").unwrap();
-        let rst_one = sim_one.get_reset("i_rst").unwrap();
-        sim_one.set("i_en1", Value::new(1, 1, false));
-        sim_one.set("i_en2", Value::new(1, 1, false));
-        sim_one.step_reset(&clk_one, &rst_one);
-        for _ in 0..6 {
-            sim_one.step(&clk_one);
-        }
-        assert_ne!(
-            sim_one.get("o_b").unwrap(),
-            Value::new(6, 8, false),
-            "vacuous: one pass over the reversed chunk already gave the right \
-             answer, so the order carries no backward edge, {config:?}",
-        );
-
-        let mut sim = Simulator::new(ir, None);
+        let mut sim = Simulator::new(analyze(code, &config), None);
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_en1", Value::new(1, 1, false));
         sim.set("i_en2", Value::new(1, 1, false));
         sim.step_reset(&clk, &rst);
-
         for _ in 0..6 {
             sim.step(&clk);
         }
@@ -801,7 +762,7 @@ fn gated_clock_closure_order_with_a_backward_edge() {
         assert_eq!(
             sim.get("o_b").unwrap(),
             Value::new(6, 8, false),
-            "second-stage gate reads the first through the reversed chunk, {config:?}",
+            "second-stage gate reads the first, {config:?}",
         );
 
         sim.set("i_en2", Value::new(0, 1, false));
@@ -818,11 +779,23 @@ fn gated_clock_closure_order_with_a_backward_edge() {
             Value::new(6, 8, false),
             "{config:?}"
         );
+
+        sim.set("i_en1", Value::new(0, 1, false));
+        sim.set("i_en2", Value::new(1, 1, false));
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(10, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(6, 8, false),
+            "a closed first stage closes the second, {config:?}"
+        );
     }
-    assert!(
-        exercised > 0,
-        "no config produced a multi-statement eval chunk"
-    );
 }
 
 /// The hardened-cell shape: the gate is a cell two levels down, its output
@@ -1004,5 +977,1031 @@ fn a_clock_chained_off_a_negedge_flop_keeps_running() {
                 "step {step}: the chained domain must advance on every rise, {config:?}"
             );
         }
+    }
+}
+
+/// A gate written by the SIBLING ARMS of a `case`, off a flop that moves
+/// within the step, so the value must be REBUILT before the edge decision.
+#[test]
+fn gated_clock_written_by_sibling_case_arms() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock   ,
+        i_rst: input  '_ reset   ,
+        i_sel: input  '_ logic<2>,
+        o_cnt: output    logic<8>,
+    ) {
+        var en: logic   ;
+        var st: logic<2>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                st = 0;
+            } else {
+                st = i_sel;
+            }
+        }
+        always_comb {
+            en = 0;
+            case st {
+                2'd0   : { en = 1; }
+                2'd1   : { en = 0; }
+                2'd2   : { en = 1; }
+                default: { en = 0; }
+            }
+        }
+        let clk_g: '_ clock = i_clk & en;
+        always_ff (clk_g, i_rst) {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_sel", Value::new(0, 2, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        let opened = sim.get("o_cnt").unwrap().payload_u128();
+        assert!(
+            opened > 0,
+            "the arm that opens the gate must let the clock through, {config:?}",
+        );
+
+        sim.set("i_sel", Value::new(1, 2, false));
+        for _ in 0..2 {
+            sim.step(&clk);
+        }
+        let settled = sim.get("o_cnt").unwrap().payload_u128();
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_cnt").unwrap().payload_u128(),
+            settled,
+            "the arm that closes the gate must stop it, {config:?}",
+        );
+    }
+}
+
+/// The gate depends on an offset with several writers: `nxt` is assigned by
+/// every arm of the `case`, and `arc` reads it.  While `st` is 1 the gate must
+/// stay closed, which holds only if `arc` sees the `nxt` of the arm that ran;
+/// the `nxt` left by `st == 0` would open it.
+#[test]
+fn derived_clock_gate_sees_the_writer_of_the_arm_that_ran() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock   ,
+        i_rst: input  '_ reset   ,
+        i_sel: input  '_ logic<2>,
+        o_cnt: output    logic<8>,
+    ) {
+        var en : logic   ;
+        var nxt: logic<4>;
+        var st : logic<2>;
+        let arc: logic = nxt == 4'd3;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                st = 0;
+            } else {
+                st = i_sel;
+            }
+        }
+        always_comb {
+            en  = 0;
+            nxt = 0;
+            case st {
+                2'd0: {
+                    nxt = 4'd3;
+                    en  = 1;
+                }
+                2'd1: {
+                    nxt = 4'd1;
+                    if arc {
+                        en = 1;
+                    }
+                }
+                default: {
+                    nxt = 4'd0;
+                }
+            }
+        }
+        let clk_g: '_ clock = i_clk & en;
+        always_ff (clk_g, i_rst) {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        let cnt = |sim: &mut Simulator| sim.get("o_cnt").unwrap().payload_u128();
+
+        sim.set("i_sel", Value::new(0, 2, false));
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        // The gate samples `st` as it was before the edge, so each step's
+        // count follows the previous step's `i_sel`.
+        let mut expect = cnt(&mut sim);
+        let seq = [
+            (0, true),
+            (0, true),
+            (1, true),
+            (1, false),
+            (1, false),
+            (2, false),
+            (2, false),
+            (0, false),
+            (0, true),
+            (1, true),
+            (1, false),
+        ];
+        for (sel, opens) in seq {
+            sim.set("i_sel", Value::new(sel, 2, false));
+            sim.step(&clk);
+            expect += u128::from(opens);
+            assert_eq!(cnt(&mut sim), expect, "i_sel={sel}, {config:?}");
+        }
+    }
+}
+
+#[test]
+fn a_clock_net_read_as_data_stays_current() {
+    // `clk_half` both clocks a domain and feeds a mux as data; the mux must
+    // follow the net's level after every step.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+        o_sel: output    logic<8>,
+    ) {
+        var half: logic;
+        always_ff (i_clk, i_rst) {
+            if_reset { half = 0; } else { half = !half; }
+        }
+        let clk_half: '_ clock = half;
+        var cnt: logic<8>;
+        always_ff (clk_half, i_rst) {
+            if_reset { cnt = 0; } else { cnt += 1; }
+        }
+        assign o_cnt = cnt;
+        assign o_sel = if clk_half ? cnt : 8'hff;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for step in 1..=8u64 {
+            sim.step(&clk);
+            let half = step % 2;
+            let cnt = sim.get("o_cnt").unwrap().payload_u128() as u64;
+            assert_eq!(cnt, step.div_ceil(2), "{config:?}");
+            let want = if half == 1 { cnt } else { 0xff };
+            assert_eq!(
+                sim.get("o_sel").unwrap().payload_u128() as u64,
+                want,
+                "the mux must see the clock net's new level, step {step}, {config:?}"
+            );
+        }
+    }
+}
+
+/// Two falling-edge domains, both firing on every master fall.  Each flop
+/// must sample what the posedge commit just produced, which only the settle
+/// before the batch can give it.
+#[test]
+fn negedge_domains_sample_the_settled_comb() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input     logic,
+        o_a  : output    logic<8>,
+        o_p  : output    logic<8>,
+        o_q  : output    logic<8>,
+        o_b  : output    logic<8>,
+        o_c  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        let b: logic<8> = a * 3 + 1;
+        let c: logic<8> = a ^ 8'h5a;
+        let clk_p: '_ clock_negedge = i_clk;
+        let clk_q: '_ clock_negedge = i_clk & i_en;
+        var p: logic<8>;
+        var q: logic<8>;
+        always_ff (clk_p) { p = b; }
+        always_ff (clk_q) { q = c; }
+        assign o_a = a;
+        assign o_p = p;
+        assign o_q = q;
+        // A second reader keeps `b` and `c` from being folded into the flops.
+        assign o_b = b;
+        assign o_c = c;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(1, 1, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..6 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let p = sim.get("o_p").unwrap().payload_u128() as u64;
+            let q = sim.get("o_q").unwrap().payload_u128() as u64;
+            assert_eq!(p, (a * 3 + 1) & 0xff, "clk_p sampled a stale b, {config:?}");
+            assert_eq!(q, a ^ 0x5a, "clk_q sampled a stale c, {config:?}");
+        }
+    }
+}
+
+/// A negedge flop reading an array at a runtime index sees the element's
+/// settled value.
+#[test]
+fn negedge_flop_reads_a_runtime_indexed_element() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_sel: input     logic<2>,
+        o_a  : output    logic<8>,
+        o_q  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        var w: logic<8> [4];
+        assign w[0] = a;
+        assign w[1] = a + 1;
+        assign w[2] = a + 2;
+        assign w[3] = a + 3;
+        let clk_n: '_ clock_negedge = i_clk;
+        var q: logic<8>;
+        always_ff (clk_n) { q = w[i_sel]; }
+        assign o_a = a;
+        assign o_q = q;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_sel", Value::new(1, 2, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..6 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let q = sim.get("o_q").unwrap().payload_u128() as u64;
+            assert_eq!(
+                q,
+                (a + 1) & 0xff,
+                "negedge flop sampled a stale w[1], {config:?}"
+            );
+        }
+    }
+}
+
+/// The converse: the element a negedge flop reads is written at a runtime
+/// index.
+#[test]
+fn negedge_flop_reads_a_runtime_indexed_write() {
+    let code = r#"
+    module Top (
+        i_clk : input  '_ clock,
+        i_rst : input  '_ reset,
+        i_wsel: input     logic<2>,
+        o_a   : output    logic<8>,
+        o_q   : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        var v: logic<8> [4];
+        always_comb {
+            v[i_wsel] = a + 5;
+        }
+        let clk_n: '_ clock_negedge = i_clk;
+        var q: logic<8>;
+        always_ff (clk_n) { q = v[1]; }
+        assign o_a = a;
+        assign o_q = q;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_wsel", Value::new(1, 2, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..6 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let q = sim.get("o_q").unwrap().payload_u128() as u64;
+            assert_eq!(
+                q,
+                (a + 5) & 0xff,
+                "negedge flop sampled a stale v[1], {config:?}"
+            );
+        }
+    }
+}
+
+/// A negedge flop still samples the settled comb once the design wakes up
+/// after idle edges.
+#[test]
+fn negedge_flop_after_a_clean_comb() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_run: input     logic,
+        o_a  : output    logic<8>,
+        o_p  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else if i_run { a += 1; }
+        }
+        let b: logic<8> = a * 3 + 1;
+        let clk_p: '_ clock_negedge = i_clk;
+        var p: logic<8>;
+        always_ff (clk_p) { p = b; }
+        assign o_a = a;
+        assign o_p = p;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_run", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        sim.set("i_run", Value::new(1, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let p = sim.get("o_p").unwrap().payload_u128() as u64;
+            assert_eq!(p, (a * 3 + 1) & 0xff, "{config:?}");
+        }
+    }
+}
+
+/// An unpacked `clock [N]` is N independent nets: each element's edge must
+/// reach only the `always_ff` written on that element.
+#[test]
+fn clock_array_elements_are_separate_nets() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var clk_g: '_ clock [2];
+        assign clk_g[0] = i_clk & i_en[0];
+        assign clk_g[1] = i_clk & i_en[1];
+
+        always_ff (clk_g[0], i_rst) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a += 1;
+            }
+        }
+        always_ff (clk_g[1], i_rst) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_en", Value::new(0b11, 2, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("i_en", Value::new(0b01, 2, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(0, 8, false),
+            "clk_g[1] is gated off, so its counter must not follow clk_g[0]",
+        );
+
+        sim.set("i_en", Value::new(0b10, 2, false));
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(3, 8, false));
+    }
+}
+
+/// The same, with each element handed to a child instance's clock port:
+/// the element has to survive the port connection.
+#[test]
+fn clock_array_element_through_an_instance_port() {
+    let code = r#"
+    module Counter (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+            }
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var clk_g: '_ clock [2];
+        assign clk_g[0] = i_clk & i_en[0];
+        assign clk_g[1] = i_clk & i_en[1];
+
+        inst u_a: Counter (
+            i_clk: clk_g[0],
+            i_rst: i_rst   ,
+            o_cnt: o_a     ,
+        );
+        inst u_b: Counter (
+            i_clk: clk_g[1],
+            i_rst: i_rst   ,
+            o_cnt: o_b     ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_en", Value::new(0b11, 2, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("i_en", Value::new(0b10, 2, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(0, 8, false),
+            "clk_g[0] is gated off",
+        );
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(4, 8, false));
+    }
+}
+
+/// A whole `clock [N]` handed to a child's `clock [N]` port keeps the
+/// element correspondence across the boundary.
+#[test]
+fn clock_array_port_keeps_its_elements() {
+    let code = r#"
+    module Sub (
+        i_clk: input  '_ clock [2],
+        i_rst: input  '_ reset,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        always_ff (i_clk[0], i_rst) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a += 1;
+            }
+        }
+        always_ff (i_clk[1], i_rst) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b += 1;
+            }
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var clk_g: '_ clock [2];
+        assign clk_g[0] = i_clk & i_en[0];
+        assign clk_g[1] = i_clk & i_en[1];
+
+        inst u_sub: Sub (
+            i_clk: clk_g,
+            i_rst: i_rst,
+            o_a  : o_a  ,
+            o_b  : o_b  ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_en", Value::new(0b11, 2, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("i_en", Value::new(0b01, 2, false));
+        for _ in 0..6 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(6, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(0, 8, false));
+    }
+}
+
+/// An unpacked `reset [N]` splits the same way: asserting one element must
+/// not reset the registers held by another.
+#[test]
+fn reset_array_elements_are_separate_nets() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var rst_n: '_ reset_async_low [2];
+        assign rst_n[0] = ~i_rst[0];
+        assign rst_n[1] = ~i_rst[1];
+
+        always_ff (i_clk, rst_n[0]) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a += 1;
+            }
+        }
+        always_ff (i_clk, rst_n[1]) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+
+        sim.set("i_rst", Value::new(0b11, 2, false));
+        sim.step(&clk);
+        sim.set("i_rst", Value::new(0b00, 2, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(5, 8, false));
+
+        // Only rst_n[0] asserts: the other counter keeps running.
+        sim.set("i_rst", Value::new(0b01, 2, false));
+        sim.step(&clk);
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(0, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(6, 8, false),
+            "rst_n[1] stayed deasserted",
+        );
+    }
+}
+
+/// A PORT array of the TOP module has no parent to take its element from,
+/// so every element's `always_ff` has to ride the one edge `get_clock`
+/// names, or it never runs at all.
+#[test]
+fn top_clock_array_port_folds_onto_one_edge() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock [2],
+        i_rst: input  '_ reset    ,
+        o_a  : output    logic<8> ,
+        o_b  : output    logic<8> ,
+    ) {
+        always_ff (i_clk[0], i_rst) {
+            if_reset { o_a = 0; } else { o_a += 1; }
+        }
+        always_ff (i_clk[1], i_rst) {
+            if_reset { o_b = 0; } else { o_b += 1; }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        // The second element is the one that silently stops.
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(4, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(4, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+/// The reset side folds the same way, but `set_reset_level` names the
+/// variable rather than an element, so there is no way to assert one from
+/// outside and watch it.  Pin the identity instead.
+#[test]
+fn top_reset_array_port_leaves_no_unreachable_event() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock    ,
+        i_rst: input  '_ reset [2],
+        o_a  : output    logic<8> ,
+        o_b  : output    logic<8> ,
+    ) {
+        always_ff (i_clk, i_rst[0]) {
+            if_reset { o_a = 0; } else { o_a += 1; }
+        }
+        always_ff (i_clk, i_rst[1]) {
+            if_reset { o_b = 0; } else { o_b += 1; }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let resets: Vec<Event> = ir
+            .event_statements
+            .keys()
+            .filter(|e| matches!(e, Event::Reset(..)))
+            .cloned()
+            .collect();
+        let named = Simulator::new(ir, None).get_reset("i_rst").unwrap();
+        // An element that lands anywhere else -- on its own index, or on an
+        // id synthesized for an internal net -- is one no caller can assert.
+        assert_eq!(resets, vec![named], "{config:?}");
+    }
+}
+
+/// A clock passed through a `logic` wire.
+#[test]
+fn copied_clock_joins_the_master_event() {
+    let code = r#"
+    module Sub (
+        i_clk: input  '_ clock  ,
+        i_d  : input     logic<8>,
+        o_q  : output    logic<8>,
+    ) {
+        always_ff (i_clk) {
+            o_q = i_d;
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock  ,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var c    : logic;
+        assign c = i_clk;
+        let c_clk: '_ clock = c;
+        always_ff (i_clk) {
+            o_a = o_a + 1;
+        }
+        inst u: Sub (
+            i_clk: c_clk,
+            i_d  : o_a  ,
+            o_q  : o_b  ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        assert!(
+            sim.ir.derived_clock_schedule.clocks.is_empty(),
+            "the copied clock must not be monitored as a derived clock",
+        );
+        let clocks = sim
+            .ir
+            .event_statements
+            .keys()
+            .filter(|e| matches!(e, Event::Clock(..)))
+            .count();
+        assert_eq!(clocks, 1, "both flops must share the master's event");
+
+        let clk = sim.get_clock("i_clk").unwrap();
+        sim.set("o_a", Value::new(0, 8, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(4, 8, false),
+            "the copied-clock flop must sample o_a before the edge",
+        );
+    }
+}
+
+#[test]
+fn clock_copied_through_inlined_logic_wires_joins_the_master_event() {
+    // `let` wires are inlined, unlike `var` and clock ports, so the copy
+    // stacks a `& 1` per link.
+    let code = r#"
+    module Leaf (
+        i_clk: input  '_ logic   ,
+        i_d  : input     logic<8>,
+        o_q  : output    logic<8>,
+    ) {
+        let w0: logic      = i_clk;
+        let w1: logic      = w0;
+        let k : '_ clock   = w1;
+        always_ff (k) {
+            o_q = i_d;
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock  ,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        let l0: logic = i_clk;
+        let l1: logic = l0;
+        always_ff (i_clk) {
+            o_a = o_a + 1;
+        }
+        inst u: Leaf (
+            i_clk: l1 ,
+            i_d  : o_a,
+            o_q  : o_b,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // 4-state compiles the copies into one block before the schedule
+        // reads them.
+        if !config.use_4state {
+            assert!(
+                sim.ir.derived_clock_schedule.clocks.is_empty(),
+                "the copied clock must not be monitored as a derived clock",
+            );
+            assert_eq!(sim.ir.derived_clock_schedule.aliases.len(), 1);
+        }
+        let clk = sim.get_clock("i_clk").unwrap();
+        sim.set("o_a", Value::new(0, 8, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(4, 8, false));
+    }
+}
+
+#[test]
+fn gated_clock_is_not_a_copy() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock  ,
+        i_en : input  '_ logic  ,
+        o_cnt: output    logic<8>,
+    ) {
+        let clk_g: '_ clock = i_clk & i_en;
+        always_ff (clk_g) {
+            o_cnt = o_cnt + 1;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let sim = Simulator::new(ir, None);
+        assert_eq!(sim.ir.derived_clock_schedule.clocks.len(), 1);
+        assert!(sim.ir.derived_clock_schedule.aliases.is_empty());
+    }
+}
+
+/// A posedge copy of a `clock_negedge` input rises when the input falls.
+#[test]
+fn copy_of_a_negedge_input_keeps_its_own_edge() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock_negedge,
+        o_a  : output    logic<8>     ,
+        o_b  : output    logic<8>     ,
+    ) {
+        var c    : logic;
+        assign c = i_clk;
+        let c_clk: '_ clock = c;
+        always_ff (i_clk) {
+            o_a = o_a + 1;
+        }
+        always_ff (c_clk) {
+            o_b = o_b + 1;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let sim = Simulator::new(ir, None);
+        assert!(sim.ir.derived_clock_schedule.aliases.is_empty());
+        assert_eq!(sim.ir.derived_clock_schedule.clocks.len(), 1);
+    }
+}
+
+/// The master's event holds only statements moved from the copy, so their
+/// comb-write classification must move with them.
+#[test]
+fn master_event_made_only_of_copied_clock_flops() {
+    let code = r#"
+    module Sub (
+        i_clk: input  '_ clock  ,
+        i_rst: input  '_ reset  ,
+        o_q  : output    logic<8>,
+    ) {
+        var r: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r = 0;
+            } else {
+                r = r + 3;
+            }
+        }
+        assign o_q = r ^ 8'h5a;
+    }
+
+    module Top (
+        i_clk: input  '_ clock  ,
+        i_rst: input  '_ reset  ,
+        o_b  : output    logic<8>,
+    ) {
+        var c    : logic;
+        assign c = i_clk;
+        let c_clk: '_ clock = c;
+        inst u: Sub (
+            i_clk: c_clk,
+            i_rst       ,
+            o_q  : o_b  ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(12 ^ 0x5a, 8, false));
+    }
+}
+
+#[test]
+fn copy_of_a_divided_clock_joins_its_event() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock  ,
+        i_rst: input  '_ reset  ,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var r_div: logic;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r_div = 0;
+            } else {
+                r_div = ~r_div;
+            }
+        }
+        let div_clk: '_ clock = r_div;
+        var c      : logic;
+        assign c = div_clk;
+        let c_clk: '_ clock = c;
+        always_ff (div_clk, i_rst) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a = o_a + 1;
+            }
+        }
+        always_ff (c_clk, i_rst) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b = o_a;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        assert_eq!(sim.ir.derived_clock_schedule.clocks.len(), 1);
+        assert_eq!(sim.ir.derived_clock_schedule.aliases.len(), 1);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(4, 8, false),
+            "the copy must sample o_a before the shared edge",
+        );
     }
 }

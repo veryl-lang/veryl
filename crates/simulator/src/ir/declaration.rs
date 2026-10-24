@@ -1,11 +1,11 @@
-use crate::backend::inst::{
-    ReuseOutcome, port_alias_enabled, try_compile_inst_chunks, try_reuse_or_claim,
-};
+use crate::backend::inst::{ReuseOutcome, try_compile_inst_chunks};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
-use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
+use crate::ir::module::{
+    BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
+};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
@@ -15,7 +15,8 @@ use crate::ir::statement::{
     size_literal_rhs,
 };
 use crate::ir::variable::{
-    ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
+    ModuleVariableMeta, VarOffset, align_up_64, collect_string_widths, create_variable_meta,
+    ff_cacheline_pad_enabled,
 };
 use crate::ir::{Event, ProtoExpression, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
@@ -81,6 +82,34 @@ fn reset_active_low(context: &mut Context, id: air::VarId) -> bool {
     }
 }
 
+/// Which element of a `clock [N]` / `reset [N]` an `always_ff` sits on.
+/// A scalar indexes nothing and is element 0.
+fn edge_element(
+    context: &mut Context,
+    id: air::VarId,
+    index: &air::VarIndex,
+    token: &TokenRange,
+) -> Result<u32, SimulatorError> {
+    if index.dimension() == 0 {
+        return Ok(0);
+    }
+    let scope = context.scope();
+    let Some(values) = index
+        .is_const()
+        .then(|| index.eval_value(&mut scope.analyzer_context))
+        .flatten()
+    else {
+        return Err(SimulatorError::unsupported_description(token));
+    };
+    let Some(meta) = scope.variable_meta.get(&id) else {
+        return Ok(0);
+    };
+    let Some(elem) = meta.r#type.array.calc_index(&values) else {
+        return Err(SimulatorError::unsupported_description(token));
+    };
+    Ok(elem as u32)
+}
+
 /// True when the reset asserts as an event of its own rather than being
 /// sampled at a clock edge.
 fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
@@ -91,29 +120,6 @@ fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
             .map(|(_, sync)| !sync)
             .unwrap_or(!context.config.abstract_reset_sync),
     }
-}
-
-/// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
-///
-/// Dependency edges come in two classes:
-///
-/// - SEMANTIC edges the final order must respect for sequential
-///   correctness: single-writer RAW, (same-block) prior-writer binding,
-///   WAR, and WAW.
-/// - BEST-EFFORT edges that only improve settle locality: a reader with no
-///   same-block prior writer (split-driver nets, cross-block reads) is
-///   placed after every overlapping writer so it sees settled values in
-///   one pass.
-///
-/// Offset- and statement-granularity conflation (whole `if` statements,
-/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
-/// out of edges no wire of the circuit closes.  The sort does NOT answer
-/// one by dropping edges: a synthesisable design has an order that needs a
-/// single settle pass, so a cycle here means the statements are tracked
-/// more coarsely than the circuit, and the cure is to split them.  The
-/// cycle is reported to the caller, which splits and asks again.
-pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-    stable_topo_sort_impl(statements, None, None).0
 }
 
 /// Which branch a piece kept (1-based; `0` = not a branch of a conditional).
@@ -135,8 +141,8 @@ pub(crate) fn branch_tag(stmt: &ProtoStatement) -> usize {
 
 /// Result of the block-aware sort: the schedule, an exact required-pass
 /// hint (`Some(1)` when one settle pass provably suffices), and whether
-/// the sort fell back to source order (the caller then runs its
-/// combinational-loop diagnostic).
+/// the sort fell back to source order (callers split and ask again, or
+/// decline to use the order).
 pub(crate) type SortOutcome = (Vec<ProtoStatement>, Option<usize>, bool);
 
 /// Block-aware variant: `blocks[i]` is the source block (always_comb /
@@ -149,7 +155,17 @@ pub(crate) fn stable_topo_sort_with_blocks(
     statements: Vec<ProtoStatement>,
     blocks: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), None)
+    stable_topo_sort_impl(statements, Some(blocks), None, None)
+}
+
+/// As [`stable_topo_sort_with_blocks`]; on a cycle, `on_cycle[i]` also says
+/// whether statement `i` sits in a nontrivial strongly connected component.
+pub(crate) fn stable_topo_sort_with_blocks_on_cycle(
+    statements: Vec<ProtoStatement>,
+    blocks: &[usize],
+    on_cycle: &mut Vec<bool>,
+) -> SortOutcome {
+    stable_topo_sort_impl(statements, Some(blocks), None, Some(on_cycle))
 }
 
 /// As [`stable_topo_sort_with_blocks`], plus the conditional each statement is
@@ -159,7 +175,44 @@ pub(crate) fn stable_topo_sort_with_pieces(
     blocks: &[usize],
     groups: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), Some(groups))
+    stable_topo_sort_impl(statements, Some(blocks), Some(groups), None)
+}
+
+/// First token anywhere in a statement tree.  Only `Assign` carries one, so a
+/// conditional or a block reports `@generated` and a cycle through it cannot be
+/// located in the source at all; the nearest assign inside it names the scope.
+fn nested_token(stmt: &ProtoStatement) -> Option<TokenRange> {
+    if let Some(t) = stmt.token().filter(|t| *t != Default::default()) {
+        return Some(t);
+    }
+    let kids: Vec<&ProtoStatement> = match stmt {
+        ProtoStatement::If(x) => x.true_side.iter().chain(x.false_side.iter()).collect(),
+        ProtoStatement::Case(c) => c
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(c.default.iter())
+            .collect(),
+        ProtoStatement::For(f) => f.body.iter().collect(),
+        ProtoStatement::SequentialBlock(b) => b.iter().collect(),
+        ProtoStatement::CompiledBlock(cb) => cb.original_stmts.iter().collect(),
+        _ => return None,
+    };
+    kids.into_iter().find_map(nested_token)
+}
+
+/// `file:line` of the nearest token, `~` marking one borrowed from a nested
+/// statement rather than the statement's own.
+fn nested_where(stmt: &ProtoStatement) -> String {
+    match nested_token(stmt) {
+        Some(t) => {
+            let src = t.beg.source.to_string();
+            let file = src.rsplit('/').next().unwrap_or(&src).to_string();
+            let own = stmt.token().is_some_and(|o| o != Default::default());
+            format!("{file}:{}{}", t.beg.line, if own { "" } else { "~" })
+        }
+        None => "generated".to_string(),
+    }
 }
 
 /// ` @file:line` for a diagnostic, empty when the statement carries no token.
@@ -217,15 +270,51 @@ fn where_branch(stmt: &ProtoStatement) -> String {
     }
 }
 
+/// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
+///
+/// Dependency edges come in two classes:
+///
+/// - SEMANTIC edges the final order must respect for sequential
+///   correctness: single-writer RAW, (same-block) prior-writer binding,
+///   WAR, and WAW.
+/// - SETTLED-READ edges: a reader with no same-block prior writer
+///   (split-driver nets, cross-block reads) is placed after every
+///   overlapping writer so it sees settled values; without them the order
+///   needs extra settle passes.
+///
+/// Offset- and statement-granularity conflation (whole `if` statements,
+/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
+/// out of edges no wire of the circuit closes.  The sort does NOT answer
+/// one by dropping edges: a synthesisable design has an order that needs a
+/// single settle pass, so a cycle here means the statements are tracked
+/// more coarsely than the circuit, and the cure is to split them.  The
+/// cycle is reported to the caller, which splits and asks again, or declines
+/// to use the order.
 fn stable_topo_sort_impl(
     statements: Vec<ProtoStatement>,
     blocks: Option<&[usize]>,
     groups: Option<&[usize]>,
+    on_cycle: Option<&mut Vec<bool>>,
 ) -> SortOutcome {
     let n = statements.len();
     if n <= 1 {
         return (statements, Some(1), false);
     }
+    // `VERYL_STAGE_TIME=1`: which of the five sections below the sort spends
+    // its time in.  They have very different complexity in the number of
+    // WRITES per variable, so a design that splits finely can move the cost
+    // from one to another without changing the statement count much.
+    let time_stages = crate::ir::module::stage_time_enabled();
+    let mut t = time_stages.then(std::time::Instant::now);
+    let mark = move |what: &str, t: &mut Option<std::time::Instant>| {
+        if let Some(t) = t {
+            log::info!(
+                "stage_time (sort n={n}): {what} {:.3}s",
+                t.elapsed().as_secs_f64()
+            );
+            *t = std::time::Instant::now();
+        }
+    };
 
     // writer_ranges values are in ascending statement order; the edge
     // rules below rely on it.
@@ -233,21 +322,32 @@ fn stable_topo_sort_impl(
     let mut stmt_reads: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
     let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
     {
+        // A runtime-indexed write is reported as its first and last element
+        // only; the elements between them have to be materialized here or
+        // their readers bind to no writer at all. See `ReadOffsets`.
+        let read_offsets = ReadOffsets::collect(&statements);
         let mut ins = vec![];
         let mut bit_outs = vec![];
+        let mut interior = vec![];
         for (i, s) in statements.iter().enumerate() {
             ins.clear();
             let mut outs = vec![];
             s.gather_variable_offsets(&mut ins, &mut outs);
-            stmt_outputs.push(outs);
             let mut reads = vec![];
             s.gather_reads_with_ranges(&mut reads);
             stmt_reads.push(reads);
             bit_outs.clear();
             gather_bit_aware_outputs(s, &mut bit_outs);
+            interior.clear();
+            read_offsets.interior_writes(s, &mut interior);
+            // An interior element carries no bit range of its own: the write
+            // covers the whole element.
+            outs.extend_from_slice(&interior);
+            bit_outs.extend(interior.iter().map(|off| (*off, None)));
             for &(off, br) in &bit_outs {
                 writer_ranges.entry(off).or_default().push((i, br));
             }
+            stmt_outputs.push(outs);
         }
     }
 
@@ -255,8 +355,9 @@ fn stable_topo_sort_impl(
     // Dedup per stmt so repeated writes (e.g. multiple case arms touching
     // the same var) don't inflate the downstream in-degree count.
     let mut writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    let mut unique_outs: HashSet<VarOffset> = HashSet::default();
     for (i, outs) in stmt_outputs.iter().enumerate() {
-        let mut unique_outs: HashSet<VarOffset> = HashSet::default();
+        unique_outs.clear();
         for &key in outs {
             if unique_outs.insert(key) {
                 writers.entry(key).or_default().push(i);
@@ -305,6 +406,8 @@ fn stable_topo_sort_impl(
         }
         split_driver.insert(*key);
     }
+
+    mark("gather+split_driver", &mut t);
 
     // --- Edge construction ---------------------------------------------
     let mut adj_sem: Vec<HashSet<usize>> = vec![HashSet::default(); n];
@@ -434,8 +537,20 @@ fn stable_topo_sort_impl(
             if *p <= reader_idx || !ranges_overlap(*wr, rr) || exclusive_pieces(reader_idx, *p) {
                 continue;
             }
+            // `None` here means "no range recorded", which for a writer of this
+            // variable is the WHOLE VARIABLE -- a partial write carries its
+            // `Some((hi, lo))`.  `usize::MAX` therefore made the coverage test
+            // unsatisfiable: writers that between them cover every bit still
+            // could not cover it, and the exact pass hint was refused.  The
+            // width is the variable's, so an unknown one still falls back to
+            // MAX.
             let (hi, lo) = match wr {
-                None => (usize::MAX, 0),
+                None => (
+                    crate::ir::module::assign_width_of(&statements[*p], *key)
+                        .map(|w| w.saturating_sub(1))
+                        .unwrap_or(usize::MAX),
+                    0,
+                ),
                 Some((hi, lo)) => (*hi, *lo),
             };
             if !merged.iter().any(|(m_lo, m_hi)| *m_lo <= lo && hi <= *m_hi) {
@@ -448,8 +563,81 @@ fn stable_topo_sort_impl(
     // RAW, range-filtered: a read of `x[A]` does not depend on a writer
     // of `x[B]` (packed per-bit drivers, pipeline-phase vectors).
     let mut relevant: Vec<usize> = Vec::new();
+    let mut split_reads: Vec<(VarOffset, BitRange)> = Vec::new();
+    // `[lo, hi]` minus `spans`, and its part inside them, as `(hi, lo)`.
+    let carve = |lo: usize, hi: usize, spans: &[BitRange]| -> (Vec<BitRange>, Vec<BitRange>) {
+        let mut sorted: Vec<(usize, usize)> =
+            spans.iter().flatten().map(|&(h, l)| (l, h)).collect();
+        sorted.sort_unstable();
+        let (mut outside, mut inside) = (Vec::new(), Vec::new());
+        let mut next = lo;
+        for (l, h) in sorted {
+            if next > hi {
+                break;
+            }
+            if h < next {
+                continue;
+            }
+            if l > next {
+                outside.push(Some(((l - 1).min(hi), next)));
+            }
+            let start = l.max(next);
+            if start <= hi {
+                inside.push(Some((h.min(hi), start)));
+            }
+            next = h + 1;
+        }
+        if next <= hi {
+            outside.push(Some((hi, next)));
+        }
+        (outside, inside)
+    };
     for (reader_idx, reads) in stmt_reads.iter().enumerate() {
+        // Bits the reader writes itself are produced inside it; of the rest,
+        // the bits an earlier statement of its block writes bind to that
+        // statement, and the others are settled values of other writers.
+        // Each part takes its own edges.
+        split_reads.clear();
         for (key, rr) in reads {
+            let ranges_where = |keep: &dyn Fn(usize) -> bool| -> Vec<BitRange> {
+                writer_ranges
+                    .get(key)
+                    .into_iter()
+                    .flatten()
+                    .filter(|(p, _)| keep(*p))
+                    .map(|(_, wr)| *wr)
+                    .collect()
+            };
+            let Some((hi, lo)) = *rr else {
+                split_reads.push((*key, *rr));
+                continue;
+            };
+            let bound_here = writer_ranges.get(key).is_some_and(|ws| {
+                ws.iter().any(|(p, _)| {
+                    *p == reader_idx || (*p < reader_idx && same_block(*p, reader_idx))
+                })
+            });
+            if !bound_here {
+                split_reads.push((*key, *rr));
+                continue;
+            }
+            let own = ranges_where(&|p| p == reader_idx);
+            if own.iter().any(|w| w.is_none()) {
+                continue;
+            }
+            let prior = ranges_where(&|p| p < reader_idx && same_block(p, reader_idx));
+            if prior.iter().any(|w| w.is_none()) {
+                let (outside, _) = carve(lo, hi, &own);
+                split_reads.extend(outside.into_iter().map(|r| (*key, r)));
+                continue;
+            }
+            let (outside, _) = carve(lo, hi, &own);
+            for piece in outside.into_iter().flatten() {
+                let (unbound, bound) = carve(piece.1, piece.0, &prior);
+                split_reads.extend(unbound.into_iter().chain(bound).map(|r| (*key, r)));
+            }
+        }
+        for (key, rr) in &split_reads {
             let Some(wranges) = writer_ranges.get(key) else {
                 continue;
             };
@@ -475,18 +663,15 @@ fn stable_topo_sort_impl(
                     cause!(writer_idx, reader_idx, "raw");
                 } else {
                     // Sole overlapping writer comes later: a settled-value
-                    // read, so the edge is best-effort rather than semantic.
+                    // read, so the edge is a settled-read edge, not semantic.
                     adj_opt[writer_idx].insert(reader_idx);
                     cause!(writer_idx, reader_idx, "raw-settled");
                 }
             } else if relevant.binary_search(&reader_idx).is_ok() {
-                // The reader itself writes overlapping bits (shared inlined
-                // scratch, carry chains): the value is produced
-                // intra-statement, so it stays in source order.  KNOWN
-                // LIMITATION: a read its own write does not cover also
-                // depends on the other writers, but edges here close
-                // sem/opt cycles across shared-scratch statement clusters
-                // and collapse real designs to source order.
+                // A read of unknown range from a statement that also writes
+                // the variable: produced intra-statement, so it stays in
+                // source order.  It gets no edges from the other writers, so
+                // a dependency on them is not ordered.
             } else if let Some(&writer_idx) = (!split_driver.contains(key))
                 .then(|| {
                     relevant
@@ -560,6 +745,8 @@ fn stable_topo_sort_impl(
         }
     }
 
+    mark("raw edges", &mut t);
+
     // A write cannot clobber a read that never happens in the same execution:
     // where reader and writer keep DIFFERENT branches of one conditional, the
     // edge is false.  Same tag does not qualify -- see [`branch_tag`].
@@ -577,14 +764,57 @@ fn stable_topo_sort_impl(
             if !has_prior {
                 continue;
             }
-            if let Some(&(next_writer, _)) = wranges.iter().find(|(p, wr)| {
-                *p > reader_idx && ranges_overlap(*wr, *rr) && !exclusive_pieces(reader_idx, *p)
-            }) {
-                adj_sem[reader_idx].insert(next_writer);
-                cause!(reader_idx, next_writer, "war");
+            // Every bit read must be read before the first later write of it,
+            // and that is not one writer when the later ones are partial.
+            // Only bits a prior same-block writer produces are read as a
+            // version; the rest are settled values a later writer supplies.
+            let (r_lo, r_hi) = match rr {
+                Some((hi, lo)) => (*lo, *hi),
+                None => (0, usize::MAX),
+            };
+            let mut unclobbered: Vec<(usize, usize)> = merge_spans(
+                wranges
+                    .iter()
+                    .filter(|(p, _)| *p < reader_idx && same_block(*p, reader_idx))
+                    .filter_map(|(_, wr)| {
+                        let (lo, hi) = match wr {
+                            Some((hi, lo)) => (*lo, *hi),
+                            None => (0, usize::MAX),
+                        };
+                        let (lo, hi) = (lo.max(r_lo), hi.min(r_hi));
+                        (lo <= hi).then_some((lo, hi))
+                    })
+                    .collect(),
+            );
+            for (p, wr) in wranges.iter() {
+                if unclobbered.is_empty() {
+                    break;
+                }
+                if *p <= reader_idx || exclusive_pieces(reader_idx, *p) {
+                    continue;
+                }
+                let (w_lo, w_hi) = match wr {
+                    Some((hi, lo)) => (*lo, *hi),
+                    None => (0, usize::MAX),
+                };
+                if !unclobbered.iter().any(|&(lo, hi)| lo <= w_hi && w_lo <= hi) {
+                    continue;
+                }
+                adj_sem[reader_idx].insert(*p);
+                cause!(reader_idx, *p, "war");
+                unclobbered = unclobbered
+                    .into_iter()
+                    .flat_map(|(lo, hi)| {
+                        let below = (lo < w_lo).then(|| (lo, (w_lo - 1).min(hi)));
+                        let above = (hi > w_hi).then(|| ((w_hi + 1).max(lo), hi));
+                        below.into_iter().chain(above)
+                    })
+                    .collect();
             }
         }
     }
+
+    mark("war edges", &mut t);
 
     // WAW: order writers that can CLOBBER each other.  `split_driver` is
     // per-variable, so one overlapping pair anywhere would otherwise make
@@ -592,28 +822,82 @@ fn stable_topo_sort_impl(
     {
         let mut stack: Vec<usize> = Vec::new();
         let mut visited: HashSet<usize> = HashSet::default();
+        let mut waw_pairs: u64 = 0;
+        let mut waw_pops: u64 = 0;
+        let mut deferred: Vec<(usize, usize, VarOffset)> = Vec::new();
+        // "Can `next` reach `prev`?" is asked once per candidate pair, and
+        // answering it by walking the graph costs the WHOLE graph every time
+        // the answer is NO -- which is the common case, so the walk dominated
+        // elaboration on a large design.  A topological numbering of `adj_sem`
+        // answers NO in one comparison: in a DAG a node can only reach one that
+        // comes LATER, so `pos[prev] < pos[next]` rules the path out outright.
+        // The walk then runs only where the numbering cannot.
+        //
+        // A cycle keeps its nodes out of the Kahn order, and they carry
+        // `usize::MAX`.  The comparison stays exact anyway, because a numbered
+        // node's predecessors are ALL numbered: nothing unnumbered reaches a
+        // numbered one, so `prev` numbered and `next` not is a genuine NO, and
+        // the two cases with `prev` unnumbered fall through to the walk.
+        //
+        // An edge added forward in this numbering keeps it valid, so the
+        // numbering is never retaken; the deferred sweep does not consult it.
+        //
+        // ★ THE DEFERRED PAIRS ARE JUDGED AGAINST A GRAPH THAT ALREADY HOLDS
+        // the fast path's edges, where before every pair saw only the edges of
+        // the pairs before it.  More edges can only make more pairs reachable,
+        // so this blocks the exact-pass hint at least as often as before, never
+        // less.
+        let topo_positions = |adj: &[HashSet<usize>]| -> Vec<usize> {
+            let mut in_degree = vec![0usize; n];
+            for succs in adj.iter() {
+                for &v in succs {
+                    in_degree[v] += 1;
+                }
+            }
+            let mut queue: VecDeque<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+            let mut pos = vec![usize::MAX; n];
+            let mut next_pos = 0usize;
+            while let Some(u) = queue.pop_front() {
+                pos[u] = next_pos;
+                next_pos += 1;
+                for &v in &adj[u] {
+                    in_degree[v] -= 1;
+                    if in_degree[v] == 0 {
+                        queue.push_back(v);
+                    }
+                }
+            }
+            pos
+        };
+        let pos = topo_positions(&adj_sem);
         // Bits each writer names, as one bounding span per statement (`None` =
         // full width).  Bounding rather than exact: a statement writing two
         // ranges of one variable keeps a single entry, and answering "can these
         // two clobber" too generously only keeps an edge.
-        let mut spans: HashMap<VarOffset, HashMap<usize, BitRange>> = HashMap::default();
-        for (key, wranges) in &writer_ranges {
-            let per_stmt = spans.entry(*key).or_default();
-            for (p, wr) in wranges {
-                match per_stmt.entry(*p) {
-                    std::collections::hash_map::Entry::Vacant(e) => {
-                        e.insert(*wr);
-                    }
-                    std::collections::hash_map::Entry::Occupied(mut e) => {
-                        let merged = match (*e.get(), *wr) {
+        // Built per variable where it is used: `writer_ranges` lists a
+        // statement's entries together and in statement order, so merging runs
+        // of one statement yields a list a binary search reads.
+        let mut per_stmt_spans: Vec<(usize, BitRange)> = Vec::new();
+        let merge_spans_of = |wranges: &[(usize, BitRange)], out: &mut Vec<(usize, BitRange)>| {
+            out.clear();
+            for &(p, wr) in wranges {
+                match out.last_mut() {
+                    Some((last, merged)) if *last == p => {
+                        *merged = match (*merged, wr) {
                             (Some((ah, al)), Some((bh, bl))) => Some((ah.max(bh), al.min(bl))),
                             _ => None,
                         };
-                        e.insert(merged);
                     }
+                    _ => out.push((p, wr)),
                 }
             }
-        }
+        };
+        let span_of = |spans: &[(usize, BitRange)], p: usize| -> BitRange {
+            spans
+                .binary_search_by_key(&p, |(q, _)| *q)
+                .ok()
+                .and_then(|i| spans[i].1)
+        };
         // How far back a writer looks for one it can clobber.  Past this the
         // scan falls back to the immediate predecessor -- the previous
         // behaviour, and conservative, since an extra WAW edge only constrains.
@@ -622,20 +906,26 @@ fn stable_topo_sort_impl(
             if split_driver.contains(key) {
                 continue;
             }
-            let per_stmt = spans.get(key);
+            let per_stmt = writer_ranges.get(key).map(|wranges| {
+                merge_spans_of(wranges, &mut per_stmt_spans);
+                &per_stmt_spans[..]
+            });
             let mut prevs: Vec<usize> = Vec::new();
             for (i, &next) in writer_indices.iter().enumerate().skip(1) {
                 prevs.clear();
                 match per_stmt {
                     Some(per_stmt) => {
                         let window = i.saturating_sub(MAX_LOOKBACK);
-                        let next_span = per_stmt.get(&next).copied().flatten();
+                        let next_span = span_of(per_stmt, next);
                         // EVERY overlapping writer before it: chaining
                         // consecutive pairs made the order transitive, and one
                         // edge does not.
-                        prevs.extend(writer_indices[window..i].iter().copied().filter(|p| {
-                            ranges_overlap(per_stmt.get(p).copied().flatten(), next_span)
-                        }));
+                        prevs.extend(
+                            writer_indices[window..i]
+                                .iter()
+                                .copied()
+                                .filter(|&p| ranges_overlap(span_of(per_stmt, p), next_span)),
+                        );
                         // Only a truncated scan leaves a pair unordered, so
                         // keep the old chaining there and nothing at all when
                         // the whole prefix is disjoint.
@@ -649,36 +939,54 @@ fn stable_topo_sort_impl(
                     None => prevs.push(writer_indices[i - 1]),
                 }
                 for &prev in &prevs {
-                    let mut reachable = false;
-                    stack.clear();
-                    stack.push(next);
-                    visited.clear();
-                    while let Some(node) = stack.pop() {
-                        if node == prev {
-                            reachable = true;
-                            break;
-                        }
-                        if visited.insert(node) {
-                            stack.extend(adj_sem[node].iter().copied());
-                        }
-                    }
-                    if !reachable {
+                    if pos[prev] < pos[next] {
                         adj_sem[prev].insert(next);
                         cause!(prev, next, "waw");
                     } else {
-                        // Two overlapping writes whose order the sort cannot
-                        // guarantee: never claim an exact one-pass schedule.
-                        if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
-                            log::info!(
-                                "pass_diag: hint blocked: WAW skip prev #{prev} next #{next} var {key:?}"
-                            );
-                        }
-                        hint_blocked = true;
+                        deferred.push((prev, next, *key));
                     }
                 }
             }
         }
+        // The pairs the numbering could not answer.  `writers` is a HashMap, so
+        // walking them in its order made the verdict depend on the hash: this
+        // sort is what makes the outcome the same on every run.
+        deferred.sort_unstable_by_key(|&(prev, next, _)| (prev, next));
+        for (prev, next, key) in deferred {
+            let mut reachable = false;
+            stack.clear();
+            stack.push(next);
+            visited.clear();
+            waw_pairs += 1;
+            while let Some(node) = stack.pop() {
+                waw_pops += 1;
+                if node == prev {
+                    reachable = true;
+                    break;
+                }
+                if visited.insert(node) {
+                    stack.extend(adj_sem[node].iter().copied());
+                }
+            }
+            if !reachable {
+                adj_sem[prev].insert(next);
+                cause!(prev, next, "waw");
+            } else {
+                // Two overlapping writes whose order the sort cannot
+                // guarantee: never claim an exact one-pass schedule.
+                if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                    log::info!(
+                        "pass_diag: hint blocked: WAW skip prev #{prev} next #{next} var {key:?}"
+                    );
+                }
+                hint_blocked = true;
+            }
+        }
+        if time_stages {
+            log::info!("stage_time (sort n={n}): waw walked={waw_pairs} pops={waw_pops}");
+        }
     }
+    mark("waw edges", &mut t);
 
     // Best-effort edges duplicated in the semantic class are redundant;
     // dropping them must actually remove the constraint.
@@ -732,8 +1040,11 @@ fn stable_topo_sort_impl(
         (sorted_indices.len() == n).then_some(sorted_indices)
     };
 
+    mark("kahn", &mut t);
+
     let Some(sorted_indices) = order else {
-        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+        let diag = std::env::var("VERYL_PASS_DIAG").is_ok();
+        if diag || on_cycle.is_some() {
             use daggy::petgraph::Graph;
             use daggy::petgraph::algo::tarjan_scc;
             let mut g: Graph<(), ()> = Graph::new();
@@ -758,21 +1069,22 @@ fn stable_topo_sort_impl(
                     }
                 }
             }
-            log::info!(
-                "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
-                 reporting it for the caller to split",
-            );
-            trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            if let Some(on_cycle) = on_cycle {
+                *on_cycle = scc_id.iter().map(|&id| id != usize::MAX).collect();
+            }
+            if diag {
+                log::info!(
+                    "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
+                     reporting it for the caller to split",
+                );
+                trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            }
         }
         return (statements, None, true);
     };
 
-    // Reconstruct statement list in sorted order.
-    let mut result: Vec<Option<ProtoStatement>> = statements.into_iter().map(Some).collect();
-    let sorted: Vec<ProtoStatement> = sorted_indices
-        .into_iter()
-        .map(|i| result[i].take().unwrap())
-        .collect();
+    let mut sorted = statements;
+    crate::ir::module::permute_in_place(&mut sorted, &sorted_indices);
     (sorted, (!hint_blocked).then_some(1), false)
 }
 
@@ -800,13 +1112,31 @@ fn trace_sort_cycles(
         return;
     }
     for (k, id) in ids.iter().enumerate() {
+        // One traced cycle names three statements; on a 1600-member SCC that
+        // says nothing about WHICH modules have to be split.
+        let mut files: Vec<(String, usize)> = Vec::new();
+        for i in (0..n).filter(|&i| scc_id[i] == *id) {
+            let f = nested_where(&statements[i]);
+            let f = f.split(':').next().unwrap_or(&f).to_string();
+            match files.iter_mut().find(|(name, _)| *name == f) {
+                Some((_, c)) => *c += 1,
+                None => files.push((f, 1)),
+            }
+        }
+        files.sort_by_key(|a| std::cmp::Reverse(a.1));
+        let top: Vec<String> = files
+            .iter()
+            .take(6)
+            .map(|(f, c)| format!("{f}x{c}"))
+            .collect();
         log::info!(
-            "pass_diag: SCC {k} (id {id}) has {} members",
-            scc_id.iter().filter(|&&x| x == *id).count()
+            "pass_diag: SCC {k} (id {id}) has {} members: {}",
+            scc_id.iter().filter(|&&x| x == *id).count(),
+            top.join(" ")
         );
     }
 
-    const MAX_TRACED: usize = 4;
+    const MAX_TRACED: usize = 32;
     for (k, id) in ids.iter().enumerate().take(MAX_TRACED) {
         let members: Vec<usize> = (0..n).filter(|&i| scc_id[i] == *id).collect();
         log::info!("pass_diag: cycle inside SCC {k}:");
@@ -861,14 +1191,11 @@ fn trace_sort_cycles(
                 ProtoStatement::SystemFunctionCall(_) => "SysFn",
                 _ => "?",
             };
-            let desc = match statements[m].token() {
-                Some(t) => {
-                    let src = t.beg.source.to_string();
-                    let file = src.rsplit('/').next().unwrap_or(&src).to_string();
-                    format!("{}@{file}:{}", kind_of(&statements[m]), t.beg.line)
-                }
-                None => format!("{}@generated", kind_of(&statements[m])),
-            };
+            let desc = format!(
+                "{}@{}",
+                kind_of(&statements[m]),
+                nested_where(&statements[m])
+            );
             // The pair of RANGES is what decides whether the edge is real: the
             // writer's bits on `m` against the reader's bits on `nxt`.
             let mut w_bits = vec![];
@@ -960,9 +1287,24 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
         match src {
             air::Declaration::Comb(x) => {
                 let mut comb_statements = vec![];
+                let prev_in_comb = context.in_comb;
+                context.in_comb = true;
+                let mut conv_err = None;
                 for stmt in &x.statements {
-                    let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
-                    comb_statements.extend(stmts);
+                    match Conv::conv(context, stmt) {
+                        Ok(stmts) => {
+                            let stmts: Vec<ProtoStatement> = stmts;
+                            comb_statements.extend(stmts);
+                        }
+                        Err(e) => {
+                            conv_err = Some(e);
+                            break;
+                        }
+                    }
+                }
+                context.in_comb = prev_in_comb;
+                if let Some(e) = conv_err {
+                    return Err(e);
                 }
                 #[allow(unused_mut)]
                 let mut comb_statements = if comb_statements.len() > 1 {
@@ -983,12 +1325,18 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // Fresh comb offsets for rename temps come from the same
                     // allocator as function locals; instance-reuse records
                     // the post-conv size, so cache replay stays consistent.
+                    // A temp has no `VariableMeta`; recording it as a
+                    // relocation of the variable it serves lets the owner
+                    // tables adopt it (see `Context::comb_reloc`).
                     let use_4state = context.config.use_4state;
                     let comb_total = &mut context.comb_total_bytes;
-                    let mut alloc = |width: usize| -> isize {
+                    let comb_reloc = &mut context.comb_reloc;
+                    let mut alloc = |width: usize, from: isize| -> isize {
                         let nb = crate::ir::variable::native_bytes(width);
+                        let vs = crate::ir::variable::value_size(nb, use_4state);
                         let off = *comb_total as isize;
-                        *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                        *comb_total += vs;
+                        comb_reloc.push((from, off, vs));
                         off
                     };
                     let stats = version_split::run(&mut comb_statements, &mut alloc);
@@ -1022,7 +1370,9 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     statements.extend(stmts);
                 }
 
-                let clock_event = Event::Clock(x.clock.id);
+                let clock_elem =
+                    edge_element(context, x.clock.id, &x.clock.index, &x.clock.comptime.token)?;
+                let clock_event = Event::Clock(x.clock.id, clock_elem);
                 let mut event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
 
                 if let Some(reset) = &x.reset {
@@ -1040,7 +1390,9 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // through both arms in one step runs its reset branch twice,
                     // as it does in SystemVerilog.  A sync reset has no such arm.
                     if reset_is_async(context, reset.id) {
-                        event_statements.insert(Event::Reset(reset.id), true_side.clone());
+                        let elem =
+                            edge_element(context, reset.id, &reset.index, &reset.comptime.token)?;
+                        event_statements.insert(Event::Reset(reset.id, elem), true_side.clone());
                     }
 
                     // The `if (rst)` of the emitted body: a reset produced by
@@ -1133,7 +1485,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // Only a plain (unindexed, unselected) variable
                     // connection can serve as a component output.
                     let output = c.output.as_ref().and_then(|dst| {
-                        (dst.index.0.is_empty()
+                        (dst.index.indices.is_empty()
                             && dst.select.0.is_empty()
                             && dst.select.1.is_none())
                         .then_some(dst.id)
@@ -1197,6 +1549,641 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
     }
 }
 
+fn reference_copies(
+    mask: &num_bigint::BigUint,
+    from: &super::variable::VariableElement,
+    to: &super::variable::VariableElement,
+    full_width: usize,
+    token: TokenRange,
+    initial: bool,
+) -> Vec<ProtoStatement> {
+    let mut statements = vec![];
+    let mut bit = 0;
+    while bit < full_width {
+        if !mask.bit(bit as u64) {
+            bit += 1;
+            continue;
+        }
+        let lsb = bit;
+        while bit + 1 < full_width && mask.bit((bit + 1) as u64) {
+            bit += 1;
+        }
+        let msb = bit;
+        let width = msb - lsb + 1;
+        let select = (width != full_width).then_some((msb, lsb));
+        let expr = ProtoExpression::Variable {
+            var_offset: from.current,
+            select,
+            dynamic_select: None,
+            width,
+            var_full_width: full_width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        };
+        let assign = ProtoAssignStatement {
+            dst: to.current,
+            dst_width: full_width,
+            select,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: to.current_offset(),
+            comb_direct: to.is_ff() && !initial,
+            token,
+        };
+        // A dual-slot FF read-modify-write preserves other bits
+        // from its next slot. Keep copied bits there too, matching
+        // ordinary combinational assignment lowering.
+        if to.is_ff() && to.next_offset != to.current_offset() {
+            statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Ff(to.next_offset),
+                ..assign.clone()
+            }));
+        }
+        statements.push(ProtoStatement::Assign(assign));
+        bit += 1;
+    }
+    statements
+}
+
+/// Port names may denote the same actual interface element. Resolve this
+/// before lowering the child so procedural reads and writes use one slot.
+fn interface_reference_bindings(
+    analyzer: &mut veryl_analyzer::conv::Context,
+    metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+    inst: &air::InstDeclaration,
+    module: &air::Module,
+) -> Result<Vec<air::InstInterfaceBinding>, SimulatorError> {
+    fn targets(
+        analyzer: &mut veryl_analyzer::conv::Context,
+        metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+        module: &air::Module,
+        binding: &air::InstInterfaceBinding,
+    ) -> Option<Vec<VarOffset>> {
+        let child = module.variables.get(&binding.child)?;
+        let parent = metas.get(&binding.parent)?;
+        if !binding.index.is_const()
+            || !binding.select.is_empty()
+            || child.r#type.total_width() != Some(parent.width)
+        {
+            return None;
+        }
+        let selection = binding
+            .index
+            .eval_selection(analyzer, &parent.r#type.array)?;
+        if selection.result_start != 0 || child.r#type.total_array() != Some(selection.length) {
+            return None;
+        }
+        Some(
+            parent.elements[selection.source_start..selection.source_start + selection.length]
+                .iter()
+                .map(|e| e.current)
+                .collect(),
+        )
+    }
+    let mut bindings = vec![];
+    let mut actuals = HashSet::default();
+    for binding in &inst.interface_bindings {
+        if !module
+            .variables
+            .get(&binding.child)
+            .is_some_and(|v| v.kind == air::VarKind::Inout)
+        {
+            continue;
+        }
+        if matches!(module.interface_assignments.get(&binding.child), Some(None)) {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        actuals.extend(
+            targets(analyzer, metas, module, binding)
+                .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?,
+        );
+        bindings.push(binding.clone());
+    }
+    if bindings.is_empty() {
+        return Ok(bindings);
+    }
+    let is_modport = |id: &air::VarId| {
+        module.variables.get(id).is_some_and(|v| {
+            module.port_types.iter().any(|(path, (ty, _))| {
+                matches!(ty.kind, air::TypeKind::Modport(..)) && v.path.starts_with(&path.0)
+            })
+        })
+    };
+    let mut candidates = vec![];
+    for input in &inst.inputs {
+        if is_modport(&input.id)
+            && let air::Expression::Term(factor) = &input.expr
+            && let air::Factor::Variable(parent, index, select, _) = factor.as_ref()
+        {
+            candidates.push(air::InstInterfaceBinding {
+                child: input.id,
+                parent: *parent,
+                index: index.clone(),
+                select: select.clone(),
+            });
+        }
+    }
+    for output in &inst.outputs {
+        if is_modport(&output.id)
+            && let [dst] = output.dst.as_slice()
+        {
+            candidates.push(air::InstInterfaceBinding {
+                child: output.id,
+                parent: dst.id,
+                index: dst.index.clone(),
+                select: dst.select.clone(),
+            });
+        }
+    }
+    for binding in candidates {
+        if let Some(selected) = targets(analyzer, metas, module, &binding)
+            && selected.iter().any(|offset| actuals.contains(offset))
+        {
+            bindings.push(binding);
+        }
+    }
+    Ok(bindings)
+}
+
+fn interface_reference_aliases(
+    context: &mut Context,
+    inst: &air::InstDeclaration,
+    module: &air::Module,
+    bindings: &[air::InstInterfaceBinding],
+) -> Result<Vec<Vec<(air::VarId, usize)>>, SimulatorError> {
+    let mut groups: HashMap<VarOffset, Vec<(air::VarId, usize)>> = HashMap::default();
+    for binding in bindings {
+        let Some(child) = module.variables.get(&binding.child) else {
+            continue;
+        };
+        let scope = context.scope();
+        let parent = scope
+            .variable_meta
+            .get(&binding.parent)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if !binding.index.is_const()
+            || !binding.select.is_empty()
+            || child.r#type.total_width() != Some(parent.width)
+            || matches!(module.interface_assignments.get(&binding.child), Some(None))
+        {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let selection = binding
+            .index
+            .eval_selection(&mut scope.analyzer_context, &parent.r#type.array)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if selection.result_start != 0 || child.r#type.total_array() != Some(selection.length) {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        for element in 0..selection.length {
+            let group = groups
+                .entry(parent.elements[selection.source_start + element].current)
+                .or_default();
+            let member = (binding.child, element);
+            if !group.contains(&member) {
+                group.push(member);
+            }
+        }
+    }
+    Ok(groups.into_values().filter(|g| g.len() > 1).collect())
+}
+
+fn coalesce_interface_references(
+    groups: &[Vec<(air::VarId, usize)>],
+    metas: &mut HashMap<air::VarId, super::variable::VariableMeta>,
+) {
+    if groups.is_empty() {
+        return;
+    }
+    for group in groups {
+        // An FF writer needs FF storage. Combinational writes to that shared
+        // slot use the existing direct-store and shadow-mirroring lowering.
+        let uniform_ff = group
+            .iter()
+            .find(|(id, _)| metas[id].elements.iter().all(|e| e.is_ff()));
+        let shared = uniform_ff
+            .map(|(id, element)| &metas[id].elements[*element])
+            .or_else(|| {
+                group
+                    .iter()
+                    .map(|(id, element)| &metas[id].elements[*element])
+                    .find(|e| e.is_ff())
+            })
+            .unwrap_or(&metas[&group[0].0].elements[group[0].1])
+            .clone();
+        for (id, element) in group {
+            metas.get_mut(id).unwrap().elements[*element] = shared.clone();
+        }
+    }
+    for meta in metas.values_mut() {
+        if meta.elements.len() < 2 {
+            continue;
+        }
+        let first = &meta.elements[0];
+        let stride = meta.elements[1].current_offset() - first.current_offset();
+        meta.uniform_buffer = meta.elements.iter().enumerate().all(|(i, element)| {
+            element.is_ff() == first.is_ff()
+                && element.current_offset() == first.current_offset() + stride * i as isize
+                && (!first.is_ff()
+                    || element.next_offset == first.next_offset + stride * i as isize)
+        });
+    }
+}
+
+fn connect_interface_references(
+    context: &mut Context,
+    inst: &air::InstDeclaration,
+    module: &air::Module,
+    child_metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+    bindings: &[air::InstInterfaceBinding],
+) -> Result<Vec<ProtoStatement>, SimulatorError> {
+    let mut statements = vec![];
+    let mut output_masks: HashMap<VarOffset, num_bigint::BigUint> = HashMap::default();
+    for binding in bindings {
+        if let Some(child) = child_metas.get(&binding.child) {
+            for (element, meta) in child.elements.iter().enumerate() {
+                let mask =
+                    if let Some(Some(writes)) = module.interface_assignments.get(&binding.child) {
+                        &writes.definite_mask[element] | &writes.dynamic_mask[element]
+                    } else if inst.outputs.iter().any(|o| o.id == binding.child) {
+                        (num_bigint::BigUint::from(1u32) << child.width) - 1u32
+                    } else {
+                        num_bigint::BigUint::default()
+                    };
+                *output_masks.entry(meta.current).or_default() |= mask;
+            }
+        }
+    }
+    let mut connected = HashSet::default();
+    for binding in bindings {
+        let child = child_metas
+            .get(&binding.child)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        let scope = context.scope();
+        let parent = scope
+            .variable_meta
+            .get(&binding.parent)
+            .cloned()
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if !binding.index.is_const() {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let selection = binding
+            .index
+            .eval_selection(&mut scope.analyzer_context, &parent.r#type.array)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if !binding.select.is_empty()
+            || parent.width != child.width
+            || selection.result_start != 0
+            || selection.length != child.elements.len()
+        {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        if matches!(module.interface_assignments.get(&binding.child), Some(None)) {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
+        for (element, child_element) in child.elements.iter().enumerate() {
+            let parent_element = &parent.elements[selection.source_start + element];
+            if !connected.insert((parent_element.current, child_element.current)) {
+                continue;
+            }
+            let output_mask = output_masks
+                .get(&child_element.current)
+                .cloned()
+                .unwrap_or_default()
+                & &full;
+            let input_mask = &full ^ &output_mask;
+            for (mask, from, to) in [
+                (&input_mask, parent_element, child_element),
+                (&output_mask, child_element, parent_element),
+            ] {
+                statements.extend(reference_copies(
+                    mask,
+                    from,
+                    to,
+                    child.width,
+                    inst.token,
+                    false,
+                ));
+            }
+        }
+    }
+    Ok(statements)
+}
+
+/// Initial stores operate on the referenced net even when its runtime writer
+/// lives in a child. Recover the binding tree from metas so cached subtrees
+/// receive the same initialization as freshly lowered instances.
+pub(crate) fn propagate_interface_initialization(
+    module: &air::Module,
+    metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+    children: &[ModuleVariableMeta],
+    events: &mut HashMap<Event, Vec<ProtoStatement>>,
+) -> Result<(), SimulatorError> {
+    if !events.keys().any(Event::is_initial) {
+        return Ok(());
+    }
+    struct Binding {
+        from: super::variable::VariableElement,
+        to: super::variable::VariableElement,
+        mask: num_bigint::BigUint,
+        width: usize,
+        token: TokenRange,
+    }
+    fn collect(
+        module: &air::Module,
+        metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+        children: &[ModuleVariableMeta],
+        bindings: &mut Vec<Binding>,
+    ) -> Result<(), SimulatorError> {
+        let mut analyzer = None;
+        for decl in &module.declarations {
+            let air::Declaration::Inst(inst) = decl else {
+                continue;
+            };
+            let air::Component::Module(child_module) = inst.component.as_ref() else {
+                continue;
+            };
+            let Some(child_meta) = children
+                .iter()
+                .find(|m| m.name == inst.name && m.hierarchy == inst.hierarchy)
+            else {
+                continue;
+            };
+            let references = if inst.interface_bindings.iter().any(|b| {
+                child_module
+                    .variables
+                    .get(&b.child)
+                    .is_some_and(|v| v.kind == air::VarKind::Inout)
+            }) {
+                let analyzer = analyzer.get_or_insert_with(|| {
+                    let mut analyzer = veryl_analyzer::conv::Context::default();
+                    analyzer.variables = module.variables.clone();
+                    analyzer.functions = module.functions.clone();
+                    analyzer
+                });
+                interface_reference_bindings(analyzer, metas, inst, child_module)?
+            } else {
+                vec![]
+            };
+            for binding in &references {
+                let writes = child_module
+                    .interface_assignments
+                    .get(&binding.child)
+                    .and_then(Option::as_ref);
+                let (Some(parent), Some(child)) = (
+                    metas.get(&binding.parent),
+                    child_meta.variable_meta.get(&binding.child),
+                ) else {
+                    continue;
+                };
+                let analyzer = analyzer.get_or_insert_with(|| {
+                    let mut analyzer = veryl_analyzer::conv::Context::default();
+                    analyzer.variables = module.variables.clone();
+                    analyzer.functions = module.functions.clone();
+                    analyzer
+                });
+                let Some(selection) = binding.index.eval_selection(analyzer, &parent.r#type.array)
+                else {
+                    continue;
+                };
+                for (element, child_element) in child.elements.iter().enumerate() {
+                    let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
+                    let mask = if let Some(writes) = writes {
+                        &writes.definite_mask[element] | &writes.dynamic_mask[element]
+                    } else if inst.outputs.iter().any(|o| o.id == binding.child) {
+                        full.clone()
+                    } else {
+                        num_bigint::BigUint::default()
+                    };
+                    if mask != 0u32.into() {
+                        bindings.push(Binding {
+                            from: parent.elements[selection.source_start + element].clone(),
+                            to: child_element.clone(),
+                            mask,
+                            width: child.width,
+                            token: inst.token,
+                        });
+                    }
+                    // Any initial store in the child reaches the same net,
+                    // including bits with a runtime writer in the child.
+                    let mask = writes.map(|w| w.mask[element].clone()).unwrap_or(full);
+                    if mask != 0u32.into() {
+                        bindings.push(Binding {
+                            from: child_element.clone(),
+                            to: parent.elements[selection.source_start + element].clone(),
+                            mask,
+                            width: child.width,
+                            token: inst.token,
+                        });
+                    }
+                }
+            }
+            collect(
+                child_module,
+                &child_meta.variable_meta,
+                &child_meta.children,
+                bindings,
+            )?;
+        }
+        Ok(())
+    }
+    let mut bindings = vec![];
+    collect(module, metas, children, &mut bindings)?;
+    if bindings.is_empty() {
+        return Ok(());
+    }
+    fn rewrite(statements: &mut Vec<ProtoStatement>, bindings: &HashMap<VarOffset, Vec<&Binding>>) {
+        let mut result = vec![];
+        for mut statement in std::mem::take(statements) {
+            match &mut statement {
+                ProtoStatement::If(x) => {
+                    rewrite(&mut x.true_side, bindings);
+                    rewrite(&mut x.false_side, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::Case(x) => {
+                    for arm in &mut x.arms {
+                        rewrite(&mut arm.body, bindings);
+                    }
+                    rewrite(&mut x.default, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::For(x) => {
+                    rewrite(&mut x.body, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::SequentialBlock(body) => {
+                    rewrite(body, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::CompiledBlock(x) if !x.original_stmts.is_empty() => {
+                    let mut body = x.original_stmts.as_ref().clone();
+                    rewrite(&mut body, bindings);
+                    result.extend(body);
+                    continue;
+                }
+                _ => {}
+            }
+            if let ProtoStatement::AssignDynamic(x) = &statement {
+                // Match only referenced elements, keeping unconnected storage
+                // on the original path. Test the index before executing the
+                // store so an RHS/LHS update cannot change which alias receives it.
+                let mut indices: Vec<_> = bindings
+                    .keys()
+                    .filter_map(|offset| {
+                        if offset.is_ff() != x.dst_base.is_ff() {
+                            return None;
+                        }
+                        let delta = offset.raw() - x.dst_base.raw();
+                        if x.dst_stride == 0 || delta % x.dst_stride != 0 {
+                            return None;
+                        }
+                        let index = delta / x.dst_stride;
+                        (index >= 0 && (index as usize) < x.dst_num_elements)
+                            .then_some(index as usize)
+                    })
+                    .collect();
+                if x.dst_stride == 0 && bindings.contains_key(&x.dst_base) {
+                    indices.extend(0..x.dst_num_elements);
+                }
+                // A narrow index cannot address every element. Avoid
+                // truncating an unreachable element into a matching index.
+                let index_bits = x
+                    .dst_index_expr
+                    .width()
+                    .saturating_sub(usize::from(x.dst_index_expr.expr_context().signed));
+                indices.retain(|index| {
+                    index_bits >= usize::BITS as usize || (*index >> index_bits) == 0
+                });
+                indices.sort_unstable();
+                indices.dedup();
+                if !indices.is_empty() {
+                    let mut fallback = vec![statement.clone()];
+                    for index in indices.into_iter().rev() {
+                        let slot = x.dst_base.raw() + x.dst_stride * index as isize;
+                        let mut body = vec![ProtoStatement::Assign(ProtoAssignStatement {
+                            dst: VarOffset::new(x.dst_base.is_ff(), slot),
+                            dst_width: x.dst_width,
+                            select: x.select,
+                            dynamic_select: x.dynamic_select.clone(),
+                            rhs_select: x.rhs_select,
+                            expr: x.expr.clone(),
+                            dst_ff_current_offset: x.dst_ff_current_base_offset
+                                + x.dst_stride * index as isize,
+                            comb_direct: x.comb_direct,
+                            token: TokenRange::default(),
+                        })];
+                        rewrite(&mut body, bindings);
+                        let width = x.dst_index_expr.width();
+                        let operand_context = x.dst_index_expr.expr_context();
+                        let cond = ProtoExpression::Binary {
+                            x: Box::new(x.dst_index_expr.clone()),
+                            op: air::Op::Eq,
+                            y: Box::new(ProtoExpression::Value {
+                                value: Value::new(index as u64, width, operand_context.signed),
+                                width,
+                                expr_context: *operand_context,
+                            }),
+                            width: 1,
+                            expr_context: ExpressionContext {
+                                width: 1,
+                                signed: false,
+                            },
+                        };
+                        fallback = vec![ProtoStatement::If(super::statement::ProtoIfStatement {
+                            cond: Some(cond),
+                            true_side: body,
+                            false_side: fallback,
+                        })];
+                    }
+                    result.extend(fallback);
+                    continue;
+                }
+            }
+            let mut written = vec![];
+            match &statement {
+                ProtoStatement::Assign(x) => written.push((x.dst, x.select)),
+                ProtoStatement::SystemFunctionCall(
+                    super::statement::ProtoSystemFunctionCall::Readmemh { elements, .. },
+                ) => {
+                    written.extend(elements.iter().map(|e| (e.current, None)));
+                }
+                _ => {}
+            }
+            let mut stores = vec![statement];
+            let coverage = |range: BitRange, width: usize| match range {
+                Some((msb, lsb)) => {
+                    ((num_bigint::BigUint::from(1u32) << (msb - lsb + 1)) - 1u32) << lsb
+                }
+                None => (num_bigint::BigUint::from(1u32) << width) - 1u32,
+            };
+            let mut seen: HashMap<VarOffset, num_bigint::BigUint> = HashMap::default();
+            for (offset, range) in &written {
+                if let Some(edges) = bindings.get(offset) {
+                    *seen.entry(*offset).or_default() |= coverage(*range, edges[0].width);
+                }
+            }
+            let mut pending: VecDeque<_> = written.into();
+            while let Some((offset, range)) = pending.pop_front() {
+                let Some(edges) = bindings.get(&offset) else {
+                    continue;
+                };
+                for binding in edges {
+                    let mask = coverage(range, binding.width) & &binding.mask;
+                    let previous = seen.entry(binding.to.current).or_default();
+                    let mask = &mask ^ (&mask & &*previous);
+                    if mask == 0u32.into() {
+                        continue;
+                    }
+                    *previous |= &mask;
+                    let copies = reference_copies(
+                        &mask,
+                        &binding.from,
+                        &binding.to,
+                        binding.width,
+                        binding.token,
+                        true,
+                    );
+                    let mut outputs = vec![];
+                    for copy in &copies {
+                        gather_bit_aware_outputs(copy, &mut outputs);
+                    }
+                    pending.extend(outputs);
+                    stores.extend(copies);
+                }
+            }
+            // A testbench settles comb logic between statements. Keep the
+            // original store and reference updates atomic, or the runtime
+            // output copy can overwrite the new parent value first.
+            if stores.len() > 1 {
+                result.push(ProtoStatement::SequentialBlock(stores));
+            } else {
+                result.extend(stores);
+            }
+        }
+        *statements = result;
+    }
+    let mut edges: HashMap<VarOffset, Vec<&Binding>> = HashMap::default();
+    for binding in &bindings {
+        edges.entry(binding.from.current).or_default().push(binding);
+    }
+    for (event, statements) in events {
+        if event.is_initial() {
+            rewrite(statements, &edges);
+        }
+    }
+    Ok(())
+}
+
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
     fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
         let air::Component::Module(child_module) = src.component.as_ref() else {
@@ -1208,35 +2195,31 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();
         child_analyzer_context.variables = child_module.variables.clone();
         child_analyzer_context.functions = child_module.functions.clone();
-        let mut child_ff_table = child_module.ff_table.clone();
-        if context.config.disable_ff_opt {
-            child_ff_table.force_all_ff();
-        }
-
-        // Comb-to-FF hoist: clone child declarations and mutate them —
-        // move comb-side `let` writes into the consuming FF block, then
-        // rebuild the FfTable on the hoisted form.
-        let mut hoisted_child_decls = child_module.declarations.clone();
-        {
-            let plans = veryl_analyzer::ir::comb_to_ff_hoist::plan_hoists(
-                &hoisted_child_decls,
-                &child_ff_table,
-                &child_module.variables,
-            );
-            veryl_analyzer::ir::comb_to_ff_hoist::apply_hoists(
-                &mut hoisted_child_decls,
-                &plans,
-                &child_module.variables,
-            );
-            child_ff_table = air::FfTable::default();
-            for (i, x) in hoisted_child_decls.iter().enumerate() {
-                x.gather_ff(&mut child_analyzer_context, &mut child_ff_table, i);
-            }
-            child_ff_table.update_is_ff(&hoisted_child_decls, &mut child_analyzer_context);
-            if context.config.disable_ff_opt {
-                child_ff_table.force_all_ff();
-            }
-        }
+        crate::ir::module::lower_function_loops(child_module, &mut child_analyzer_context);
+        let peeled = context
+            .peel_cache
+            .entry(Arc::as_ptr(&src.component))
+            .or_insert_with(|| {
+                crate::ir::module::peeled_declarations(child_module, &mut child_analyzer_context)
+            })
+            .clone();
+        let scope = context.scope();
+        let reference_bindings = interface_reference_bindings(
+            &mut scope.analyzer_context,
+            &scope.variable_meta,
+            src,
+            child_module,
+        )?;
+        let reference_aliases =
+            interface_reference_aliases(context, src, child_module, &reference_bindings)?;
+        let reference_ids: HashSet<_> = reference_bindings.iter().map(|b| b.child).collect();
+        let (hoisted_child_decls, child_ff_table) = crate::ir::module::simulated_declarations(
+            child_module,
+            &mut child_analyzer_context,
+            context.config.disable_ff_opt,
+            peeled,
+            &reference_aliases,
+        );
         let child_decls: &[air::Declaration] = &hoisted_child_decls;
 
         let mut ff_start = context.ff_total_bytes as isize;
@@ -1245,18 +2228,26 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.ff_total_bytes = ff_start as usize;
         }
         let comb_start = context.comb_total_bytes as isize;
+        let comb_reloc_start = context.comb_reloc.len();
 
         // Analyzer-IR pre-pass to identify multi-RMW FFs.  Same as
         // ProtoModule::conv but for child module.
-        let multi_rmw_set = analyze_multi_write(
+        let mut multi_rmw_set = analyze_multi_write(
             child_decls,
             &mut child_analyzer_context,
             context.config.disable_ff_opt,
         );
         let dyn_indexed = collect_dyn_indexed_vars(child_decls);
+        let has_reference_aliases = !reference_aliases.is_empty();
+        // Writes through different port names can be partial writes to one
+        // FF. Give their common slot a shadow for ordered read-modify-writes.
+        for group in &reference_aliases {
+            multi_rmw_set.extend(group.iter().copied());
+        }
 
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
+            &collect_string_widths(&child_module.variables, child_decls)?,
             &child_ff_table,
             &multi_rmw_set,
             &dyn_indexed,
@@ -1267,40 +2258,39 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         context.ff_total_bytes += child_ff_count;
         context.comb_total_bytes += child_comb_count;
+        coalesce_interface_references(&reference_aliases, &mut child_variable_meta);
 
         // Alias child input/output port storage to the parent slot it's wired
         // to, eliminating the inter-module copy at settle_comb.  De-aliased only
         // for the reuse-target DUT boundary — see `port_alias_enabled`.
         let component_key = Arc::as_ptr(&src.component);
-        let alias_enabled = port_alias_enabled(
+        let alias_enabled = context.dut_reuse.port_alias_enabled(
             component_key,
             child_ff_count,
             child_comb_count,
             context.in_reuse_dut,
-            context.test_top_id,
-            context.config.dut_reuse,
+            context.config.dut_reuse && !has_reference_aliases,
         );
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
-                let Some(air::Expression::Term(factor)) = input.single() else {
+                if reference_ids.contains(&input.id) {
+                    continue;
+                }
+                let air::Expression::Term(factor) = &input.expr else {
                     continue;
                 };
                 let air::Factor::Variable(parent_id, idx, sel, _) = factor.as_ref() else {
                     continue;
                 };
-                if !idx.0.is_empty() || !sel.is_empty() {
+                if !idx.indices.is_empty() || !sel.is_empty() {
                     continue;
                 }
                 // Reading parent storage directly during an event would
                 // race the parent's own NBA commit; reject when the
                 // parent has any always_ff writer.
                 let parent_scope = context.scope();
-                let parent_has_ff_writer = parent_scope
-                    .ff_table
-                    .table
-                    .iter()
-                    .any(|((vid, _), entry)| *vid == *parent_id && entry.assigned.is_some());
+                let parent_has_ff_writer = parent_scope.ff_table.has_ff_writer(*parent_id);
                 if parent_has_ff_writer {
                     continue;
                 }
@@ -1337,27 +2327,23 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut already_aliased_parent_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for output in &src.outputs {
+                if reference_ids.contains(&output.id) {
+                    continue;
+                }
                 // A concat destructure (multiple dsts) maps each parent var
                 // to a slice of the child port — no whole-var alias exists.
                 let [parent_dst] = output.dst.as_slice() else {
                     continue;
                 };
-                if !parent_dst.index.0.is_empty() || !parent_dst.select.is_empty() {
+                if !parent_dst.index.indices.is_empty() || !parent_dst.select.is_empty() {
                     continue;
                 }
-                let child_output_is_ff = child_ff_table
-                    .table
-                    .iter()
-                    .any(|((vid, _), entry)| *vid == output.id && entry.assigned.is_some());
+                let child_output_is_ff = child_ff_table.has_ff_writer(output.id);
                 if child_output_is_ff {
                     continue;
                 }
                 let parent_scope = context.scope();
-                let parent_has_ff_writer = parent_scope
-                    .ff_table
-                    .table
-                    .iter()
-                    .any(|((vid, _), entry)| *vid == parent_dst.id && entry.assigned.is_some());
+                let parent_has_ff_writer = parent_scope.ff_table.has_ff_writer(parent_dst.id);
                 if parent_has_ff_writer {
                     continue;
                 }
@@ -1402,12 +2388,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // test/instance), restore its subtree relocated to this instance's
         // offsets, skipping IR assembly AND codegen.  `child_variable_meta` and
         // the port copies / event remap below are still rebuilt fresh.
-        let (reuse_hit, claim_guard) = match try_reuse_or_claim(
+        let (reuse_hit, claim_guard) = match context.dut_reuse.try_reuse_or_claim(
             component_key,
             alias_enabled,
             ff_start,
             comb_start,
-            context.config.dut_reuse,
+            context.config.dut_reuse && !has_reference_aliases,
         ) {
             ReuseOutcome::Hit(r) => (Some(r), None),
             ReuseOutcome::Compute(g) => (None, Some(g)),
@@ -1427,7 +2413,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
             };
             for ev in reuse.event_statements.keys() {
-                if let Event::Clock(v) | Event::Reset(v) = ev {
+                if let Event::Clock(v, _) | Event::Reset(v, _) = ev {
                     intern(*v, context);
                 }
             }
@@ -1436,8 +2422,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let rekey = |ev: Event| -> Event {
                 match ev {
-                    Event::Clock(v) => Event::Clock(id_map.get(&v).copied().unwrap_or(v)),
-                    Event::Reset(v) => Event::Reset(id_map.get(&v).copied().unwrap_or(v)),
+                    Event::Clock(v, e) => Event::Clock(id_map.get(&v).copied().unwrap_or(v), e),
+                    Event::Reset(v, e) => Event::Reset(id_map.get(&v).copied().unwrap_or(v), e),
                     other => other,
                 }
             };
@@ -1463,6 +2449,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // where the rest was allocated.
             context.ff_total_bytes = ff_start as usize + reuse.ff_size;
             context.comb_total_bytes = comb_start as usize + reuse.comb_size;
+            context.comb_reloc.extend(reuse.comb_reloc);
         } else {
             let child_scope = ScopeContext {
                 variable_meta: child_variable_meta.clone(),
@@ -1484,11 +2471,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             for decl in child_decls {
                 let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
-                for (event, mut stmts) in proto_decl.event_statements {
-                    all_event_statements
-                        .entry(event)
-                        .and_modify(|v| v.append(&mut stmts))
-                        .or_insert(stmts);
+                for (event, stmts) in proto_decl.event_statements {
+                    merge_event_statements(&mut all_event_statements, event, stmts);
                 }
                 // Move, not clone: `proto_decl` is dropped after this iteration.
                 all_comb_statements.append(&mut proto_decl.comb_statements);
@@ -1510,15 +2494,17 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.in_reuse_dut = prev_in_reuse_dut;
             context.scope_contexts.pop();
 
-            try_compile_inst_chunks(
-                context,
-                src,
-                ff_start,
-                comb_start,
-                alias_enabled,
-                &mut all_event_statements,
-                &mut all_comb_statements,
-            );
+            if !has_reference_aliases {
+                try_compile_inst_chunks(
+                    context,
+                    src,
+                    ff_start,
+                    comb_start,
+                    alias_enabled,
+                    &mut all_event_statements,
+                    &mut all_comb_statements,
+                );
+            }
 
             // Publish this component's whole internal subtree (statements +
             // child-module metas + nested derived-clock candidates) for later
@@ -1540,40 +2526,50 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     &all_post_comb_fns,
                     &all_child_modules,
                     &all_derived_clock_candidates,
+                    &context.comb_reloc[comb_reloc_start..],
                 );
             }
         }
 
+        // Direction-free interface references exchange only the bits written
+        // on each side. Whole-member copies would overwrite disjoint drivers.
+        all_comb_statements.extend(connect_interface_references(
+            context,
+            src,
+            child_module,
+            &child_variable_meta,
+            &reference_bindings,
+        )?);
+
         // Input ports: parent expr → child port var
         for input in &src.inputs {
-            if aliased_input_ids.contains(&input.id) {
+            if aliased_input_ids.contains(&input.id) || reference_ids.contains(&input.id) {
                 continue;
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
 
-            // One expression per port element: an unpacked-array slice, wired
-            // element-wise.
-            if input.exprs.len() != 1 {
-                if input.exprs.len() != child_meta.elements.len() {
+            let input_expr = &input.expr;
+            if let Some(exprs) = super::expression::array_slice_elements(context, input_expr)? {
+                if exprs.len() != child_meta.elements.len() {
                     return Err(SimulatorError::unsupported_description(&src.token));
                 }
-                for (child_element, expr) in child_meta.elements.iter().zip(&input.exprs) {
-                    let mut proto_expr: ProtoExpression = Conv::conv(context, expr)?;
-                    size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
+                all_comb_statements.append(&mut context.pending_statements);
+                for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
+                    size_literal_rhs(&mut expr, None, None, child_meta.width);
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: child_element.current,
                         dst_width: child_meta.width,
                         select: None,
                         dynamic_select: None,
                         rhs_select: None,
-                        expr: proto_expr,
-                        dst_ff_current_offset: 0, // not FF
-                        token: TokenRange::default(),
+                        expr,
+                        dst_ff_current_offset: 0,
+                        comb_direct: false,
+                        token: src.token,
                     }));
                 }
                 continue;
             }
-            let input_expr = &input.exprs[0];
 
             // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
             if let Some(exprs) = const_array_element_exprs(input_expr, child_meta.elements.len()) {
@@ -1586,6 +2582,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1599,6 +2596,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 &child_meta.r#type,
                 child_meta.elements.len(),
             ) {
+                all_comb_statements.append(&mut context.pending_statements);
                 for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
                     size_literal_rhs(&mut expr, None, None, child_meta.width);
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
@@ -1609,6 +2607,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1617,14 +2616,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
             // Array port fed by a bare or constant partial-index variable
             // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.
-            if child_meta.elements.len() > 1
+            // A one-element port is still an ARRAY, so gating on the element
+            // COUNT sent `logic<W> [1]` to the scalar path below, where
+            // `Conv::conv` meets an array-valued expression and raises
+            // `unsupported_description`.
+            if !child_meta.r#type.array.is_empty()
                 && let air::Expression::Term(factor) = input_expr
                 && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
                 && select.is_empty()
             {
                 let parent_scope = context.scope();
                 if let Some(parent_meta) = parent_scope.variable_meta.get(parent_id).cloned() {
-                    let base_index = if index.0.is_empty() {
+                    let base_index = if index.indices.is_empty() {
                         Some(0)
                     } else if let Some(idx_vals) =
                         index.eval_value(&mut parent_scope.analyzer_context)
@@ -1663,6 +2666,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     rhs_select: None,
                                     expr: parent_expr,
                                     dst_ff_current_offset: 0, // not FF
+                                    comb_direct: false,
                                     token: TokenRange::default(),
                                 },
                             ));
@@ -1684,6 +2688,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 rhs_select: None,
                 expr: proto_expr.clone(),
                 dst_ff_current_offset: 0, // not FF
+                comb_direct: false,
                 token: TokenRange::default(),
             }));
         }
@@ -1692,7 +2697,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // (`o: {a, b}`) slices the port value MSB-first within the concat's
         // TOTAL width — truncated / zero-extended like `assign {a, b} = o`.
         for output in &src.outputs {
-            if aliased_output_ids.contains(&output.id) {
+            if aliased_output_ids.contains(&output.id) || reference_ids.contains(&output.id) {
                 continue;
             }
             let child_meta = child_variable_meta.get(&output.id).unwrap();
@@ -1751,6 +2756,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     parent_need_dynamic,
                     parent_width_shape,
                     parent_kind_width,
+                    parent_index_is_absolute_bits,
                 ) = {
                     let parent_scope = context.scope();
                     let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
@@ -1774,6 +2780,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let width = parent_meta.width;
                     let width_shape = parent_meta.r#type.width().clone();
                     let kind_width = parent_meta.r#type.kind.width().unwrap_or(1);
+                    let index_is_absolute_bits = !parent_meta.r#type.kind.is_enum();
                     (
                         parent_index,
                         select,
@@ -1781,6 +2788,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         need_dynamic,
                         width_shape,
                         kind_width,
+                        index_is_absolute_bits,
                     )
                 };
 
@@ -1790,6 +2798,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         &parent_width_shape,
                         &parent_dst.select,
                         parent_kind_width,
+                        parent_index_is_absolute_bits,
                     )?)
                 } else {
                     None
@@ -1832,6 +2841,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 // A concat field spanning multiple parent array elements
                 // has no single rhs_select window.
                 if multi_dst && parent_element_indices.len() != 1 {
+                    return Err(SimulatorError::unsupported_description(&parent_dst.token));
+                }
+
+                // Outside element-wise wiring the child advances alongside the
+                // parent, so the two element counts have to agree. They do not
+                // when a port and its connection disagree on the unpacked
+                // dimensions, which is illegal SystemVerilog (IEEE 1800-2023
+                // 7.6) and which the analyzer reports as `mismatch_assignment`
+                // -- at Warning severity, so the design still reaches here.
+                // Too few child elements ran off the end; too many were
+                // dropped without a word.
+                if !element_wise && parent_element_indices.len() != child_meta.elements.len() {
                     return Err(SimulatorError::unsupported_description(&parent_dst.token));
                 }
 
@@ -1880,6 +2901,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select,
                         expr: child_expr,
                         dst_ff_current_offset: parent_element.current_offset(),
+                        comb_direct: false,
                         token: TokenRange::default(),
                     });
 
@@ -1888,29 +2910,68 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
         }
 
-        // Remap child event keys (clock/reset) to parent VarIds via input port connections
-        let mut child_to_parent_var: HashMap<air::VarId, air::VarId> = HashMap::default();
+        // Remap child event keys to the parent net the port is tied to.  The
+        // element rides along as a base: handing over the whole array lines
+        // the child's element k up with the parent's, handing over one
+        // element ties the child's scalar to that element alone.
+        let mut child_to_parent_var: HashMap<air::VarId, (air::VarId, u32)> = HashMap::default();
         for input in &src.inputs {
-            if let Some(air::Expression::Term(factor)) = input.single()
-                && let air::Factor::Variable(parent_var_id, _, _, _) = factor.as_ref()
+            if let air::Expression::Term(factor) = &input.expr
+                && let air::Factor::Variable(parent_var_id, index, _, _) = factor.as_ref()
             {
-                child_to_parent_var.insert(input.id, *parent_var_id);
+                let base = if index.dimension() == 0 {
+                    Some(0)
+                } else if index.is_const() {
+                    let parent_scope = context.scope();
+                    let values = index.eval_value(&mut parent_scope.analyzer_context);
+                    match (values, parent_scope.variable_meta.get(parent_var_id)) {
+                        (Some(values), Some(meta)) => meta.r#type.array.calc_index(&values),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(base) = base {
+                    child_to_parent_var.insert(input.id, (*parent_var_id, base as u32));
+                }
+            }
+        }
+
+        for binding in &src.interface_bindings {
+            if !child_module
+                .variables
+                .get(&binding.child)
+                .is_some_and(|v| v.kind == air::VarKind::Inout)
+            {
+                continue;
+            }
+            let scope = context.scope();
+            if binding.index.is_const()
+                && let Some(meta) = scope.variable_meta.get(&binding.parent)
+                && let Some(selection) = binding
+                    .index
+                    .eval_selection(&mut scope.analyzer_context, &meta.r#type.array)
+            {
+                child_to_parent_var.insert(
+                    binding.child,
+                    (binding.parent, selection.source_start as u32),
+                );
             }
         }
 
         let mut remapped_events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         for (event, stmts) in all_event_statements {
             let new_event = match &event {
-                Event::Clock(child_id) => {
-                    if let Some(parent_id) = child_to_parent_var.get(child_id) {
-                        Event::Clock(*parent_id)
+                Event::Clock(child_id, elem) => {
+                    if let Some((parent_id, base)) = child_to_parent_var.get(child_id) {
+                        Event::Clock(*parent_id, base + elem)
                     } else {
                         event.clone()
                     }
                 }
-                Event::Reset(child_id) => {
-                    if let Some(parent_id) = child_to_parent_var.get(child_id) {
-                        Event::Reset(*parent_id)
+                Event::Reset(child_id, elem) => {
+                    if let Some((parent_id, base)) = child_to_parent_var.get(child_id) {
+                        Event::Reset(*parent_id, base + elem)
                     } else {
                         event.clone()
                     }
@@ -1951,22 +3012,31 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             if child_port_var_set.contains(vid) {
                 continue;
             }
+            // Inside the child the element told the nets apart; the monitor
+            // below keys on the id alone, so each takes one of its own here.
+            let Some(meta) = child_variable_meta.get(vid) else {
+                continue;
+            };
             if is_reset {
-                if let Some(stmts) = remapped_events.remove(&Event::Reset(*vid)) {
+                let mut reset_kind = None;
+                for (elem_idx, elem) in meta.elements.iter().enumerate() {
+                    let Some(stmts) = remapped_events.remove(&Event::Reset(*vid, elem_idx as u32))
+                    else {
+                        continue;
+                    };
                     let unique_id = context.alloc_internal_event_id();
-                    remapped_events.insert(Event::Reset(unique_id), stmts);
-                    let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
-                        crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
+                    remapped_events.insert(Event::reset(unique_id), stmts);
+                    let (active_low, is_async) = *reset_kind.get_or_insert_with(|| {
+                        let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
+                            crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
+                        });
+                        crate::ir::module::resolved_reset_kind(
+                            &var.r#type.kind,
+                            inst_kinds.get(vid).copied().flatten(),
+                            &context.config,
+                        )
                     });
-                    let (active_low, is_async) = crate::ir::module::resolved_reset_kind(
-                        &var.r#type.kind,
-                        inst_kinds.get(vid).copied().flatten(),
-                        &context.config,
-                    );
-                    if is_async
-                        && let Some(meta) = child_variable_meta.get(vid)
-                        && let Some(elem) = meta.elements.first()
-                    {
+                    if is_async {
                         all_derived_clock_candidates.push((
                             unique_id,
                             elem.current,
@@ -1978,12 +3048,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
                 continue;
             }
-            if let Some(meta) = child_variable_meta.get(vid)
-                && let Some(elem) = meta.elements.first()
-            {
+            for (elem_idx, elem) in meta.elements.iter().enumerate() {
                 let unique_id = context.alloc_internal_event_id();
-                if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid)) {
-                    remapped_events.insert(Event::Clock(unique_id), stmts);
+                if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid, elem_idx as u32)) {
+                    remapped_events.insert(Event::clock(unique_id), stmts);
                 }
                 all_derived_clock_candidates.push((
                     unique_id,

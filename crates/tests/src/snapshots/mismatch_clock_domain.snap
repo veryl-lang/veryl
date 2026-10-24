@@ -1,6 +1,5 @@
 ---
 source: crates/tests/src/lib.rs
-assertion_line: 362
 expression: out
 ---
 mismatch_clock_domain (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_clock_domain)
@@ -14,4 +13,4 @@ mismatch_clock_domain (https://doc.veryl-lang.org/book/07_appendix/02_semantic_e
    ·            ╰── clock domain 'w
  6 │ }
    ╰────
-  help:
+  help: synchronize the crossing and mark it 'unsafe (cdc) { ... }', or correct the domain annotations if the crossing is not real

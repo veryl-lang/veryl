@@ -176,25 +176,149 @@ pub struct FunctionCall {
     pub outputs: CallArgs<Vec<AssignDestination>>,
 }
 
+#[derive(Hash, PartialEq, Eq)]
+struct FunctionValueKey {
+    id: VarId,
+    index: Option<Vec<usize>>,
+    inputs: Vec<(VarPath, Value)>,
+}
+
+/// Reuse pure constant-function results within one evaluation tree. The
+/// cache never survives an outer call, so changing conversion contexts and
+/// captured runtime state cannot make a later evaluation reuse stale data.
+#[derive(Default)]
+pub(crate) struct FunctionValueCache {
+    depth: usize,
+    bits: usize,
+    values: HashMap<FunctionValueKey, Value>,
+}
+
+/// The element values behind an unpacked-array actual argument: the folded
+/// array a const reference carries, or the elements of the variable it names.
+/// Partial indices and slices retain the source's flat element order.
+pub(crate) fn array_arg_values(
+    context: &mut Context,
+    expr: &Expression,
+    len: usize,
+) -> Option<Vec<Value>> {
+    let Expression::Term(factor) = expr else {
+        return None;
+    };
+    match factor.as_ref() {
+        crate::ir::Factor::Value(comptime) => match &comptime.value {
+            ValueVariant::NumericArray(values) => values.get(0..len).map(<[Value]>::to_vec),
+            _ => None,
+        },
+        crate::ir::Factor::Variable(id, index, select, _) => {
+            if index.is_range() {
+                return factor.array_values(context).filter(|x| x.len() == len);
+            }
+            let index = index.eval_value(context)?;
+            let src = context.variables.get(id)?;
+            let (start, end) = src.r#type.array.calc_range(&index)?;
+            if end - start + 1 != len {
+                return None;
+            }
+            let values = src.value.get(start..=end)?.to_vec();
+            if select.is_empty() {
+                return Some(values);
+            }
+            let r#type = src.r#type.clone();
+            let (high, low) = select.eval_value(context, &r#type, false)?;
+            Some(values.into_iter().map(|v| v.select(high, low)).collect())
+        }
+        _ => None,
+    }
+}
+
 impl FunctionCall {
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        !self.comptime.runtime_dependent
+            && context.functions.get(&self.id).is_none_or(|x| x.is_const)
+            && self.outputs.is_empty()
+            && self
+                .inputs
+                .values_mut()
+                .all(|x| x.eval_elaboration_const(context))
+    }
+
     pub fn eval_type(&mut self, context: &mut Context) {
         self.comptime.is_const = self.eval_comptime_flag(context);
     }
 
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
+        #[cfg(test)]
+        VALUE_EVALUATIONS.set(VALUE_EVALUATIONS.get() + 1);
+        context.function_value_cache.depth += 1;
+        let result = self.eval_value_inner(context);
+        context.function_value_cache.depth -= 1;
+        if context.function_value_cache.depth == 0 {
+            context.function_value_cache.values.clear();
+            context.function_value_cache.bits = 0;
+        }
+        result
+    }
+
+    fn eval_value_inner(&self, context: &mut Context) -> Option<Value> {
         let func = context.functions.get(&self.id)?;
+        let mut cacheable = func.is_const && self.outputs.is_empty();
         let func = if let Some(x) = &self.index {
             func.get_function(x)
         } else {
             func.get_function(&[])
         }?;
 
-        // set inputs
+        let mut inputs = Vec::new();
+        let mut input_bits = 0usize;
+        let mut evaluated_inputs = Vec::new();
+        // Evaluate every actual in order, even on a cache hit. Defer copy-in
+        // until all actuals are ready: an actual can call this same function
+        // and overwrite its formals while the outer call is still evaluating.
+        let mut evaluated_arrays = Vec::new();
         for (path, expr) in &self.inputs {
-            let id = func.arg_map.get(path)?;
+            let id = *func.arg_map.get(path)?;
+            let total = context
+                .variables
+                .get(&id)?
+                .r#type
+                .total_array()
+                .unwrap_or(1);
+            if context.variables.get(&id)?.r#type.is_array() {
+                // An unpacked array has no single value to evaluate --
+                // `get_value(&[])` wants one index per dimension -- so the
+                // whole-array actual has to be copied element by element, the
+                // way the simulator's inliner does for the same shape.  Having
+                // no `Value`, it cannot key a cache entry either, so a call
+                // taking one is evaluated every time.
+                let values = array_arg_values(context, expr, total)?;
+                cacheable = false;
+                evaluated_arrays.push((id, values));
+                continue;
+            }
             let value = expr.eval_value(context)?;
-            let var = context.variable_mut(id)?;
+            if cacheable {
+                input_bits = input_bits.saturating_add(value.width().max(64));
+                inputs.push((path.clone(), value.clone()));
+            }
+            evaluated_inputs.push((id, value));
+        }
+        for (id, value) in evaluated_inputs {
+            let var = context.variable_mut(&id)?;
             var.set_value(&[], value, None);
+        }
+        for (id, values) in evaluated_arrays {
+            context.variable_mut(&id)?.value = values;
+        }
+        let key = cacheable.then(|| FunctionValueKey {
+            id: self.id,
+            index: self.index.clone(),
+            inputs,
+        });
+        if let Some(value) = key
+            .as_ref()
+            .and_then(|key| context.function_value_cache.values.get(key))
+        {
+            return Some(value.clone());
         }
 
         let disable_const_opt = context.disalbe_const_opt;
@@ -227,13 +351,28 @@ impl FunctionCall {
 
         if let Some(x) = &func.ret {
             let variable = context.variables.get(x)?;
-            variable.get_value(&[]).cloned()
+            let value = variable.get_value(&[]).cloned();
+            if let Some(key) = key
+                && let Some(value) = &value
+            {
+                let bits = input_bits.saturating_add(value.width().max(64));
+                let total = context.function_value_cache.bits.saturating_add(bits);
+                if total <= context.config.evaluate_size_limit {
+                    context.function_value_cache.bits = total;
+                    context
+                        .function_value_cache
+                        .values
+                        .insert(key, value.clone());
+                }
+            }
+            value
         } else {
             None
         }
     }
 
     pub fn eval_comptime(&mut self, context: &mut Context) -> Comptime {
+        let runtime_dependent = !self.eval_elaboration_const(context);
         let value = self.eval_value(context);
         let value = if let Some(x) = value {
             ValueVariant::Numeric(x)
@@ -245,6 +384,7 @@ impl FunctionCall {
         ret.value = value;
 
         ret.is_const = self.eval_comptime_flag(context);
+        ret.runtime_dependent = runtime_dependent;
         ret
     }
 
@@ -266,16 +406,19 @@ impl FunctionCall {
                     let Some(variable) = context.get_variable_info(dst.id) else {
                         continue;
                     };
-                    if let Some((beg, end)) =
-                        dst.select.eval_value(context, &variable.r#type, false)
-                    {
+                    if let Some((beg, end)) = dst.select.conservative_packed_range(
+                        context,
+                        &variable.r#type,
+                        dst.comptime.member_select_domain,
+                    ) {
                         let mask = ValueBigUint::gen_mask_range(beg, end);
+                        let dynamic = !dst.index.is_const() || !dst.select.is_const_with_range();
                         let (success, tokens) = assign_table.insert_assign(
                             &variable,
                             index,
                             mask,
-                            false,
-                            false,
+                            dynamic,
+                            dynamic,
                             self.comptime.token,
                         );
                         if !success
@@ -307,7 +450,11 @@ impl FunctionCall {
         }
         for dsts in self.outputs.values() {
             for dst in dsts {
-                dst.gather_ff(context, table, decl);
+                if from_ff {
+                    dst.gather_ff(context, table, decl);
+                } else {
+                    dst.gather_ff_comb_assign(context, table, decl);
+                }
             }
         }
     }
@@ -348,6 +495,11 @@ impl FunctionCall {
 
         is_const
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static VALUE_EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl fmt::Display for FunctionCall {
@@ -442,6 +594,23 @@ pub enum Arguments {
 }
 
 impl Arguments {
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        let positional = |args: &mut PositionalArgs| {
+            args.iter_mut()
+                .all(|(expr, _, _)| expr.eval_elaboration_const(context))
+        };
+        let named = |args: &mut NamedArgs| {
+            args.iter_mut()
+                .all(|(_, (expr, _, _))| expr.eval_elaboration_const(context))
+        };
+        match self {
+            Self::Positional(args) => positional(args),
+            Self::Named(args) => named(args),
+            Self::Mixed(a, b) => positional(a) && named(b),
+            Self::Null => true,
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -556,6 +725,12 @@ impl Arguments {
                                 &mut expr,
                             )?;
                         }
+                        // A function input is assignment-like. Propagate the
+                        // formal's packed width through the actual expression
+                        // before it can be folded, just as an assignment does.
+                        // Otherwise `f(2'b11 + 2'b01)` evaluates the addition
+                        // at 2 bits even when `f` takes a wider argument.
+                        expr.eval_comptime(context, arg_type.total_width());
                         if arg_type.is_clock() || arg_type.is_reset() {
                             let expr_comptime = expr.eval_comptime(context, None);
                             let expr_token = expr_comptime.token;
@@ -569,6 +744,17 @@ impl Arguments {
                         inputs.push((path.clone(), expr));
                     }
                     Direction::Output => {
+                        let dst = dst
+                            .into_iter()
+                            .filter_map(|x| x.to_assign_destination(context, false))
+                            .collect();
+                        outputs.push((path.clone(), dst));
+                    }
+                    // `inout` is copy-in / copy-out: the actual is read on entry
+                    // and written back on return.
+                    Direction::Inout => {
+                        expr.eval_comptime(context, arg.comptime.r#type.total_width());
+                        inputs.push((path.clone(), expr));
                         let dst = dst
                             .into_iter()
                             .filter_map(|x| x.to_assign_destination(context, false))
@@ -601,6 +787,14 @@ impl Arguments {
                         Direction::Output => {
                             let dst = actual_member.to_assign_destination(context, false);
                             if let Some(dst) = dst {
+                                outputs.push((arg_path, vec![dst]));
+                            }
+                        }
+                        Direction::Inout => {
+                            if let Some(expr) = actual_member.clone().to_expression(context) {
+                                inputs.push((arg_path.clone(), expr));
+                            }
+                            if let Some(dst) = actual_member.to_assign_destination(context, false) {
                                 outputs.push((arg_path, vec![dst]));
                             }
                         }

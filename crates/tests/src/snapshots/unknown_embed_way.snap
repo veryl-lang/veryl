@@ -11,4 +11,4 @@ unknown_embed_way (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error
    ·          ╰── Error location
  2 │ }}}
    ╰────
-  help:
+  help: valid embed ways are: inline|cocotb

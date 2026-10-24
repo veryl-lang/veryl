@@ -1,12 +1,12 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
 use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::utils::{
-    TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type, build_for_range,
-    build_for_statement, case_patterns, check_assign_before_definition, check_assign_clock_domain,
-    eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable, expand_connect,
-    expand_connect_const, function_call, get_return_str, hoist_component_method_call,
-    single_function_call_factor, switch_condition, tb_method_call, try_infer_decl_type,
-    try_infer_var_assign,
+    CaseOperand, TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type,
+    build_for_range, build_for_statement, case_patterns, check_assign_before_definition,
+    check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_case_target,
+    eval_expr, eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
+    hoist_component_method_call, single_function_call_factor, switch_condition, tb_method_call,
+    to_hier_assign_destination, try_infer_decl_type, try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -201,6 +201,7 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
             check_assign_clock_domain(context, d, &comptime, &token);
         }
         let statement = ir::Statement::Assign(ir::AssignStatement {
+            hier_dst: None,
             dst,
             width,
             expr,
@@ -285,7 +286,7 @@ fn conv_tb_method_call_assignment(
     // full declared width. Indexed/selected destinations go through the
     // expression-position hoist (a temporary plus an ordinary assignment,
     // which handles selects).
-    if dst.index.0.is_empty() && dst.select.0.is_empty() && dst.select.1.is_none() {
+    if dst.index.indices.is_empty() && dst.select.0.is_empty() && dst.select.1.is_none() {
         method_call.ret = Some(Box::new(dst));
         return Ok(Some(ir::StatementBlock(vec![ir::Statement::TbMethodCall(
             method_call,
@@ -297,6 +298,7 @@ fn conv_tb_method_call_assignment(
         .and_then(|x| context.check_size(x, token));
     Ok(Some(ir::StatementBlock(vec![ir::Statement::Assign(
         ir::AssignStatement {
+            hier_dst: None,
             dst: vec![dst],
             width,
             expr: temp,
@@ -348,6 +350,31 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             eval_array_range_assign(context, &dst, &x.assignment.expression, token)?
                         {
                             return Ok(ir::StatementBlock(statements));
+                        }
+
+                        if let Some(hier_dst) = to_hier_assign_destination(context, dst.clone())? {
+                            // Testbench write into a child instance; the RHS is
+                            // evaluated against the target's type exactly as a
+                            // local destination's would be.
+                            let ctx_type = hier_dst.comptime.r#type.clone();
+                            let (_, expr) = eval_expr(
+                                context,
+                                Some(ctx_type),
+                                &x.assignment.expression,
+                                false,
+                            )?;
+                            let width = hier_dst
+                                .select
+                                .eval_value(context, &hier_dst.comptime.r#type, false)
+                                .map(|(beg, end)| beg - end + 1);
+                            let statement = ir::Statement::Assign(ir::AssignStatement {
+                                dst: vec![],
+                                hier_dst: Some(Box::new(hier_dst)),
+                                width,
+                                expr,
+                                token,
+                            });
+                            return Ok(ir::StatementBlock(vec![statement]));
                         }
 
                         if let Some(mut dst) = dst.to_assign_destination(context, false) {
@@ -402,6 +429,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             let _ = expr.eval_comptime(context, width);
 
                             let statement = ir::AssignStatement {
+                                hier_dst: None,
                                 dst: vec![dst],
                                 width,
                                 expr,
@@ -540,7 +568,7 @@ pub(crate) fn check_true_false(comptime: &Comptime) -> (bool, bool) {
     if comptime.is_const
         && let Ok(value) = comptime.get_value()
     {
-        if value.to_usize().unwrap_or(0) != 0 {
+        if value.is_true() {
             (true, false)
         } else {
             (false, true)
@@ -555,7 +583,7 @@ pub(crate) fn check_true_false(comptime: &Comptime) -> (bool, bool) {
 /// (e.g. the `i >= 4` arms of an unrolled `if i >= 4 || sig`), so a dead arm's
 /// out-of-range select never reaches the range check or the simulator.
 /// Returns `(true_side_only, false_side_only)`.
-fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, bool) {
+pub(crate) fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, bool) {
     if let ir::Expression::Binary(x, op, y, _) = cond {
         match op {
             ir::Op::LogicOr => {
@@ -571,19 +599,54 @@ fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, 
             _ => {}
         }
     }
-    // Leaf: mirror `check_true_false` (no `is_xz` guard) so `if`, `if_reset`,
-    // and fully-constant conditions fold x/z the same way.
     if cond.comptime().is_const
         && let Some(value) = cond.eval_value(context)
     {
-        if value.to_usize().unwrap_or(0) != 0 {
-            (true, false)
-        } else {
-            (false, true)
-        }
-    } else {
-        (false, false)
+        return (value.is_true(), !value.is_true());
     }
+    // A retained iterator is runtime state in emitted SV. A condition may
+    // nevertheless have the same truth value for every value of its range.
+    // Prove only uniform conditions; leave varying conditions in the loop.
+    for (id, range) in context.for_ranges.clone() {
+        let Some(iterations) = range.eval_iter(context) else {
+            continue;
+        };
+        let Some(variable) = context.variables.get(&id) else {
+            continue;
+        };
+        let Some(width) = variable.r#type.total_width() else {
+            continue;
+        };
+        let signed = variable.r#type.signed;
+        let mut uniform = None;
+        let mut decided = true;
+        for iteration in iterations {
+            let value = crate::value::Value::new(iteration as u64, width, signed);
+            let Some(condition) = crate::ir::peel::specialize_expression(context, cond, id, value)
+            else {
+                decided = false;
+                break;
+            };
+            if !condition.comptime().is_const {
+                decided = false;
+                break;
+            }
+            let Some(value) = condition.eval_value(context) else {
+                decided = false;
+                break;
+            };
+            let truth = value.is_true();
+            if uniform.is_some_and(|previous| previous != truth) {
+                decided = false;
+                break;
+            }
+            uniform = Some(truth);
+        }
+        if decided && let Some(truth) = uniform {
+            return (truth, !truth);
+        }
+    }
+    (false, false)
 }
 
 /// Append `block` to the innermost `else` of the `else if` chain in `false_side`.
@@ -709,6 +772,10 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
 
         let mut false_side = vec![];
         let mut else_if_break = false;
+        // The trailing `else` is gated by the conditions above it. Only the
+        // last live one is carried here, so a crossing in an earlier `else if`
+        // of the same chain still goes unreported.
+        let mut last_cond_comptime: Option<ir::Comptime> = None;
 
         for x in &value.if_reset_statement_list {
             let (comptime, cond) = eval_expr(context, None, &x.expression, false)?;
@@ -725,8 +792,15 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
                 continue;
             }
 
-            let true_side: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
-            let true_side = true_side.0;
+            // An `else if` of the reset chain gates its body exactly as a plain
+            // `if` does, so its clock domain has to reach the writes inside it.
+            // Without this a foreign-domain condition here goes unreported.
+            let true_side: ir::IrResult<ir::StatementBlock> = context
+                .with_condition_domain(comptime.clone(), |c| {
+                    Conv::conv(c, x.statement_block.as_ref())
+                });
+            let true_side = true_side?.0;
+            last_cond_comptime = Some(comptime);
 
             // The uncovered-branch check that motivates this in `if` is comb-only;
             // here it just keeps a dead always-true node out of the IR.
@@ -748,7 +822,16 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
         if let Some(x) = &value.if_reset_statement_opt
             && !else_if_break
         {
-            let block: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
+            let block: ir::StatementBlock = match last_cond_comptime {
+                Some(cond) => {
+                    let block: ir::IrResult<ir::StatementBlock> = context
+                        .with_condition_domain(cond, |c| Conv::conv(c, x.statement_block.as_ref()));
+                    block?
+                }
+                // `if_reset { .. } else { .. }`: the reset is the only gate and
+                // it is same-domain by construction.
+                None => Conv::conv(context, x.statement_block.as_ref())?,
+            };
 
             append_leaf_false(&mut false_side, block.0);
         }
@@ -783,6 +866,7 @@ impl Conv<&ReturnStatement> for ir::Statement {
                 false,
             )?;
             Ok(ir::Statement::Assign(ir::AssignStatement {
+                hier_dst: None,
                 dst: vec![dst],
                 width,
                 expr,
@@ -822,149 +906,8 @@ impl Conv<&ForStatement> for ir::StatementBlock {
 
         let for_range = build_for_range(context, &value.range, rev, step)?;
 
-        // Testbench for-loops may iterate many times at runtime; do not unroll.
-        // A body with `break` also stays a runtime For: flattening would strand a
-        // runtime-conditional Break with no loop to leave, running every iteration.
-        if !context.in_test_module
-            && !statement_block_has_break(value.statement_block.as_ref())
-            && let Some(range) = for_range.eval_iter(context)
-        {
-            return unroll_for(context, value, &r#type, clock_domain, &range, token);
-        }
-
         build_for_statement(context, value, &r#type, clock_domain, for_range, token)
     }
-}
-
-/// True when the block contains a `break` that would target THIS loop:
-/// nested for-loops consume their own breaks, so the scan stops there.
-fn statement_block_has_break(block: &StatementBlock) -> bool {
-    block
-        .statement_block_list
-        .iter()
-        .any(|x| statement_block_group_has_break(&x.statement_block_group))
-}
-
-fn statement_block_group_has_break(group: &StatementBlockGroup) -> bool {
-    match &*group.statement_block_group_group {
-        StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => x
-            .statement_block_group_group_list
-            .iter()
-            .any(|x| statement_block_group_has_break(&x.statement_block_group)),
-        StatementBlockGroupGroup::StatementBlockItem(x) => match x.statement_block_item.as_ref() {
-            StatementBlockItem::Statement(x) => statement_has_break(&x.statement),
-            _ => false,
-        },
-    }
-}
-
-fn statement_has_break(stmt: &Statement) -> bool {
-    match stmt {
-        Statement::BreakStatement(_) => true,
-        Statement::IfStatement(x) => {
-            let x = &x.if_statement;
-            statement_block_has_break(&x.statement_block)
-                || x.if_statement_list
-                    .iter()
-                    .any(|x| statement_block_has_break(&x.statement_block))
-                || x.if_statement_opt
-                    .as_ref()
-                    .is_some_and(|x| statement_block_has_break(&x.statement_block))
-        }
-        Statement::IfResetStatement(x) => {
-            let x = &x.if_reset_statement;
-            statement_block_has_break(&x.statement_block)
-                || x.if_reset_statement_list
-                    .iter()
-                    .any(|x| statement_block_has_break(&x.statement_block))
-                || x.if_reset_statement_opt
-                    .as_ref()
-                    .is_some_and(|x| statement_block_has_break(&x.statement_block))
-        }
-        Statement::CaseStatement(x) => x.case_statement.case_statement_list.iter().any(|x| match x
-            .case_item
-            .case_item_group0
-            .as_ref()
-        {
-            CaseItemGroup0::Statement(x) => statement_has_break(&x.statement),
-            CaseItemGroup0::StatementBlock(x) => statement_block_has_break(&x.statement_block),
-        }),
-        Statement::SwitchStatement(x) => x.switch_statement.switch_statement_list.iter().any(|x| {
-            match x.switch_item.switch_item_group0.as_ref() {
-                SwitchItemGroup0::Statement(x) => statement_has_break(&x.statement),
-                SwitchItemGroup0::StatementBlock(x) => {
-                    statement_block_has_break(&x.statement_block)
-                }
-            }
-        }),
-        // A break inside a nested for belongs to that loop.
-        Statement::ForStatement(_) => false,
-        Statement::IdentifierStatement(_) | Statement::ReturnStatement(_) => false,
-    }
-}
-
-fn unroll_for(
-    context: &mut Context,
-    value: &ForStatement,
-    r#type: &ir::Type,
-    clock_domain: crate::symbol::ClockDomain,
-    range: &[usize],
-    token: TokenRange,
-) -> ir::IrResult<ir::StatementBlock> {
-    use veryl_parser::resource_table;
-
-    let mut ret = ir::StatementBlock::default();
-    'outer: for &i in range {
-        let label = format!("[{}]", i);
-        let label = resource_table::insert_str(&label);
-
-        context.push_hierarchy(label);
-
-        let block = context.block(|c| {
-            let index = value.identifier.text();
-            let path = ir::VarPath::new(index);
-            let kind = ir::VarKind::Const;
-            let mut comptime = ir::Comptime::from_type(r#type.clone(), clock_domain, token);
-            comptime.is_const = true;
-            if let Some(total_width) = r#type.total_width() {
-                comptime.value = ir::ValueVariant::Numeric(crate::value::Value::new(
-                    i as u64,
-                    total_width,
-                    r#type.signed,
-                ));
-            }
-
-            let id = c.insert_var_path(path.clone(), comptime.clone());
-            let array_limit = c.config.evaluate_array_limit;
-            let variable = ir::Variable::new(
-                id,
-                path,
-                kind,
-                comptime.r#type.clone(),
-                vec![comptime.get_value().unwrap().clone()],
-                c.get_affiliation(),
-                &token,
-                array_limit,
-            );
-            c.insert_variable(id, variable);
-
-            let block: ir::IrResult<ir::StatementBlock> =
-                Conv::conv(c, value.statement_block.as_ref());
-            block
-        });
-
-        context.pop_hierarchy();
-
-        if let Ok(mut block) = block {
-            for stmt in block.0.drain(..) {
-                if matches!(stmt, ir::Statement::Break) {
-                    break 'outer;
-                }
-                ret.0.push(stmt);
-            }
-        }
-    }
-    Ok(ret)
 }
 
 impl Conv<&CaseStatement> for ir::StatementBlock {
@@ -975,8 +918,10 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
         }
 
         let mut tgt: ir::Expression = Conv::conv(context, value.expression.as_ref())?;
-        let tgt_comptime = tgt.eval_comptime(context, None).clone();
+        let tgt_comptime = eval_case_target(context, &mut tgt);
 
+        let target = CaseOperand::new(context, &tgt);
+        let mut operands = Vec::new();
         let mut arms: Vec<ir::CaseArm> = Vec::new();
         let mut default: Vec<ir::Statement> = Vec::new();
 
@@ -997,7 +942,8 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
             let body = body?;
             match item.case_item.case_item_group.as_ref() {
                 CaseItemGroup::CaseCondition(x) => {
-                    let patterns = case_patterns(context, x.case_condition.as_ref())?;
+                    let patterns =
+                        case_patterns(context, x.case_condition.as_ref(), &tgt, &mut operands)?;
                     arms.push(ir::CaseArm {
                         patterns,
                         body: body.0,
@@ -1013,6 +959,8 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
                 }
             }
         }
+
+        CaseOperand::check(context, &target, &operands);
 
         if arms.is_empty() && default.is_empty() {
             return Ok(ir::StatementBlock::default());

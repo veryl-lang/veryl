@@ -31,7 +31,8 @@ pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             ProtoStatement::CompiledBlock(mut cb) => {
                 pending.clear();
                 if !cb.original_stmts.is_empty() {
-                    cb.original_stmts = dce_aggressive(cb.original_stmts);
+                    let owned = std::sync::Arc::make_mut(&mut cb.original_stmts);
+                    *owned = dce_aggressive(std::mem::take(owned));
                 }
                 ProtoStatement::CompiledBlock(cb)
             }

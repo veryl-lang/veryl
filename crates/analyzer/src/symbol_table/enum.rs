@@ -1,6 +1,6 @@
 use crate::BigUint;
 use crate::HashSet;
-use crate::analyzer_error::{AnalyzerError, UnevaluableValueKind};
+use crate::analyzer_error::{AnalyzerError, MismatchAssignmentKind, UnevaluableValueKind};
 use crate::attribute::EnumEncodingItem;
 use crate::conv::utils::TypePosition;
 use crate::conv::{self, Context, Conv};
@@ -153,6 +153,7 @@ fn eval_enum_member_value(
                     errors.push(AnalyzerError::mismatch_assignment(
                         &src,
                         &dst,
+                        MismatchAssignmentKind::Normal,
                         &expression.into(),
                         &[],
                     ));

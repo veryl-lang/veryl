@@ -12,4 +12,16 @@ exceed_limit (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html
    ·          ╰── Error location
  5 │ }
    ╰────
-  help:
+  help: 
+
+Advice: instantiated_here
+
+  ☞ reported inside u: exceed_limit_hierarchy_depth #(X: 2) -> u: exceed_limit_hierarchy_depth #(X: 3) -> (124 more) -> u: exceed_limit_hierarchy_depth #(X: 128) -> u: exceed_limit_hierarchy_depth
+  │ #(X: 129)
+   ╭─[../../testcases/error/exceed_limit_hierarch_depth.veryl:4:10]
+ 3 │ ) {
+ 4 │     inst u: exceed_limit_hierarchy_depth #( X: X + 1 );
+   ·          ┬
+   ·          ╰── Instantiated here
+ 5 │ }
+   ╰────

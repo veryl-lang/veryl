@@ -59,7 +59,7 @@ pub fn analyze_multi_write(
     for stmt_lists in events.values() {
         let mut event_counts: HashMap<(VarId, usize), u32> = HashMap::default();
         for stmts in stmt_lists {
-            let sub = count_writes_seq(stmts, analyzer_ctx);
+            let sub = count_writes_seq(stmts, analyzer_ctx, false);
             for (k, n) in sub {
                 *event_counts.entry(k).or_insert(0) += n;
             }
@@ -84,10 +84,11 @@ enum EventKey {
 fn count_writes_seq(
     stmts: &[air::Statement],
     ctx: &mut AnalyzerContext,
+    in_for: bool,
 ) -> HashMap<(VarId, usize), u32> {
     let mut result: HashMap<(VarId, usize), u32> = HashMap::default();
     for s in stmts {
-        let sub = count_writes_one(s, ctx);
+        let sub = count_writes_one(s, ctx, in_for);
         for (k, n) in sub {
             *result.entry(k).or_insert(0) += n;
         }
@@ -95,42 +96,46 @@ fn count_writes_seq(
     result
 }
 
-/// Per-statement write counts.  Branches take per-key max; for loops
-/// approximate one iteration to mirror the simulator-side
-/// `collect_max_writes_one`.
+/// Branches take per-key max; repeated loop writes require dual-slot storage.
 fn count_writes_one(
     stmt: &air::Statement,
     ctx: &mut AnalyzerContext,
+    in_for: bool,
 ) -> HashMap<(VarId, usize), u32> {
     use air::Statement;
     let mut result: HashMap<(VarId, usize), u32> = HashMap::default();
     match stmt {
         Statement::Assign(a) => {
             for dst in &a.dst {
-                add_dst_write(dst, ctx, &mut result);
+                add_dst_write(dst, ctx, &mut result, in_for);
             }
         }
         Statement::If(i) => {
-            let t = count_writes_seq(&i.true_side, ctx);
-            let f = count_writes_seq(&i.false_side, ctx);
+            let t = count_writes_seq(&i.true_side, ctx, in_for);
+            let f = count_writes_seq(&i.false_side, ctx, in_for);
             merge_branches_max(&t, &f, &mut result);
         }
         Statement::Case(c) => {
             let lowered = c.lower_to_nested_if();
-            return count_writes_seq(&lowered, ctx);
+            return count_writes_seq(&lowered, ctx, in_for);
         }
         Statement::IfReset(i) => {
-            let t = count_writes_seq(&i.true_side, ctx);
-            let f = count_writes_seq(&i.false_side, ctx);
+            let t = count_writes_seq(&i.true_side, ctx, in_for);
+            let f = count_writes_seq(&i.false_side, ctx, in_for);
             merge_branches_max(&t, &f, &mut result);
         }
         Statement::For(f) => {
-            return count_writes_seq(&f.body, ctx);
+            let iterations = f.range.eval_iter(ctx);
+            if iterations.as_ref().is_some_and(Vec::is_empty) {
+                return result;
+            }
+            let repeated = iterations.as_ref().is_none_or(|values| values.len() > 1);
+            return count_writes_seq(&f.body, ctx, in_for || repeated);
         }
         Statement::FunctionCall(call) => {
             for outputs in call.outputs.values() {
                 for dst in outputs {
-                    add_dst_write(dst, ctx, &mut result);
+                    add_dst_write(dst, ctx, &mut result, in_for);
                 }
             }
         }
@@ -237,6 +242,7 @@ fn add_dst_write(
     dst: &air::AssignDestination,
     ctx: &mut AnalyzerContext,
     out: &mut HashMap<(VarId, usize), u32>,
+    in_for: bool,
 ) {
     let variable = match ctx.get_variable_info(dst.id) {
         Some(v) => v,
@@ -246,12 +252,18 @@ fn add_dst_write(
         return;
     }
 
+    // A retained loop can write the same slot on successive iterations. A
+    // packed FF merges a PARTIAL write against the slot's pre-edge value, which
+    // keeps only the last repeat to land in a word; two writes earn the dual
+    // slot the merges forward.  A whole element per iteration needs no merge.
+    let n = if in_for { 2 } else { 1 };
+
     if let Some(idx_vec) = dst.index.eval_value(ctx)
         && let Some(flat) = variable.r#type.array.calc_index(&idx_vec)
     {
-        *out.entry((dst.id, flat)).or_insert(0) += 1;
+        *out.entry((dst.id, flat)).or_insert(0) += n;
         return;
     }
 
-    *out.entry((dst.id, 0)).or_insert(0) += 1;
+    *out.entry((dst.id, 0)).or_insert(0) += n;
 }

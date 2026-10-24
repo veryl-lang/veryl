@@ -2,22 +2,120 @@ use crate::HashMap;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::variable::{
-    VarOffset, is_wide_ptr, native_bytes as calc_native_bytes, read_native_value, value_size,
+    VarOffset, clip_select_to_width, is_wide_ptr, native_bytes as calc_native_bytes,
+    read_native_value, value_size,
 };
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use num_bigint::BigUint;
 use num_traits::One;
-use std::cmp::Ordering;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
+/// Value an out-of-range dynamic index reads.
+///
+/// IEEE 1800-2023 7.4.6 gives it the element type's default, which is `x`
+/// in 4-state storage and zero in 2-state.  The address is still clamped
+/// so the load stays inside the allocation; only the value the caller sees
+/// comes from here.
+pub fn out_of_range_read(width: usize, signed: bool, use_4state: bool) -> Value {
+    if use_4state {
+        Value::new_x(width, signed)
+    } else {
+        Value::new(0, width, signed)
+    }
+}
+
+/// Build a variable read with its constant select clipped to the variable it
+/// names.  `invalid_select` is an error, but an index built from a `for`
+/// variable gets past it: the bounds check does not unroll the loop, and the
+/// simulator does.  The bits past the variable read x (IEEE 1800-2023 11.5.1),
+/// and answering that here, where a user-written select becomes a read, is
+/// what stops the three backends answering it differently.
+///
+/// `beg >= end` throughout: a reversed range is `wrong index order`.
+pub fn storage_bounded_read(
+    select: Option<(usize, usize)>,
+    var_width: usize,
+    width: usize,
+    expr_context: ExpressionContext,
+    use_4state: bool,
+    build: impl FnOnce(Option<(usize, usize)>, usize, ExpressionContext) -> ProtoExpression,
+) -> ProtoExpression {
+    let Some((beg, end)) = select.filter(|&(beg, _)| beg >= var_width) else {
+        return build(select, width, expr_context);
+    };
+    // A select's result is its own span wide, whatever width the caller
+    // carried in for the unclipped read.
+    let span = beg - end + 1;
+    let Some((clipped_beg, clipped_end)) = clip_select_to_width(beg, end, var_width) else {
+        return ProtoExpression::Value {
+            value: out_of_range_read(span, expr_context.signed, use_4state),
+            width: span,
+            expr_context,
+        };
+    };
+    // Only the top overhangs, so the fill is the high element.
+    let kept = clipped_beg - clipped_end + 1;
+    let inner_context = ExpressionContext {
+        width: kept,
+        signed: false,
+    };
+    let inner = build(Some((clipped_beg, clipped_end)), kept, inner_context);
+    let lost = span - kept;
+    let fill = ProtoExpression::Value {
+        value: out_of_range_read(lost, false, use_4state),
+        width: lost,
+        expr_context: ExpressionContext {
+            width: lost,
+            signed: false,
+        },
+    };
+    ProtoExpression::Concatenation {
+        elements: vec![(Box::new(fill), 1, lost), (Box::new(inner), 1, kept)],
+        width: span,
+        expr_context,
+    }
+}
+
+/// Whether a runtime index can leave an array of `num_elements`.
+///
+/// A 10-bit index into 1024 entries never can, so the guards below and in
+/// the two compiling backends are emitted only where they can fire.  Width
+/// zero is the unsized all-bit sentinel, whose value is filled from its
+/// context rather than its own width, so it is never ruled out here.
+pub fn index_may_exceed(index_width: usize, num_elements: usize) -> bool {
+    index_width == 0
+        || index_width >= usize::BITS as usize
+        || (1usize << index_width) > num_elements
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExpressionContext {
     pub width: usize,
     pub signed: bool,
+}
+
+impl ExpressionContext {
+    /// Signedness used to evaluate a binary operation. Comparison results
+    /// remain unsigned, but their operands may need signed interpretation.
+    pub(crate) fn binary_operand_signed(&self, op: Op, x: &Self, y: &Self) -> bool {
+        match op {
+            Op::Div
+            | Op::Rem
+            | Op::Greater
+            | Op::GreaterEq
+            | Op::Less
+            | Op::LessEq
+            | Op::Eq
+            | Op::Ne
+            | Op::EqWildcard
+            | Op::NeWildcard => x.signed && y.signed,
+            _ => self.signed,
+        }
+    }
 }
 
 impl From<&air::ExpressionContext> for ExpressionContext {
@@ -52,7 +150,13 @@ pub enum Expression {
         x: Box<Expression>,
         op: Op,
         y: Box<Expression>,
-        expr_context: ExpressionContext,
+        operand_context: ExpressionContext,
+    },
+    Resize {
+        x: Box<Expression>,
+        width: usize,
+        sign_extend: bool,
+        signed: bool,
     },
     Concatenation {
         elements: Vec<(Box<Expression>, usize, usize)>, // (expr, repeat, elem_width)
@@ -111,13 +215,11 @@ impl Expression {
                 let val = unsafe {
                     read_native_value(*value, *native_bytes, *use_4state, read_width, *signed)
                 };
-                if let Some(dyn_sel) = dynamic_select {
-                    let idx = dyn_sel
-                        .index_expr
-                        .eval(mask_cache)
-                        .to_usize()
-                        .unwrap_or(0)
-                        .min(dyn_sel.num_elements.saturating_sub(1));
+                let mut val = if let Some(dyn_sel) = dynamic_select {
+                    let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+                    if idx >= dyn_sel.num_elements {
+                        return out_of_range_read(*width, *signed, *use_4state);
+                    }
                     let end = idx * dyn_sel.elem_width;
                     let beg = end + dyn_sel.window - 1;
                     val.select(beg, end)
@@ -125,7 +227,10 @@ impl Expression {
                     val.select(*beg, *end)
                 } else {
                     val
-                }
+                };
+                // `Value::select` drops the sign.
+                val.set_signed(*signed);
+                val
             }
             Expression::Value { value } => value.clone(),
             Expression::Unary {
@@ -140,11 +245,30 @@ impl Expression {
                 x,
                 op,
                 y,
-                expr_context,
+                operand_context,
             } => {
                 let x = x.eval(mask_cache);
                 let y = y.eval(mask_cache);
-                op.eval_value_binary(&x, &y, expr_context.width, expr_context.signed, mask_cache)
+                op.eval_value_binary(
+                    &x,
+                    &y,
+                    operand_context.width,
+                    operand_context.signed,
+                    mask_cache,
+                )
+            }
+            Expression::Resize {
+                x,
+                width,
+                sign_extend,
+                signed,
+            } => {
+                let mut value = x.eval(mask_cache);
+                value.set_signed(*sign_extend);
+                let mut value = value.expand(*width, *sign_extend).into_owned();
+                value.trunc(*width);
+                value.set_signed(*signed);
+                value
             }
             Expression::Concatenation { elements, signed } => {
                 let mut ret = Value::new(0, 0, false);
@@ -193,14 +317,13 @@ impl Expression {
                 width,
                 signed,
             } => {
-                if *num_elements == 0 {
-                    return Value::new(0, *width, *signed);
-                }
                 let idx_val = index_expr.eval(mask_cache);
-                let idx = idx_val
-                    .to_usize()
-                    .unwrap_or(0)
-                    .min(num_elements.saturating_sub(1));
+                let Some(idx) = idx_val
+                    .to_usize_saturating()
+                    .filter(|idx| *idx < *num_elements)
+                else {
+                    return out_of_range_read(*width, *signed, *use_4state);
+                };
                 #[cfg(debug_assertions)]
                 debug_assert!(
                     stride.checked_mul(idx as isize).is_some(),
@@ -218,13 +341,11 @@ impl Expression {
                 let value = unsafe {
                     read_native_value(ptr, *native_bytes, *use_4state, read_width, *signed)
                 };
-                if let Some(dyn_sel) = dynamic_select {
-                    let idx = dyn_sel
-                        .index_expr
-                        .eval(mask_cache)
-                        .to_usize()
-                        .unwrap_or(0)
-                        .min(dyn_sel.num_elements.saturating_sub(1));
+                let mut value = if let Some(dyn_sel) = dynamic_select {
+                    let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+                    if idx >= dyn_sel.num_elements {
+                        return out_of_range_read(*width, *signed, *use_4state);
+                    }
                     let end = idx * dyn_sel.elem_width;
                     let beg = end + dyn_sel.window - 1;
                     value.select(beg, end)
@@ -232,7 +353,10 @@ impl Expression {
                     value.select(*beg, *end)
                 } else {
                     value
-                }
+                };
+                // `Value::select` drops the sign.
+                value.set_signed(*signed);
+                value
             }
         }
     }
@@ -257,7 +381,7 @@ impl Expression {
                 }
             }
             Expression::Value { .. } => (),
-            Expression::Unary { x, .. } => {
+            Expression::Unary { x, .. } | Expression::Resize { x, .. } => {
                 x.gather_variable(inputs, outputs);
             }
             Expression::Binary { x, y, .. } => {
@@ -317,7 +441,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets(inputs),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_variable_offsets(inputs)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_variable_offsets(inputs);
                 y.gather_variable_offsets(inputs);
@@ -397,7 +523,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_reads_expanded_ranged(out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_reads_expanded_ranged(out)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_reads_expanded_ranged(out);
                 y.gather_reads_expanded_ranged(out);
@@ -464,6 +592,15 @@ impl ProtoExpression {
             signed,
         };
         match self {
+            ProtoExpression::Value {
+                value,
+                expr_context,
+                ..
+            } if value.width() == width => Some(ProtoExpression::Value {
+                value: value.select(hi, lo),
+                width: out_width,
+                expr_context: ctx(expr_context.signed),
+            }),
             ProtoExpression::Variable {
                 var_offset,
                 select,
@@ -511,6 +648,64 @@ impl ProtoExpression {
                 width: out_width,
                 expr_context: ctx(expr_context.signed),
             }),
+            // Each element overlapping the window gives its own window; one
+            // element alone needs no concatenation around it.
+            ProtoExpression::Concatenation {
+                elements,
+                expr_context,
+                ..
+            } => {
+                let total: usize = elements.iter().map(|(_, r, w)| r * w).sum();
+                if total != width {
+                    return None;
+                }
+                let mut parts: Vec<(Box<ProtoExpression>, usize, usize)> = Vec::new();
+                // Elements are most-significant first.
+                let mut top = width;
+                for (expr, repeat, w) in elements {
+                    for _ in 0..*repeat {
+                        let bottom = top - w;
+                        if expr.width() != *w {
+                            return None;
+                        }
+                        if bottom <= hi && lo < top {
+                            let (ehi, elo) = (hi.min(top - 1), lo.max(bottom));
+                            let part = expr.bit_parallel_window(ehi - bottom, elo - bottom)?;
+                            parts.push((Box::new(part), 1, ehi - elo + 1));
+                        }
+                        top = bottom;
+                    }
+                }
+                if parts.len() == 1 {
+                    Some(*parts.pop().unwrap().0)
+                } else {
+                    Some(ProtoExpression::Concatenation {
+                        elements: parts,
+                        width: out_width,
+                        expr_context: ctx(expr_context.signed),
+                    })
+                }
+            }
+            // A select is scalar, so it picks the same arm for every bit: each
+            // window keeps the whole condition and narrows only the arms.  The
+            // condition is then evaluated once per window -- `max_parts` at the
+            // caller is what bounds that, and it is what a bundle mux costs to
+            // stop carrying every bit into every other.
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                expr_context,
+                ..
+            } if true_expr.width() == width && false_expr.width() == width => {
+                Some(ProtoExpression::Ternary {
+                    cond: cond.clone(),
+                    true_expr: Box::new(true_expr.bit_parallel_window(hi, lo)?),
+                    false_expr: Box::new(false_expr.bit_parallel_window(hi, lo)?),
+                    width: out_width,
+                    expr_context: ctx(expr_context.signed),
+                })
+            }
             _ => None,
         }
     }
@@ -598,7 +793,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_reads_with_ranges(out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_reads_with_ranges(out)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_reads_with_ranges(out);
                 y.gather_reads_with_ranges(out);
@@ -675,7 +872,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(fold, inputs),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_variable_offsets_expanded(fold, inputs)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_variable_offsets_expanded(fold, inputs);
                 y.gather_variable_offsets_expanded(fold, inputs);
@@ -765,7 +964,9 @@ impl ProtoExpression {
                     dyn_sel.index_expr.collect_big_arrays(fold);
                 }
             }
-            ProtoExpression::Unary { x, .. } => x.collect_big_arrays(fold),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.collect_big_arrays(fold)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.collect_big_arrays(fold);
                 y.collect_big_arrays(fold);
@@ -820,7 +1021,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_dynamic_read_ranges(ranges),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_dynamic_read_ranges(ranges)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_dynamic_read_ranges(ranges);
                 y.gather_dynamic_read_ranges(ranges);
@@ -893,6 +1096,14 @@ const READ_EXPAND_CAP_BYTES: usize = (1 << 20) * 8;
 
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoExpression {
+    /// Resize the bit pattern without interpreting X/Z as arithmetic operands.
+    /// `sign_extend` controls extension from x; expr_context describes the result.
+    Resize {
+        x: Box<ProtoExpression>,
+        width: usize,
+        sign_extend: bool,
+        expr_context: ExpressionContext,
+    },
     Variable {
         var_offset: VarOffset,
         select: Option<(usize, usize)>,
@@ -922,6 +1133,8 @@ pub enum ProtoExpression {
         op: Op,
         y: Box<ProtoExpression>,
         width: usize,
+        // Result context exposed to parent expressions. Operand signedness
+        // is derived separately when evaluating the operation.
         expr_context: ExpressionContext,
     },
     Concatenation {
@@ -1025,7 +1238,7 @@ impl ProtoExpression {
                     dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
                 }
             }
-            ProtoExpression::Unary { x, .. } => {
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.adjust_offsets(ff_delta, comb_delta);
             }
             ProtoExpression::Binary { x, y, .. } => {
@@ -1084,7 +1297,9 @@ impl ProtoExpression {
                     dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
-            ProtoExpression::Unary { x, .. } => x.remap_offsets_with(f),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.remap_offsets_with(f)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.remap_offsets_with(f);
                 y.remap_offsets_with(f);
@@ -1115,7 +1330,8 @@ impl ProtoExpression {
             ProtoExpression::Value { width, .. } => *width,
             ProtoExpression::Unary { width, .. } => *width,
             ProtoExpression::Binary { width, .. } => *width,
-            ProtoExpression::Concatenation { width, .. } => *width,
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => *width,
             ProtoExpression::Ternary { width, .. } => *width,
             ProtoExpression::DynamicVariable { width, .. } => *width,
         }
@@ -1190,7 +1406,8 @@ impl ProtoExpression {
                 Op::BitOr | Op::BitXor => x.effective_bits().max(y.effective_bits()),
                 _ => *width,
             },
-            ProtoExpression::Concatenation { width, .. } => *width,
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => *width,
             ProtoExpression::Ternary {
                 true_expr,
                 false_expr,
@@ -1205,7 +1422,8 @@ impl ProtoExpression {
             ProtoExpression::HierVariable(x) => &x.expr_context,
             ProtoExpression::Variable { expr_context, .. } => expr_context,
             ProtoExpression::Value { expr_context, .. } => expr_context,
-            ProtoExpression::Unary { expr_context, .. } => expr_context,
+            ProtoExpression::Unary { expr_context, .. }
+            | ProtoExpression::Resize { expr_context, .. } => expr_context,
             ProtoExpression::Binary { expr_context, .. } => expr_context,
             ProtoExpression::Concatenation { expr_context, .. } => expr_context,
             ProtoExpression::Ternary { expr_context, .. } => expr_context,
@@ -1257,7 +1475,8 @@ impl ProtoExpression {
             // The all-bit sentinel materializes wider than its 0 `width` field
             // (see `materialized_width`); key on that.
             ProtoExpression::Value { .. } => is_wide_ptr(self.materialized_width()),
-            ProtoExpression::Concatenation { width, .. } => is_wide_ptr(*width),
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => is_wide_ptr(*width),
             ProtoExpression::Ternary {
                 width,
                 true_expr,
@@ -1355,6 +1574,16 @@ impl ProtoExpression {
     /// clean branches).  Add/Sub/Mul/Shl/negation/ArithShiftR fall to the
     /// false branch.
     pub fn is_clean_to_width(&self, target_width: usize) -> bool {
+        let operand_clean = |operand: &Self, width: usize, signed: bool| {
+            // Extension past the destination is clean only if the sign bit
+            // (including its X/Z mask) is known zero before the operation.
+            let limit = if signed && width > target_width {
+                target_width.min(operand.materialized_width().saturating_sub(1))
+            } else {
+                target_width
+            };
+            operand.is_clean_to_width(limit)
+        };
         match self {
             ProtoExpression::HierVariable(_) => false,
             ProtoExpression::Variable {
@@ -1383,7 +1612,8 @@ impl ProtoExpression {
                     *width <= target_width
                 }
             }
-            ProtoExpression::Concatenation { width, .. } => *width <= target_width,
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => *width <= target_width,
             ProtoExpression::DynamicVariable {
                 width,
                 select,
@@ -1399,7 +1629,12 @@ impl ProtoExpression {
                 };
                 result_width <= target_width
             }
-            ProtoExpression::Unary { op, x, width, .. } => match op {
+            ProtoExpression::Unary {
+                op,
+                x,
+                width,
+                expr_context,
+            } => match op {
                 Op::BitAnd
                 | Op::BitNand
                 | Op::BitOr
@@ -1408,10 +1643,16 @@ impl ProtoExpression {
                 | Op::BitXor
                 | Op::BitXnor => target_width >= 1,
                 Op::BitNot => *width <= target_width,
-                Op::Add => x.is_clean_to_width(target_width),
+                Op::Add => operand_clean(x, expr_context.width, expr_context.signed),
                 _ => false,
             },
-            ProtoExpression::Binary { op, x, y, .. } => match op {
+            ProtoExpression::Binary {
+                op,
+                x,
+                y,
+                expr_context,
+                ..
+            } => match op {
                 Op::Eq
                 | Op::Ne
                 | Op::EqWildcard
@@ -1423,51 +1664,58 @@ impl ProtoExpression {
                 | Op::LogicAnd
                 | Op::LogicOr => target_width >= 1,
                 Op::BitAnd => {
-                    x.is_clean_to_width(target_width) || y.is_clean_to_width(target_width)
+                    operand_clean(x, expr_context.width, expr_context.signed)
+                        || operand_clean(y, expr_context.width, expr_context.signed)
                 }
                 Op::BitOr | Op::BitXor => {
-                    x.is_clean_to_width(target_width) && y.is_clean_to_width(target_width)
+                    operand_clean(x, expr_context.width, expr_context.signed)
+                        && operand_clean(y, expr_context.width, expr_context.signed)
                 }
                 // ~(x^y) sets every bit above the width even for clean
                 // operands, so binary XNOR is never clean.
-                Op::LogicShiftR => x.is_clean_to_width(target_width),
+                Op::LogicShiftR => operand_clean(x, expr_context.width, expr_context.signed),
                 _ => false,
             },
             ProtoExpression::Ternary {
                 true_expr,
                 false_expr,
+                width,
                 ..
             } => {
-                true_expr.is_clean_to_width(target_width)
-                    && false_expr.is_clean_to_width(target_width)
+                let signed = true_expr.expr_context().signed
+                    && false_expr.expr_context().signed
+                    && true_expr.width() > 0
+                    && false_expr.width() > 0;
+                operand_clean(true_expr, *width, signed)
+                    && operand_clean(false_expr, *width, signed)
             }
         }
     }
 
     /// The leaf a store sees, as `(width, signed)`.  Operators already extend
     /// to the context width, so only leaf reads/literals reach a store at
-    /// their natural width; bit/part-selects are unsigned per the LRM, so
-    /// selected leaves are exempt.
+    /// their natural width.
     fn store_leaf(&self) -> Option<(usize, bool)> {
         match self {
             ProtoExpression::Variable {
                 width,
-                select: None,
-                dynamic_select: None,
                 expr_context,
                 ..
             }
             | ProtoExpression::DynamicVariable {
                 width,
-                select: None,
-                dynamic_select: None,
                 expr_context,
                 ..
             } => Some((*width, expr_context.signed)),
             ProtoExpression::Value { value, width, .. } => Some((*width, value.signed())),
-            // A concatenation is unsigned per the LRM, but `$signed({..})` marks
-            // it signed and it reaches the store at its natural width too.
-            ProtoExpression::Concatenation {
+            // Casts and concatenations reach the store at their materialized
+            // width; `$signed` can also mark a concatenation signed.
+            ProtoExpression::Resize {
+                width,
+                expr_context,
+                ..
+            }
+            | ProtoExpression::Concatenation {
                 width,
                 expr_context,
                 ..
@@ -1615,6 +1863,14 @@ impl ProtoExpression {
                     expr_context,
                     ..
                 } => {
+                    let operand_context = ExpressionContext {
+                        signed: expr_context.binary_operand_signed(
+                            *op,
+                            x.expr_context(),
+                            y.expr_context(),
+                        ),
+                        ..*expr_context
+                    };
                     let x = x.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1633,9 +1889,26 @@ impl ProtoExpression {
                         x: Box::new(x),
                         op: *op,
                         y: Box::new(y),
-                        expr_context: *expr_context,
+                        operand_context,
                     }
                 }
+                ProtoExpression::Resize {
+                    x,
+                    width,
+                    sign_extend,
+                    expr_context,
+                } => Expression::Resize {
+                    x: Box::new(x.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    )),
+                    width: *width,
+                    sign_extend: *sign_extend,
+                    signed: expr_context.signed,
+                },
                 ProtoExpression::Concatenation {
                     elements,
                     expr_context,
@@ -1770,76 +2043,135 @@ impl ProtoExpression {
     }
 }
 
-/// Resize a literal in place; a non-`Value` expression is left alone.
-fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
-    let ProtoExpression::Value {
-        value,
-        width: value_width,
-        expr_context,
-    } = expr
-    else {
-        return;
-    };
-    match value.width().cmp(&width) {
-        Ordering::Less => *value = value.expand(width, value.signed()).into_owned(),
-        Ordering::Greater => value.trunc(width),
-        Ordering::Equal => {}
+/// Resize independently of the result's propagated signedness. In particular,
+/// an unsigned outer expression must not suppress extension inside a cast.
+fn resize_to_width(
+    expr: ProtoExpression,
+    width: usize,
+    expr_context: ExpressionContext,
+) -> ProtoExpression {
+    let sign_extend = expr.expr_context().signed;
+    if let ProtoExpression::Value { mut value, .. } = expr {
+        value.set_signed(sign_extend);
+        let mut value = value.expand(width, sign_extend).into_owned();
+        value.trunc(width);
+        value.set_signed(expr_context.signed);
+        return ProtoExpression::Value {
+            value,
+            width,
+            expr_context,
+        };
     }
-    *value_width = width;
-    expr_context.width = width;
+    ProtoExpression::Resize {
+        x: Box::new(expr),
+        width,
+        sign_extend,
+        expr_context,
+    }
 }
 
-/// Grow `expr` to `width` bits.  A widening `as` cast lowers to its operand,
-/// so a node can be narrower than its analyzer width; extend by the OPERAND's
-/// signedness, like `N'(x)`.
-fn extend_to_width(mut expr: ProtoExpression, width: usize) -> ProtoExpression {
-    if matches!(expr, ProtoExpression::Value { .. }) {
-        fit_literal_width(&mut expr, width);
-        return expr;
-    }
-    let src_width = expr.width();
-    if src_width == 0 || src_width >= width {
-        return expr;
-    }
-    let signed = expr.expr_context().signed;
-    let expr_context = ExpressionContext {
-        width,
+/// `x ==? k` (or `!=?`) against a constant with x/z digits, as a plain
+/// equality over the digits `k` does specify: `(x & care) == (k & care)`.
+///
+/// The 2-state backends compare payloads only, so a wildcard digit would
+/// otherwise be compared as whatever payload bit encodes it, and a `case`
+/// label such as `2'bz1` would match `3` instead of both `1` and `3`.  Only
+/// for 2-state: the 4-state `==?` keeps an x of the target in the result,
+/// which `==` over the masked operands would turn into a known value.
+fn lower_wildcard_const_compare(
+    x: ProtoExpression,
+    op: Op,
+    k: &Value,
+    k_width: usize,
+    width: usize,
+    expr_context: ExpressionContext,
+) -> ProtoExpression {
+    // The operands carry the signedness of their comparison; the result's own
+    // context is the 1-bit outcome.
+    let signed = x.expr_context().signed;
+    let cmp_width = x.width().max(k_width).max(k.width()).max(1);
+    let k = k.expand(cmp_width, signed);
+    let full = (BigUint::one() << cmp_width) - BigUint::one();
+    let mut care = &full ^ (k.mask_xz().as_ref() & &full);
+    let known = k.payload().as_ref() & &care;
+    let x_width = x.width();
+    let x = if signed {
+        extend_to_width(x, cmp_width)
+    } else {
+        // Zero-extension folded into the mask: bits above the operand are
+        // not guaranteed clean, and here they would be compared.
+        if x_width > 0 && x_width < cmp_width {
+            care &= (BigUint::one() << x_width) - BigUint::one();
+        }
+        x
+    };
+    let ctx = ExpressionContext {
+        width: cmp_width,
         signed: false,
     };
     let value_node = |payload: BigUint| ProtoExpression::Value {
-        value: Value::new_biguint(payload, width, false),
-        width,
-        expr_context,
+        value: Value::new_biguint(payload, cmp_width, false),
+        width: cmp_width,
+        expr_context: ctx,
     };
-
-    // Mask to the operand width first: the bits above a narrow node are not
-    // guaranteed clean, and here they become the extension bits.
-    let mask = (BigUint::one() << src_width) - BigUint::one();
-    let ret = ProtoExpression::Binary {
-        x: Box::new(expr),
+    let masked = ProtoExpression::Binary {
+        x: Box::new(x),
         op: Op::BitAnd,
-        y: Box::new(value_node(mask)),
-        width,
-        expr_context,
+        y: Box::new(value_node(care)),
+        width: cmp_width,
+        expr_context: ctx,
     };
-    if !signed {
-        return ret;
-    }
-    // Sign-extend the masked value: ((v ^ s) - s) mod 2^width.
-    let sign = BigUint::one() << (src_width - 1);
     ProtoExpression::Binary {
-        x: Box::new(ProtoExpression::Binary {
-            x: Box::new(ret),
-            op: Op::BitXor,
-            y: Box::new(value_node(sign.clone())),
-            width,
-            expr_context,
-        }),
-        op: Op::Sub,
-        y: Box::new(value_node(sign)),
+        x: Box::new(masked),
+        op: if op == Op::EqWildcard { Op::Eq } else { Op::Ne },
+        y: Box::new(value_node(known)),
         width,
-        expr_context,
+        expr_context: ExpressionContext {
+            signed: false,
+            ..expr_context
+        },
     }
+}
+
+/// Materialize an element's full width before placing it in a concatenation.
+fn extend_to_width(expr: ProtoExpression, width: usize) -> ProtoExpression {
+    // Unsized literals also need truncation to a struct member's width.
+    if !matches!(expr, ProtoExpression::Value { .. }) && expr.width() >= width {
+        return expr;
+    }
+    let expr_context = ExpressionContext {
+        width,
+        ..*expr.expr_context()
+    };
+    resize_to_width(expr, width, expr_context)
+}
+
+/// Whether the use-site bounds check covers every value a coordinate can take.
+/// It compares against the element count, so a signed coordinate's negatives,
+/// which arrive as the top half of its unsigned range, are covered only once
+/// the array ends below that half. A width the host cannot shift by answers no.
+fn use_site_check_suffices(coordinate: &ProtoExpression, dim_size: usize) -> bool {
+    if !coordinate.expr_context().signed {
+        return true;
+    }
+    coordinate
+        .width()
+        .checked_sub(1)
+        .and_then(|bits| u32::try_from(bits).ok())
+        .and_then(|bits| 1usize.checked_shl(bits))
+        .is_some_and(|negatives_start| dim_size <= negatives_start)
+}
+
+/// Whether a coordinate can hold a value its dimension does not address: a
+/// signed one always can, through its negatives.
+fn can_leave_dimension(coordinate: &ProtoExpression, dim_size: usize) -> bool {
+    if coordinate.expr_context().signed {
+        return true;
+    }
+    u32::try_from(coordinate.width())
+        .ok()
+        .and_then(|bits| 1usize.checked_shl(bits))
+        .is_none_or(|span| span > dim_size)
 }
 
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
@@ -1849,13 +2181,19 @@ pub fn build_linear_index_expr(
     array: &veryl_analyzer::ir::ShapeRef,
     index: &air::VarIndex,
 ) -> Result<ProtoExpression, SimulatorError> {
-    let index_width = 32;
+    let index_width = index
+        .indices
+        .iter()
+        .map(|x| x.comptime().expr_context.width)
+        .max()
+        .unwrap_or(32)
+        .max(64);
     let index_expr_context = ExpressionContext {
         width: index_width,
         signed: false,
     };
 
-    if array.is_empty() || (array.dims() == 1 && array[0] == Some(1) && index.0.is_empty()) {
+    if array.is_empty() || (array.dims() == 1 && array[0] == Some(1) && index.indices.is_empty()) {
         return Ok(ProtoExpression::Value {
             value: Value::new(0, index_width, false),
             width: index_width,
@@ -1865,17 +2203,65 @@ pub fn build_linear_index_expr(
 
     // A partial index (`s[i]` against `logic<8> [2, 3]`) leaves a sub-array,
     // which has no single element to offset to.
-    if index.0.len() != array.dims() {
-        let token = index.0.first().map(|x| x.token_range()).unwrap_or_default();
+    if index.is_range() || index.indices.len() != array.dims() {
+        let token = index
+            .indices
+            .first()
+            .map(|x| x.token_range())
+            .unwrap_or_default();
         return Err(SimulatorError::unsupported_description(&token));
     }
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
+    let mut valid: Option<ProtoExpression> = None;
 
     for (i, dim_size) in array.iter().enumerate().rev() {
         let dim_size = dim_size.expect("array dimension size must be known");
-        let idx_proto: ProtoExpression = Conv::conv(context, &index.0[i])?;
+        let idx_proto: ProtoExpression = Conv::conv(context, &index.indices[i])?;
+        // Dynamic reads and writes already bounds-check a flat index, which for
+        // one dimension is the coordinate itself. Flattening dimensions, or
+        // narrowing a wide coordinate, needs a check of its own first.
+        if array.dims() == 1
+            && (1..=64).contains(&idx_proto.width())
+            && use_site_check_suffices(&idx_proto, dim_size)
+        {
+            return Ok(idx_proto);
+        }
+        // Widening first keeps an invalid inner coordinate from aliasing the
+        // next row, and a negative one from becoming a small positive offset.
+        // One that stays inside needs neither, and the arithmetic below widens
+        // it anyway.
+        let idx_proto = if can_leave_dimension(&idx_proto, dim_size) {
+            let idx_proto = resize_to_width(idx_proto, index_width, index_expr_context);
+            let check = ProtoExpression::Binary {
+                x: Box::new(idx_proto.clone()),
+                op: Op::Less,
+                y: Box::new(ProtoExpression::Value {
+                    value: Value::new(dim_size as u64, index_width, false),
+                    width: index_width,
+                    expr_context: index_expr_context,
+                }),
+                width: 1,
+                expr_context: index_expr_context,
+            };
+            valid = Some(match valid {
+                Some(previous) => ProtoExpression::Binary {
+                    x: Box::new(previous),
+                    op: Op::LogicAnd,
+                    y: Box::new(check),
+                    width: 1,
+                    expr_context: ExpressionContext {
+                        width: 1,
+                        signed: false,
+                    },
+                },
+                None => check,
+            });
+            idx_proto
+        } else {
+            idx_proto
+        };
 
         let mul_expr = if base == 1 {
             idx_proto
@@ -1909,7 +2295,32 @@ pub fn build_linear_index_expr(
         base *= dim_size;
     }
 
-    Ok(ret.expect("non-empty array must produce index expression"))
+    let ret = ret.expect("non-empty array must produce index expression");
+    let native = ExpressionContext {
+        width: 64,
+        signed: false,
+    };
+    let ret = if ret.width() == 64 && !ret.expr_context().signed {
+        ret
+    } else {
+        resize_to_width(ret, 64, native)
+    };
+    let Some(valid) = valid else {
+        return Ok(ret);
+    };
+    // Invalid coordinates produce the one-past-end sentinel understood by both
+    // dynamic reads and writes. Narrow only after checking all dimensions.
+    Ok(ProtoExpression::Ternary {
+        cond: Box::new(valid),
+        true_expr: Box::new(ret),
+        false_expr: Box::new(ProtoExpression::Value {
+            value: Value::new(base as u64, 64, false),
+            width: 64,
+            expr_context: native,
+        }),
+        width: 64,
+        expr_context: native,
+    })
 }
 
 /// Build a `ProtoDynamicBitSelect` from a `VarSelect` containing variable
@@ -1923,6 +2334,7 @@ pub fn build_dynamic_bit_select(
     width_shape: &veryl_analyzer::ir::ShapeRef,
     select: &air::VarSelect,
     kind_width: usize,
+    index_is_absolute_bits: bool,
 ) -> Result<ProtoDynamicBitSelect, SimulatorError> {
     // The analyzer already folds the element stride and any struct field offset
     // into the select index as an absolute *bit* position. For a non-trivial
@@ -1930,8 +2342,18 @@ pub fn build_dynamic_bit_select(
     // would re-apply the stride, double-scaling the index/window/clamp. Collapse
     // to a flat single-bit view so the folded index passes through unscaled;
     // plain logic (kind_width == 1) is already flat.
+    //
+    // That holds only where the stride really was folded in. A packed array of
+    // an ENUM (`e3_t<8>`: shape [8],
+    // kind_width 3) keeps its element stride in the SHAPE, and the index
+    // arrives as an element number. Flattening that left the index unscaled
+    // AND the window one bit wide, so a runtime-indexed write landed a single
+    // bit at the index instead of the element -- silently, with the right
+    // total width. `index_is_absolute_bits` is the caller's answer, because
+    // only it knows the kind.
     let flat_storage: [Option<usize>; 1];
     let (width_shape, kind_width) = if kind_width > 1
+        && index_is_absolute_bits
         && let Some(total) = width_shape.total()
     {
         flat_storage = [Some(total * kind_width)];
@@ -2224,11 +2646,156 @@ pub(crate) fn inline_function_call(
     Ok(ret_offsets)
 }
 
+/// Sample before any of an array assignment's destination elements change.
+/// Function calls in selectors also pass through here, so each is evaluated once.
+pub(crate) fn snapshot_expression(context: &mut Context, expr: ProtoExpression) -> ProtoExpression {
+    let width = expr.width();
+    let expr_context = *expr.expr_context();
+    let bytes = value_size(calc_native_bytes(width), context.config.use_4state);
+    let offset = super::variable::align_up_64(context.comb_total_bytes as isize);
+    context.comb_total_bytes = offset as usize + bytes;
+    let var_offset = VarOffset::Comb(offset);
+    context.pending_statements.push(ProtoStatement::Assign(
+        super::statement::ProtoAssignStatement {
+            dst: var_offset,
+            dst_width: width,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: TokenRange::default(),
+        },
+    ));
+    ProtoExpression::Variable {
+        var_offset,
+        select: None,
+        dynamic_select: None,
+        width,
+        var_full_width: width,
+        expr_context,
+    }
+}
+
+/// Evaluate address expressions once before lowering an aggregate access.
+pub(crate) fn snapshot_selectors(
+    context: &mut Context,
+    indices: &mut [air::Expression],
+) -> Result<(), SimulatorError> {
+    for index in indices {
+        if index.comptime().is_const {
+            continue;
+        }
+        let expr: ProtoExpression = Conv::conv(context, &*index)?;
+        let captured = snapshot_expression(context, expr);
+        let ProtoExpression::Variable {
+            var_offset, width, ..
+        } = captured
+        else {
+            unreachable!()
+        };
+        let mut comptime = index.comptime().clone();
+        comptime.is_const = false;
+        comptime.value = air::ValueVariant::Unknown;
+        let scope = context.scope();
+        while scope
+            .variable_meta
+            .contains_key(&scope.analyzer_context.var_id)
+            || scope
+                .analyzer_context
+                .variables
+                .contains_key(&scope.analyzer_context.var_id)
+        {
+            scope.analyzer_context.var_id.inc();
+        }
+        let id = scope.analyzer_context.var_id;
+        scope.analyzer_context.var_id.inc();
+        let native_bytes = calc_native_bytes(width);
+        // Hierarchical references lower their AIR indices after elaboration,
+        // so their sampled selector metadata must remain in this scope.
+        scope.variable_meta.insert(
+            id,
+            super::variable::VariableMeta {
+                path: air::VarPath::new(veryl_parser::resource_table::insert_str(&format!(
+                    "slice.index.{id}"
+                ))),
+                r#type: comptime.r#type.clone(),
+                width,
+                native_bytes,
+                elements: vec![super::variable::VariableElement {
+                    native_bytes,
+                    current: var_offset,
+                    next_offset: 0,
+                }],
+                initial_values: vec![],
+                uniform_buffer: true,
+            },
+        );
+        *index = air::Expression::Term(Box::new(air::Factor::Variable(
+            id,
+            air::VarIndex::default(),
+            air::VarSelect::default(),
+            comptime,
+        )));
+    }
+    Ok(())
+}
+
+/// Lower a slice at the boundary where concrete destination elements are laid
+/// out. Selectors are sampled once, before reading any of the elements.
+pub(crate) fn array_slice_elements(
+    context: &mut Context,
+    expression: &air::Expression,
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
+    let air::Expression::Term(factor) = expression else {
+        return Ok(None);
+    };
+    if !factor.array_index().is_some_and(air::VarIndex::is_range) {
+        return Ok(None);
+    }
+    let shape = match factor.as_ref() {
+        air::Factor::Variable(id, _, _, _) => context
+            .scope()
+            .variable_meta
+            .get(id)
+            .unwrap()
+            .r#type
+            .array
+            .clone(),
+        air::Factor::HierVariable(reference) => reference.array.clone(),
+        _ => unreachable!("only variable references have array indices"),
+    };
+    let mut reference = factor.as_ref().clone();
+    let count = reference
+        .comptime()
+        .r#type
+        .total_array()
+        .ok_or_else(|| SimulatorError::unsupported_description(&reference.token_range()))?;
+    snapshot_selectors(context, &mut reference.array_index_mut().unwrap().indices)?;
+    let mut elements = Vec::with_capacity(count);
+    for i in 0..count {
+        let element = reference
+            .array_element(&mut context.scope().analyzer_context, &shape, i)
+            .ok_or_else(|| SimulatorError::unsupported_description(&reference.token_range()))?;
+        elements.push(Conv::conv(context, &element)?);
+    }
+    Ok(Some(elements))
+}
+
 impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut Context, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
             air::Expression::Term(x) => match x.as_ref() {
                 air::Factor::HierVariable(x) => {
+                    // The child sizes its `string` storage from its own
+                    // assignments, which this reference cannot see here.
+                    if x.comptime.r#type.is_string() {
+                        return Err(SimulatorError::unsupported_string(
+                            "a hierarchical reference",
+                            &x.comptime.token,
+                        ));
+                    }
                     let width = x.comptime.r#type.total_width().ok_or_else(|| {
                         SimulatorError::unsupported_description(&x.comptime.token)
                     })?;
@@ -2243,11 +2810,64 @@ impl Conv<&air::Expression> for ProtoExpression {
                     })))
                 }
                 air::Factor::Variable(id, index, select, comptime) => {
-                    let width = comptime.r#type.total_width().unwrap();
-                    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+                    if index.is_range() {
+                        return Err(SimulatorError::unsupported_description(&comptime.token));
+                    }
+                    let mut width = comptime.r#type.total_width().unwrap();
+                    let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+                    // A `string` type answers a nominal 1 bit; the text is as
+                    // wide as the storage `collect_string_widths` sized.
+                    if comptime.r#type.is_string()
+                        && let Some(meta) = context.scope().variable_meta.get(id)
+                    {
+                        width = meta.width;
+                        expr_context.width = expr_context.width.max(width);
+                    }
+
+                    // A `param` is never written, so reading one whole is
+                    // reading its value.  Lowering it to storage instead hides
+                    // that from the identity folding in the `Binary` and
+                    // `Ternary` arms below: a parameter-gated expression of
+                    // the shape `full_q || (Pass && wvalid_i)`
+                    // then keeps a read of the gated-off operand, and a
+                    // consumer that rings the cell reports a combinational
+                    // loop the design does not have.
+                    //
+                    // `VarKind::Const` does NOT belong here even though it
+                    // reads as the stronger word: `build_for_statement` gives
+                    // it to the iterator of a RUNTIME for-loop, whose value
+                    // changes every iteration.
+                    //
+                    // Scalar `U64` values only: that is what those foldings
+                    // match, and inlining a wide constant at every read site
+                    // would grow the code for nothing.  The storage stays
+                    // allocated -- hierarchical references and waveform dumps
+                    // still resolve the parameter by name.
+                    if select.is_empty() && index.dimension() == 0 {
+                        let scope = context.scope();
+                        if let Some(var) = scope.analyzer_context.variables.get(id)
+                            && var.kind == air::VarKind::Param
+                            && let [value @ Value::U64(v)] = var.value.as_slice()
+                            && v.width as usize == width
+                        {
+                            return Ok(ProtoExpression::Value {
+                                value: value.clone(),
+                                width,
+                                expr_context,
+                            });
+                        }
+                    }
 
                     // Try constant index first
-                    let (select_val, const_index, need_dynamic_select, width_shape, kind_width) = {
+                    let (
+                        select_val,
+                        const_index,
+                        need_dynamic_select,
+                        width_shape,
+                        kind_width,
+                        index_is_absolute_bits,
+                    ) = {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(id).unwrap();
                         let select_val = if !select.is_empty() {
@@ -2267,20 +2887,24 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let select_val = if need_dynamic { None } else { select_val };
                         let width_shape = meta.r#type.width().clone();
                         let kind_width = meta.r#type.kind.width().unwrap_or(1);
+                        let index_is_absolute_bits = !meta.r#type.kind.is_enum();
                         (
                             select_val,
                             const_index,
                             need_dynamic,
                             width_shape,
                             kind_width,
+                            index_is_absolute_bits,
                         )
                     };
+                    let use_4state = context.config.use_4state;
                     let dynamic_select = if need_dynamic_select {
                         Some(build_dynamic_bit_select(
                             context,
                             &width_shape,
                             select,
                             kind_width,
+                            index_is_absolute_bits,
                         )?)
                     } else {
                         None
@@ -2293,23 +2917,34 @@ impl Conv<&air::Expression> for ProtoExpression {
                             SimulatorError::unsupported_description(&comptime.token)
                         })?;
                         let element = &meta.elements[index];
-                        let var_full_width = kind_width
-                            * width_shape
-                                .iter()
-                                .map(|d| d.unwrap_or(1))
-                                .product::<usize>();
+                        let var_full_width = meta.width;
 
-                        Ok(ProtoExpression::Variable {
-                            var_offset: element.current,
-                            select: select_val,
-                            dynamic_select,
-                            width,
+                        Ok(storage_bounded_read(
+                            select_val,
                             var_full_width,
+                            width,
                             expr_context,
-                        })
+                            use_4state,
+                            |select, width, expr_context| ProtoExpression::Variable {
+                                var_offset: element.current,
+                                select,
+                                dynamic_select,
+                                width,
+                                var_full_width,
+                                expr_context,
+                            },
+                        ))
                     } else {
                         // Dynamic index: build linear index ProtoExpression directly
-                        let (array_shape, num_elements, base_offset, stride, is_ff, element_nb) = {
+                        let (
+                            array_shape,
+                            num_elements,
+                            base_offset,
+                            stride,
+                            is_ff,
+                            element_nb,
+                            element_width,
+                        ) = {
                             let scope = context.scope();
                             let meta = scope.variable_meta.get(id).unwrap();
                             let dyn_info = meta.dynamic_index_info().ok_or_else(|| {
@@ -2322,22 +2957,30 @@ impl Conv<&air::Expression> for ProtoExpression {
                                 dyn_info.2,
                                 dyn_info.3,
                                 meta.native_bytes,
+                                meta.width,
                             )
                         };
 
                         let index_proto = build_linear_index_expr(context, &array_shape, index)?;
 
-                        Ok(ProtoExpression::DynamicVariable {
-                            base_offset: VarOffset::new(is_ff, base_offset),
-                            stride,
-                            element_native_bytes: element_nb,
-                            index_expr: Box::new(index_proto),
-                            num_elements,
-                            select: select_val,
-                            dynamic_select,
+                        Ok(storage_bounded_read(
+                            select_val,
+                            element_width,
                             width,
                             expr_context,
-                        })
+                            use_4state,
+                            |select, width, expr_context| ProtoExpression::DynamicVariable {
+                                base_offset: VarOffset::new(is_ff, base_offset),
+                                stride,
+                                element_native_bytes: element_nb,
+                                index_expr: Box::new(index_proto),
+                                num_elements,
+                                select,
+                                dynamic_select,
+                                width,
+                                expr_context,
+                            },
+                        ))
                     }
                 }
                 air::Factor::Value(comptime) => {
@@ -2349,6 +2992,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                         .r#type
                         .total_width()
                         .ok_or_else(|| SimulatorError::unresolved_expression(&comptime.token))?;
+                    // A folded operator keeps its operand's type, but its value
+                    // has the context width (`1 << 70` stored to 128 bits).
+                    let width = width.max(value.width());
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                     Ok(ProtoExpression::Value {
@@ -2385,18 +3031,65 @@ impl Conv<&air::Expression> for ProtoExpression {
                             ProtoExpression::Variable { expr_context, .. }
                             | ProtoExpression::Value { expr_context, .. }
                             | ProtoExpression::Unary { expr_context, .. }
+                            | ProtoExpression::Resize { expr_context, .. }
                             | ProtoExpression::Binary { expr_context, .. }
                             | ProtoExpression::Concatenation { expr_context, .. }
                             | ProtoExpression::Ternary { expr_context, .. }
                             | ProtoExpression::DynamicVariable { expr_context, .. } => expr_context,
                         };
                         ctx.signed = signed;
+                        // Constant folding extends by the value's own flag.
+                        if let ProtoExpression::Value { value, .. } = &mut inner {
+                            value.set_signed(signed);
+                        }
                         Ok(inner)
                     }
+                    // `$bits`/`$size`/`$clog2`/`$onehot` are elaboration-time
+                    // values. The analyzer folds one that sits in a `const`
+                    // initialiser, because it evaluates the whole RHS -- but
+                    // one in an ordinary expression, or in a function body
+                    // where the argument only becomes constant at the call
+                    // site, arrives here as a call, on a line `veryl check`,
+                    // `veryl build` and Verilator all accept. Evaluate it,
+                    // and report an unsupported description rather than
+                    // panicking when it will not evaluate.
                     _ => {
-                        unreachable!("system function calls are resolved by the analyzer")
+                        let scope = context.scope();
+                        let value = call.eval_value(&mut scope.analyzer_context);
+                        let Some(value) = value else {
+                            return Err(SimulatorError::unsupported_description(
+                                &call.comptime.token,
+                            ));
+                        };
+                        // Keep the value's own width and the analyzer's
+                        // propagated context, just as for a numeric literal.
+                        // Parent comparisons and conditionals use this
+                        // signedness when extending their operands.
+                        let width = value.width();
+                        let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+                        Ok(ProtoExpression::Value {
+                            value,
+                            width,
+                            expr_context,
+                        })
                     }
                 },
+                air::Factor::ResetValue(kind, polarity, comptime) => {
+                    let active_high = match polarity {
+                        air::ResetPolarity::High => true,
+                        air::ResetPolarity::Low => false,
+                        air::ResetPolarity::Default => context.config.abstract_reset_active_high,
+                    };
+                    let is_active = matches!(kind, air::ResetValueKind::Active);
+                    let value = Value::new((active_high == is_active) as u64, 1, false);
+                    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+                    Ok(ProtoExpression::Value {
+                        value,
+                        width: 1,
+                        expr_context,
+                    })
+                }
                 air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {
                     Err(SimulatorError::unsupported_description(&comptime.token))
                 }
@@ -2467,71 +3160,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                         return Ok(proto);
                     }
 
-                    // Int->int casts are otherwise transparent (the operand
-                    // is already sized by the cast in gather_context), but a
-                    // NARROWING cast must still truncate the operand value:
-                    // mask to the cast width, and re-extend by the cast
-                    // signedness when the outer context is wider.  A
-                    // same-width cast that flips signedness needs the same
-                    // re-extension: a wider context must extend by the cast
-                    // signedness, not the operand's own (SV `longint'(a)`
-                    // sign-extends a 64-bit unsigned `a`).
-                    let cast_width = comptime.r#type.total_width();
-                    let operand_width = x.comptime().expr_context.width;
+                    let cast_width = comptime
+                        .r#type
+                        .total_width()
+                        .ok_or_else(|| SimulatorError::unresolved_expression(&comptime.token))?;
                     let proto: ProtoExpression = Conv::conv(context, x.as_ref())?;
                     let outer: ExpressionContext = (&comptime.expr_context).into();
-                    let needs_reinterpret = |cw: usize| {
-                        outer.width > cw
-                            && operand_width <= cw
-                            && proto.width() == cw
-                            && proto.expr_context().signed != comptime.r#type.signed
-                    };
-                    if let Some(cw) = cast_width
-                        && cw > 0
-                        && (operand_width > cw || needs_reinterpret(cw))
-                    {
-                        let node_width = outer.width.max(cw);
-                        let value_node = |payload: BigUint| ProtoExpression::Value {
-                            value: Value::new_biguint(payload, node_width, false),
-                            width: node_width,
-                            expr_context: ExpressionContext {
-                                width: node_width,
-                                signed: false,
-                            },
-                        };
-                        let ctx = ExpressionContext {
-                            width: node_width,
-                            signed: false,
-                        };
-                        let mask = (BigUint::one() << cw) - BigUint::one();
-                        let mut ret = ProtoExpression::Binary {
-                            x: Box::new(proto),
-                            op: Op::BitAnd,
-                            y: Box::new(value_node(mask)),
-                            width: node_width,
-                            expr_context: ctx,
-                        };
-                        if comptime.r#type.signed && outer.width > cw {
-                            // Sign-extend the truncated value to the outer
-                            // width: ((v ^ s) - s) mod 2^node_width.
-                            let sign = BigUint::one() << (cw - 1);
-                            ret = ProtoExpression::Binary {
-                                x: Box::new(ProtoExpression::Binary {
-                                    x: Box::new(ret),
-                                    op: Op::BitXor,
-                                    y: Box::new(value_node(sign.clone())),
-                                    width: node_width,
-                                    expr_context: ctx,
-                                }),
-                                op: Op::Sub,
-                                y: Box::new(value_node(sign)),
-                                width: node_width,
-                                expr_context: ctx,
-                            };
-                        }
-                        return Ok(ret);
-                    }
-                    return Ok(proto);
+                    return Ok(resize_to_width(proto, cast_width, outer));
                 }
 
                 let x_kind = x.comptime().r#type.kind.clone();
@@ -2539,25 +3174,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
-                let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
-                if matches!(
-                    op,
-                    Op::Div
-                        | Op::Rem
-                        | Op::Greater
-                        | Op::GreaterEq
-                        | Op::Less
-                        | Op::LessEq
-                        | Op::Eq
-                        | Op::Ne
-                        | Op::EqWildcard
-                        | Op::NeWildcard
-                ) {
-                    // See build_binary for the merge() rationale; equality ops
-                    // carry signed=false in their own context but both-signed
-                    // operands must sign-extend to the comparison width.
-                    expr_context.signed = x.expr_context().signed & y.expr_context().signed;
-                }
+                let expr_context: ExpressionContext = (&comptime.expr_context).into();
+                let operand_signed =
+                    expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
 
                 // Float constant folding
                 if (x_kind.is_float() || y_kind.is_float())
@@ -2604,7 +3223,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                 ) = (&x, &y)
                 {
                     let mut mc = MaskCache::default();
-                    let result = op.eval_value_binary(xv, yv, width, expr_context.signed, &mut mc);
+                    let result = op.eval_value_binary(xv, yv, width, operand_signed, &mut mc);
                     if matches!(&result, Value::U64(_)) {
                         return Ok(ProtoExpression::Value {
                             value: result,
@@ -2612,6 +3231,25 @@ impl Conv<&air::Expression> for ProtoExpression {
                             expr_context,
                         });
                     }
+                }
+
+                if matches!(op, Op::EqWildcard | Op::NeWildcard)
+                    && !context.config.use_4state
+                    && let ProtoExpression::Value {
+                        value: yv,
+                        width: y_width,
+                        ..
+                    } = &y
+                    && yv.is_xz()
+                {
+                    return Ok(lower_wildcard_const_compare(
+                        x,
+                        *op,
+                        yv,
+                        *y_width,
+                        width,
+                        expr_context,
+                    ));
                 }
 
                 // Algebraic identity folding: 0 && X = 0, 1 || X = 1, etc.
@@ -2721,6 +3359,62 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
+                // A constant condition picks one arm at elaboration, and the
+                // arm it cannot pick must not be left in the tree:
+                // `gather_variable` walks both arms of a `Ternary`, so the
+                // dead arm still contributes a read, and where a consumer
+                // rings the cell that phantom read closes a combinational
+                // loop the design does not have. A synchronous FIFO whose
+                // pass-through arm is gated by a parameter is written exactly
+                // this way, and such cells ring each other.  This is the
+                // Ternary counterpart of the
+                // `0 && X` identity folding in the Binary arm above.
+                //
+                // An arm that already carries the ternary's width and context
+                // replaces the node outright; `apply_context` pushes both onto
+                // each arm, so that is the normal case. Otherwise the node
+                // stays and only the dead arm is swapped for a zero of its own
+                // width and signedness -- the live arm, the width and the
+                // node's extension (by BOTH arms' signedness, LRM 11.4.11)
+                // are then all unchanged, so either form is bit-exact.
+                if let ProtoExpression::Value {
+                    value: Value::U64(v),
+                    ..
+                } = &cond
+                    && v.mask_xz == 0
+                {
+                    let took_true = v.payload != 0;
+                    let (taken, dead) = if took_true {
+                        (true_expr, false_expr)
+                    } else {
+                        (false_expr, true_expr)
+                    };
+                    if taken.width() == width && *taken.expr_context() == expr_context {
+                        return Ok(taken);
+                    }
+                    let dead = if dead.width() > 0 {
+                        ProtoExpression::Value {
+                            value: Value::new(0, dead.width(), dead.expr_context().signed),
+                            width: dead.width(),
+                            expr_context: *dead.expr_context(),
+                        }
+                    } else {
+                        dead
+                    };
+                    let (true_expr, false_expr) = if took_true {
+                        (taken, dead)
+                    } else {
+                        (dead, taken)
+                    };
+                    return Ok(ProtoExpression::Ternary {
+                        cond: Box::new(cond),
+                        true_expr: Box::new(true_expr),
+                        false_expr: Box::new(false_expr),
+                        width,
+                        expr_context,
+                    });
+                }
+
                 Ok(ProtoExpression::Ternary {
                     cond: Box::new(cond),
                     true_expr: Box::new(true_expr),
@@ -2759,6 +3453,93 @@ impl Conv<&air::Expression> for ProtoExpression {
                 })
             }
             _ => panic!("unhandled Expression variant"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VAR_WIDTH: usize = 80;
+
+    fn build(
+        select: Option<(usize, usize)>,
+        width: usize,
+        expr_context: ExpressionContext,
+    ) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select,
+            dynamic_select: None,
+            width,
+            var_full_width: VAR_WIDTH,
+            expr_context,
+        }
+    }
+
+    /// Pinned here rather than through Veryl source: every source that
+    /// reaches the out-of-range arms has to stay illegal to be interesting,
+    /// so a tighter bounds check would silently retire the coverage.
+    #[test]
+    fn storage_bounded_read_clips_to_the_variable() {
+        let context = ExpressionContext {
+            width: 24,
+            signed: false,
+        };
+        let read = |select, use_4state| {
+            storage_bounded_read(Some(select), VAR_WIDTH, 24, context, use_4state, build)
+        };
+
+        let kept = read((71, 48), true);
+        assert!(
+            matches!(
+                kept,
+                ProtoExpression::Variable {
+                    select: Some((71, 48)),
+                    width: 24,
+                    ..
+                }
+            ),
+            "{kept:?}"
+        );
+
+        let partial = read((95, 72), true);
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = &partial
+        else {
+            panic!("expected a concatenation: {partial:?}");
+        };
+        assert_eq!(*width, 24);
+        assert_eq!(
+            elements.iter().map(|x| x.2).collect::<Vec<_>>(),
+            vec![16, 8]
+        );
+        let ProtoExpression::Value { value, .. } = elements[0].0.as_ref() else {
+            panic!("expected an x fill: {:?}", elements[0].0);
+        };
+        assert!(value.is_xz(), "{value:?}");
+        assert!(
+            matches!(
+                elements[1].0.as_ref(),
+                ProtoExpression::Variable {
+                    select: Some((79, 72)),
+                    ..
+                }
+            ),
+            "{:?}",
+            elements[1].0
+        );
+
+        // Nothing of the variable survives in either state.
+        for (use_4state, xz) in [(true, true), (false, false)] {
+            let gone = read((119, 96), use_4state);
+            let ProtoExpression::Value { value, width, .. } = &gone else {
+                panic!("expected a folded value: {gone:?}");
+            };
+            assert_eq!(*width, 24);
+            assert_eq!(value.is_xz(), xz, "{value:?}");
         }
     }
 }

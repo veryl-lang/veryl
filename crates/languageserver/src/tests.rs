@@ -144,6 +144,23 @@ fn build_did_open(text: &str) -> Request {
 }
 
 fn build_completion(id: i64, line: u32, character: u32) -> Request {
+    build_completion_with_context(
+        id,
+        line,
+        character,
+        CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        },
+    )
+}
+
+fn build_completion_with_context(
+    id: i64,
+    line: u32,
+    character: u32,
+    context: CompletionContext,
+) -> Request {
     let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     path.pop();
     path.pop();
@@ -157,10 +174,7 @@ fn build_completion(id: i64, line: u32, character: u32) -> Request {
         },
         work_done_progress_params: Default::default(),
         partial_result_params: Default::default(),
-        context: Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-            trigger_character: Some(".".to_string()),
-        }),
+        context: Some(context),
     };
 
     Request::build("textDocument/completion")
@@ -200,6 +214,41 @@ async fn completion_tb_component_method() {
     assert!(
         items.iter().any(|x| x["label"] == "next"),
         "expected `next` in completion items, got: {items:?}",
+    );
+}
+
+#[tokio::test]
+#[ntest::timeout(60000)]
+async fn completion_in_unparsable_document() {
+    let mut server = TestServer::new(Backend::new);
+
+    let req = build_initialize(1);
+    server.send_request(req).await;
+    let res = server.recv_response().await;
+    assert!(res.is_ok());
+
+    let req = build_initialized();
+    server.send_request(req).await;
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "window/logMessage");
+
+    // The only open source does not parse, so nothing of the project has been analyzed.
+    let code = "module t {\n    let a: logic = mo\n}\n";
+    let req = build_did_open(code);
+    server.send_request(req).await;
+
+    let context = CompletionContext {
+        trigger_kind: CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+    };
+    let req = build_completion_with_context(2, 1, 21, context);
+    server.send_request(req).await;
+
+    let res = server.recv_response_skipping().await;
+    let items = res["result"].as_array().unwrap();
+    assert!(
+        items.iter().any(|x| x["label"] == "module"),
+        "expected keyword items, got: {items:?}",
     );
 }
 
@@ -301,12 +350,53 @@ async fn combinational_loop_diagnostic() {
     assert_eq!(diag["code"], Value::from("combinational_loop"));
     assert_eq!(
         diag["message"],
-        Value::from("Semantic Error: combinational loop detected"),
+        Value::from("Semantic Error: combinational loop detected: b -> c -> b"),
     );
     let related = diag["relatedInformation"].as_array();
     assert!(
         related.is_some_and(|r| !r.is_empty()),
         "expected non-empty relatedInformation, got: {diag}",
+    );
+}
+
+#[tokio::test]
+#[ntest::timeout(60000)]
+async fn instantiation_note_diagnostic() {
+    let mut server = TestServer::new(Backend::new);
+
+    let req = build_initialize(1);
+    server.send_request(req).await;
+    let _ = server.recv_response().await;
+
+    let req = build_initialized();
+    server.send_request(req).await;
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "window/logMessage");
+
+    let code = "module Leaf #(param W: u32 = 1) (i: input logic<8>, o: output logic) {\n    assign o = i[W + 5];\n}\nmodule Top (i: input logic<8>, o: output logic) {\n    inst l: Leaf #(W: 9) (i, o);\n}\n";
+    let req = build_did_open(code);
+    server.send_request(req).await;
+
+    // did_open log
+    let _ = server.recv_notification().await;
+
+    // diagnostics
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "textDocument/publishDiagnostics");
+    let diags = res.params().unwrap()["diagnostics"].as_array().unwrap();
+    let diag = diags
+        .iter()
+        .find(|x| x["code"] == "invalid_select")
+        .unwrap_or_else(|| panic!("expected invalid_select, got: {diags:?}"));
+    let related = diag["relatedInformation"].as_array().unwrap();
+    assert_eq!(related.len(), 1, "{diag}");
+    assert_eq!(
+        related[0]["message"],
+        Value::from("reported inside l: Leaf #(W: 9)")
+    );
+    assert_eq!(
+        related[0]["location"]["range"]["start"]["line"],
+        Value::from(4)
     );
 }
 

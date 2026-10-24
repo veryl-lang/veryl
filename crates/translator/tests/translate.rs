@@ -66,4 +66,42 @@ fn unsupported_construct_has_span_reason_and_source() {
     );
 }
 
+#[test]
+fn unsupported_span_points_into_the_input_after_preprocessing() {
+    // The preprocessor drops the `define line and pads the string literal, so
+    // offsets into its output are behind or ahead of the input.
+    let src = "`define W 8\nmodule top;\n  logic [`W-1:0] a;\n  logic b;\n  assign b = \"ab\" == \"ab\";\n  initial begin\n    a = 0;\n  end\nendmodule\n";
+    let out = veryl_translator::translate_str(
+        src,
+        "inline.sv",
+        false,
+        veryl_metadata::NewlineStyle::Auto,
+    )
+    .expect("translate");
+
+    let c = out
+        .unsupported
+        .iter()
+        .find(|c| c.kind == "initial block")
+        .expect("initial block should be reported as unsupported");
+    assert_eq!(c.span.offset(), src.find("initial").unwrap());
+    assert_eq!(c.span.len(), "initial".len());
+    assert!(out.veryl.contains("var a: logic<8>;"), "{}", out.veryl);
+}
+
+#[test]
+fn nested_width_casts_translate_to_valid_veryl() {
+    let src = "module casts (input logic [15:0] a, output logic [7:0] y);\n  assign y = 8'(16'(a));\nendmodule\n";
+    let out = veryl_translator::translate_str(
+        src,
+        "nested_casts.sv",
+        false,
+        veryl_metadata::NewlineStyle::Auto,
+    )
+    .expect("translate");
+    assert!(out.unsupported.is_empty(), "{:?}", out.unsupported);
+    assert!(out.veryl.contains("((a) as 16) as 8"), "{}", out.veryl);
+    veryl_parser::Parser::parse(&out.veryl, &"nested_casts.veryl").expect("parse translated Veryl");
+}
+
 include!(concat!(env!("OUT_DIR"), "/translate_cases.rs"));

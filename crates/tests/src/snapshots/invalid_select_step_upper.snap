@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_select (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_select)
+
+  × invalid select caused by out of range [11:6] > 8
+   ╭─[../../testcases/error/invalid_select_step_upper.veryl:3:26]
+ 2 │     var a : logic<8>;
+ 3 │     let _b: logic<6> = a[1 step 6];
+   ·                          ────┬───
+   ·                              ╰── Error location
+ 4 │ }
+   ╰────
+  help:

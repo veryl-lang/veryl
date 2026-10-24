@@ -150,7 +150,7 @@ impl Runner for Verilator {
                         "Failed to copy include {:?} to {:?}",
                         include_file,
                         target_path
-                    )
+                    );
                 }
             } else {
                 miette::bail!("Failed to get include file name {:?}", include_file);

@@ -1,0 +1,5 @@
+module referring_inactive_definition {
+    #[ifdef(UNDEFINED)]
+    let a : logic = 1;
+    let _b: logic = a;
+}

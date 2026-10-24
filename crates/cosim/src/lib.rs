@@ -37,8 +37,10 @@ pub unsafe extern "C" fn cosim_open(
     let top = unsafe { CStr::from_ptr(top) };
     let top = top.to_str().unwrap();
 
+    // Not `Config::apply_env`: that also turns DUT reuse on.
     let config = Config {
         use_4state,
+        allow_multi_pass: std::env::var("VERYL_ALLOW_MULTI_PASS").as_deref() == Ok("1"),
         ..Default::default()
     };
 
@@ -72,7 +74,7 @@ pub unsafe extern "C" fn cosim_step_reset(handle: NonNull<Simulator>, name: *con
         .event_statements
         .keys()
         .filter_map(|e| match e {
-            Event::Clock(id) => Some(*id),
+            Event::Clock(id, _) => Some(*id),
             _ => None,
         })
         .collect();
@@ -82,7 +84,7 @@ pub unsafe extern "C" fn cosim_step_reset(handle: NonNull<Simulator>, name: *con
     }
     for (i, clock) in clocks.iter().enumerate() {
         // The assertion edge is the reset's own event, not one clock's.
-        sim.step_in_reset(&Event::Clock(*clock), &reset, i == 0);
+        sim.step_in_reset(&Event::clock(*clock), &reset, i == 0);
     }
     if let Some(id) = reset.var_id() {
         sim.set_reset_level(&id, false);

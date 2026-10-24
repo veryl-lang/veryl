@@ -18,6 +18,7 @@ use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::msb_table;
 use veryl_analyzer::namespace::{DefineContext, Namespace};
+use veryl_analyzer::reset_value_table;
 use veryl_analyzer::resolved_type_table;
 use veryl_analyzer::scope;
 use veryl_analyzer::symbol::Direction as SymDirection;
@@ -202,6 +203,21 @@ impl Default for Emitter {
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
         }
+    }
+}
+
+// Variables local to a statement block or function are updated immediately,
+// so only the other targets of an always_ff assignment need a nonblocking one.
+fn is_nba_target<T: Into<SymbolPathNamespace>>(path: T) -> bool {
+    match symbol_table::resolve(path) {
+        Ok(symbol) => match &symbol.found.kind {
+            SymbolKind::Variable(x) => !matches!(
+                x.affiliation,
+                Affiliation::StatementBlock | Affiliation::Function
+            ),
+            _ => true,
+        },
+        Err(_) => true,
     }
 }
 
@@ -583,7 +599,7 @@ impl Emitter {
                     return;
                 }
 
-                self.process_comment(x, will_push);
+                self.process_comment(&x.comments, will_push);
             }
             Mode::Align => {
                 self.aligner.token(x);
@@ -593,13 +609,13 @@ impl Emitter {
         self.last_token = Some(x.clone());
     }
 
-    fn process_comment(&mut self, x: &VerylToken, will_push: bool) {
-        if x.comments.is_empty() {
+    fn process_comment(&mut self, comments: &[Token], will_push: bool) {
+        if comments.is_empty() {
             return;
         }
-        let mut cs: Vec<CommentDoc> = Vec::with_capacity(x.comments.len());
+        let mut cs: Vec<CommentDoc> = Vec::with_capacity(comments.len());
         let mut prev_line = self.src_line;
-        for c in &x.comments {
+        for c in comments {
             let raw = resource_table::get_str_value(c.text).unwrap();
             let is_line_comment = raw.ends_with('\n');
             let trimmed: String = if is_line_comment {
@@ -629,6 +645,15 @@ impl Emitter {
             node = doc::indent_by(1, node);
         }
         self.emit_doc(node);
+    }
+
+    /// The guards `process_token` applies to comments, for a caller that held
+    /// them back. `src_line` must be the line they were held back from.
+    fn deferred_comment(&mut self, comments: &[Token], will_push: bool) {
+        if self.mode != Mode::Build || self.build_opt.strip_comments || self.skip_comment {
+            return;
+        }
+        self.process_comment(comments, will_push);
     }
 
     fn token(&mut self, x: &VerylToken) {
@@ -823,21 +848,36 @@ impl Emitter {
     }
 
     fn is_simple_case_statement(arg: &CaseStatement) -> bool {
+        let conditions = arg.case_statement_list.iter().filter_map(|x| {
+            if let CaseItemGroup::CaseCondition(x) = x.case_item.case_item_group.as_ref() {
+                Some(x.case_condition.as_ref())
+            } else {
+                None
+            }
+        });
+        Self::is_simple_case_conditions(conditions)
+    }
+
+    fn is_simple_case_expression(arg: &CaseExpression) -> bool {
+        let conditions = std::iter::once(arg.case_condition.as_ref()).chain(
+            arg.case_expression_list
+                .iter()
+                .map(|x| x.case_condition.as_ref()),
+        );
+        Self::is_simple_case_conditions(conditions)
+    }
+
+    fn is_simple_case_conditions<'a>(conditions: impl Iterator<Item = &'a CaseCondition>) -> bool {
         let mut context = Context::default();
 
-        for statement in &arg.case_statement_list {
-            if let CaseItemGroup::CaseCondition(case_item) =
-                statement.case_item.case_item_group.as_ref()
-            {
-                let condition = &case_item.case_condition;
-                if !Self::is_simple_case_condition(condition.range_item.as_ref(), &mut context) {
-                    return false;
-                }
+        for condition in conditions {
+            if !Self::is_simple_case_condition(condition.range_item.as_ref(), &mut context) {
+                return false;
+            }
 
-                for x in &condition.case_condition_list {
-                    if !Self::is_simple_case_condition(x.range_item.as_ref(), &mut context) {
-                        return false;
-                    }
+            for x in &condition.case_condition_list {
+                if !Self::is_simple_case_condition(x.range_item.as_ref(), &mut context) {
+                    return false;
                 }
             }
         }
@@ -962,13 +1002,19 @@ impl Emitter {
         }
     }
 
-    fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem) {
+    fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem, simple: bool) {
         if rhs.range.range_opt.is_some() && !self.build_opt.expand_inside_operation {
             self.str("(");
             self.expression(lhs);
             self.str(") inside {");
             self.range(&rhs.range);
             self.str("}");
+        } else if simple {
+            self.str("(");
+            self.expression(lhs);
+            self.str(") == (");
+            self.expression(&rhs.range.expression);
+            self.str(")");
         } else {
             self.inside_element_operation(lhs, rhs);
         }
@@ -1122,6 +1168,24 @@ impl Emitter {
             }
         } else {
             false
+        }
+    }
+
+    /// Value of a reset value literal according to the polarity of its counterpart
+    fn reset_value_text(&self, token: &VerylToken, is_active: bool) -> &'static str {
+        let reset_type = match reset_value_table::get(token.token.id).unwrap() {
+            TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
+            TypeKind::ResetAsyncLow => ResetType::AsyncLow,
+            TypeKind::ResetSyncHigh => ResetType::SyncHigh,
+            TypeKind::ResetSyncLow => ResetType::SyncLow,
+            TypeKind::Reset => self.build_opt.reset_type,
+            _ => unreachable!(),
+        };
+        let active_high = matches!(reset_type, ResetType::AsyncHigh | ResetType::SyncHigh);
+        if active_high == is_active {
+            "1'b1"
+        } else {
+            "1'b0"
         }
     }
 
@@ -1474,10 +1538,16 @@ impl Emitter {
             &arg.identifier.identifier_token,
             None,
         ));
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(&format!("{prefix}begin")));
+        // The brace carries the comments written at the top of the block, and
+        // emitting them with it would put them between `begin` and the label.
+        let mut begin = arg.l_brace.l_brace_token.replace(&format!("{prefix}begin"));
+        let comments = std::mem::take(&mut begin.comments);
+        self.token_will_push(&begin);
         self.space(1);
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
+        self.src_line = arg.l_brace.l_brace_token.token.line;
+        self.deferred_comment(&comments, true);
         for (i, x) in arg.generate_named_block_list.iter().enumerate() {
             self.newline_list(i);
             self.generate_group(&x.generate_group);
@@ -1488,11 +1558,23 @@ impl Emitter {
         self.in_generate_block.pop();
     }
 
-    fn emit_statement_block(&mut self, arg: &StatementBlock, begin_kw: &str, end_kw: &str) {
+    fn emit_statement_block(
+        &mut self,
+        arg: &StatementBlock,
+        begin_kw: &str,
+        end_kw: &str,
+        symbol: Option<&Symbol>,
+    ) {
         self.token_will_push(&arg.l_brace.l_brace_token.replace(begin_kw));
 
-        let mut base = 0;
-        let mut n_newlines = 0;
+        let n_typedefs = if let Some(symbol) = symbol {
+            self.emit_generic_type_typedefs(symbol)
+        } else {
+            0
+        };
+
+        let mut base = n_typedefs;
+        let mut n_newlines = n_typedefs;
         let mut suppress_newline = false;
         for x in &arg.statement_block_list {
             (base, n_newlines) = self.hoist_declarations_in_group(
@@ -1513,7 +1595,7 @@ impl Emitter {
                 &mut suppress_newline,
             );
         }
-        self.newline_list_post(arg.statement_block_list.is_empty());
+        self.newline_list_post(arg.statement_block_list.is_empty() && n_typedefs == 0);
         self.token(&arg.r_brace.r_brace_token.replace(end_kw));
     }
 
@@ -1698,6 +1780,9 @@ impl Emitter {
             }
             StatementBlockItem::ConstDeclaration(x) => {
                 self.const_declaration(&x.const_declaration);
+            }
+            StatementBlockItem::GenDeclaration(x) => {
+                self.gen_declaration(&x.gen_declaration);
             }
             _ => {}
         }
@@ -2733,10 +2818,21 @@ impl Emitter {
     ) {
         let emit_bodies = !arg.interface_declaration_list.is_empty();
         let emit_imports = !import_declarations.is_empty() && !symbol.kind.has_parameters();
-        let push_indent = !in_mixin && (emit_bodies || emit_imports);
 
-        if push_indent {
+        // The typedefs come first, and `newline_list(0)` opens the indented body
+        // just as `newline_push` does, so they open it themselves when present.
+        let n_typedefs = if in_mixin {
+            0
+        } else {
+            self.emit_generic_type_typedefs(symbol)
+        };
+        let push_indent = !in_mixin && (emit_bodies || emit_imports || n_typedefs != 0);
+
+        if push_indent && n_typedefs == 0 {
             self.newline_push();
+        }
+        if n_typedefs != 0 && (emit_imports || emit_bodies) {
+            self.newline();
         }
 
         if emit_imports {
@@ -2878,6 +2974,84 @@ impl Emitter {
                 unreachable!();
             }
         }
+    }
+
+    /// SystemVerilog has no cast to an unnamed type, so a cast through a `type`
+    /// bound generic parameter or `gen` declaration names the `typedef` emitted
+    /// for it instead of expanding into the type itself.
+    /// (refs: veryl-lang/veryl#3479)
+    fn casting_user_defined_type(&mut self, arg: &UserDefinedType) {
+        let (result, path) = self.resolve_scoped_idnetifier(&arg.scoped_identifier);
+        if result.is_err() && is_anonymous_type(&path) {
+            let identifier_token = arg.scoped_identifier.identifier().clone();
+            self.identifier(&Identifier { identifier_token });
+        } else {
+            self.user_defined_type(arg);
+        }
+    }
+
+    /// The SystemVerilog spelling of the anonymous type bound to `name` in the
+    /// generic map of the scope being emitted, for the `typedef` naming it, or
+    /// `None` if nothing is bound to it, or what is bound already has a name.
+    fn anonymous_type_string(&self, name: StrId) -> Option<String> {
+        let map = self.generic_map.last().and_then(|x| x.last())?;
+        let path = map.map.get(&name)?;
+        if !is_anonymous_type(path) {
+            return None;
+        }
+
+        let Literal::Type(x) = path.to_literal().unwrap() else {
+            unreachable!("`is_anonymous_type` has already matched the type literal");
+        };
+
+        let mut ret = x.to_sv_string();
+        if let GenericSymbolPathKind::VariableType(width) = &path.kind
+            && !width.is_empty()
+        {
+            ret.push(' ');
+            for w in width {
+                ret.push_str(&format!("[{w}-1:0]"));
+            }
+        }
+
+        Some(ret)
+    }
+
+    /// The type a `gen` declaration names with a `typedef`, or `None` when it
+    /// declares a value, or a type which already has a name of its own.
+    fn gen_declaration_type(&self, arg: &GenDeclaration) -> Option<String> {
+        if !matches!(
+            arg.gen_declaration_group.as_ref(),
+            GenDeclarationGroup::Type(_)
+        ) {
+            return None;
+        }
+
+        // A `gen` declaration takes part in the generic map of its scope, under
+        // the name it declares, just as a generic parameter does.
+        self.anonymous_type_string(arg.identifier.identifier_token.token.text)
+    }
+
+    /// Emits one `typedef` per `type` bound generic parameter of the generic
+    /// instance being emitted, in declaration order, at the head of its body,
+    /// and answers how many it wrote. A parameter bound to a type which already
+    /// has a name needs none.
+    fn emit_generic_type_typedefs(&mut self, symbol: &Symbol) -> usize {
+        let typedefs: Vec<_> = symbol
+            .generic_parameters()
+            .iter()
+            .filter_map(|(name, _)| {
+                let r#type = self.anonymous_type_string(*name)?;
+                Some(format!("typedef {type} {name};"))
+            })
+            .collect();
+
+        for (i, x) in typedefs.iter().enumerate() {
+            self.newline_list(i);
+            self.str(x);
+        }
+
+        typedefs.len()
     }
 
     fn resolve_scoped_idnetifier(
@@ -3216,6 +3390,20 @@ impl VerylWalker for Emitter {
         self.token(&arg.msb_token.replace(&text));
     }
 
+    /// Semantic action for non-terminal 'ResetActive'
+    fn reset_active(&mut self, arg: &ResetActive) {
+        let token = &arg.reset_active_token;
+        let text = self.reset_value_text(token, true);
+        self.veryl_token(&token.replace(text));
+    }
+
+    /// Semantic action for non-terminal 'ResetInactive'
+    fn reset_inactive(&mut self, arg: &ResetInactive) {
+        let token = &arg.reset_inactive_token;
+        let text = self.reset_value_text(token, false);
+        self.veryl_token(&token.replace(text));
+    }
+
     /// Semantic action for non-terminal 'Param'
     fn param(&mut self, arg: &Param) {
         self.veryl_token(&arg.param_token.replace("parameter"));
@@ -3411,7 +3599,11 @@ impl VerylWalker for Emitter {
                         self.scalar_type_emitted = true;
                     }
                 }
-                _ => {}
+                // The analyzer resolves every identifier before emission, so a
+                // resolvable path failing here means the symbol table and the
+                // emitted code disagree. Emitting nothing would silently produce
+                // broken SystemVerilog -- an empty type or an empty expression.
+                _ => unreachable!(),
             }
         }
     }
@@ -3616,7 +3808,7 @@ impl VerylWalker for Emitter {
                 }
                 CastingType::BBool(_) | CastingType::LBool(_) => self.str("(("),
                 CastingType::UserDefinedType(x) => {
-                    self.user_defined_type(&x.user_defined_type);
+                    self.casting_user_defined_type(&x.user_defined_type);
                     self.str("'(");
                 }
                 CastingType::Based(x) => {
@@ -3625,6 +3817,12 @@ impl VerylWalker for Emitter {
                 }
                 CastingType::BaseLess(x) => {
                     self.base_less(&x.base_less);
+                    self.str("'(");
+                }
+                CastingType::LParenExpressionRParen(x) => {
+                    self.l_paren(&x.l_paren);
+                    self.expression(&x.expression);
+                    self.r_paren(&x.r_paren);
                     self.str("'(");
                 }
                 // casting to clock type doesn't change polarity
@@ -3713,7 +3911,8 @@ impl VerylWalker for Emitter {
                 | CastingType::F64(_)
                 | CastingType::UserDefinedType(_)
                 | CastingType::Based(_)
-                | CastingType::BaseLess(_) => self.str(")"),
+                | CastingType::BaseLess(_)
+                | CastingType::LParenExpressionRParen(_) => self.str(")"),
                 CastingType::BBool(_) | CastingType::LBool(_) => self.str(") != 1'b0)"),
                 // casting to clock/reset emits no surrounding cast wrapper
                 CastingType::Clock(_)
@@ -3733,6 +3932,7 @@ impl VerylWalker for Emitter {
         match arg {
             Factor::Number(x) => self.number(&x.number),
             Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
+            Factor::ResetValueLiteral(x) => self.reset_value_literal(&x.reset_value_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
@@ -3960,8 +4160,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'CaseExpression'
     fn case_expression(&mut self, arg: &CaseExpression) {
+        let simple = Self::is_simple_case_expression(arg);
         self.token(&arg.case.case_token.replace("(("));
-        self.case_expression_condition(&arg.expression, &arg.case_condition.range_item);
+        self.case_expression_condition(&arg.expression, &arg.case_condition.range_item, simple);
         self.str(") ? (");
         self.newline_push();
         self.expression(&arg.expression0);
@@ -3970,7 +4171,7 @@ impl VerylWalker for Emitter {
             self.token(&x.comma.comma_token.replace(")"));
             self.space(1);
             self.str(": (");
-            self.case_expression_condition(&arg.expression, &x.range_item);
+            self.case_expression_condition(&arg.expression, &x.range_item, simple);
             self.str(") ? (");
             self.newline_push();
             self.expression(&arg.expression0);
@@ -3980,7 +4181,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         for x in &arg.case_expression_list {
             self.str(": (");
-            self.case_expression_condition(&arg.expression, &x.case_condition.range_item);
+            self.case_expression_condition(&arg.expression, &x.case_condition.range_item, simple);
             self.str(") ? (");
             self.newline_push();
             self.expression(&x.expression);
@@ -3989,7 +4190,7 @@ impl VerylWalker for Emitter {
                 self.token(&y.comma.comma_token.replace(")"));
                 self.space(1);
                 self.str(": (");
-                self.case_expression_condition(&arg.expression, &y.range_item);
+                self.case_expression_condition(&arg.expression, &y.range_item, simple);
                 self.str(") ? (");
                 self.newline_push();
                 self.expression(&x.expression);
@@ -4219,7 +4420,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StatementBlock'
     fn statement_block(&mut self, arg: &StatementBlock) {
-        self.emit_statement_block(arg, "begin", "end");
+        self.emit_statement_block(arg, "begin", "end", None);
     }
 
     /// Semantic action for non-terminal 'LetStatement'
@@ -4266,6 +4467,16 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationAssignment'
     fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        let list = &arg.assign_concatenation_list;
+        let is_nba = self.in_always_ff
+            && std::iter::once(&*list.assign_concatenation_item)
+                .chain(
+                    list.assign_concatenation_list_list
+                        .iter()
+                        .map(|x| &*x.assign_concatenation_item),
+                )
+                .any(|item| is_nba_target(item.hierarchical_identifier.identifier.as_ref()));
+
         self.align_start(align_kind::IDENTIFIER);
         self.l_brace(&arg.l_brace);
         self.assign_concatenation_list(&arg.assign_concatenation_list);
@@ -4273,7 +4484,7 @@ impl VerylWalker for Emitter {
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.align_start(align_kind::ASSIGNMENT);
-        if self.in_always_ff {
+        if is_nba {
             self.str("<");
         }
         self.equ(&arg.equ);
@@ -4285,23 +4496,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
-        let is_nba = if !self.in_always_ff {
-            false
-        } else if let Some(lhs) = &self.assignment_lefthand_side {
-            if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
-                match &lhs_symbol.found.kind {
-                    SymbolKind::Variable(x) => !matches!(
-                        x.affiliation,
-                        Affiliation::StatementBlock | Affiliation::Function
-                    ),
-                    _ => true,
-                }
-            } else {
-                true
-            }
-        } else {
-            true
-        };
+        let is_nba = self.in_always_ff
+            && match &self.assignment_lefthand_side {
+                Some(lhs) => is_nba_target(lhs.scoped_identifier.as_ref()),
+                None => true,
+            };
 
         self.space(1);
         if is_nba {
@@ -4876,8 +5075,17 @@ impl VerylWalker for Emitter {
         self.semicolon(&arg.semicolon);
     }
 
-    fn gen_declaration(&mut self, _arg: &GenDeclaration) {
-        // nothing to do
+    fn gen_declaration(&mut self, arg: &GenDeclaration) {
+        let Some(r#type) = self.gen_declaration_type(arg) else {
+            return;
+        };
+
+        self.token(&arg.r#gen.gen_token.replace("typedef"));
+        self.space(1);
+        self.str(&r#type);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'TypeDefDeclaration'
@@ -6041,7 +6249,7 @@ impl VerylWalker for Emitter {
                 self.token(&x.minus_g_t.minus_g_t_token.replace(""));
             }
             self.str(";");
-            self.emit_statement_block(&arg.statement_block, "", "endfunction");
+            self.emit_statement_block(&arg.statement_block, "", "endfunction", Some(&symbol.found));
 
             self.pop_generic_map();
             self.align_reset();
@@ -6060,7 +6268,7 @@ impl VerylWalker for Emitter {
             // the semicolon's own line so `Doc::Comments` carries the
             // correct gap into the renderer.
             self.src_line = arg.semicolon.semicolon_token.token.line;
-            self.process_comment(&arg.semicolon.semicolon_token, false);
+            self.deferred_comment(&arg.semicolon.semicolon_token.comments, false);
         }
     }
 
@@ -6165,8 +6373,9 @@ impl VerylWalker for Emitter {
                 self.port_declaration(&x.port_declaration);
             }
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
+            let n_typedefs = self.emit_generic_type_typedefs(&symbol.found);
             for (i, x) in arg.module_declaration_list.iter().enumerate() {
-                self.newline_list(i);
+                self.newline_list(n_typedefs + i);
                 if i == 0 && !import_declarations.is_empty() && empty_header {
                     for x in &import_declarations {
                         self.emit_import_declaration(x, true);
@@ -6180,7 +6389,7 @@ impl VerylWalker for Emitter {
                 self.module_group(&x.module_group);
             }
             self.emit_global_functions(&symbol.found);
-            self.newline_list_post(arg.module_declaration_list.is_empty());
+            self.newline_list_post(arg.module_declaration_list.is_empty() && n_typedefs == 0);
             self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
 
             self.pop_generic_map();
@@ -6477,8 +6686,9 @@ impl VerylWalker for Emitter {
                 self.veryl_token(&arg.identifier.identifier_token.replace(&text));
             }
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
+            let n_typedefs = self.emit_generic_type_typedefs(&symbol.found);
             for (i, x) in arg.package_declaration_list.iter().enumerate() {
-                self.newline_list(i);
+                self.newline_list(n_typedefs + i);
                 if i == 0 {
                     let mut import_declarations = self.file_scope_import.clone();
                     import_declarations.append(&mut arg.collect_import_declarations());
@@ -6490,7 +6700,7 @@ impl VerylWalker for Emitter {
                 self.package_group(&x.package_group);
             }
             self.emit_global_functions(&symbol.found);
-            self.newline_list_post(arg.package_declaration_list.is_empty());
+            self.newline_list_post(arg.package_declaration_list.is_empty() && n_typedefs == 0);
             self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
 
             self.pop_generic_map();
@@ -6744,6 +6954,10 @@ fn namespace_string(
             // "$sv" namespace should be removed
             if text == "$sv_" {
                 in_sv_namespace = true;
+            } else if text == "$define_" {
+                // "$define" namespace is emitted as a macro reference
+                ret.push('`');
+                in_sv_namespace = true;
             } else {
                 let emit_prj_prefix = if context.build_opt.omit_project_prefix {
                     context.project_name != Some(*path)
@@ -6840,6 +7054,14 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
 
     let resolved = symbol_table::resolve_generic_structural(&path, &symbol.namespace);
     resolved.ok().map(|x| (*x.found).clone())
+}
+
+/// Whether a path is a bare type, such as the argument given for a `type` bound
+/// generic parameter. SystemVerilog has no name for such a type until a
+/// `typedef` gives it one, so a cast through it cannot be emitted as it stands.
+/// A path which names a type is not one of these.
+fn is_anonymous_type(path: &GenericSymbolPath) -> bool {
+    !path.is_resolvable() && matches!(path.to_literal(), Some(Literal::Type(_)))
 }
 
 pub fn symbol_string(

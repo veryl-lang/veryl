@@ -4,23 +4,23 @@
 //! produced inside the module — by a comb expression (`let clk_g: clock
 //! = i_clk & i_en;`) or an `always_ff` write.  The simulator detects
 //! 0→1 transitions after each `step()` and synthesizes
-//! `Event::Clock(VarId)` for downstream `always_ff(derived_clk)`.
+//! `Event::Clock` for downstream `always_ff(derived_clk)`.
 //!
-//! Derived-clock values are refreshed by a dedicated
-//! `derived_clock_eval` ProtoStatements chunk (dependency closure only),
-//! JIT-compiled separately so the main comb JIT/AOT-C blob is untouched.
+//! Derived-clock values are refreshed by the regular comb settle.
 //!
 //! A non-port ASYNC RESET the design produces itself rides the same
 //! machinery: no testbench drives it, so its assertion is a transition of
 //! an internal net just like a derived clock's rising edge, and firing
-//! `Event::Reset(VarId)` there is what keeps `if_reset` from waiting for
+//! `Event::Reset` there is what keeps `if_reset` from waiting for
 //! the next clock edge.
 
 use crate::HashMap;
 use crate::HashSet;
+use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
 use smallvec::SmallVec;
+use veryl_analyzer::ir::Op;
 use veryl_analyzer::ir::VarId;
 
 #[derive(Clone, Debug)]
@@ -56,6 +56,10 @@ pub struct DerivedReset {
 /// reset, and `negedge` marks a `clock_negedge` (meaningless for a reset).
 pub type EdgeCandidate = (VarId, VarOffset, usize, Option<bool>, bool);
 
+/// Statement indices that write one offset, ascending.  A single writer is
+/// the ordinary case; sibling conditional arms are what make it more.
+type Writers = SmallVec<[usize; 1]>;
+
 #[derive(Clone, Debug, Default)]
 pub struct DerivedClockSchedule {
     pub clocks: Vec<DerivedClock>,
@@ -65,25 +69,35 @@ pub struct DerivedClockSchedule {
     /// that match a top-module clock-typed variable — either an input
     /// port or a testbench `$tb::clock_gen` inst output.
     pub master_input_clocks: SmallVec<[VarId; 4]>,
+    /// `(copy, source)` for a derived clock that only copies another clock:
+    /// its flops fire on the source's event, sampling the same values.
+    pub aliases: Vec<(VarId, VarId)>,
 }
 
 impl DerivedClockSchedule {
     pub fn is_empty(&self) -> bool {
         self.clocks.is_empty() && self.resets.is_empty()
     }
+
+    /// The clock whose event fires for `clock`'s edges.
+    pub fn source_of(&self, clock: VarId) -> VarId {
+        self.aliases
+            .iter()
+            .find(|(copy, _)| *copy == clock)
+            .map_or(clock, |(_, source)| *source)
+    }
 }
 
-/// Returns `(schedule, eval_indices)` where `eval_indices` are
-/// dependency-closure stmt indices into `pre_jit_stmts` (already
-/// topo-sorted by `analyze_dependency`).
 pub fn build_schedule(
     candidates: &[EdgeCandidate],
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
-) -> (DerivedClockSchedule, Vec<usize>) {
-    // Comb-only reverse map: VarOffset -> writer stmt index.  FF outputs
-    // go through the event/commit path so they're not tracked.
-    let mut output_to_writer: HashMap<VarOffset, usize> = HashMap::default();
+    negedge_inputs: &HashSet<VarId>,
+) -> DerivedClockSchedule {
+    // FF outputs go through the event/commit path.  Every writer, not the
+    // last: an offset written by sibling conditional arms has one fragment
+    // per arm, and keeping only the last drops the others from the closure.
+    let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
     let mut scratch_in: Vec<VarOffset> = Vec::new();
     let mut scratch_out: Vec<VarOffset> = Vec::new();
     for (i, stmt) in pre_jit_stmts.iter().enumerate() {
@@ -92,7 +106,13 @@ pub fn build_schedule(
         stmt.gather_variable_offsets(&mut scratch_in, &mut scratch_out);
         for off in &scratch_out {
             if !off.is_ff() {
-                output_to_writer.insert(*off, i);
+                // A statement holding sibling arms gathers its output once per
+                // arm, and only WHICH statements to run matters below.  Its
+                // pushes are adjacent, so the tail is enough to dedupe.
+                let writers = output_to_writer.entry(*off).or_default();
+                if writers.last() != Some(&i) {
+                    writers.push(i);
+                }
             }
         }
     }
@@ -137,15 +157,39 @@ pub fn build_schedule(
         if c.current_offset.is_ff() {
             (0u32, 0u32)
         } else {
+            // The offset only holds its settled value once every fragment
+            // that can write it has run.
             let writer = output_to_writer
                 .get(&c.current_offset)
-                .copied()
+                .and_then(|w| w.last().copied())
                 .unwrap_or(usize::MAX);
             (1u32, writer as u32)
         }
     });
 
-    let mut dep_set: HashSet<usize> = HashSet::default();
+    let clock_at: HashMap<VarOffset, (VarId, bool)> = clocks
+        .iter()
+        .map(|c| (c.current_offset, (c.var_id, c.negedge)))
+        .collect();
+    let mut aliases = Vec::new();
+    clocks.retain(|clk| {
+        if clk.negedge || clk.current_offset.is_ff() {
+            return true;
+        }
+        let source = copied_source(
+            clk.current_offset,
+            pre_jit_stmts,
+            &output_to_writer,
+            input_clock_offsets,
+            &clock_at,
+        )
+        .filter(|source| *source != clk.var_id && !negedge_inputs.contains(source));
+        if let Some(source) = source {
+            aliases.push((clk.var_id, source));
+        }
+        source.is_none()
+    });
+
     let mut master_set: HashSet<VarId> = HashSet::default();
     for clk in &mut clocks {
         if clk.current_offset.is_ff() {
@@ -164,77 +208,125 @@ pub fn build_schedule(
             &mut local_master,
         );
         clk.master_gated = !local_master.is_empty();
-        dep_set.extend(local_dep);
         master_set.extend(local_master);
     }
-    for rst in &resets {
-        if rst.current_offset.is_ff() {
-            continue;
-        }
-        // Same closure, for `partial_settle` only: a reset has no ICG
-        // reading, so its master inputs stay out of `master_input_clocks`
-        // (toggling one would fabricate a clock edge nothing asked for).
-        let mut local_dep: HashSet<usize> = HashSet::default();
-        let mut local_master: HashSet<VarId> = HashSet::default();
-        collect_comb_closure(
-            rst.current_offset,
-            pre_jit_stmts,
-            &output_to_writer,
-            input_clock_offsets,
-            &mut local_dep,
-            &mut local_master,
-        );
-        dep_set.extend(local_dep);
-    }
-
-    // Sort by pre_jit_stmts index so partial_settle runs deps first.
-    let mut eval_indices: Vec<usize> = dep_set.into_iter().collect();
-    eval_indices.sort_unstable();
-
     let mut master_input_clocks: SmallVec<[VarId; 4]> = SmallVec::new();
     for vid in master_set {
         master_input_clocks.push(vid);
     }
 
-    (
-        DerivedClockSchedule {
-            clocks,
-            resets,
-            master_input_clocks,
-        },
-        eval_indices,
-    )
+    DerivedClockSchedule {
+        clocks,
+        resets,
+        master_input_clocks,
+        aliases,
+    }
 }
 
-pub fn extract_eval_proto_stmts(
-    eval_indices: &[usize],
+/// The master input clock the copy chain from `offset` reaches, else the
+/// clock nearest the chain's source.
+fn copied_source(
+    mut offset: VarOffset,
     pre_jit_stmts: &[ProtoStatement],
-) -> Vec<ProtoStatement> {
-    eval_indices
-        .iter()
-        .filter_map(|i| pre_jit_stmts.get(*i).cloned())
-        .collect()
+    output_to_writer: &HashMap<VarOffset, Writers>,
+    input_clock_offsets: &HashMap<VarOffset, VarId>,
+    clock_at: &HashMap<VarOffset, (VarId, bool)>,
+) -> Option<VarId> {
+    let mut nearest = None;
+    // A chain longer than the statement count would revisit a writer.
+    for _ in 0..=pre_jit_stmts.len() {
+        if let Some(&(clock, negedge)) = clock_at.get(&offset) {
+            if negedge {
+                return None;
+            }
+            nearest = Some(clock);
+        }
+        let Some(writers) = output_to_writer.get(&offset) else {
+            return input_clock_offsets.get(&offset).copied().or(nearest);
+        };
+        let next = match writers.as_slice() {
+            [writer] => pre_jit_stmts.get(*writer).and_then(copy_source),
+            _ => None,
+        };
+        match next {
+            Some(next) => offset = next,
+            None => return nearest,
+        }
+    }
+    None
 }
 
-/// BFS back from `target_offset` through `output_to_writer`.  FF inputs
+/// `src` of a one-bit `dst = src`, also under the `& 1` a logic-to-clock
+/// conversion lowers to.
+fn copy_source(stmt: &ProtoStatement) -> Option<VarOffset> {
+    let ProtoStatement::Assign(a) = stmt else {
+        return None;
+    };
+    if a.dst_width != 1
+        || a.dst.is_ff()
+        || a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+    {
+        return None;
+    }
+    copied_bit(&a.expr)
+}
+
+/// The one-bit variable `e` copies.  Inlining a chain of copies leaves one
+/// `& 1` per link.
+fn copied_bit(e: &ProtoExpression) -> Option<VarOffset> {
+    let is_one = |e: &ProtoExpression| matches!(e, ProtoExpression::Value { value, width: 1, .. } if value.to_u64() == Some(1));
+    match e {
+        ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd,
+            y,
+            width: 1,
+            ..
+        } if is_one(y) => copied_bit(x),
+        ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd,
+            y,
+            width: 1,
+            ..
+        } if is_one(x) => copied_bit(y),
+        e => one_bit_variable(e),
+    }
+}
+
+fn one_bit_variable(e: &ProtoExpression) -> Option<VarOffset> {
+    match e {
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width: 1,
+            var_full_width: 1,
+            ..
+        } if !var_offset.is_ff() => Some(*var_offset),
+        _ => None,
+    }
+}
+
+/// Walks back from `target_offset` through `output_to_writer`.  FF inputs
 /// are leaves; boundary clock-typed inputs (top-module ports or testbench
 /// inst outputs) are recorded as masters.
 fn collect_comb_closure(
     target_offset: VarOffset,
     pre_jit_stmts: &[ProtoStatement],
-    output_to_writer: &HashMap<VarOffset, usize>,
+    output_to_writer: &HashMap<VarOffset, Writers>,
     input_clock_offsets: &HashMap<VarOffset, VarId>,
     dep_set: &mut HashSet<usize>,
     master_set: &mut HashSet<VarId>,
 ) {
-    let start = match output_to_writer.get(&target_offset) {
-        Some(&idx) => idx,
-        None => return,
-    };
-
     let mut scratch_in: Vec<VarOffset> = Vec::new();
     let mut scratch_out: Vec<VarOffset> = Vec::new();
-    let mut stack: Vec<usize> = vec![start];
+    let mut stack: Vec<usize> = match output_to_writer.get(&target_offset) {
+        Some(writers) => writers.to_vec(),
+        None => return,
+    };
     while let Some(idx) = stack.pop() {
         if !dep_set.insert(idx) {
             continue;
@@ -251,9 +343,11 @@ fn collect_comb_closure(
                 continue;
             }
             match output_to_writer.get(off) {
-                Some(&writer) => {
-                    if !dep_set.contains(&writer) {
-                        stack.push(writer);
+                Some(writers) => {
+                    for &writer in writers {
+                        if !dep_set.contains(&writer) {
+                            stack.push(writer);
+                        }
                     }
                 }
                 None => {
@@ -263,5 +357,81 @@ fn collect_comb_closure(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::Value;
+    use crate::ir::expression::ExpressionContext;
+
+    fn ctx() -> ExpressionContext {
+        ExpressionContext {
+            width: 1,
+            signed: false,
+        }
+    }
+
+    fn bit(offset: isize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(offset),
+            select: None,
+            dynamic_select: None,
+            width: 1,
+            var_full_width: 1,
+            expr_context: ctx(),
+        }
+    }
+
+    fn and(x: ProtoExpression, y: ProtoExpression) -> ProtoExpression {
+        ProtoExpression::Binary {
+            x: Box::new(x),
+            op: Op::BitAnd,
+            y: Box::new(y),
+            width: 1,
+            expr_context: ctx(),
+        }
+    }
+
+    fn one() -> ProtoExpression {
+        ProtoExpression::Value {
+            value: Value::new(1, 1, false),
+            width: 1,
+            expr_context: ctx(),
+        }
+    }
+
+    #[test]
+    fn a_copy_wrapped_once_per_inlined_link_is_still_a_copy() {
+        let stacked = and(and(and(bit(8), one()), one()), one());
+        assert_eq!(copied_bit(&stacked), Some(VarOffset::Comb(8)));
+        assert_eq!(
+            copied_bit(&and(one(), and(bit(8), one()))),
+            Some(VarOffset::Comb(8))
+        );
+    }
+
+    #[test]
+    fn a_gate_under_the_wrappers_is_not_a_copy() {
+        let gated = and(and(bit(8), bit(16)), one());
+        assert_eq!(copied_bit(&gated), None);
+        assert_eq!(copied_bit(&and(and(bit(8), one()), bit(16))), None);
+        let inverted = ProtoExpression::Unary {
+            op: Op::BitNot,
+            x: Box::new(bit(8)),
+            width: 1,
+            expr_context: ctx(),
+        };
+        assert_eq!(copied_bit(&and(inverted, one())), None);
+        let wide = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(8),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 8,
+            expr_context: ctx(),
+        };
+        assert_eq!(copied_bit(&and(wide, one())), None);
     }
 }

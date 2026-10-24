@@ -5,7 +5,9 @@
 // chunk's top-level ProtoStatement sequence, so that
 // `cranelift::build_binary_inner` can apply Belady-optimal eviction
 // (evict the entry whose next read is farthest in the future) after
-// each statement when the live cache exceeds a fixed capacity.
+// each statement when the live cache exceeds a fixed capacity.  It acts
+// wherever the load_cache is on: event chunks and the Cranelift dataflow
+// cells.  The per-chunk comb settle compiles with the cache off.
 //
 // Mechanism: the load_cache holds Cranelift Values across statements.
 // Each cache hit emits a `use_var`-equivalent IR reference, extending
@@ -112,6 +114,9 @@ fn walk_stmt(s: &ProtoStatement, idx: usize, reads: &mut FutureReads) {
         | ProtoStatement::CompiledBlock(_)
         | ProtoStatement::TbMethodCall { .. }
         | ProtoStatement::Break => {}
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -147,7 +152,9 @@ fn walk_expr(expr: &ProtoExpression, idx: usize, reads: &mut FutureReads) {
                 walk_expr(&dyn_sel.index_expr, idx, reads);
             }
         }
-        ProtoExpression::Unary { x, .. } => walk_expr(x, idx, reads),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            walk_expr(x, idx, reads)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             walk_expr(x, idx, reads);
             walk_expr(y, idx, reads);

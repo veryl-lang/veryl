@@ -6,11 +6,13 @@
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod comb_fusion;
-pub(crate) mod cone_gate;
+pub(crate) mod cone_order;
+pub(crate) mod dataflow;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dup_assign_dce;
+pub(crate) mod event_gate;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod field_unfuse;
 #[cfg(not(target_family = "wasm"))]
@@ -19,6 +21,7 @@ pub(crate) mod lane_vector;
 pub(crate) mod load_cache_lookahead;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod multi_write_analysis;
+pub(crate) mod owners;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod version_split;
 
@@ -50,10 +53,21 @@ pub(crate) mod comb_fusion {
         false
     }
     pub fn force_disable() {}
+    pub fn sel_enabled() -> bool {
+        false
+    }
+    pub(crate) fn adopt_field_defs(
+        _n_sel: Option<usize>,
+        _n_base: Option<usize>,
+        _retired_frac: f64,
+    ) -> bool {
+        false
+    }
     pub fn inline_single_readers(
         stmts: Vec<ProtoStatement>,
         _events: &HashMap<Event, Vec<ProtoStatement>>,
         _externals_extra: &HashSet<VarOffset>,
+        _sel: bool,
     ) -> (Vec<ProtoStatement>, Vec<isize>) {
         (stmts, Vec::new())
     }
@@ -86,6 +100,9 @@ pub(crate) mod field_unfuse {
     pub fn explain_offsets() -> &'static [isize] {
         &[]
     }
+    pub fn event_census_digest(_events: &HashMap<Event, Vec<ProtoStatement>>) -> u128 {
+        0
+    }
     pub fn run(
         _unified: &mut [ProtoStatement],
         _event_statements: &HashMap<Event, Vec<ProtoStatement>>,
@@ -113,14 +130,22 @@ pub(crate) mod dead_var_dce {
     pub fn collect_dead_offsets(_slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> {
         HashSet::default()
     }
+    pub fn collect_dead_closure(
+        _slices: &[&[ProtoStatement]],
+        _protect: &HashSet<VarOffset>,
+    ) -> HashSet<VarOffset> {
+        HashSet::default()
+    }
     pub fn apply_counting(
         stmts: Vec<ProtoStatement>,
         _dead: &HashSet<VarOffset>,
     ) -> (Vec<ProtoStatement>, usize) {
         (stmts, 0)
     }
+    pub fn localize_comb_ranges(_comb: &[ProtoStatement]) -> Vec<(isize, usize, isize)> {
+        Vec::new()
+    }
     pub fn collect_localize_info(
-        _comb: &[ProtoStatement],
         _event_slices: &[&[ProtoStatement]],
     ) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
         (HashSet::default(), Vec::new())
@@ -137,7 +162,10 @@ pub(crate) mod version_split {
     pub fn pass_enabled(_use_4state: bool) -> bool {
         false
     }
-    pub fn run(_stmts: &mut [ProtoStatement], _alloc: &mut dyn FnMut(usize) -> isize) -> RunStats {
+    pub fn run(
+        _stmts: &mut [ProtoStatement],
+        _alloc: &mut dyn FnMut(usize, isize) -> isize,
+    ) -> RunStats {
         RunStats
     }
     pub fn accumulate(_s: &RunStats) {}

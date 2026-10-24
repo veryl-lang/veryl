@@ -8,27 +8,32 @@ use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table;
 
-mod comb_loop_diagnostic_tests;
-
+mod comb_loop_adversarial_tests;
 mod comb_loop_conservative_tests;
-
-mod comb_loop_incomplete_tests;
-
-mod comb_loop_interface_tests;
-
-mod comb_loop_interface_function_tests;
-
-mod comb_loop_procedural_tests;
-
-mod comb_loop_retained_state_tests;
-
+mod comb_loop_diagnostic_tests;
 mod comb_loop_function_tests;
-
+mod comb_loop_incomplete_tests;
+mod comb_loop_interface_function_tests;
+mod comb_loop_interface_tests;
 mod comb_loop_module_tests;
-
+mod comb_loop_output_connection_tests;
+mod comb_loop_partition_limit_tests;
 mod comb_loop_positional_tests;
-
+mod comb_loop_procedural_tests;
+mod comb_loop_read_region_tests;
+mod comb_loop_replication_tests;
+mod comb_loop_retained_state_tests;
 mod comb_loop_sparse_tests;
+mod comb_loop_summary_tests;
+mod comb_loop_tier_tests;
+mod constant_evaluation_tests;
+mod dynamic_packed_member_tests;
+mod generic_interface_port_tests;
+mod instantiation_note_tests;
+mod interface_array_tests;
+mod modport_connection_tests;
+mod package_alias_type_tests;
+mod statement_after_if_reset_tests;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
@@ -49,6 +54,52 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
+}
+
+#[test]
+fn a_long_const_chain_is_not_a_function_instantiation() {
+    // A `const` that refers to another `const` costs one level of
+    // `eval_factor_path` per link, and an external reference re-derives the
+    // whole chain: each component gets a fresh `Context`, `Context::inherit`
+    // does not carry `variables`, so a consumer cannot see the values the
+    // defining package already folded. That recursion used to be charged
+    // against the function-instantiation limit, which a const chain is not,
+    // so a long chain was rejected partway with a diagnostic pointing at its
+    // first link.
+    //
+    // This runs on an explicit stack: libtest gives each test a fraction of
+    // the main thread's, and these frames are large in a debug build, so the
+    // harness aborts well before either bound. The bound is not what protects
+    // the stack; it is only kept below it.
+    fn chain(n: usize) -> String {
+        let mut s = String::from("package pk {\n    const C0: logic<32> = 32'd0;\n");
+        for i in 1..=n {
+            s += &format!("    const C{i}: logic<32> = C{} + 32'd1;\n", i - 1);
+        }
+        s += "}\nmodule Top (\n    y: output logic<32>,\n) {\n";
+        s += &format!("    assign y = pk::C{n};\n}}\n");
+        s
+    }
+
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            assert!(
+                analyze(&chain(37)).is_empty(),
+                "a 37-link const chain is ordinary SystemVerilog and must elaborate"
+            );
+            // And the bound still bites, and REPORTS rather than aborting.
+            let errors = analyze(&chain(48));
+            assert!(
+                errors
+                    .iter()
+                    .any(|x| matches!(x, AnalyzerError::ExceedLimit { .. })),
+                "past the bound it must be reported"
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 #[track_caller]
@@ -1257,6 +1308,81 @@ fn cyclic_file_dependency() {
         errors[0],
         AnalyzerError::CyclicFileDependency { .. }
     ));
+}
+
+#[test]
+fn duplicated_identifier_clock_domain_label() {
+    use crate::analyzer_error::DuplicatedIdentifierKind;
+
+    // A clock-domain label occupies the scope's ordinary namespace, so `'i`
+    // and `i` collide. Reported both ways round: the label used to reuse
+    // whatever symbol resolved under its name, variable included, so only the
+    // label-first order errored.
+    let label_first = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_i: input  'i clock,
+        y    : output 'a logic,
+    ) {
+        var i: 'a logic;
+        var j: 'i logic;
+        always_ff (clk_a) { i = 1; }
+        always_ff (clk_i) { j = 1; }
+        assign y = i;
+    }
+    "#;
+    let var_first = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_b: input  'b clock,
+        y    : output 'a logic,
+    ) {
+        var i: 'a logic;
+        var j: 'i logic;
+        always_ff (clk_a) { i = 1; }
+        always_ff (clk_b) { j = 1; }
+        assign y = i;
+    }
+    "#;
+    for (name, code) in [("label first", label_first), ("var first", var_first)] {
+        let errors = analyze(code);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                AnalyzerError::DuplicatedIdentifier {
+                    // The help names the colliding identifier: a reader sees
+                    // `"i" is duplicated` and has to be told which label.
+                    kind: DuplicatedIdentifierKind::ClockDomain { name },
+                    ..
+                } if name == "i"
+            )),
+            "{name}: {errors:?}"
+        );
+    }
+
+    // A label that does not collide stays silent, and so does a second use of
+    // the same label -- that is what the symbol reuse is for.
+    let code = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_i: input  'i clock,
+        y    : output 'a logic,
+    ) {
+        var n: 'a logic;
+        var j: 'i logic;
+        var k: 'i logic;
+        always_ff (clk_a) { n = 1; }
+        always_ff (clk_i) { j = 1; k = j; }
+        assign y = n;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicatedIdentifier { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -5581,7 +5707,29 @@ fn invalid_type_declaration() {
 }
 
 #[test]
+fn array_slice_shape_mismatch() {
+    let code = r#"
+    module Leaf(i: input logic[4], o: output logic) { assign o = i[0]; }
+    module Top(d: input logic[4, 2], o: output logic) {
+        inst u: Leaf(i: d[1+:2], o: o);
+    }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 1, "{errors:#?}");
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn mismatch_assignment() {
+    // The unpacked dimensions disagree. No SystemVerilog tool accepts that, so
+    // the help says which axis is wrong, but the severity stays the warning the
+    // rest of this test covers: the check is conservative.
     let code = r#"
     module ModuleA {
         let _a: logic[2] = 1;
@@ -5591,7 +5739,10 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
     ));
 
     let code = r#"
@@ -5604,8 +5755,34 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
     ));
+
+    // A 2-state destination answers `compatible` from its element kind alone,
+    // so the dimensions were never compared and the whole 2-state half of the
+    // type system reported nothing. Clock and reset arrays answer the same way.
+    let code = r#"
+    module ModuleA {
+        var _a: bit<8>[4];
+        var _b: bit<8>[2];
+        assign _a = _b;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors.iter().any(|x| matches!(
+            x,
+            AnalyzerError::MismatchAssignment {
+                kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
 
     let code = r#"
     module ModuleA {
@@ -6015,6 +6192,17 @@ fn mismatch_assignment() {
 
     let code = r#"
     module ModuleA {
+        const A: u32 = 0;
+        const B: u32 = $define::B | A;
+        const C: u32 = $define::pkg::a | A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
         enum EnumA: bit<_> {
             A = 1'bx,
         }
@@ -6066,6 +6254,30 @@ fn mismatch_assignment() {
     }
     module ModuleA #(
         param CHANNELS: u32 = $sv::pkg::CHANNELS,
+    ) (
+        i_data: input  logic [CHANNELS / 2],
+        o_data: output logic [CHANNELS / 2],
+    ) {
+        inst u: Inner (
+            i_data: i_data,
+            o_data: o_data,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Array size from a `$define::` macro: unknown dimensions should match any size.
+    let code = r#"
+    module Inner (
+        i_data: input  logic [4],
+        o_data: output logic [4],
+    ) {
+        assign o_data = i_data;
+    }
+    module ModuleA #(
+        param CHANNELS: u32 = $define::CHANNELS,
     ) (
         i_data: input  logic [CHANNELS / 2],
         o_data: output logic [CHANNELS / 2],
@@ -6443,6 +6655,27 @@ fn missing_reset_statement() {
     assert!(errors.is_empty());
 
     let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: $define::StructA;
+
+        always_ff {
+            if_reset {
+                a.a = 0;
+                a.b = 0;
+            } else {
+                a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     module jtag_tap2 (
         i_tck : input clock,
         i_trst: input reset,
@@ -6474,6 +6707,84 @@ fn missing_tri() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MissingTri { .. }));
+}
+
+#[test]
+fn inout_function_argument() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module ModuleA (
+        a: input  logic<2>,
+        b: output logic<2>,
+    ) {
+        var c: logic<2>;
+
+        function sum (
+            v: inout logic<2>,
+        ) {
+            v = v + 1;
+        }
+
+        always_comb {
+            c = a;
+            sum(c);
+            b = c;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn tri_function_argument() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module ModuleA {
+        function sum (
+            v: inout tri logic<2>,
+        ) {
+            v = v + 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidModifier { .. }));
+}
+
+#[test]
+fn inout_function_argument_in_always_ff() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock,
+        a    : input  logic<2>,
+        b    : output logic<2>,
+    ) {
+        var c: logic<2>;
+
+        function sum (
+            v: inout logic<2>,
+        ) {
+            v = v + 1;
+        }
+
+        always_ff {
+            c = a;
+            sum(c);
+            b = c;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
 }
 
 #[test]
@@ -7478,6 +7789,26 @@ fn referring_before_definition() {
         AnalyzerError::ReferringBeforeDefinition { .. }
     ));
 
+    // An instantiation binding the forward-referenced parameter must not
+    // suppress the check for the component's own conversion.
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleB #(B: 4) ();
+    }
+    module ModuleB #(
+        param A: u32 = B,
+        param B: u32 = 3,
+    ) {
+        const C: u32 = A + B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
     let code = r#"
     module ModuleA {
         always_comb {
@@ -7757,6 +8088,246 @@ fn referring_before_definition() {
         errors[0],
         AnalyzerError::ReferringBeforeDefinition { .. }
     ));
+
+    let code = r#"
+    module ModuleA #(
+        param W: u32    = 8,
+        param V: bit<W> = 0,
+    ) {}
+    module ModuleB::<B: u32> #(
+        param W: u32    = B,
+        param V: bit<W> = 0,
+    ) {
+        inst u: ModuleA #(
+            W: W,
+            V: V,
+        );
+    }
+    module ModuleC {
+        inst u: ModuleB::<8>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        const A: bit<$sv::WIDTH> = 0,
+    ) {
+        let _a: bit<$sv::WIDTH> = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        const A: bit<$define::WIDTH> = 0,
+    ) {
+        let _a: bit<$define::WIDTH> = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A width the analyzer cannot evaluate says nothing about where the
+    // constant was declared.
+    let code = r#"
+    module ModuleA {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 0;
+        let _a: bit<W> = C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Binding the constant must not cost the checks a bound constant gets.
+    let code = r#"
+    module ModuleA {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 0;
+        var _a: bit<W>;
+        always_comb {
+            C  = 1;
+            _a = C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
+
+    // A dropped value takes the generate branch out of the IR, and every
+    // check inside it.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 1;
+        if C == 1 :g {
+            always_comb {
+                o_a = 1;
+            }
+            always_comb {
+                o_a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. }))
+    );
+
+    // Without the declared signedness the fold reads 8'hff as positive and
+    // drops the branch.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        const W: u32           = $sv::get_width(1);
+        const C: signed bit<W> = 8'hff;
+        if C <: 0 :g {
+            always_comb {
+                o_a = 1;
+            }
+            always_comb {
+                o_a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. }))
+    );
+
+    // The array path binds the constant too, so the same checks apply.
+    let code = r#"
+    module ModuleA {
+        const W: u32        = $sv::get_width(1);
+        const C: bit<W> [2] = '{0, 1};
+        var _a: bit<W>;
+        always_comb {
+            C[0] = 1;
+            _a   = C[0];
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
+
+    // Here the value, rather than the width, is what cannot be evaluated.
+    let code = r#"
+    module ModuleA {
+        const C: bit<8> = $sv::get_val();
+        var _a: bit<8>;
+        always_comb {
+            C  = 1;
+            _a = C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
+}
+
+#[test]
+fn referring_inactive_definition() {
+    // The declaration sits before the reference; the guard is what it cannot
+    // reach.
+    let code = r#"
+    module ModuleA {
+        #[ifdef(FOO)]
+        const W: u32 = 8;
+        var _a: bit<W>;
+        always_comb {
+            _a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    // With the define in hand there is nothing to report, so the verdict is
+    // the guard's state and not its presence.
+    let errors = analyze_with_defines(code, &["FOO"]);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        #[ifdef(FOO)]
+        var w: logic;
+        assign o_a = w;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    // The same guard on both sides leaves nothing to report.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        #[ifdef(FOO)]
+        var w: logic;
+        #[ifdef(FOO)]
+        assign o_a = w;
+        #[ifndef(FOO)]
+        assign o_a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -8625,6 +9196,25 @@ fn unknown_member() {
     assert!(errors.is_empty());
 
     let code = r#"
+    module a_module {
+        var _a: $define::foo_bar;
+        var _b: $define::foo_bar;
+        always_comb {
+            _a = $define::foo_bar'{
+                foo: 0,
+                bar: 1,
+            };
+
+            _b.foo = 0;
+            _b.bar = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     interface a_if {
         var a: logic;
         modport mp_a {
@@ -8743,6 +9333,34 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface ab_if {
+        var a: logic;
+        var b: logic;
+        modport master {
+            ..converse(slave)
+        }
+        modport slave {
+            ..same(slave_a, slave_b)
+        }
+        modport slave_a {
+            a: input,
+        }
+        modport slave_b {
+            b: input,
+        }
+    }
+    module c_module (
+        ab: modport ab_if::master,
+    ) {
+        assign ab.a = 0;
+        assign ab.b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -8750,6 +9368,16 @@ fn unknown_msb() {
     let code = r#"
     module ModuleA {
         var a: $sv::SvType;
+        let b: logic = a[msb];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMsb { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: $define::SvType;
         let b: logic = a[msb];
     }
     "#;
@@ -9881,6 +10509,145 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    // A width select strides by the element's own width, which for a user type
+    // lives in the kind rather than the width shape. Writing every element of
+    // `some_enum<N>` covers the variable; taking the stride as one bit leaves
+    // all but the low N bits looking undriven.
+    let code = r#"
+    package Pkg {
+        enum e_t: logic<5> {
+            A = 5'd0,
+            B = 5'd1,
+        }
+    }
+    module ModuleA (
+        i_d: input  logic<4, 5>,
+        o_d: output Pkg::e_t<4>,
+    ) {
+        for i in 0..4 :g_loop {
+            assign o_d[i] = i_d[i] as Pkg::e_t;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // The same shape one element short must still be reported, so the case
+    // above is not passing because the check stopped looking.
+    let code = r#"
+    package Pkg {
+        enum e_t: logic<5> {
+            A = 5'd0,
+            B = 5'd1,
+        }
+    }
+    module ModuleA (
+        i_d: input  logic<4, 5>,
+        o_d: output Pkg::e_t<4>,
+    ) {
+        for i in 0..3 :g_loop {
+            assign o_d[i] = i_d[i] as Pkg::e_t;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+}
+
+#[test]
+fn non_constant_output_select() {
+    // Icarus Verilog rejects a variable select on the destination of an output connection.
+    let code = r#"
+    module ModuleA (
+        index: input  logic,
+        bits : output logic<2>,
+        tail : output logic,
+    ) {
+        inst u: ModuleB (
+            o: {bits[index], tail},
+        );
+    }
+
+    module ModuleB (
+        o: output logic<2>,
+    ) {
+        assign o = 2'b10;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantOutputSelect { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        index: input  logic,
+        bits : output logic<4>,
+    ) {
+        inst u: ModuleB (
+            o: bits[index+:2],
+        );
+    }
+
+    module ModuleB (
+        o: output logic<2>,
+    ) {
+        assign o = 2'b10;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantOutputSelect { .. }))
+    );
+
+    // Constant selects, parameters and genvars stay valid, as do dynamic inputs.
+    let code = r#"
+    module ModuleA #(
+        param P: u32 = 1,
+    ) (
+        index: input  logic,
+        bits : output logic<4>,
+        tail : output logic<4>,
+    ) {
+        inst u0: ModuleB (
+            i: bits[index],
+            o: bits[1:0],
+        );
+        inst u1: ModuleB (
+            i: tail[index],
+            o: tail[P+:2],
+        );
+        for j in 0..2 :g {
+            inst u2: ModuleB (
+                i: 0,
+                o: tail[j][0],
+            );
+        }
+    }
+
+    module ModuleB (
+        i: input  logic,
+        o: output logic<2>,
+    ) {
+        assign o = {i, i};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantOutputSelect { .. }))
+    );
 }
 
 #[test]
@@ -11593,6 +12360,33 @@ fn unevaluable_value_const_value() {
 
     let code = r#"
     module ModuleA {
+        const y: logic = $define::func();
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: $define::a_struct = $define::a_struct'{ a: 1 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: bit<5>[1] = '{$define::FOO};
+        const B: bit<5>[1] = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
         const A: u32[1] = '{ 1 + 1 };
     }
     "#;
@@ -11628,6 +12422,201 @@ fn unevaluable_value_const_value() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtPkg {
+        const W: u32;
+    }
+    package Pkg::<V: u32> for ProtPkg {
+        const W: u32 = V;
+    }
+    package WidthPkg {
+        const DW: u32 = 32;
+    }
+    package AliasPkg {
+        import WidthPkg::DW;
+        alias package BusPkg = Pkg::<DW>;
+    }
+    interface InterfaceA::<PKG: ProtPkg> {
+        const W: u32 = PKG::W;
+    }
+    module ModuleA {
+        import AliasPkg::BusPkg;
+        inst u: InterfaceA::<BusPkg>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn mismatch_case_label() {
+    // SystemVerilog sizes and signs a case target and all its labels
+    // together: a label whose comparison changes with that is rejected, as
+    // is an exclusive bound whose `hi - 1` can wrap.
+    let code = r#"
+    module ModuleA (
+        a: input  logic<8>,
+        b: input  logic<8>,
+        s: input  i8,
+        y: output logic<8>,
+        z: output logic<8>,
+    ) {
+        const P: i8 = 2;
+        const S: i8 = -6;
+        const T: i8 = -3;
+        const U: u8 = 7;
+        always_comb {
+            y = 0;
+            case s {
+                -2     : y = 1;
+                8'h80  : y = 2;
+                default: {}
+            }
+            case a + 8'h10 {
+                9'h105 : y = 1;
+                8'h05  : y = 2;
+                default: {}
+            }
+            case a {
+                '1      : y = 1;
+                16'h1234: y = 2;
+                default : {}
+            }
+            case a {
+                0..b   : y = 1;
+                default: {}
+            }
+            case P {
+                S / T  : y = 1;
+                U      : y = 2;
+                default: {}
+            }
+            case a + b {
+                0..8'h7F: y = 1;
+                default : {}
+            }
+        }
+        assign z = case s {
+            -16..=8'h10: 8'd1,
+            default    : 8'd0,
+        };
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 7, "{errors:#?}");
+
+    // Labels SystemVerilog compares as Veryl does are accepted.
+    let code = r#"
+    module ModuleA (
+        a: input  logic<8>,
+        s: input  i8,
+        y: output logic<8>,
+        z: output logic<8>,
+    ) {
+        enum E: logic<2> {
+            X,
+            Y,
+        }
+        var e: E;
+        always_comb {
+            e = E::X;
+            y = 0;
+            case a {
+                0      : y = 1;
+                1..=3  : y = 2;
+                8'hFF  : y = 3;
+                '0     : y = 4;
+                0..8   : y = 5;
+                default: {}
+            }
+            case s {
+                -1     : y = 1;
+                -8..=-2: y = 2;
+                0..=7  : y = 3;
+                default: {}
+            }
+            case e {
+                E::X   : y = 1;
+                E::Y   : y = 2;
+                default: {}
+            }
+            case a[7:4] {
+                4'h0..4'h8: y = 1;
+                4'h8..4'hF: y = 2;
+                default   : {}
+            }
+            case s {
+                -8..(-2): y = 1;
+                default : {}
+            }
+            case s {
+                0      : y = 2;
+                1      : y = 3;
+                8'h02  : y = 4;
+                default: {}
+            }
+            case a as 16 {
+                16'hFFFF: y = 1;
+                -1      : y = 2;
+                default : {}
+            }
+        }
+        assign z = case a {
+            1..=3  : 8'd0,
+            default: 8'd1,
+        };
+    }"#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. })),
+        "{errors:#?}"
+    );
+}
+
+#[test]
+fn string_case_label() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  bit<8>,
+        o_x: output logic  ,
+    ) {
+        always_comb {
+            case i_a {
+                ":"    : o_x = 1;
+                default: o_x = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  bit<8>,
+        o_x: output logic ,
+        o_y: output logic ,
+    ) {
+        assign o_x = case i_a {
+            ":"    : 1,
+            default: 0,
+        };
+        assign o_y = inside i_a {":"};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -11830,6 +12819,18 @@ fn invalid_logical_operand() {
         const X : u32      = $sv::pkg::X;
         let a : logic<2> = 1;
         let _b: logic    = a[X - 1] && 1'b1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const X : u32      = $define::X;
+        const Y : u32      = $define::pkg::Y;
+        let a : logic<2> = 1;
+        let _b: logic    = a[X - 1] && 1'b1;
+        let _c: logic    = a[Y - 1] && 1'b1;
     }"#;
 
     let errors = analyze(code);
@@ -12114,6 +13115,484 @@ fn invalid_factor_kind() {
 }
 
 #[test]
+fn reset_value_literal() {
+    // input port connection for each reset type
+    let code = r#"
+    module ModuleA (
+        i_rst0: input reset,
+        i_rst1: input reset_async_high,
+        i_rst2: input reset_async_low,
+        i_rst3: input reset_sync_high,
+        i_rst4: input reset_sync_low,
+    ) {}
+    module ModuleB {
+        inst u_a0: ModuleA (
+            i_rst0: reset_active,
+            i_rst1: reset_active,
+            i_rst2: reset_inactive,
+            i_rst3: reset_inactive,
+            i_rst4: (reset_active),
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // port connection of generic instance resolved through proto module
+    let code = r#"
+    proto module ProtoA (
+        i_rst: input reset_async_low,
+    );
+    module ModuleA for ProtoA (
+        i_rst: input reset_async_low,
+    ) {}
+    module ModuleB::<M: ProtoA> {
+        inst u_a: M (
+            i_rst: reset_active,
+        );
+    }
+    module ModuleC {
+        inst u_b: ModuleB::<ModuleA>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // assignment to reset type variables
+    let code = r#"
+    module ModuleA (
+        i_rst : input  reset,
+        o_rst0: output reset,
+        o_rst1: output reset_async_low,
+        o_rst2: output reset,
+        o_rst3: output reset_sync_high,
+    ) {
+        struct StructA {
+            rst: reset,
+        }
+
+        let a: reset = reset_active;
+        var b: StructA;
+        var c: reset_sync_low[2];
+
+        assign b.rst = reset_inactive;
+        assign c[0]  = reset_active;
+
+        always_comb {
+            o_rst0 = a;
+            o_rst1 = reset_active;
+            o_rst2 = b.rst;
+        }
+
+        always_comb {
+            let d: reset_sync_low = reset_inactive;
+            c[1]   = d;
+            o_rst3 = (reset_inactive);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // assignment in interface and to modport member
+    let code = r#"
+    interface InterfaceA {
+        var rst0: reset_async_high;
+        var rst1: reset;
+
+        assign rst0 = reset_active;
+
+        modport mp {
+            rst1: output,
+        }
+    }
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {
+        assign if_a.rst1 = reset_inactive;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // equality comparison with reset type signals
+    let code = r#"
+    interface InterfaceA {
+        var rst: reset;
+        modport mp {
+            rst: input,
+        }
+    }
+    module ModuleA (
+        i_rst : input  reset,
+        i_rsts: input  reset_async_low[2],
+        if_a  : modport InterfaceA::mp,
+        o_a   : output logic<7>,
+    ) {
+        struct StructA {
+            rst: reset_sync_low,
+        }
+
+        var s: StructA;
+
+        assign s.rst = i_rst as reset_sync_low;
+
+        assign o_a[0] = i_rst == reset_active;
+        assign o_a[1] = reset_inactive != i_rst;
+        assign o_a[2] = i_rsts[1] == reset_active;
+        assign o_a[3] = if_a.rst != (reset_inactive);
+        assign o_a[4] = s.rst == reset_active;
+        assign o_a[5] = i_rst == reset_active && s.rst != reset_inactive;
+        assign o_a[6] = reset_active == i_rst == 1'b1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_reset_value_literal() {
+    #[track_caller]
+    fn check_n(code: &str, expected: usize) {
+        let errors = analyze(code);
+        let n = errors
+            .iter()
+            .filter(|x| matches!(x, AnalyzerError::InvalidFactor { .. }))
+            .count();
+        assert_eq!(n, expected);
+    }
+
+    #[track_caller]
+    fn check(code: &str) {
+        check_n(code, 1);
+    }
+
+    // assignment to non reset type
+    check(
+        r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        assign o_a = reset_active;
+    }
+    "#,
+    );
+
+    // assignment to whole array and range select
+    for exp in ["assign a = reset_active;", "assign a[1:0] = reset_active;"] {
+        check(&format!(
+            r#"
+    module ModuleA {{
+        var a: reset[2];
+        {exp}
+    }}
+    "#
+        ));
+    }
+
+    // type inference is reported by another error
+    let code = r#"
+    module ModuleA (
+        o_a: output reset,
+    ) {
+        let a = reset_active;
+        assign o_a = a;
+    }
+    "#;
+
+    check_n(code, 0);
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::TypeInferenceNotSupported { .. }))
+    );
+
+    // operator assignment
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_rst: output reset,
+    ) {
+        always_comb {
+            o_rst = i_rst;
+            o_rst |= reset_active;
+        }
+    }
+    "#,
+    );
+
+    // port default value
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input reset = reset_active,
+    ) {}
+    "#,
+    );
+
+    // connection to non reset type port
+    check(
+        r#"
+    module ModuleA (
+        i_a: input logic,
+    ) {}
+    module ModuleB {
+        inst u_a: ModuleA (
+            i_a: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to output port
+    check(
+        r#"
+    module ModuleA (
+        o_rst: output reset,
+    ) {
+        assign o_rst = 0;
+    }
+    module ModuleB {
+        inst u_a: ModuleA (
+            o_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to output port of generic instance
+    check(
+        r#"
+    proto module ProtoA (
+        o_rst: output reset,
+    );
+    module ModuleB::<M: ProtoA> {
+        inst u_a: M (
+            o_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to SystemVerilog port
+    check(
+        r#"
+    module ModuleA {
+        inst u: $sv::Module (
+            rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // unresolved counterpart is reported by another error
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleX (
+            rst: reset_active,
+        );
+    }
+    "#;
+
+    check_n(code, 0);
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::UndefinedIdentifier { .. }))
+    );
+
+    // function argument and return value
+    check(
+        r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        function f (
+            rst: input reset,
+        ) -> logic {
+            return rst;
+        }
+
+        assign o_a = f(reset_inactive);
+    }
+    "#,
+    );
+
+    check(
+        r#"
+    module ModuleA (
+        o_rst: output reset,
+    ) {
+        function f () -> reset {
+            return reset_active;
+        }
+
+        assign o_rst = f();
+    }
+    "#,
+    );
+
+    // operators other than equality comparison
+    for exp in [
+        "~reset_active",
+        "i_rst & reset_active",
+        "i_rst && reset_active",
+        "i_rst ==? reset_active",
+        "{reset_active}",
+        "reset_active as reset",
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {{
+        assign o_a = {exp};
+    }}
+    "#
+        ));
+    }
+
+    // conditional expressions
+    for exp in [
+        "if i_a ? reset_active : i_rst",
+        "case i_a { 0: reset_active, default: i_rst }",
+        "switch { i_a: reset_active, default: i_rst }",
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA (
+        i_a  : input  logic,
+        i_rst: input  reset,
+        o_rst: output reset,
+    ) {{
+        assign o_rst = {exp};
+    }}
+    "#
+        ));
+    }
+
+    // invalid counterpart of equality comparison
+    for (exp, n) in [
+        ("i_a == reset_active", 1),
+        ("reset_active == reset_inactive", 2),
+        ("(i_rst & i_rst) == reset_active", 1),
+        ("i_rst & i_rst == reset_active", 0),
+        ("i_rst == i_rst == reset_active", 1),
+        ("f() == reset_active", 1),
+    ] {
+        check_n(
+            &format!(
+                r#"
+    module ModuleA (
+        i_a  : input  logic,
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {{
+        function f () -> reset {{
+            return i_rst;
+        }}
+
+        assign o_a = {exp};
+    }}
+    "#
+            ),
+            n,
+        );
+    }
+
+    // type not declared directly by reset keyword
+    for (decl, exp) in [
+        ("var a: T;", "assign a = reset_active;"),
+        ("var a: R;", "assign a = reset_active;"),
+        ("var a: C;", "assign a = reset_active;"),
+        ("var a: S;", "assign a.rst = reset_active;"),
+        ("var a: T;", "assign o_a = a == reset_active;"),
+        ("var a: C;", "assign o_a = a == reset_active;"),
+        ("var a: S;", "assign o_a = a.rst != reset_inactive;"),
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA #(
+        param T: type = reset,
+    ) (
+        o_a: output logic,
+    ) {{
+        const C: type = reset_async_low;
+        type R = reset;
+
+        struct S {{
+            rst: T,
+        }}
+
+        {decl}
+        {exp}
+    }}
+    "#
+        ));
+    }
+
+    check(
+        r#"
+    module ModuleA #(
+        param T: type = reset,
+    ) (
+        i_rst: input T,
+    ) {}
+    module ModuleB {
+        inst u_a: ModuleA (
+            i_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    check(
+        r#"
+    proto package ProtoPkg {
+        type rst_t;
+    }
+    package PkgA for ProtoPkg {
+        type rst_t = reset_async_low;
+    }
+    module ModuleA::<P: ProtoPkg> (
+        o_rst: output P::rst_t,
+    ) {
+        assign o_rst = reset_active;
+    }
+    module ModuleB {
+        inst u_a: ModuleA::<PkgA>;
+    }
+    "#,
+    );
+
+    // case label
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {
+        always_comb {
+            case i_rst {
+                reset_active: o_a = 1;
+                default   : o_a = 0;
+            }
+        }
+    }
+    "#,
+    );
+}
+
+#[test]
 fn call_non_function() {
     let code = r#"
     module ModuleA {
@@ -12137,6 +13616,18 @@ fn call_non_function() {
         var a: logic;
 
         assign a = $sv::pkg::func() + 1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        var b: logic;
+
+        assign a = $define::func() + 1;
+        assign b = $define::pkg::func() + 1;
     }"#;
 
     let errors = analyze(code);
@@ -12332,7 +13823,27 @@ fn unevaluable_value_case_condition() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleC (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        always_comb {
+          case i_sel {
+            c..=1  : o_b = i_a[0];
+            default: o_b = i_a[1];
+          }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleD (
@@ -12368,7 +13879,104 @@ fn unevaluable_value_case_condition() {
     "#;
 
     let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleE (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        assign o_b = case i_sel {
+            c..=1  : i_a[0],
+            default: i_a[1],
+        };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn unevaluable_value_inside_operand() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        o_b: output logic   ,
+    ) {
+        const ONE: bit<3> = 3'd1;
+
+        always_comb {
+            o_b = inside i_a { 3'd0, ONE, 2..=3, 3'b1xx };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { i_b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        let b: logic<3> = 3'd1;
+        always_comb {
+            o_c = inside i_a { b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { 0..=i_b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { i_b..=1 };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -13625,6 +15233,98 @@ fn clock_domain_function_call() {
             return x;
         }
         assign o_a = FuncF(i_a);
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn clock_domain_if_reset_else_if_condition() {
+    // An `else if` of the `if_reset` chain gates its body exactly as a plain
+    // `if` does, so a foreign-domain condition there is a crossing, and it went
+    // unreported: `Conv<&IfResetStatement>` did not push the condition's domain
+    // the way `Conv<&IfStatement>` does.
+    for cond in ["cond_i", "!cond_i"] {
+        let code = format!(
+            r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'b logic,
+        o_a   : output 'a logic,
+    ) {{
+        always_ff (i_clk, i_rst) {{
+            if_reset {{
+                o_a = 1'b0;
+            }} else if {cond} {{
+                o_a = 1'b1;
+            }}
+        }}
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+            "cond={cond}: {errors:?}"
+        );
+    }
+
+    // The trailing `else` is gated by the same condition and is reported too.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'b logic,
+        o_a   : output 'a logic,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_a = 1'b0;
+            } else if cond_i {
+                o_a = 1'b1;
+            } else {
+                o_a = 1'b0;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. }))
+            .count(),
+        2,
+        "{errors:?}"
+    );
+
+    // A same-domain condition stays accepted, and so does an `if_reset` with
+    // no `else if` at all -- the reset is the only gate there.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'a logic,
+        o_a   : output 'a logic,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_a = 1'b0;
+            } else if cond_i {
+                o_a = 1'b1;
+            } else {
+                o_a = 1'b0;
+            }
+        }
     }
     "#;
     let errors = analyze(code);
@@ -16771,7 +18471,7 @@ fn mismatch_function_arity_system_function() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = $size(1, 2);
+        let _a: u32 = $size(1, 2, 3);
     }
     "#;
 
@@ -16780,6 +18480,17 @@ fn mismatch_function_arity_system_function() {
         errors[0],
         AnalyzerError::MismatchFunctionArity { .. }
     ));
+
+    // `$size` takes an optional dimension, as in SystemVerilog.
+    let code = r#"
+    module ModuleA {
+        const A: bit<2, 3> = '0;
+        const B: u32       = $size(A, 1);
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleA {
@@ -19647,6 +21358,165 @@ fn tb_random_analyze() {
 }
 
 #[test]
+fn tb_queue_element_type() {
+    // `$tb::queue::<T, N>` accepts any fixed-width packed type as T and rejects
+    // the others with a MismatchType error.
+    let build = |ty: &str| {
+        format!(
+            r#"
+    package pkg {{
+        type arr_t = u32[2];
+        struct pair_t {{
+            a: logic<4>,
+            b: logic<8>,
+        }}
+    }}
+    #[test(t)]
+    module t {{
+        gen wide_t: type = bit<100>;
+        var q: $tb::queue::<{ty}>;
+        initial {{
+            q.clear();
+            $finish();
+        }}
+    }}
+    "#
+        )
+    };
+    let has_mismatch = |ty: &str| {
+        analyze(&build(ty))
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchType { .. }))
+    };
+
+    for ty in [
+        "u32",
+        "i8",
+        "bbool",
+        "lbool",
+        "f64",
+        "wide_t",
+        "pkg::pair_t",
+    ] {
+        assert!(!has_mismatch(ty), "`$tb::queue::<{ty}>` should be accepted");
+    }
+    for ty in ["pkg::arr_t", "string"] {
+        assert!(has_mismatch(ty), "`$tb::queue::<{ty}>` should be rejected");
+    }
+}
+
+#[test]
+fn tb_queue_analyze() {
+    // Valid `$tb::queue` usage, with and without the capacity, and its methods
+    // in statement, assignment and expression positions.
+    let code = r#"
+    package pkg {
+        const DEPTH: u32 = 4;
+    }
+    #[test(test_queue)]
+    module test_queue {
+        var q: $tb::queue::<u32>;
+        var b: $tb::queue::<i16, 2>;
+        var c: $tb::queue::<u8, pkg::DEPTH>;
+        var x: u32;
+        var y: i16;
+        var n: u32;
+        initial {
+            q.push_back(1);
+            q.push_front(2);
+            x = q.pop_front();
+            x = q.pop_back();
+            x = q.front();
+            x = q.back();
+            q.drop_front();
+            q.drop_back();
+            q.clear();
+            n = q.size();
+            $assert(q.is_empty() == 1);
+            $assert(b.is_full() == 0);
+            b.push_back(-1);
+            y = b.pop_front();
+            c.push_back(x as u8);
+            let z: u32 = q.pop_front() + 1;
+            $finish();
+        }
+    }
+    "#;
+    let errors: Vec<_> = analyze(code)
+        .into_iter()
+        .filter(|e| !matches!(e, AnalyzerError::UnusedVariable { .. }))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "expected no analyzer errors, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_queue_arity() {
+    // `push_back`/`push_front` take one argument and the other methods none.
+    let code = r#"
+    #[test(test_queue)]
+    module test_queue {
+        var q: $tb::queue::<u32>;
+        var n: u32;
+        initial {
+            q.push_back();
+            q.push_front(1, 2);
+            n = q.size(1);
+            $finish();
+        }
+    }
+    "#;
+    let count = analyze(code)
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::MismatchFunctionArity { .. }))
+        .count();
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn tb_var_component_as_inst() {
+    // `var`-form `$tb` components are rejected when declared with `inst`.
+    for ty in ["$tb::file", "$tb::random::<u32>", "$tb::queue::<u32>"] {
+        let code = format!(
+            r#"
+    #[test(t)]
+    module t {{
+        inst x: {ty};
+        initial {{
+            $finish();
+        }}
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+            "`inst x: {ty}` should be rejected, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn tb_queue_outside_test_module() {
+    let code = r#"
+    module ModuleA {
+        var _q: $tb::queue::<u32>;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn maybe_driver_cross_process_conflict() {
     // A non-const index/select write has an empty definite mask, so the
     // per-bit overlap check missed it: two processes writing dynamic slices of
@@ -21257,4 +23127,823 @@ fn nested_generic_interface_effect_trace_uses_parent_specialization() {
     };
     assert_eq!(call_stack.len(), 2, "{errors:?}");
     assert_eq!(external_writes.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn cast_by_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 8,
+        param Q: u32 = 16,
+    ) (
+        i_x: input  logic<16>,
+        o_a: output logic<32>,
+        o_b: output logic<32>,
+    ) {
+        assign o_a = i_x as (W + 1);
+        assign o_b = (i_x - 2) as (Q + 1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn cast_by_type_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA (
+        i_x: input  logic<16>,
+        o_y: output logic<32>,
+    ) {
+        assign o_y = i_x as (u32);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSizeType { .. }));
+}
+
+#[test]
+fn cast_by_non_constant_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA (
+        i_x: input  logic<16>,
+        o_y: output logic<32>,
+    ) {
+        assign o_y = i_x as (i_x);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+}
+
+#[test]
+fn msb_dimension_after_member_access() {
+    // msb is the member's own msb (7), so +1 is out of range.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic = b[0].a[msb + 1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn msb_dimension_after_member_access_multi_dim() {
+    // msb is m's first packed dimension (4), not a dimension of b.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            m: logic<4, 6>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].m = 0;
+            b[1].m = 0;
+        }
+        let _c: logic = b[0].m[msb][0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_on_element_of_struct_array() {
+    // msb is the element count (2), not the struct width.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic<8> = b[msb].a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_in_assign_destination_is_rejected_without_panic() {
+    // pass2 walks the destination even though pass1 rejected the msb.
+    let code = r#"
+    module ModuleA {
+        var c: logic<8>;
+        assign c[msb] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidMsb { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn sv_keyword_usage_let_and_type() {
+    // https://github.com/veryl-lang/veryl/issues/3397
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        let within: logic = i_a;
+        assign o_x = within;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    // `let` inside a block is a separate production from the declaration.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        always_comb {
+            let within: logic = i_a;
+            o_x = within;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        type table = logic<8>;
+        assign o_x = i_a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        let ok_name: logic = i_a;
+        let _: logic = i_a;
+        type ok_t = logic<8>;
+        assign o_x = ok_name;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn sv_keyword_usage_loop_var_and_label() {
+    // https://github.com/veryl-lang/veryl/issues/3397
+    // A loop variable and a generate block label are emitted by name too.
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4>,
+    ) {
+        always_comb {
+            for within in 0..4 {
+                o_x[within] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4>,
+    ) {
+        for within in 0..4 :g {
+            assign o_x[within] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4>,
+    ) {
+        for i in 0..4 :table {
+            assign o_x[i] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        if 1 :table {
+            assign o_x = i_a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+}
+
+#[test]
+fn anonymous_loop_var() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<8>,
+        o_x: output logic<8>,
+    ) {
+        always_comb {
+            o_x = 0;
+            for _ in 0..4 {
+                o_x += i_a;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        for _ in 0..1 :g {
+            assign o_x = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<32>,
+    ) {
+        always_comb {
+            o_x = 0;
+            for _ in 0..2 {
+                o_x += _;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::AnonymousIdentifierUsage { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        assign o_a = 0;
+    }
+    module ModuleB {
+        for _ in 0..2 :g {
+            inst u: ModuleA (
+                o_a: _,
+            );
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn zero_size() {
+    // https://github.com/veryl-lang/veryl/issues/3347
+    let code = r#"
+    module ModuleA {
+        var a: logic<0>;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 0,
+    ) {
+        var a: logic<W>;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8> [0];
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn non_zero_size_is_allowed() {
+    // https://github.com/veryl-lang/veryl/issues/3347
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 1,
+    ) {
+        var a: logic<W>;
+        var b: logic<8> [1];
+        assign a    = 0;
+        assign b[0] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn invalid_select_scalar() {
+    // https://github.com/veryl-lang/veryl/issues/3411
+    // SV rejects a select on a widthless `logic`/`bit`; `logic<1>` is the
+    // indexable form. The IR gives both a width of 1, so the check reads
+    // the declaration.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var a: logic;
+        assign a   = i_a;
+        assign o_x = a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var a: logic;
+        assign a   = i_a;
+        assign o_x = a[0:0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        assign o_x = i_a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var b: bit;
+        assign b   = 0;
+        assign o_x = b[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    // A scalar member reached through a struct, a modport and an interface
+    // instance.
+    let code = r#"
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        struct S {
+            x: logic,
+        }
+        var s: S;
+        assign s   = 0;
+        assign o_x = s.x[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleA (
+        i  : modport InterfaceA::mp,
+        o_x: output  logic,
+    ) {
+        assign o_x = i.a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+    }
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        inst u: InterfaceA;
+        assign u.a = 0;
+        assign o_x = u.a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    // An assignment target takes a different conversion path than an
+    // expression, so it is checked separately.
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        assign a[0] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            x: logic   ,
+            y: logic<2>,
+        }
+        var s: StructA;
+        assign s.x[0] = 0;
+        assign s.y    = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    // A vector target, including a member, stays assignable by select.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            x: logic   ,
+            y: logic<2>,
+        }
+        var s: StructA;
+        var w: logic<1>;
+        var v: logic<4>;
+        assign s.x    = 0;
+        assign s.y[1] = 0;
+        assign s.y[0] = 0;
+        assign w[0]   = 0;
+        assign v[3:2] = 0;
+        assign v[1]   = 0;
+        assign v[0]   = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // `logic<1>` and a wider vector stay selectable, as does a struct as a
+    // whole, which flattens to its width first.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var w: logic<1>;
+        var v: logic<4>;
+        assign w   = i_a;
+        assign v   = 0;
+        assign o_x = w[0] | v[2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        struct S {
+            x: logic,
+            y: logic<2>,
+        }
+        var s: S;
+        assign s   = 0;
+        assign o_x = s[0] | s.y[1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A loop whose `break` is decided is analyzed in the form it is emitted in,
+/// a runtime loop writing whole `a[i]`: peeling it is left to the simulator,
+/// so an element no iteration reaches is neither unassigned nor free for
+/// another block to assign.
+#[test]
+fn decided_break_loop_is_analyzed_as_a_runtime_loop() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        var a: logic<8> [4];
+        always_comb {
+            for i in 0..4 {
+                if i == 2 {
+                    break;
+                }
+                a[i] = i;
+            }
+        }
+        assign o = a[3];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        var b: logic<8> [4];
+        always_comb {
+            for i in 0..4 {
+                if i == 2 {
+                    break;
+                }
+                b[i] = i;
+            }
+        }
+        always_comb {
+            b[2] = 0;
+            b[3] = 0;
+        }
+        assign o = b[3];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [AnalyzerError::MultipleAssignment { .. }]
+        ),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn array_slice_rejects_non_positive_width() {
+    for (width, zero) in [("0", true), ("-1", false)] {
+        let code = format!(
+            r#"
+        module Top(i: input logic[4], index: input u32, o: output logic[2]) {{
+            assign o = i[index+:{width}];
+        }}
+        "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors.iter().any(|error| if zero {
+                matches!(error, AnalyzerError::ZeroSize { .. })
+            } else {
+                matches!(error, AnalyzerError::NonPositiveValue { .. })
+            }),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
+fn loop_iteration_ignores_the_index_of_an_untaken_branch() {
+    // Regression: the untaken `r[j - 1]` at j = 0 exceeded the evaluate size limit.
+    let code = r#"
+    module ModuleA #(
+        param N: u32 = 4,
+    ) (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        en : input  logic   ,
+        a  : input  logic<2>,
+        o  : output logic<2>,
+        p  : output logic<2>,
+    ) {
+        var r: logic<N, 2>;
+        var q: logic<N, 2>;
+        var s: logic<N, N, 2>;
+        always_ff {
+            if_reset {
+                r = '0;
+            } else {
+                for j in 0..N {
+                    if j == 0 {
+                        r[j] = a;
+                    } else {
+                        r[j] = r[j - 1];
+                    }
+                }
+            }
+        }
+        always_ff {
+            if_reset {
+                q = '0;
+            } else {
+                q[0] = a;
+                for j in 0..N {
+                    if j != 0 && en {
+                        q[j] = q[j - 1];
+                    }
+                }
+            }
+        }
+        assign p = q[N - 1];
+        for i in 0..N :g {
+            always_ff {
+                if_reset {
+                    s[i] = '0;
+                } else {
+                    for j in i..N {
+                        if j == i {
+                            s[i][j] = r[i];
+                        } else {
+                            s[i][j] = s[i][j - 1];
+                        }
+                    }
+                }
+            }
+        }
+        assign o = s[0][N - 1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn loop_iteration_decision_reports_no_error_of_its_own() {
+    // Regression: deciding the `if` per iteration re-checked its condition and
+    // reported the zero repeat below as an unsized literal.
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 1,
+    ) (
+        a: input  logic<W>,
+        s: input  logic   ,
+        d: input  logic<4>,
+        o: output logic   ,
+    ) {
+        always_comb {
+            o = 1'b0;
+            for i in 0..4 {
+                if (a + {{1'b0 repeat W - 1}, s}) == i[W - 1:0] {
+                    o |= d[i];
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }

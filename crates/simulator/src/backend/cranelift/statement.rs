@@ -3,18 +3,19 @@
 
 use super::helpers::*;
 use super::runtime::{
-    Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
-    scratch_mark, scratch_release,
+    Context as CraneliftContext, MARK_COMPARE_MAX_BYTES, emit_inline_write_log_push,
+    emit_inline_write_log_push_wide, load_pieces, scratch_mark, scratch_release,
 };
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain};
 use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoDynamicBitSelect,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
+    index_may_exceed,
 };
-use cranelift::codegen::ir::BlockArg;
+use cranelift::codegen::ir::{Block, BlockArg};
 use cranelift::prelude::Value as CraneliftValue;
-use cranelift::prelude::types::{I32, I64, I128};
+use cranelift::prelude::types::{I8, I16, I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
@@ -57,6 +58,9 @@ fn emit_ff_log_push(
     span: Option<(usize, usize)>,
 ) {
     let nb_i32 = nb as i32;
+    let off = builder.ins().iconst(I32, log_current_offset as i64);
+    let elem = ff_static_span(log_current_offset, nb);
+    emit_ff_push_mark(context, builder, off, nb, PushedBytes::Value(payload), elem);
     if nb > 8
         && let Some((start, w)) = span.and_then(|(hi, lo)| log_window_for_span(lo / 8, hi / 8, nb))
         && w < nb
@@ -142,9 +146,87 @@ fn emit_ff_log_push(
     }
 }
 
+/// Open the region a dynamic store runs only when its runtime index is in
+/// range.  IEEE 1800-2023 11.5.1 gives an out-of-range write no effect,
+/// where clamping the index overwrites the last element instead.  `None`
+/// means the index cannot leave the array and no branch was emitted.
+fn begin_oob_guard(
+    builder: &mut FunctionBuilder,
+    in_range: Option<CraneliftValue>,
+) -> Option<Block> {
+    let cond = in_range?;
+    let body = builder.create_block();
+    let merge = builder.create_block();
+    builder.ins().brif(cond, body, &[], merge, &[]);
+    builder.switch_to_block(body);
+    Some(merge)
+}
+
+/// Close a [`begin_oob_guard`] region.  Safe to call after the body has
+/// bailed: the half-built function is discarded by the caller.
+fn end_oob_guard(builder: &mut FunctionBuilder, merge: Option<Block>) {
+    if let Some(merge) = merge {
+        builder.ins().jump(merge, &[]);
+        builder.switch_to_block(merge);
+    }
+}
+
+/// Combine an element index's range test with a bit-select's: either one
+/// leaving its range puts the statement out of range.
+fn and_in_range(
+    builder: &mut FunctionBuilder,
+    a: Option<CraneliftValue>,
+    b: Option<CraneliftValue>,
+) -> Option<CraneliftValue> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(builder.ins().band(x, y)),
+        (x, y) => x.or(y),
+    }
+}
+
+/// Zero a bit-select's field mask when the runtime index left the array.
+///
+/// The read-modify-write then puts the original value back and its log
+/// entry repeats it, which is the no-effect IEEE 1800-2023 11.5.1 asks
+/// for, without splitting the statement's load-cache forwarding across a
+/// branch.  The destination byte offset is static here, so unlike a
+/// dynamic ELEMENT index there is no wrong address to avoid.
+fn mask_out_of_range(
+    context: &CraneliftContext,
+    builder: &mut FunctionBuilder,
+    in_range: Option<CraneliftValue>,
+    dyn_mask: CraneliftValue,
+    wide: bool,
+) -> CraneliftValue {
+    match in_range {
+        Some(c) => {
+            let z = if wide { context.zero_128 } else { context.zero };
+            builder.ins().select(c, dyn_mask, z)
+        }
+        None => dyn_mask,
+    }
+}
+
 impl ProtoAssignDynamicStatement {
+    /// `Some(cond)` when this statement's runtime index can leave the array.
+    fn dst_in_range(
+        &self,
+        idx_payload: CraneliftValue,
+        builder: &mut FunctionBuilder,
+    ) -> Option<CraneliftValue> {
+        index_may_exceed(self.dst_index_expr.width(), self.dst_num_elements).then(|| {
+            let n = builder.ins().iconst(I64, self.dst_num_elements as i64);
+            builder.ins().icmp(IntCC::UnsignedLessThan, idx_payload, n)
+        })
+    }
+
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() || !self.dst_index_expr.can_build_binary() {
+            return false;
+        }
+        // See the same gate on `ProtoAssignStatement`: only the narrow path
+        // below honours `comb_direct`.
+        if self.comb_direct && self.dst_width > 64 {
             return false;
         }
         // Sign-extension of a bare narrow signed RHS at the store is
@@ -203,6 +285,20 @@ impl ProtoAssignDynamicStatement {
         if self.dst_width > 64 && self.dst_base.is_ff() && self.rhs_select.is_none() {
             return self.build_binary_dynamic_wide_ff(context, builder);
         }
+        // The body can bail from inside the out-of-range guard, so the merge
+        // block is closed here rather than on its way out.
+        let mut guard = None;
+        let result = self.build_binary_narrow(context, builder, &mut guard);
+        end_oob_guard(builder, guard);
+        result
+    }
+
+    fn build_binary_narrow(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        guard: &mut Option<Block>,
+    ) -> Option<()> {
         // Plain store re-masks the payload to dst_width (istoreN truncation
         // or the non-native band below), so the producer-side root mask is
         // redundant; select/dynamic_select shift the payload and need it.
@@ -233,6 +329,7 @@ impl ProtoAssignDynamicStatement {
 
         // Compute dynamic address
         let (idx_payload, _idx_mask_xz) = self.dst_index_expr.build_binary(context, builder)?;
+        let mut in_range = self.dst_in_range(idx_payload, builder);
 
         let max_idx = builder
             .ins()
@@ -259,7 +356,9 @@ impl ProtoAssignDynamicStatement {
         // the current slot (packed layout) or the next slot (dual-slot
         // multi-RMW).  The canonical `dst_ff_current_base_offset` always
         // reflects the current slot origin.
-        let emit_log = self.dst_base.is_ff() && self.dst_width <= 64;
+        // `comb_direct` lands in ff_values without being a flop write, so it
+        // stores directly and logs nothing (see the IR-side field).
+        let emit_log = self.dst_base.is_ff() && !self.comb_direct && self.dst_width <= 64;
         let is_packed_ff_dyn = emit_log && (self.dst_base.raw() == self.dst_ff_current_base_offset);
         let log_offset_i32 = if emit_log {
             let log_base = builder
@@ -302,11 +401,25 @@ impl ProtoAssignDynamicStatement {
             }
         };
 
+        let array_span = dyn_ff_span(
+            self.dst_ff_current_base_offset,
+            self.dst_stride,
+            self.dst_num_elements,
+            nb,
+        );
         let emit_log_push = |context: &mut CraneliftContext,
                              builder: &mut FunctionBuilder,
                              payload: cranelift::prelude::Value,
                              mask: Option<cranelift::prelude::Value>| {
             if let Some(offset_val) = log_offset_i32 {
+                emit_ff_push_mark(
+                    context,
+                    builder,
+                    offset_val,
+                    nb,
+                    PushedBytes::Value(payload),
+                    array_span,
+                );
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
                 emit_inline_write_log_push(context, builder, offset_val, payload, width_class_val);
                 if context.use_4state
@@ -323,8 +436,21 @@ impl ProtoAssignDynamicStatement {
                 }
             }
         };
+        // The bit-select index is built before the guard so its own range
+        // test can join the element one; both must hold for the store.
+        let dyn_shift = match &self.dynamic_select {
+            Some(dyn_sel) => {
+                let (shift, sel_in_range) =
+                    build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+                in_range = and_in_range(builder, in_range, sel_in_range);
+                Some(shift)
+            }
+            None => None,
+        };
+        *guard = begin_oob_guard(builder, in_range);
+
         if let Some(dyn_sel) = &self.dynamic_select {
-            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            let shift = dyn_shift?;
 
             // Clip mask and payload to the element width: a last-element
             // window can overhang, and RHS bits above the window must not
@@ -387,22 +513,21 @@ impl ProtoAssignDynamicStatement {
             };
             emit_log_push(context, builder, result, mask_result);
         } else {
-            // Mask payload to dst_width when not a clean native width;
-            // matches the loaded-width semantics that ff_commit_from_log
-            // expects from the log payload.
-            let (payload_to_store, payload_for_log) = match self.dst_width {
-                8 | 16 | 32 | 64 => (payload, payload),
-                _ => {
-                    if self.dst_width >= 64 {
-                        return None;
-                    }
-                    let mask = (1u64 << self.dst_width) - 1;
-                    let masked = builder.ins().band_imm_u(payload, mask as i64);
-                    (masked, masked)
+            // A 12-bit element has 2-byte storage, and its readers load all
+            // of it trusting the bits above the width to be zero.
+            let fills_storage = self.dst_width == nb * 8;
+            let (payload_to_store, payload_for_log) = if fills_storage {
+                (payload, payload)
+            } else {
+                if self.dst_width >= 64 {
+                    return None;
                 }
+                let mask = (1u64 << self.dst_width) - 1;
+                let masked = builder.ins().band_imm_u(payload, mask as i64);
+                (masked, masked)
             };
             let mask_xz_for_log = if let Some(mask_xz_v) = mask_xz {
-                let m = if !matches!(self.dst_width, 8 | 16 | 32 | 64) {
+                let m = if !fills_storage {
                     let mask = (1u64 << self.dst_width) - 1;
                     builder.ins().band_imm_u(mask_xz_v, mask as i64)
                 } else {
@@ -463,12 +588,16 @@ impl ProtoAssignDynamicStatement {
 
     /// Runtime byte-address of the dynamically-indexed element:
     /// `comb_values + dst_base + dst_stride * clamp(idx, num_elements-1)`.
+    /// Opens the out-of-range guard, so everything the caller emits after
+    /// this runs only for an index the array has an element for.
     fn dynamic_elem_addr(
         &self,
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
+        guard: &mut Option<Block>,
     ) -> Option<cranelift::prelude::Value> {
         let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
+        let in_range = self.dst_in_range(idx_payload, builder);
         let max_idx = builder
             .ins()
             .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
@@ -480,7 +609,9 @@ impl ProtoAssignDynamicStatement {
         let byte_offset = builder.ins().imul(clamped, stride_val);
         let static_offset = builder.ins().iconst(I64, self.dst_base.raw() as i64);
         let addr = builder.ins().iadd(context.comb_values, static_offset);
-        Some(builder.ins().iadd(addr, byte_offset))
+        let addr = builder.ins().iadd(addr, byte_offset);
+        *guard = begin_oob_guard(builder, in_range);
+        Some(addr)
     }
 
     /// Wide (>128-bit) comb-base dynamic-indexed store (`var arr[idx] <= wide`).
@@ -491,6 +622,18 @@ impl ProtoAssignDynamicStatement {
         &self,
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
+    ) -> Option<()> {
+        let mut guard = None;
+        let result = self.build_binary_dynamic_wide_body(context, builder, &mut guard);
+        end_oob_guard(builder, guard);
+        result
+    }
+
+    fn build_binary_dynamic_wide_body(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        guard: &mut Option<Block>,
     ) -> Option<()> {
         if context.use_4state || self.rhs_select.is_some() || self.dynamic_select.is_some() {
             return None;
@@ -515,7 +658,7 @@ impl ProtoAssignDynamicStatement {
             } else {
                 raw
             };
-            let addr = self.dynamic_elem_addr(context, builder)?;
+            let addr = self.dynamic_elem_addr(context, builder, guard)?;
             emit_wide_narrow_field_store(builder, addr, 0, beg, end, self.dst_width, sv);
             return Some(());
         }
@@ -552,7 +695,7 @@ impl ProtoAssignDynamicStatement {
             slot
         };
 
-        let addr = self.dynamic_elem_addr(context, builder)?;
+        let addr = self.dynamic_elem_addr(context, builder, guard)?;
 
         // Wide (>64-bit) bit-select: merge the [end..=beg] range into the
         // element in place -- no whole-element temporary.
@@ -605,6 +748,18 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        let mut guard = None;
+        let result = self.build_binary_dynamic_wide_ff_body(context, builder, &mut guard);
+        end_oob_guard(builder, guard);
+        result
+    }
+
+    fn build_binary_dynamic_wide_ff_body(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        guard: &mut Option<Block>,
+    ) -> Option<()> {
         if context.use_4state || self.rhs_select.is_some() {
             return None;
         }
@@ -615,9 +770,92 @@ impl ProtoAssignDynamicStatement {
         let n_words = nb / 8;
         let flags = MemFlagsData::trusted();
 
+        let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
+
+        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
+        let mut in_range = self.dst_in_range(idx_payload, builder);
+        let max_idx = builder
+            .ins()
+            .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
+        let in_bounds = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThan, idx_payload, max_idx);
+        let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
+        let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
+        let byte_offset = builder.ins().imul(clamped, stride_val);
+
+        // Packed: skip the in-place store; the wide log push below delivers it
+        // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
+        // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
+        let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
+
+        // The window path below and the read-merge fallback share this, so it
+        // is lowered once; a copy per path would leave the earlier one dead.
+        // After the element index, so the two index expressions evaluate in
+        // `AssignDynamicStatement::eval_step`'s order.
+        let dyn_window = match self.dynamic_select.as_ref() {
+            Some(dyn_sel) => {
+                let (shift, sel_in_range) =
+                    build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+                in_range = and_in_range(builder, in_range, sel_in_range);
+                Some((shift, dyn_sel.window))
+            }
+            None => None,
+        };
+        *guard = begin_oob_guard(builder, in_range);
+
+        // A narrow source is held in a 16-byte slot rather than an
+        // element-sized one (see the same case in `build_binary_wide`).
+        if nb > WIDE_INLINE_NB
+            && let Some((amount, width)) = dyn_window.or_else(|| {
+                self.select
+                    .map(|(beg, end)| (builder.ins().iconst(I64, end as i64), beg - end + 1))
+            })
+        {
+            let need = width.div_ceil(64) * 8;
+            let src = if returns_wide_pointer(&self.expr) {
+                (calc_native_bytes(self.expr.width()) >= need).then_some(payload)
+            } else if need <= 16 {
+                let slot = alloc_wide_zero(builder, 16);
+                builder.ins().store(flags, payload, slot, 0);
+                Some(slot)
+            } else {
+                None
+            };
+            if let Some(src_ptr) = src {
+                let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
+                let old_ptr = builder.ins().iadd(context.ff_values, base);
+                let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
+                let cur_base = builder
+                    .ins()
+                    .iconst(I64, self.dst_ff_current_base_offset as i64);
+                let log_base = builder.ins().iadd(cur_base, byte_offset);
+                let log_base = builder.ins().ireduce(I32, log_base);
+                let log = builder.ins().iadd(log_base, context.ff_delta);
+                let span = dyn_ff_span(
+                    self.dst_ff_current_base_offset,
+                    self.dst_stride,
+                    self.dst_num_elements,
+                    nb,
+                );
+                emit_ff_mark_readers(context, builder, span);
+                emit_wide_window_store(
+                    context,
+                    builder,
+                    old_ptr,
+                    src_ptr,
+                    amount,
+                    width,
+                    self.dst_width,
+                    Some(log),
+                    !ff_is_packed,
+                );
+                return Some(());
+            }
+        }
+
         // Materialize the RHS into an nb-sized slot, zero-extending a narrower
         // wide source.
-        let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
         let src_ptr = if returns_wide_pointer(&self.expr) {
             let src_nb = calc_native_bytes(self.expr.width());
             if src_nb == nb {
@@ -640,51 +878,23 @@ impl ProtoAssignDynamicStatement {
         // Mask the source to dst_width (the source may alias a flat read).
         emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
 
-        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
-        let max_idx = builder
-            .ins()
-            .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
-        let in_bounds = builder
-            .ins()
-            .icmp(IntCC::UnsignedLessThan, idx_payload, max_idx);
-        let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
-        let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
-        let byte_offset = builder.ins().imul(clamped, stride_val);
-
-        // Packed: skip the in-place store; the wide log push below delivers it
-        // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
-        // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
-        let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
-
         // `arr[idx][hi:lo] <= v`: read the element back and merge the window
         // in, so the store/log below still deliver a whole element.  The read
         // source and the dynamic-over-static precedence follow
         // `AssignDynamicStatement::eval_step`.
-        let src_ptr = if self.dynamic_select.is_some() || self.select.is_some() {
+        let src_ptr = if dyn_window.is_some() || self.select.is_some() {
             use super::helpers::{emit_wide_select_rmw, emit_wide_select_rmw_at};
             let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
             let old_ptr = builder.ins().iadd(context.ff_values, base);
             let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
-            let merged = match self.dynamic_select.as_ref() {
-                Some(dyn_sel) => {
-                    // Built here, after the element index, so the two index
-                    // expressions are evaluated in the same order as
-                    // `AssignDynamicStatement::eval_step`.
-                    let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
-                    emit_wide_select_rmw_at(
-                        context,
-                        builder,
-                        old_ptr,
-                        src_ptr,
-                        shift,
-                        dyn_sel.window,
-                        nb,
-                    )
+            let merged = match (dyn_window, self.select) {
+                (Some((shift, window)), _) => {
+                    emit_wide_select_rmw_at(context, builder, old_ptr, src_ptr, shift, window, nb)
                 }
-                None => {
-                    let (beg, end) = self.select?;
+                (None, Some((beg, end))) => {
                     emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
                 }
+                (None, None) => src_ptr,
             };
             // `Value::assign` confines the result to the declared width: a
             // dynamic window on the last element can overhang, and the padding
@@ -712,18 +922,49 @@ impl ProtoAssignDynamicStatement {
             .iconst(I64, self.dst_ff_current_base_offset as i64);
         let log_base = builder.ins().iadd(cur_base, byte_offset);
         let log_base_i32 = builder.ins().ireduce(I32, log_base);
+        let span = dyn_ff_span(
+            self.dst_ff_current_base_offset,
+            self.dst_stride,
+            self.dst_num_elements,
+            nb,
+        );
+        emit_ff_push_mark(
+            context,
+            builder,
+            log_base_i32,
+            nb,
+            PushedBytes::Ptr(src_ptr),
+            span,
+        );
         emit_wide_log_chunks_dyn(context, builder, src_ptr, log_base_i32, nb);
 
         Some(())
     }
 }
+fn extend_i64(
+    builder: &mut FunctionBuilder,
+    v: CraneliftValue,
+    width: usize,
+    signed: bool,
+) -> CraneliftValue {
+    if width == 0 || width >= 64 {
+        v
+    } else if signed {
+        let sh = (64 - width) as i64;
+        let v = builder.ins().ishl_imm_u(v, sh);
+        builder.ins().sshr_imm_u(v, sh)
+    } else {
+        band_const(builder, v, (1u128 << width) - 1, false)
+    }
+}
+
 impl ProtoForStatement {
     pub fn can_build_binary(&self) -> bool {
         // A bound is JIT-able when it is a compile-time constant, or a runtime
         // expression that is itself JIT-able and fits an i64 counter (≤64 bits,
         // so its payload materialises as a scalar we can compare against).
         let bound_ok = |b: &ProtoForBound| match b {
-            ProtoForBound::Const(_) => true,
+            ProtoForBound::Const(..) => true,
             ProtoForBound::Dynamic(e) => e.can_build_binary() && e.width() <= 64,
         };
         let bounds_jittable = match &self.range {
@@ -737,7 +978,7 @@ impl ProtoForStatement {
             // analysis, but runtime bounds have no such guard — so only JIT
             // const-bound Stepped loops (matching the pre-existing behaviour).
             ProtoForRange::Stepped { start, end, .. } => {
-                matches!(start, ProtoForBound::Const(_)) && matches!(end, ProtoForBound::Const(_))
+                matches!(start, ProtoForBound::Const(..)) && matches!(end, ProtoForBound::Const(..))
             }
         };
         bounds_jittable && self.body.iter().all(|s| s.can_build_binary())
@@ -785,20 +1026,28 @@ impl ProtoForStatement {
 
         // Evaluate the loop bounds once, here in the entry block, matching the
         // interpreter which reads `r.start`/`r.end` a single time before
-        // looping (`Statement::For` in `ir::statement`).  Const bounds fold to
-        // `iconst`; dynamic bounds evaluate their expression to an i64.
-        // `inclusive` bumps the end by one, as the const path did with `e += 1`.
-        let start_v = Self::bound_value(start_bound, false, context, builder)?;
-        let end_v = Self::bound_value(end_bound, inclusive, context, builder)?;
+        // looping (`Statement::For` in `ir::statement`), whose
+        // `for_bound_reached` is the comparison this mirrors.
+        let start_v = Self::bound_value(start_bound, context, builder)?;
+        let end_v = Self::bound_value(end_bound, context, builder)?;
 
         // Reverse mirrors the emitted SV `for (int i = hi - 1; i >= lo;
-        // i -= step)`. The signed `>= lo` guard makes underflow past `lo`
-        // terminate, matching the signed `int i`.
-        let init_i = if is_reverse {
+        // i -= step)`, `hi` itself when inclusive.
+        let init_i = if is_reverse && !inclusive {
             builder.ins().iadd_imm_s(end_v, -1)
+        } else if is_reverse {
+            end_v
         } else {
             start_v
         };
+        let init_i = self.wrap_counter(builder, init_i);
+
+        // The counter is stored straight into FF storage, with no log push to
+        // mark at.
+        if self.var_offset.is_ff() {
+            let span = ff_static_span(var_mem_offset, nb);
+            emit_ff_mark_readers(context, builder, span);
+        }
 
         // Carry the counter in a block param (a register), mirroring the
         // interpreter's local `i`: `var_mem` is written only at the top of the
@@ -816,19 +1065,9 @@ impl ProtoForStatement {
         let i_val = builder.block_params(header_block)[0];
 
         let cond = if is_reverse {
-            // Sign-extend the counter from its native width so an underflow
-            // below `lo` compares as negative, matching the signed `int i`.
-            let i_signed = if nb <= 4 {
-                let r = builder.ins().ireduce(I32, i_val);
-                builder.ins().sextend(I64, r)
-            } else {
-                i_val
-            };
-            builder
-                .ins()
-                .icmp(IntCC::SignedGreaterThanOrEqual, i_signed, start_v)
+            self.in_range(builder, i_val, start_v, start_bound, true, false)
         } else {
-            builder.ins().icmp(IntCC::UnsignedLessThan, i_val, end_v)
+            self.in_range(builder, i_val, end_v, end_bound, false, inclusive)
         };
         builder
             .ins()
@@ -877,6 +1116,7 @@ impl ProtoForStatement {
                 _ => builder.ins().iadd(i_cur, step_c),
             }
         };
+        let new_i = self.wrap_counter(builder, new_i);
 
         builder.ins().jump(header_block, &[BlockArg::Value(new_i)]);
 
@@ -887,24 +1127,20 @@ impl ProtoForStatement {
         Some(())
     }
 
-    /// Materialise a loop bound as an i64 cranelift value.  Const bounds fold
-    /// to `iconst`; dynamic bounds evaluate their (JIT-able, ≤64-bit) expression
-    /// and normalise its payload to I64.  `add_one` applies the `inclusive`
-    /// end-bound bump.  Callers gate on `can_build_binary`, so the payload is a
-    /// scalar; the `None` arms are defensive (a type mismatch bails to the
-    /// interpreter instead of panicking cranelift).
+    /// Callers gate on `can_build_binary`, so the payload is a scalar; the
+    /// `None` arms are defensive (a type mismatch bails to the interpreter
+    /// instead of panicking cranelift).
     fn bound_value(
         bound: &ProtoForBound,
-        add_one: bool,
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<CraneliftValue> {
-        let raw = match bound {
-            ProtoForBound::Const(c) => builder.ins().iconst(I64, *c as i64),
+        Some(match bound {
+            ProtoForBound::Const(c, _) => builder.ins().iconst(I64, *c as i64),
             ProtoForBound::Dynamic(expr) => {
                 let (payload, _mask) = expr.build_binary(context, builder)?;
                 let ty = builder.func.dfg.value_type(payload);
-                if ty == I64 {
+                let raw = if ty == I64 {
                     payload
                 } else if ty == I128 {
                     builder.ins().ireduce(I64, payload)
@@ -912,14 +1148,46 @@ impl ProtoForStatement {
                     builder.ins().uextend(I64, payload)
                 } else {
                     return None;
-                }
+                };
+                let (width, signed) = bound.shape();
+                extend_i64(builder, raw, width, signed)
             }
-        };
-        Some(if add_one {
-            builder.ins().iadd_imm_s(raw, 1)
-        } else {
-            raw
         })
+    }
+
+    fn wrap_counter(&self, builder: &mut FunctionBuilder, v: CraneliftValue) -> CraneliftValue {
+        extend_i64(builder, v, self.var_width, self.var_signed)
+    }
+
+    /// The loop's continue condition: the negation of `for_bound_reached`.
+    fn in_range(
+        &self,
+        builder: &mut FunctionBuilder,
+        i: CraneliftValue,
+        bound: CraneliftValue,
+        shape: &ProtoForBound,
+        ge: bool,
+        inclusive: bool,
+    ) -> CraneliftValue {
+        let (bound_width, bound_signed) = shape.shape();
+        let (i, bound, cc) = if self.var_signed && bound_signed {
+            let cc = match (ge, inclusive) {
+                (true, _) => IntCC::SignedGreaterThanOrEqual,
+                (false, true) => IntCC::SignedLessThanOrEqual,
+                (false, false) => IntCC::SignedLessThan,
+            };
+            (i, bound, cc)
+        } else {
+            let i = extend_i64(builder, i, self.var_width, false);
+            let bound = extend_i64(builder, bound, bound_width, false);
+            let cc = match (ge, inclusive) {
+                (true, _) => IntCC::UnsignedGreaterThanOrEqual,
+                (false, true) => IntCC::UnsignedLessThanOrEqual,
+                (false, false) => IntCC::UnsignedLessThan,
+            };
+            (i, bound, cc)
+        };
+        builder.ins().icmp(cc, i, bound)
     }
 
     fn store_counter(
@@ -931,12 +1199,18 @@ impl ProtoForStatement {
         nb: usize,
     ) {
         if nb <= 4 {
-            let v32 = builder.ins().ireduce(I32, val_i64);
+            // A narrow slot's neighbour starts right after it.
+            let ty = match nb {
+                1 => I8,
+                2 => I16,
+                _ => I32,
+            };
+            let v = builder.ins().ireduce(ty, val_i64);
             builder
                 .ins()
-                .store(MemFlagsData::trusted(), v32, base_addr, offset);
+                .store(MemFlagsData::trusted(), v, base_addr, offset);
             if context.use_4state {
-                let zero = builder.ins().iconst(I32, 0);
+                let zero = builder.ins().iconst(ty, 0);
                 builder
                     .ins()
                     .store(MemFlagsData::trusted(), zero, base_addr, offset + nb as i32);
@@ -981,6 +1255,9 @@ impl ProtoStatement {
             ProtoStatement::SequentialBlock(body) => body.iter().all(|s| s.can_build_binary()),
             ProtoStatement::TbMethodCall { .. } => false,
             ProtoStatement::Break => false,
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
     pub fn build_binary(
@@ -993,9 +1270,61 @@ impl ProtoStatement {
         // only after their bodies, so an arm can never recycle its
         // condition's slots.
         let mark = scratch_mark();
-        let result = self.build_binary_body(context, builder, is_last);
+        let result = match self.df_store_hits(context) {
+            Some(hits) => self.build_binary_store_marked(context, builder, is_last, hits),
+            None => self.build_binary_body(context, builder, is_last),
+        };
         scratch_release(mark);
         result
+    }
+
+    /// The dataflow marks this comb store must set when it changes what
+    /// readers see; `None` outside event code or when no reader is hit.
+    fn df_store_hits(
+        &self,
+        context: &CraneliftContext,
+    ) -> Option<crate::ir::opt::dataflow::MarkSpan> {
+        let marks = context.df_marks.as_ref()?;
+        let (lo, hi) = crate::ir::opt::dataflow::store_span(self)?;
+        crate::ir::opt::dataflow::store_hits(marks, lo, hi)
+    }
+
+    /// The store, then the readers' bits set when the hit ranges changed.
+    fn build_binary_store_marked(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        is_last: bool,
+        (a, b, words): crate::ir::opt::dataflow::MarkSpan,
+    ) -> Option<()> {
+        let flags = MemFlagsData::trusted();
+        let compare = b - a <= MARK_COMPARE_MAX_BYTES;
+        let pieces = if compare {
+            load_pieces(a, b)
+        } else {
+            Vec::new()
+        };
+        let before: Vec<CraneliftValue> = pieces
+            .iter()
+            .map(|&(o, ty)| builder.ins().load(ty, flags, context.comb_values, o as i32))
+            .collect();
+        self.build_binary_body(context, builder, is_last)?;
+        let changed = compare.then(|| {
+            let mut acc = builder.ins().iconst(I64, 0);
+            for (&(o, ty), &old) in pieces.iter().zip(&before) {
+                let new = builder.ins().load(ty, flags, context.comb_values, o as i32);
+                let x = builder.ins().bxor(old, new);
+                let x = if ty == I64 {
+                    x
+                } else {
+                    builder.ins().uextend(I64, x)
+                };
+                acc = builder.ins().bor(acc, x);
+            }
+            builder.ins().icmp_imm_u(IntCC::NotEqual, acc, 0)
+        });
+        emit_set_dirty(context, builder, changed, &words);
+        Some(())
     }
 
     fn build_binary_body(
@@ -1025,6 +1354,9 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => None,
             ProtoStatement::Break => None,
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 }
@@ -1050,6 +1382,12 @@ impl ProtoAssignStatement {
 
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() {
+            return false;
+        }
+        // A combinational write into FF storage must not be logged, and the
+        // wide (>128-bit) emitter threads its log pushes through too many
+        // paths to gate one by one.  Rare enough to leave to the interpreter.
+        if self.comb_direct && self.dst_width > 128 {
             return false;
         }
         // The wide (>128-bit) flat-buffer store path can't sign-extend a
@@ -1270,7 +1608,9 @@ impl ProtoAssignStatement {
         // Wide FFs (65-128 bit, nb=16) emit a pair of 8-byte log entries
         // for the payload (and another pair for the 4-state mask).  See
         // the log push block below.
-        let emit_log = self.dst.is_ff();
+        // `comb_direct` lands in ff_values without being a flop write, so it
+        // stores directly and logs nothing (see the IR-side field).
+        let emit_log = self.dst.is_ff() && !self.comb_direct;
         let is_packed_ff = emit_log && (self.dst.raw() == self.dst_ff_current_offset);
         let log_current_offset = self.dst_ff_current_offset as i32;
 
@@ -1301,10 +1641,10 @@ impl ProtoAssignStatement {
             };
 
         if let Some(dyn_sel) = &self.dynamic_select {
-            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            let (shift, in_range) = build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
 
             // Clip mask and payload to the declared width: a last-element
-            // window can overhang, and `clip_window_to_width` drops those
+            // window can overhang, and `clip_select_to_width` drops those
             // bits on the interpreter side.
             let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = if wide {
@@ -1314,6 +1654,7 @@ impl ProtoAssignStatement {
             };
             let dyn_mask = builder.ins().ishl(mask_val, shift);
             let dyn_mask = band_const(builder, dyn_mask, gen_mask_for_width(self.dst_width), wide);
+            let dyn_mask = mask_out_of_range(context, builder, in_range, dyn_mask, wide);
             let not_mask = builder.ins().bnot(dyn_mask);
 
             let payload = builder.ins().ishl(payload, shift);
@@ -1649,6 +1990,18 @@ impl ProtoAssignStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        let mut guard = None;
+        let result = self.build_binary_wide_body(context, builder, &mut guard);
+        end_oob_guard(builder, guard);
+        result
+    }
+
+    fn build_binary_wide_body(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        guard: &mut Option<Block>,
+    ) -> Option<()> {
         use super::helpers::emit_wide_apply_mask;
 
         // Wide-dst bit-select WRITE (RMW) in 4-state mode needs mask-aware
@@ -1725,7 +2078,8 @@ impl ProtoAssignStatement {
                 }
                 None => sv,
             };
-            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            let (shift, in_range) = build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+            *guard = begin_oob_guard(builder, in_range);
             emit_wide_dynamic_field_store(
                 builder,
                 context.comb_values,
@@ -1790,6 +2144,73 @@ impl ProtoAssignStatement {
             0
         };
 
+        // Both window paths below and the read-merge fallback share this, so
+        // it is lowered once; a copy per path would leave the earlier ones
+        // dead.
+        let dyn_window = match self.dynamic_select.as_ref() {
+            Some(dyn_sel) => {
+                let (shift, in_range) =
+                    build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+                *guard = begin_oob_guard(builder, in_range);
+                Some((shift, dyn_sel.window))
+            }
+            None => None,
+        };
+        let window = match (dyn_window, self.select) {
+            (Some(w), _) => Some(w),
+            (None, Some((beg, end))) => {
+                Some((builder.ins().iconst(I64, end as i64), beg - end + 1))
+            }
+            (None, None) => None,
+        };
+
+        // The whole-value forms below walk every word per write, which turns a
+        // `for` over the windows of a packed array into a quadratic cost.  A
+        // narrow source is held in a 16-byte slot rather than a value-sized
+        // one; a static window on an unpacked FF keeps its in-place merge.
+        if nb > WIDE_INLINE_NB
+            && mask_xz.is_none()
+            && self.rhs_select.is_none()
+            && (self.dynamic_select.is_some() || ff_packed)
+            && let Some((amount, width)) = window
+        {
+            let need = width.div_ceil(64) * 8;
+            let src = if returns_wide_pointer(&self.expr) {
+                (calc_native_bytes(expr_width) >= need).then_some(payload)
+            } else if need <= 16 {
+                let slot = alloc_wide_zero(builder, 16);
+                builder
+                    .ins()
+                    .store(MemFlagsData::trusted(), payload, slot, 0);
+                Some(slot)
+            } else {
+                None
+            };
+            if let Some(src_ptr) = src {
+                if is_ff {
+                    let span = ff_static_span(log_current_offset, nb);
+                    emit_ff_mark_readers(context, builder, span);
+                }
+                let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                let log = is_ff.then(|| {
+                    let base = builder.ins().iconst(I32, log_current_offset as i64);
+                    builder.ins().iadd(base, context.ff_delta)
+                });
+                emit_wide_window_store(
+                    context,
+                    builder,
+                    old_ptr,
+                    src_ptr,
+                    amount,
+                    width,
+                    self.dst_width,
+                    log,
+                    !ff_packed,
+                );
+                return Some(());
+            }
+        }
+
         // Source representation: build_binary returns a POINTER iff
         // `builds_wide_pointer()` (the keystone predicate), NOT simply when
         // width > 128.  A wide-WIDTH expression that build_binary still
@@ -1798,6 +2219,15 @@ impl ProtoAssignStatement {
         // must be promoted into a slot, else `payload` (a scalar) is
         // dereferenced as a pointer (SIGSEGV).  `is_wide_ptr(expr_width)`
         // alone gets this wrong and crashed the v4 OoO core's wide datapath.
+        //
+        // A register is at most 16 bytes.  The in-place merge of a static
+        // window reads only the source words it needs, so it takes the
+        // register's own size; the whole-value paths get a value-sized slot.
+        let reg_slot_nb = if self.select.is_some() && self.dynamic_select.is_none() && !ff_packed {
+            16
+        } else {
+            nb
+        };
         let src_ptr = if returns_wide_pointer(&self.expr) {
             payload
         } else {
@@ -1807,7 +2237,7 @@ impl ProtoAssignStatement {
             // guard is fooled by an inflated `width` field (> 128 while the
             // build is actually a scalar) and would pass the register straight
             // through unstored, to be dereferenced as a pointer (SIGSEGV).
-            let slot = alloc_wide_zero(builder, nb);
+            let slot = alloc_wide_zero(builder, reg_slot_nb);
             builder
                 .ins()
                 .store(MemFlagsData::trusted(), payload, slot, 0);
@@ -1821,7 +2251,7 @@ impl ProtoAssignStatement {
         let src_wide_nb = if returns_wide_pointer(&self.expr) {
             calc_native_bytes(expr_width)
         } else {
-            nb // force-stored above into an nb-sized zeroed slot
+            reg_slot_nb // force-stored above into a zeroed slot of that size
         };
         // Static window merged straight into the destination.  Excludes a
         // packed FF, whose direct store is skipped so in-event readers still
@@ -1893,25 +2323,48 @@ impl ProtoAssignStatement {
         // live value, packed FF = last-cycle current slot, unpacked multi-RMW
         // FF = next slot with prior in-event writes forwarded.  Dynamic index
         // wins over static `select` as in `AssignStatement::eval_step`.
-        let src_ptr = if let Some(dyn_sel) = self.dynamic_select.as_ref() {
-            use super::helpers::emit_wide_select_rmw_at;
-            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+        // The windows the early path declined (a fused `rhs_select`, a source
+        // narrower than the window, an unpacked static window) reach the same
+        // helper here, from the widened source.
+        if nb > WIDE_INLINE_NB
+            && mask_xz.is_none()
+            && let Some((amount, width)) = window
+        {
+            if is_ff {
+                let span = ff_static_span(log_current_offset, nb);
+                emit_ff_mark_readers(context, builder, span);
+            }
             let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
-            emit_wide_select_rmw_at(
+            let log = is_ff.then(|| {
+                let base = builder.ins().iconst(I32, log_current_offset as i64);
+                builder.ins().iadd(base, context.ff_delta)
+            });
+            emit_wide_window_store(
                 context,
                 builder,
                 old_ptr,
                 src_ptr,
-                shift,
-                dyn_sel.window,
-                nb,
-            )
-        } else if let Some((beg, end)) = self.select {
-            use super::helpers::emit_wide_select_rmw;
-            let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
-            emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
-        } else {
-            src_ptr
+                amount,
+                width,
+                self.dst_width,
+                log,
+                !ff_packed,
+            );
+            return Some(());
+        }
+
+        let src_ptr = match (dyn_window, self.select) {
+            (Some((shift, dst_window)), _) => {
+                use super::helpers::emit_wide_select_rmw_at;
+                let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                emit_wide_select_rmw_at(context, builder, old_ptr, src_ptr, shift, dst_window, nb)
+            }
+            (None, Some((beg, end))) => {
+                use super::helpers::emit_wide_select_rmw;
+                let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
+            }
+            (None, None) => src_ptr,
         };
 
         // Apply width mask to the source to truncate extra bits
@@ -1941,7 +2394,7 @@ impl ProtoAssignStatement {
             } else {
                 // Force-store (see the payload src_ptr note above): the
                 // width-field guard in ensure_wide_ptr_val is unreliable here.
-                let slot = alloc_wide_zero(builder, nb);
+                let slot = alloc_wide_zero(builder, reg_slot_nb);
                 builder
                     .ins()
                     .store(MemFlagsData::trusted(), mask_xz, slot, 0);
@@ -2269,6 +2722,9 @@ fn emit_wide_log_chunks(
         builder.ins().iadd_imm_s(src_ptr, skip as i64)
     };
     let base_offset = base_offset + skip as i32;
+    let off = builder.ins().iconst(I32, base_offset as i64);
+    let elem = ff_static_span(base_offset, nb);
+    emit_ff_push_mark(context, builder, off, nb, PushedBytes::Ptr(src_ptr), elem);
     let mut written: usize = 0;
     while written < nb {
         let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
@@ -2495,6 +2951,144 @@ fn cold_if_true_enabled() -> bool {
     *V.get_or_init(|| std::env::var("VERYL_COLD_IF_TRUE").ok().as_deref() != Some("0"))
 }
 
+/// Sets the dirty bits of the dataflow cells reading FF bytes `span` without
+/// comparing: a window store merges inside its helper call, so the new value
+/// is never in hand to compare against.
+fn emit_ff_mark_readers(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    span: Option<(u32, u32)>,
+) {
+    if context.use_4state {
+        return;
+    }
+    let Some(words) = ff_reader_words(context, span) else {
+        return;
+    };
+    emit_set_dirty(context, builder, None, &words);
+}
+
+/// The dirty words of the cells reading FF bytes `span`.  An unknown span
+/// takes every FF reader: the event still counts as marking its pushes, so
+/// nothing compares them at commit.
+fn ff_reader_words(
+    context: &CraneliftContext,
+    span: Option<(u32, u32)>,
+) -> Option<Vec<(u32, u64)>> {
+    let marks = context.df_marks.as_ref()?;
+    let (lo, hi) = span.unwrap_or((0, u32::MAX));
+    crate::ir::opt::dataflow::ff_push_hits(marks, lo, hi).map(|(_, _, words)| words)
+}
+
+/// The FF bytes a push of `nb` bytes at a constant `offset` writes.
+fn ff_static_span(offset: i32, nb: usize) -> Option<(u32, u32)> {
+    let lo = u32::try_from(offset).ok()?;
+    Some((lo, lo.checked_add(u32::try_from(nb).ok()?)?))
+}
+
+/// ORs `words` into the dirty words the write log header points at when
+/// `cond` holds.  A null pointer (no dataflow settle at run time) skips them.
+fn emit_set_dirty(
+    context: &CraneliftContext,
+    builder: &mut FunctionBuilder,
+    cond: Option<CraneliftValue>,
+    words: &[(u32, u64)],
+) {
+    use crate::ir::write_log::WRITE_LOG_OFFSET_DF_DIRTY;
+    let flags = MemFlagsData::trusted();
+    let dirty = builder
+        .ins()
+        .load(I64, flags, context.log_buf, WRITE_LOG_OFFSET_DF_DIRTY);
+    let live = builder.ins().icmp_imm_u(IntCC::NotEqual, dirty, 0);
+    let take = match cond {
+        Some(c) => builder.ins().band(c, live),
+        None => live,
+    };
+    let mark = builder.create_block();
+    let done = builder.create_block();
+    builder.ins().brif(take, mark, &[], done, &[]);
+    builder.switch_to_block(mark);
+    for &(w, m) in words {
+        let woff = (w * 8) as i32;
+        let v = builder.ins().load(I64, flags, dirty, woff);
+        let v = builder.ins().bor_imm_u(v, m as i64);
+        builder.ins().store(flags, v, dirty, woff);
+    }
+    builder.ins().jump(done, &[]);
+    builder.switch_to_block(done);
+}
+
+/// The bytes an FF log push carries: an integer, low byte first, or memory.
+enum PushedBytes {
+    Value(CraneliftValue),
+    Ptr(CraneliftValue),
+}
+
+/// Before an FF log push of `nb` bytes at current-slot `offset`: when they
+/// differ from what the slot holds, set the dirty bits of the dataflow cells
+/// reading FF bytes `span` (the element, or the whole array for a runtime
+/// index).
+fn emit_ff_push_mark(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    offset: CraneliftValue,
+    nb: usize,
+    bytes: PushedBytes,
+    span: Option<(u32, u32)>,
+) {
+    // The compare sees values, not 4-state masks; such events stay unmarked.
+    if context.use_4state {
+        return;
+    }
+    let Some(words) = ff_reader_words(context, span) else {
+        return;
+    };
+    let flags = MemFlagsData::trusted();
+    let off = builder.ins().iadd(offset, context.ff_delta);
+    let off = builder.ins().uextend(I64, off);
+    let addr = builder.ins().iadd(context.ff_values, off);
+    let mut acc = builder.ins().iconst(I64, 0);
+    for (o, ty) in load_pieces(0, nb as u32) {
+        let cur = builder.ins().load(ty, flags, addr, o as i32);
+        let new = match bytes {
+            PushedBytes::Value(v) => {
+                let v = if o == 0 {
+                    v
+                } else {
+                    builder.ins().ushr_imm_u(v, (o * 8) as i64)
+                };
+                if builder.func.dfg.value_type(v) == ty {
+                    v
+                } else {
+                    builder.ins().ireduce(ty, v)
+                }
+            }
+            PushedBytes::Ptr(p) => builder.ins().load(ty, flags, p, o as i32),
+        };
+        let x = builder.ins().bxor(cur, new);
+        let x = if ty == I64 {
+            x
+        } else {
+            builder.ins().uextend(I64, x)
+        };
+        acc = builder.ins().bor(acc, x);
+    }
+    let changed = builder.ins().icmp_imm_u(IntCC::NotEqual, acc, 0);
+    emit_set_dirty(context, builder, Some(changed), &words);
+}
+
+/// The FF bytes every element of a runtime-indexed array covers, from its
+/// current base `cur_base` with `nb`-byte elements.
+fn dyn_ff_span(
+    cur_base: isize,
+    stride: isize,
+    num_elements: usize,
+    nb: usize,
+) -> Option<(u32, u32)> {
+    let (lo, hi) = crate::ir::strided_span(cur_base, stride, num_elements, nb)?;
+    Some((u32::try_from(lo).ok()?, u32::try_from(hi).ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::log_window_for_span;
@@ -2534,6 +3128,151 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    mod dataflow_marks {
+        use crate::backend::cranelift::runtime::{
+            CellWatch, build_binary_marked, build_cell_binary,
+        };
+        use crate::ir::opt::dataflow::{EventMarks, MarkTable, StoreMarks};
+        use crate::ir::variable::VarOffset;
+        use crate::ir::write_log::WriteLogBuffer;
+        use crate::ir::{
+            Config, ExpressionContext, ProtoAssignStatement, ProtoExpression, ProtoStatement,
+        };
+        use veryl_parser::token_range::TokenRange;
+
+        fn cvar(off: isize) -> ProtoExpression {
+            ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(off),
+                select: None,
+                dynamic_select: None,
+                width: 8,
+                var_full_width: 8,
+                expr_context: ExpressionContext {
+                    width: 8,
+                    signed: false,
+                },
+            }
+        }
+
+        fn assign(dst: VarOffset, src: isize) -> ProtoStatement {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst,
+                dst_width: 8,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: cvar(src),
+                dst_ff_current_offset: dst.raw(),
+                comb_direct: false,
+                token: TokenRange::default(),
+            })
+        }
+
+        /// A cell copying comb byte 0 to byte 8 marks its consumers exactly
+        /// when byte 8 changed, or on every run when told to.
+        #[test]
+        fn a_cell_marks_its_consumers_only_when_its_boundary_moved() {
+            let consumers = [(0u32, 0b100u64), (1, 0b1)];
+            let run = |always: bool, src: u8, old: u8| -> [u64; 2] {
+                let watch = CellWatch {
+                    boundary: &[(8, 9)],
+                    consumers: &consumers,
+                    always,
+                };
+                let stmt = assign(VarOffset::Comb(8), 0);
+                let (f, _keep) = build_cell_binary(&Config::default(), vec![stmt], &watch)
+                    .expect("the cell must compile");
+                let mut comb = [0u8; 16];
+                comb[0] = src;
+                comb[8] = old;
+                let ff = [0u8; 8];
+                let mut log = WriteLogBuffer::with_capacity(4, 4);
+                let mut dirty = [0u64; 2];
+                unsafe {
+                    f(
+                        ff.as_ptr(),
+                        comb.as_mut_ptr(),
+                        &mut log as *mut _ as *mut u8,
+                        dirty.as_mut_ptr() as isize,
+                    )
+                };
+                assert_eq!(comb[8], src);
+                dirty
+            };
+            assert_eq!(run(false, 5, 0), [0b100, 0b1], "a change must mark");
+            assert_eq!(run(false, 5, 5), [0, 0], "no change marks nothing");
+            assert_eq!(run(true, 5, 5), [0b100, 0b1], "`always` marks every run");
+        }
+
+        fn event_marks(comb: MarkTable, ff: MarkTable) -> StoreMarks {
+            std::sync::Arc::new(EventMarks { comb, ff })
+        }
+
+        /// Runs `stmt` as marked event code, `dirty` wired through the write
+        /// log header unless `live` is false.
+        fn run_event(
+            stmt: ProtoStatement,
+            marks: StoreMarks,
+            comb: &mut [u8],
+            ff: &mut [u8],
+            live: bool,
+        ) -> ([u64; 2], WriteLogBuffer) {
+            let (f, _keep) =
+                build_binary_marked(&Config::default(), vec![stmt], false, Some(marks))
+                    .expect("the event chunk must compile");
+            let mut log = WriteLogBuffer::with_capacity(4, 4);
+            let mut dirty = [0u64; 2];
+            if live {
+                log.df_dirty = dirty.as_mut_ptr();
+            }
+            unsafe {
+                f(
+                    ff.as_ptr(),
+                    comb.as_mut_ptr(),
+                    &mut log as *mut _ as *mut u8,
+                    0,
+                )
+            };
+            (dirty, log)
+        }
+
+        /// An event store into the middle of a watched comb span marks the
+        /// span's readers when the byte changed, and only then.
+        #[test]
+        fn an_event_comb_store_marks_readers_when_it_changes_a_byte() {
+            let marks = || event_marks(vec![(8, 16, vec![(1, 0b10)])], Vec::new());
+            let stmt = || assign(VarOffset::Comb(12), 0);
+            let mut ff = [0u8; 8];
+            let mut comb = [0u8; 16];
+            comb[0] = 7;
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!((comb[12], dirty), (7, [0, 0b10]), "a change must mark");
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0, 0], "rewriting the same value marks nothing");
+            comb[0] = 9;
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, false);
+            assert_eq!((comb[12], dirty), (9, [0, 0]), "no dirty words, no marks");
+        }
+
+        /// A logged FF write marks the FF readers when the pushed value
+        /// differs from the current slot, and still pushes either way.
+        #[test]
+        fn an_event_ff_push_marks_readers_when_the_value_differs() {
+            let marks = || event_marks(Vec::new(), vec![(0, 1, vec![(0, 0b1000)])]);
+            let stmt = || assign(VarOffset::Ff(0), 0);
+            let mut ff = [3u8; 8];
+            let mut comb = [0u8; 16];
+            comb[0] = 4;
+            let (dirty, log) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0b1000, 0], "a differing push must mark");
+            assert_eq!(log.narrow_count, 1);
+            comb[0] = 3;
+            let (dirty, log) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0, 0], "pushing the current value marks nothing");
+            assert_eq!(log.narrow_count, 1);
         }
     }
 }

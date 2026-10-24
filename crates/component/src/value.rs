@@ -156,6 +156,13 @@ impl Value {
         }
     }
 
+    pub fn as_slice(&self) -> &[u64] {
+        match self {
+            Value::Bits { words, .. } => words,
+            _ => &[],
+        }
+    }
+
     /// True if any bit is set. Strings and unit are false.
     pub fn as_bool(&self) -> bool {
         match self {

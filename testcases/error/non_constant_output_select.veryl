@@ -1,0 +1,15 @@
+module non_constant_output_select (
+    i_index: input  logic   ,
+    o_bits : output logic<2>,
+    o_tail : output logic   ,
+) {
+    inst u: ModuleB (
+        o: {o_bits[i_index], o_tail},
+    );
+}
+
+module ModuleB (
+    o: output logic<2>,
+) {
+    assign o = 2'b10;
+}

@@ -1,7 +1,7 @@
 //! Backend orchestrator.
 //!
-//! At build time: whole-comb / whole-event paths try `compile_whole_*`
-//! on each backend in order, taking the first `Some`.  The chunk path
+//! At build time: the whole-event path tries `compile_whole_event` on
+//! each backend in order, taking the first `Some`.  The chunk path
 //! groups statements by `supports_stmt` and asks the registered
 //! chunk backend to compile each jittable group.  Backends that
 //! decline are skipped; the interpreter is the ultimate fallback.
@@ -22,23 +22,21 @@ use std::sync::{Arc, LazyLock, Mutex};
 /// `try_jit_no_cache` that otherwise re-JITs the whole shared DUT comb each run.
 ///
 /// Populated on miss only; a rare concurrent double-compile just overwrites an
-/// equivalent artifact. Never cleared — a `veryl test` process is one-shot and
-/// the entries stay hot for its whole run. Gated to `config.dut_reuse` (CLI
-/// only), so the unit-test harness (many transient `air::Ir`s) never touches it.
-static CHUNK_ARTIFACT_CACHE: LazyLock<Mutex<HashMap<u128, Arc<ChunkArtifact>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// equivalent artifact. Shared by the registries and compiler helpers of one
+/// `BuildSession`, so another IR or backend configuration cannot reuse it.
+pub(crate) type ChunkArtifactCache = Arc<Mutex<HashMap<u128, Arc<ChunkArtifact>>>>;
 
 /// Lets the IR's `Hash` impls feed XXH3-128 directly, replacing the old sink
 /// that fed `Debug`-formatted strings (its dominant per-test cost). Keying uses
 /// `finish_128`; the trait's 64-bit `finish` is unused.
-struct Fp128(twox_hash::xxhash3_128::Hasher);
+pub(crate) struct Fp128(twox_hash::xxhash3_128::Hasher);
 
 impl Fp128 {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Fp128(twox_hash::xxhash3_128::Hasher::new())
     }
 
-    fn finish_128(&self) -> u128 {
+    pub(crate) fn finish_128(&self) -> u128 {
         self.0.finish_128()
     }
 }
@@ -77,7 +75,7 @@ fn chunk_fingerprint(
 /// `extra` (a caller-supplied digest of the event-statement liveness census and
 /// the DCE protect set — the pieces of dead-var DCE that depend on state outside
 /// the comb list). Token- and pointer-agnostic like `chunk_fingerprint`.
-pub(crate) fn whole_comb_fingerprint(
+pub(crate) fn comb_list_fingerprint(
     use_4state: bool,
     stmts: &[ProtoStatement],
     extra: u128,
@@ -91,12 +89,21 @@ pub(crate) fn whole_comb_fingerprint(
     h.finish_128()
 }
 
-/// Ordered collection of backends.  Whole-module backends should come
-/// before chunk backends so a successful whole-module compile elides
-/// the per-chunk grouping pass.
+/// `comb_list_fingerprint` for a caller that hashed the statement list
+/// earlier than it builds the key.
+pub(crate) fn comb_list_fingerprint_from(stmts_fp: u128, extra: u128) -> u128 {
+    let mut h = Fp128::new();
+    h.write_u128(stmts_fp);
+    h.write_u8(0xE5);
+    h.write_u128(extra);
+    h.finish_128()
+}
+
+/// Ordered collection of backends, tried in registration order.
 #[derive(Default)]
 pub struct BackendRegistry {
     backends: Vec<Box<dyn Backend>>,
+    pub(crate) chunk_cache: ChunkArtifactCache,
 }
 
 impl BackendRegistry {
@@ -106,7 +113,9 @@ impl BackendRegistry {
         let mut r = Self::default();
         #[cfg(not(target_family = "wasm"))]
         {
-            if _config.aot_c {
+            // AOT-C dlopens the object it compiles, so a statically linked
+            // build would pay every `cc` invocation and throw the result away.
+            if _config.aot_c && crate::component::loader::native_loading_supported() {
                 r.register(Box::new(super::AotCBackend::new(
                     _config.aot_c_async,
                     _config.aot_c_event,
@@ -123,25 +132,16 @@ impl BackendRegistry {
         self.backends.push(backend);
     }
 
-    pub fn try_compile_whole_comb(
-        &mut self,
-        ctx: &CompileCtx,
-        stmts: &[ProtoStatement],
-    ) -> Option<Arc<dyn CompiledWhole>> {
-        self.backends
-            .iter_mut()
-            .find_map(|b| b.compile_whole_comb(ctx, stmts))
-    }
-
     pub fn try_compile_whole_event(
         &mut self,
         ctx: &CompileCtx,
         event: &Event,
         stmts: &[ProtoStatement],
+        gates: &[crate::ir::opt::event_gate::EventGate],
     ) -> Option<Arc<dyn CompiledWhole>> {
         self.backends
             .iter_mut()
-            .find_map(|b| b.compile_whole_event(ctx, event, stmts))
+            .find_map(|b| b.compile_whole_event(ctx, event, stmts, gates))
     }
 
     pub fn try_compile_chunk(
@@ -155,8 +155,11 @@ impl BackendRegistry {
                 .iter_mut()
                 .find_map(|b| b.compile_chunk(ctx, stmts));
         }
-        let key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
-        if let Some(artifact) = CHUNK_ARTIFACT_CACHE.lock().unwrap().get(&key) {
+        let mut key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
+        if let Some((_, marks_fp)) = ctx.df_marks {
+            key = key.rotate_left(1) ^ marks_fp;
+        }
+        if let Some(artifact) = self.chunk_cache.lock().unwrap().get(&key) {
             return Some(Arc::clone(artifact));
         }
         // Compile outside the lock; a concurrent peer may compile the same
@@ -166,14 +169,14 @@ impl BackendRegistry {
             .iter_mut()
             .find_map(|b| b.compile_chunk(ctx, stmts));
         if let Some(artifact) = &mut artifact {
-            // Stamp the fingerprint so a fingerprint over a parent chunk (or
-            // whole comb) that embeds this as a nested CompiledBlock prints a
+            // Stamp the fingerprint so a fingerprint over a parent chunk
+            // that embeds this as a nested CompiledBlock prints a
             // stable, content-derived id rather than the `func` address. The
             // Arc is fresh here (refcount 1), so `get_mut` always succeeds.
             if let Some(a) = Arc::get_mut(artifact) {
                 a.content_fp = Some(key);
             }
-            CHUNK_ARTIFACT_CACHE
+            self.chunk_cache
                 .lock()
                 .unwrap()
                 .insert(key, Arc::clone(artifact));
@@ -189,12 +192,6 @@ impl BackendRegistry {
         self.backends.is_empty()
     }
 
-    pub fn diagnose_whole_comb_fallback(&self, stmts: &[ProtoStatement]) -> Option<String> {
-        self.backends
-            .iter()
-            .find_map(|b| b.diagnose_whole_comb_fallback(stmts))
-    }
-
     /// Group `stmts` by `supports_stmt` and produce `ChunkOutput`s,
     /// splitting jittable groups into pieces of at most `max_chunk_size`
     /// to bound regalloc cost.  Declined chunks become `Interpreted`.
@@ -204,18 +201,32 @@ impl BackendRegistry {
         proto: Vec<ProtoStatement>,
         max_chunk_size: usize,
     ) -> Vec<ChunkOutput> {
+        let plans = self.plan_chunked(proto, max_chunk_size);
+        self.compile_plans(ctx, plans)
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    /// `build_chunked` without the compile step, so a caller with thousands of
+    /// chunks can spread the compiles over threads (`compile_plans_parallel`);
+    /// the cutting is a cheap walk.
+    pub fn plan_chunked(
+        &self,
+        proto: Vec<ProtoStatement>,
+        max_chunk_size: usize,
+    ) -> Vec<ChunkPlan> {
         let mut out = Vec::new();
         let mut current_jittable: Option<bool> = None;
         let mut current_group: Vec<ProtoStatement> = Vec::new();
 
-        let flush =
-            |group: Vec<ProtoStatement>, was_jittable: bool, this: &mut Self, out: &mut Vec<_>| {
-                if was_jittable {
-                    Self::compile_group(this, ctx, group, max_chunk_size, out);
-                } else {
-                    out.push(ChunkOutput::Interpreted(group));
-                }
-            };
+        let flush = |group: Vec<ProtoStatement>, was_jittable: bool, out: &mut Vec<ChunkPlan>| {
+            if was_jittable {
+                Self::plan_group(group, max_chunk_size, out);
+            } else {
+                out.push(ChunkPlan::Interpreted(group));
+            }
+        };
 
         for stmt in proto {
             let jittable = self.any_supports_stmt(&stmt);
@@ -224,16 +235,36 @@ impl BackendRegistry {
             } else {
                 if let Some(was_jittable) = current_jittable {
                     let group = std::mem::take(&mut current_group);
-                    flush(group, was_jittable, self, &mut out);
+                    flush(group, was_jittable, &mut out);
                 }
                 current_jittable = Some(jittable);
                 current_group.push(stmt);
             }
         }
         if let Some(was_jittable) = current_jittable {
-            flush(current_group, was_jittable, self, &mut out);
+            flush(current_group, was_jittable, &mut out);
         }
         out
+    }
+
+    /// One output list per plan: a chunk the backend bisects yields several
+    /// outputs, and a caller that planned several pieces must cut them apart.
+    pub fn compile_plans(
+        &mut self,
+        ctx: &CompileCtx,
+        plans: Vec<ChunkPlan>,
+    ) -> Vec<Vec<ChunkOutput>> {
+        plans
+            .into_iter()
+            .map(|plan| {
+                let mut out = Vec::new();
+                match plan {
+                    ChunkPlan::Interpreted(stmts) => out.push(ChunkOutput::Interpreted(stmts)),
+                    ChunkPlan::Compile(stmts) => self.compile_group_bisect(ctx, stmts, &mut out),
+                }
+                out
+            })
+            .collect()
     }
 
     /// Split `group` into chunks of at most `max_chunk_size` statements,
@@ -241,13 +272,7 @@ impl BackendRegistry {
     /// but a whole function to the backend.  One whose own tree exceeds the
     /// budget cannot be divided (that would duplicate its guard), so it lands
     /// alone and overshoots.
-    fn compile_group(
-        &mut self,
-        ctx: &CompileCtx,
-        group: Vec<ProtoStatement>,
-        max_chunk_size: usize,
-        out: &mut Vec<ChunkOutput>,
-    ) {
+    fn plan_group(group: Vec<ProtoStatement>, max_chunk_size: usize, out: &mut Vec<ChunkPlan>) {
         let diag = std::env::var("VERYL_JIT_CHUNK_DIAG").as_deref() == Ok("1");
         // `VERYL_JIT_CHUNK_BY_ENTRIES=1` restores the old unit so a design's
         // before/after can be measured from one binary.
@@ -259,7 +284,7 @@ impl BackendRegistry {
             // `mass > 0` keeps an oversized statement from flushing an empty
             // chunk ahead of itself; it lands alone and is reported.
             if mass > 0 && mass + m > max_chunk_size {
-                self.compile_group_bisect(ctx, std::mem::take(&mut cur), out);
+                out.push(ChunkPlan::Compile(std::mem::take(&mut cur)));
                 mass = 0;
             }
             if diag && m > max_chunk_size {
@@ -272,7 +297,7 @@ impl BackendRegistry {
             cur.push(stmt);
         }
         if !cur.is_empty() {
-            self.compile_group_bisect(ctx, cur, out);
+            out.push(ChunkPlan::Compile(cur));
         }
     }
 
@@ -349,12 +374,102 @@ fn classify_proto_stmt(s: &ProtoStatement) -> String {
         ProtoStatement::CompiledBlock(_) => "CompiledBlock".to_string(),
         ProtoStatement::SequentialBlock(b) => format!("SequentialBlock(len={})", b.len()),
         ProtoStatement::TbMethodCall { .. } => "TbMethodCall".to_string(),
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
 pub enum ChunkOutput {
     Compiled(Arc<ChunkArtifact>),
     Interpreted(Vec<ProtoStatement>),
+}
+
+/// One chunk as `plan_chunked` cut it, before any backend saw it.
+pub enum ChunkPlan {
+    Interpreted(Vec<ProtoStatement>),
+    Compile(Vec<ProtoStatement>),
+}
+
+/// `compile_plans` on helper threads, for the unified-comb JIT.  Only a
+/// caller holding a comb-pipeline claim may use it: the peers blocked on that
+/// claim leave their cores idle, which is what the helpers take.  Elsewhere it
+/// costs far more than it saves, and not in the compiling: every worker spawns
+/// a set at once, and each helper's stack mmap and munmap holds `mmap_lock`
+/// against every other thread's page faults.  Note the claim is per key, so
+/// workers converting tops with different comb lists are not blocked by it.
+///
+/// Each helper gets its own registry; the backends keep no state of their own
+/// (the executable arena and the artifact cache are shared behind locks), so
+/// artifacts from any thread are interchangeable.  Results stay in plan order.
+pub(crate) fn compile_plans_parallel(
+    registry: &mut BackendRegistry,
+    ctx: &CompileCtx,
+    plans: Vec<ChunkPlan>,
+) -> Vec<Vec<ChunkOutput>> {
+    let to_compile = plans
+        .iter()
+        .filter(|p| matches!(p, ChunkPlan::Compile(_)))
+        .count();
+    let threads = jit_parallelism().min(to_compile);
+    if threads < 2 {
+        return registry.compile_plans(ctx, plans);
+    }
+
+    let n = plans.len();
+    let queue = Mutex::new(plans.into_iter().enumerate());
+    let mut done: Vec<Option<Vec<ChunkOutput>>> = (0..n).map(|_| None).collect();
+
+    // The compile recurses over statement trees like the workers do.
+    let parts: Vec<Vec<(usize, Vec<ChunkOutput>)>> = std::thread::scope(|s| {
+        let queue = &queue;
+        let chunk_cache = &registry.chunk_cache;
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                std::thread::Builder::new()
+                    .stack_size(crate::IR_WALK_STACK_BYTES)
+                    .spawn_scoped(s, move || {
+                        let mut local = BackendRegistry::for_config(ctx.config);
+                        local.chunk_cache = Arc::clone(chunk_cache);
+                        let mut mine = Vec::new();
+                        loop {
+                            let Some((i, plan)) = queue.lock().unwrap().next() else {
+                                break;
+                            };
+                            let mut out = Vec::new();
+                            match plan {
+                                ChunkPlan::Interpreted(stmts) => {
+                                    out.push(ChunkOutput::Interpreted(stmts))
+                                }
+                                ChunkPlan::Compile(stmts) => {
+                                    local.compile_group_bisect(ctx, stmts, &mut out)
+                                }
+                            }
+                            mine.push((i, out));
+                        }
+                        mine
+                    })
+                    .expect("spawn chunk compiler")
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
+    for (i, out) in parts.into_iter().flatten() {
+        done[i] = Some(out);
+    }
+    done.into_iter()
+        .map(|o| o.expect("every plan is claimed exactly once"))
+        .collect()
+}
+
+fn jit_parallelism() -> usize {
+    static N: LazyLock<usize> = LazyLock::new(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    });
+    *N
 }
 
 #[cfg(test)]
@@ -387,6 +502,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: -1,
+            comb_direct: false,
             token: TokenRange::default(),
         })
     }
@@ -427,6 +543,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         // 20 entries x 201 statements = 4020 statements, budget 1024.
         let group: Vec<ProtoStatement> = (0..20).map(|_| fat_if(100)).collect();
@@ -443,6 +560,44 @@ mod tests {
             chunks <= 2 * total.div_ceil(1024),
             "{chunks} chunks is too many"
         );
+    }
+
+    #[test]
+    fn parallel_compile_matches_the_sequential_chunking() {
+        // Planning then compiling on helper threads must hand back the same
+        // chunks, in the same order, as the one-thread path.
+        let config = Config {
+            use_jit: true,
+            aot_c: false,
+            ..Default::default()
+        };
+        let mut r = BackendRegistry::for_config(&config);
+        if r.is_empty() {
+            return; // wasm: no chunk backend
+        }
+        let ctx = CompileCtx {
+            config: &config,
+            use_4state: false,
+            contains_compiled_block: false,
+            df_marks: None,
+        };
+        let group: Vec<ProtoStatement> = (0..40).map(|_| fat_if(50)).collect();
+        let shape = |out: &[ChunkOutput]| -> Vec<(bool, u128)> {
+            out.iter()
+                .map(|o| match o {
+                    ChunkOutput::Compiled(a) => (true, a.content_fp.unwrap_or(0)),
+                    ChunkOutput::Interpreted(s) => (false, s.len() as u128),
+                })
+                .collect()
+        };
+        let sequential = shape(&r.build_chunked(&ctx, group.clone(), 512));
+        let plans = r.plan_chunked(group, 512);
+        let parallel: Vec<ChunkOutput> = compile_plans_parallel(&mut r, &ctx, plans)
+            .into_iter()
+            .flatten()
+            .collect();
+        assert!(sequential.len() > 1, "one chunk proves nothing");
+        assert_eq!(shape(&parallel), sequential);
     }
 
     /// A single statement bigger than the budget cannot be divided (splitting
@@ -463,6 +618,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         let group = vec![assign(0), fat_if(2000), assign(4)];
         let out = r.build_chunked(&ctx, group, 1024);

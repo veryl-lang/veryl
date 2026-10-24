@@ -8,6 +8,623 @@ fn assert_comb_loop(case: &str, code: &str, expected: bool) {
     assert_eq!(actual, expected, "{case}: {errors:?}");
 }
 
+fn assert_complete_comb_loop(code: &str, expected: bool) {
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{code}\n{errors:#?}"
+    );
+    assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+    assert!(comb_loop_analysis_is_complete(code), "{code}");
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_initializer_side_effects() {
+    for (ty, literal, used) in [
+        ("bit[2]", "'{0, 0, default: effect()}", false),
+        ("bit[2]", "'{default: effect(), 0, 0}", false),
+        ("bit[2]", "'{effect() repeat 0, 0, 0}", false),
+        ("bit[2]", "'{effect() repeat (1 - 1), 0, 0}", false),
+        ("bit<2>", "'{0, 0, default: effect()}", false),
+        (
+            "bit<2, 2>",
+            "'{'{0, 0}, '{0, 0}, default: '{effect(), 0}}",
+            false,
+        ),
+        ("bit<2>[2]", "'{'{0, 0, default: effect()}, '{0, 0}}", false),
+        (
+            "bit<2>[3]",
+            "'{(if enable ? '{0, 0, default: effect()} : '{0, 0, default: effect()}), 0, 0}",
+            false,
+        ),
+        (
+            "bit<2>[3]",
+            "'{(if enable ? '{0, default: effect()} : '{0, default: effect()}), 0, 0}",
+            true,
+        ),
+        (
+            "bit[2]",
+            "if enable ? '{0, 0, default: effect()} : '{0, 0}",
+            false,
+        ),
+        ("bit[2, 2]", "'{'{0, 0, default: effect()}, '{0, 0}}", false),
+        (
+            "bit[2, 2]",
+            "'{'{effect(), 0} repeat 0, '{0, 0} repeat 2}",
+            false,
+        ),
+        (
+            "bit[2, 2]",
+            "'{'{0, 0} repeat 2, default: '{effect(), 0}}",
+            false,
+        ),
+        ("bit[2]", "'{0, default: effect()}", true),
+        ("bit[2]", "'{effect() repeat 1, 0}", true),
+        ("bit[2]", "'{effect() repeat 2}", true),
+        ("bit[2, 2]", "'{'{0, default: effect()}, '{0, 0}}", true),
+        ("bit[2, 2]", "'{'{0, 0}, default: '{effect(), 0}}", true),
+        // Packed repetition evaluates its operand even when it contributes no bits.
+        ("bit<2>", "{effect() repeat 0, 2'b0}", true),
+        ("bit<2>", "{effect() repeat (1 - 1), 2'b0}", true),
+        ("bit<2>", "{effect() repeat 1, 1'b0}", true),
+    ] {
+        for boundary in ["return", "argument", "assignment"] {
+            for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                let (declaration, result_type, expression) = match boundary {
+                    "return" => (
+                        format!("function make() -> Value {{ return {literal}; }}"),
+                        "Value",
+                        "make()".to_string(),
+                    ),
+                    "argument" => (
+                        "function consume(value: input Value) -> bit { return 0; }".to_string(),
+                        "bit",
+                        format!("consume({literal})"),
+                    ),
+                    "assignment" => (String::new(), "Value", literal.to_string()),
+                    _ => unreachable!(),
+                };
+                let code = format!(
+                    r#"
+                    module Top(enable: input bit, o: output bit) {{
+                        type Value = {ty};
+                        var saved: bit;
+                        var result: {result_type};
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        {declaration}
+                        always_comb {{
+                            saved = {initial};
+                            result = {expression};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_evaluates_packed_repeats_once() {
+    for count in [0, 1, 3] {
+        let literal = format!("{{advance() repeat {count}, 1'b0}}");
+        for boundary in ["assignment", "argument", "return"] {
+            let (declaration, expression) = match boundary {
+                "assignment" => (String::new(), literal.clone()),
+                "argument" => (
+                    "function consume(x: input bit<4>) -> bit<4> { return 0; }".to_string(),
+                    format!("consume({literal})"),
+                ),
+                "return" => (
+                    format!("function make() -> bit<4> {{ return {literal}; }}"),
+                    "make()".to_string(),
+                ),
+                _ => unreachable!(),
+            };
+            let code = format!(
+                r#"
+                module Top(o: output bit) {{
+                    var saved: bit<2>;
+                    var result: bit<4>;
+                    function advance() -> bit {{ saved = saved << 1; return 0; }}
+                    {declaration}
+                    always_comb {{
+                        saved = o;
+                        result = {expression};
+                    }}
+                    assign o = saved[1];
+                }}
+                "#
+            );
+            // Exactly one shift moves feedback into bit 1. Skipping the call
+            // or executing it again would incorrectly remove this loop.
+            assert_complete_comb_loop(&code, true);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_discards_zero_repeat_value_dependencies() {
+    for count in [0, 1] {
+        for operand in ["value", "read()"] {
+            for suffix in ["", " + 2'b0"] {
+                let literal = format!("{{1'b0, {operand} repeat {count}}}{suffix}");
+                for boundary in ["assignment", "argument", "return"] {
+                    let (declaration, expression) = match boundary {
+                        "assignment" => (String::new(), literal.clone()),
+                        "argument" => (
+                            "function identity(x: input bit<2>) -> bit<2> { return x; }"
+                                .to_string(),
+                            format!("identity({literal})"),
+                        ),
+                        "return" => (
+                            format!("function make() -> bit<2> {{ return {literal}; }}"),
+                            "make()".to_string(),
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let code = format!(
+                        r#"
+                        module Top(o: output bit<2>) {{
+                            var value: bit;
+                            function read() -> bit {{ return value; }}
+                            {declaration}
+                            assign value = o[0];
+                            always_comb {{ o = {expression}; }}
+                        }}
+                        "#
+                    );
+                    assert_complete_comb_loop(&code, count != 0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_uses_lowered_array_element_shapes() {
+    for condition in ["enable", "1'b1", "1'b0"] {
+        for count in [1, 2] {
+            let packed = format!("'{{0 repeat {count}, default: effect()}}");
+            let element = format!("(if {condition} ? {packed} : {packed})");
+            let row = format!("'{{{element}, 0 repeat 2}}");
+            let inner = format!("'{{{packed}, 0 repeat 3}}");
+            let partial =
+                format!("'{{(if {condition} ? {inner} : {inner}), '{{0 repeat 4}} repeat 2}}");
+            // Lowering can consume one or several dimensions, leave an inner
+            // array intact, or start after explicit indices/ranges. Dimensions
+            // already selected from the destination must not be removed again.
+            for (ty, select, expression) in [
+                ("bit<2>[3]", "", row.clone()),
+                ("bit<2>[2, 3]", "[1]", row.clone()),
+                ("bit<2>[2, 3]", "", format!("'{{{row} repeat 2}}")),
+                ("bit<2>[4, 3]", "[1+:2]", format!("'{{{row} repeat 2}}")),
+                ("bit<2>[3, 4]", "", partial.clone()),
+                ("bit<2>[2, 3, 4]", "[1]", partial),
+                ("bit<2>[3]", "", format!("if {condition} ? {row} : {row}")),
+            ] {
+                let used = count < 2;
+                for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                    let code = format!(
+                        r#"
+                        module Top(enable: input bit, o: output bit) {{
+                            var saved: bit;
+                            var result: {ty};
+                            function effect() -> bit {{ saved = {effect}; return 0; }}
+                            always_comb {{
+                                saved = {initial};
+                                result = '{{default: 0}};
+                                result{select} = {expression};
+                            }}
+                            assign o = saved;
+                        }}
+                        "#
+                    );
+                    assert_complete_comb_loop(&code, expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_lowered_element_operand_width() {
+    for condition in ["1'b1", "1'b0"] {
+        for count in [2, 4] {
+            let used = condition == "1'b1" && count < 4;
+            for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                let code = format!(
+                    r#"
+                    module Top(o: output bit) {{
+                        var saved: bit;
+                        var result: bit<4>[5];
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        always_comb {{
+                            saved = {initial};
+                            result = '{{(if {condition} ? '{{0 repeat {count}, default: effect()}} : 4'b0), 0 repeat 4}};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_operand_width_before_narrowing() {
+    for width in [1, 2, 4, 8] {
+        for count in [2, 4] {
+            for operator in ["|", "^", "&", "+"] {
+                let literal = format!("'{{0 repeat {count}, default: effect()}}");
+                for expression in [
+                    format!("4'b0 {operator} {literal}"),
+                    format!("{literal} {operator} 4'b0"),
+                ] {
+                    let used = count < width.max(4);
+                    for (initial, effect, expected) in [("0", "o", used), ("o", "0", !used)] {
+                        let code = format!(
+                            r#"
+                            module Top(o: output bit) {{
+                                var saved: bit;
+                                var result: bit;
+                                function effect() -> bit {{ saved = {effect}; return 0; }}
+                                function consume(x: input logic<{width}>) -> bit {{ return 0; }}
+                                always_comb {{
+                                    saved = {initial};
+                                    result = consume({expression});
+                                }}
+                                assign o = saved;
+                            }}
+                            "#
+                        );
+                        assert_complete_comb_loop(&code, expected);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_uses_selected_destination_width() {
+    for (select, width) in [
+        ("[0]", 1),
+        ("[1:0]", 2),
+        ("[0+:2]", 2),
+        ("[3-:2]", 2),
+        ("[1 step 2]", 2),
+        ("[7:0]", 8),
+        ("", 8),
+    ] {
+        for operator in ["|", "^", "&", "+"] {
+            for count in [2, 4] {
+                let used = count < width.max(4);
+                for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                    let code = format!(
+                        r#"
+                        module Top(o: output bit) {{
+                            var saved: bit;
+                            var result: logic<8>;
+                            function effect() -> bit {{ saved = {effect}; return 0; }}
+                            always_comb {{
+                                saved = {initial};
+                                result = 0;
+                                result{select} = 4'b0 {operator} '{{0 repeat {count}, default: effect()}};
+                            }}
+                            assign o = saved;
+                        }}
+                        "#
+                    );
+                    assert_complete_comb_loop(&code, expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_selected_packed_dimensions() {
+    for (ty, select) in [
+        ("logic<8, 2>", "[1:0]"),
+        ("logic<8, 2>", "[0+:2]"),
+        ("logic<8, 2>", "[3-:2]"),
+        ("logic<8, 2, 2>", "[0]"),
+    ] {
+        for count in [1, 2] {
+            let literal = format!("'{{'{{0, 0}} repeat {count}, default: '{{effect(), 0}}}}");
+            let used = count < 2;
+            for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                let code = format!(
+                    r#"
+                    module Top(enable: input bit, o: output bit) {{
+                        var saved: bit;
+                        var result: {ty};
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        always_comb {{
+                            saved = {initial};
+                            result = 0;
+                            result{select} = if enable ? {literal} : {literal};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_precedes_selector_side_effects() {
+    for select in [
+        "[address()]",
+        "[address()+:2]",
+        "[address()+1-:2]",
+        "[address() step 2]",
+    ] {
+        for count in [2, 4] {
+            let code = format!(
+                r#"
+                module Top(o: output bit) {{
+                    var saved: bit;
+                    var observed: bit;
+                    var result: logic<8>;
+                    function effect() -> bit {{ saved = o; return 0; }}
+                    function address() -> u32 {{ observed = saved; saved = 0; return 0; }}
+                    always_comb {{
+                        saved = 0;
+                        observed = 0;
+                        result = 0;
+                        result{select} = 4'b0 | '{{0 repeat {count}, default: effect()}};
+                    }}
+                    assign o = observed;
+                }}
+                "#
+            );
+            // The selector observes the initializer's write only when its
+            // default is used, before clearing the captured storage again.
+            assert_complete_comb_loop(&code, count < 4);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_width_boundaries_and_array_shapes() {
+    for (ty, expression, used) in [
+        ("logic<1>", "~(4'b0 | '{0, 0, default: effect()})", true),
+        ("logic<1>", "-(4'b0 | '{0, 0, default: effect()})", true),
+        (
+            "logic<1>",
+            "if 1'b1 ? '{0, 0, default: effect()} : 4'b0",
+            true,
+        ),
+        (
+            "logic<1>",
+            "if 1'b0 ? '{0, 0, default: effect()} : 4'b0",
+            false,
+        ),
+        ("logic<1>", "(4'b0 | '{0, 0, default: effect()}) as 1", true),
+        ("logic<8>", "'{0, 0, default: effect()} as 2", false),
+        (
+            "logic<8>",
+            "4'b0 == '{0 repeat 4, default: effect()}",
+            false,
+        ),
+        (
+            "logic<8>",
+            "|(4'b0 | '{0 repeat 4, default: effect()})",
+            false,
+        ),
+        (
+            "logic<8>",
+            "4'b0 << (4'b0 | '{0 repeat 4, default: effect()})",
+            false,
+        ),
+        (
+            "logic<8>",
+            "{(4'b0 | '{0 repeat 4, default: effect()}), 1'b0}",
+            false,
+        ),
+        (
+            "logic<1>[8]",
+            "'{4'b0 | '{0, 0, default: effect()}, 0 repeat 7}",
+            true,
+        ),
+        (
+            "logic<1>[8]",
+            "'{4'b0 | '{0 repeat 4, default: effect()}, 0 repeat 7}",
+            false,
+        ),
+    ] {
+        for boundary in ["return", "argument", "assignment"] {
+            for (initial, effect, expected) in [("0", "o", used), ("o", "0", !used)] {
+                let (declaration, result_type, expression) = match boundary {
+                    "return" => (
+                        format!("function make() -> Value {{ return {expression}; }}"),
+                        "Value",
+                        "make()".to_string(),
+                    ),
+                    "argument" => (
+                        "function consume(x: input Value) -> bit { return 0; }".to_string(),
+                        "bit",
+                        format!("consume({expression})"),
+                    ),
+                    "assignment" => (String::new(), "Value", expression.to_string()),
+                    _ => unreachable!(),
+                };
+                let code = format!(
+                    r#"
+                    module Top(o: output bit) {{
+                        type Value = {ty};
+                        var saved: bit;
+                        var result: {result_type};
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        {declaration}
+                        always_comb {{
+                            saved = {initial};
+                            result = {expression};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_evaluates_defaults_after_explicit_elements() {
+    for (ty, literal, selection, expected) in [
+        ("bit[2]", "'{saved, default: clear()}", "[0]", true),
+        ("bit[2]", "'{default: clear(), saved}", "[0]", true),
+        ("bit[2]", "'{clear(), default: saved}", "[1]", false),
+        ("bit[2]", "'{default: saved, clear()}", "[1]", false),
+        (
+            "bit[2, 2]",
+            "'{'{saved, default: clear()}, '{0, 0}}",
+            "[0][0]",
+            true,
+        ),
+        (
+            "bit[2, 2]",
+            "'{'{default: saved, clear()}, '{0, 0}}",
+            "[0][1]",
+            false,
+        ),
+    ] {
+        let code = format!(
+            r#"
+            module Top(o: output bit) {{
+                type Value = {ty};
+                var saved: bit;
+                var result: Value;
+                function clear() -> bit {{ saved = 0; return 0; }}
+                function make() -> Value {{ return {literal}; }}
+                always_comb {{
+                    saved = o;
+                    result = make();
+                }}
+                assign o = result{selection};
+            }}
+            "#
+        );
+        assert_complete_comb_loop(&code, expected);
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_keeps_comparison_operands_before_destination_selectors() {
+    let code = r#"
+    module Top(o: output bit) {
+        var saved: bit;
+        var result: logic<2>;
+        function effect() -> bit { saved = o; return 0; }
+        function address() -> u32 { saved = 0; return 0; }
+        always_comb {
+            saved = 0;
+            result = 0;
+            result[address()] = 4'b0 == '{0, 0, default: effect()};
+        }
+        assign o = saved;
+    }
+    "#;
+    assert_complete_comb_loop(code, false);
+}
+
+#[test]
+fn comb_loop_assignment_reads_precede_all_region_writes() {
+    for width in [3usize, 8] {
+        for source_bit in 0..width {
+            for result_bit in 0..width {
+                for (operator, expected_bit) in [
+                    ("<<", Some(source_bit + 1)),
+                    (">>", source_bit.checked_sub(1)),
+                ] {
+                    for compound in [false, true] {
+                        let assignment = if compound {
+                            format!("value {operator}= 1;")
+                        } else {
+                            format!("value = value {operator} 1;")
+                        };
+                        let code = format!(
+                            r#"
+                            module Top(o: output bit) {{
+                                var value: bit<{width}>;
+                                always_comb {{
+                                    value = (o as {width}) << {source_bit};
+                                    {assignment}
+                                }}
+                                assign o = value[{result_bit}];
+                            }}
+                            "#
+                        );
+                        // A whole-vector assignment shifts every bit once,
+                        // regardless of the regions introduced by later reads.
+                        assert_complete_comb_loop(&code, expected_bit == Some(result_bit));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_concatenated_assignment_preserves_rhs_before_any_write() {
+    for source_bit in 0..4 {
+        for result_bit in 0..4 {
+            let code = format!(
+                r#"
+                module Top(o: output bit) {{
+                    var value: bit<4>;
+                    always_comb {{
+                        value = (o as 4) << {source_bit};
+                        {{value[1:0], value[3:2]}} = value;
+                    }}
+                    assign o = value[{result_bit}];
+                }}
+                "#
+            );
+            assert_complete_comb_loop(&code, result_bit == (source_bit + 2) % 4);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_assignment_samples_rhs_in_expression_order() {
+    for (expression, result_bit, expected) in [
+        ("{saved, clear()}", 1, true),
+        ("{clear(), saved}", 0, false),
+        ("(saved as 2) | clear()", 0, true),
+        ("clear() | (saved as 2)", 0, false),
+    ] {
+        let code = format!(
+            r#"
+            module Top(o: output bit) {{
+                var saved: bit;
+                var result: bit<2>;
+                function clear() -> bit {{ saved = 0; return 0; }}
+                always_comb {{
+                    saved = o;
+                    result = {expression};
+                }}
+                assign o = result[{result_bit}];
+            }}
+            "#
+        );
+        assert_complete_comb_loop(&code, expected);
+    }
+}
+
 #[test]
 fn comb_loop_core_semantics_and_region_regressions_2_block_ring_assign_b_c_a_assign_c_b_1() {
     // 2-block ring: assign b = c + a; assign c = b + 1
@@ -940,7 +1557,6 @@ fn comb_loop_structural_dependency_semantics_a_value_controlling_its_own_dynamic
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_mutually_exclusive_reverse_dependencies_are_not_simultaneous_feedback() {
     assert_comb_loop(
         "opposing dependencies on mutually exclusive branches do not form a realizable loop",
@@ -966,7 +1582,6 @@ fn comb_loop_mutually_exclusive_reverse_dependencies_are_not_simultaneous_feedba
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_break_path_does_not_reach_the_opposing_dependency_after_the_loop_exit() {
     assert_comb_loop(
         "a dependency before break is exclusive with the reverse dependency after it",
@@ -994,7 +1609,6 @@ fn comb_loop_break_path_does_not_reach_the_opposing_dependency_after_the_loop_ex
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_break_exit_preserves_feedback_killed_only_on_the_continuing_path() {
     assert_comb_loop(
         "a write after a conditional break must not kill the break exit's dependency",
@@ -1019,6 +1633,62 @@ fn comb_loop_break_exit_preserves_feedback_killed_only_on_the_continuing_path() 
         }
         "#,
         true,
+    );
+}
+
+#[test]
+fn comb_loop_false_negative_break_condition_controls_a_following_write() {
+    // The loop reduces to value = stop ? 0 : 1 while stop = value. The break
+    // condition therefore closes a real control-dependency loop.
+    assert_comb_loop(
+        "a break condition controls whether the following assignment executes",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var stop: logic;
+            var value: logic;
+            assign stop = value;
+            always_comb {
+                value = 0;
+                for _index in 0..1 {
+                    if stop {
+                        break;
+                    }
+                    value = 1;
+                }
+                o = value;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_break_condition_does_not_control_write_after_loop_exit() {
+    assert_comb_loop(
+        "all break and fallthrough paths execute a write after the loop",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var stop : logic;
+            var value: logic;
+            assign stop = value;
+            always_comb {
+                value = 0;
+                for _index in 0..1 {
+                    if stop {
+                        break;
+                    }
+                }
+                value = 1;
+                o = value;
+            }
+        }
+        "#,
+        false,
     );
 }
 
@@ -1085,7 +1755,6 @@ fn comb_loop_feedback_within_one_branch_is_detected() {
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_mutually_exclusive_case_arms_do_not_form_feedback() {
     assert_comb_loop(
         "opposing dependencies in distinct case arms cannot execute together",
@@ -1110,7 +1779,6 @@ fn comb_loop_mutually_exclusive_case_arms_do_not_form_feedback() {
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_opposing_shifts_in_mutually_exclusive_arms_are_acyclic() {
     assert_comb_loop(
         "opposing positional dependencies cannot combine across exclusive arms",
@@ -1373,7 +2041,6 @@ fn comb_loop_if_assignment_to_array_is_feed_forward_array_loop_is_reported() {
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_if_expression_arms_are_mutually_exclusive() {
     // `sel` chooses exactly one direction. The opposite edges cannot coexist:
     // true gives state[1] <- state[0], while false gives state[0] <- state[1].
@@ -1396,7 +2063,6 @@ fn comb_loop_if_expression_arms_are_mutually_exclusive() {
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_case_expression_arms_are_mutually_exclusive() {
     // A case expression selects one arm, so neither selected equation contains
     // a cycle even though the two alternatives use opposite directions.
@@ -1422,7 +2088,6 @@ fn comb_loop_case_expression_arms_are_mutually_exclusive() {
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_switch_expression_arms_are_mutually_exclusive() {
     // A switch expression uses only its first matching arm. No execution can
     // combine the left-arm and right-arm dependencies into a cycle.
@@ -1450,7 +2115,6 @@ fn comb_loop_switch_expression_arms_are_mutually_exclusive() {
 }
 
 #[test]
-#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_if_expression_function_side_effects_remain_arm_exclusive() {
     assert_comb_loop(
         "captured writes in opposite expression arms cannot execute together",
@@ -1481,7 +2145,6 @@ fn comb_loop_if_expression_function_side_effects_remain_arm_exclusive() {
 }
 
 #[test]
-#[ignore = "a runtime short-circuit RHS write is applied as an unconditional overwrite"]
 fn comb_loop_false_negative_runtime_short_circuit_write_kills_disabled_feedback() {
     assert_comb_loop(
         "a conditionally skipped function write cannot kill a realizable loop",
@@ -1507,4 +2170,335 @@ fn comb_loop_false_negative_runtime_short_circuit_write_kills_disabled_feedback(
         "#,
         true,
     );
+}
+
+// ---- Does a whole-struct literal lose field granularity? ----
+// A bus struct carries a FORWARD request and a BACKWARD ready in ONE type, and
+// a buffer stage writes the whole struct in a single literal. Per field there
+// is no ring; per whole variable there is.
+
+#[test]
+fn zz_q1_struct_literal_whole_write_two_directions() {
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Producer (
+        src_valid_i: input  logic,
+        back_i     : input  logic,
+        h_o        : output Pk::H,
+    ) {
+        assign h_o = Pk::H'{
+            a_valid: src_valid_i,
+            d_ready: back_i     ,
+        };
+    }
+    module Dev (
+        h_i    : input  Pk::H,
+        ready_o: output logic,
+    ) {
+        assign ready_o = h_i.a_valid;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : Pk::H;
+        var rdy: logic;
+        inst p: Producer (src_valid_i: v  , back_i: rdy, h_o    : h  );
+        inst d: Dev      (h_i        : h  , ready_o    : rdy         );
+        assign z = rdy;
+    }
+    "#;
+    // Per field: rdy <- h.a_valid <- v. h.d_ready <- rdy. NO ring.
+    assert_comb_loop("Q1 whole-struct literal, two directions", code, false);
+}
+
+#[test]
+fn zz_q2_same_but_field_wise_writes() {
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Producer (
+        src_valid_i: input  logic,
+        back_i     : input  logic,
+        h_o        : output Pk::H,
+    ) {
+        assign h_o.a_valid = src_valid_i;
+        assign h_o.d_ready = back_i;
+    }
+    module Dev (
+        h_i    : input  Pk::H,
+        ready_o: output logic,
+    ) {
+        assign ready_o = h_i.a_valid;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : Pk::H;
+        var rdy: logic;
+        inst p: Producer (src_valid_i: v  , back_i: rdy, h_o    : h  );
+        inst d: Dev      (h_i        : h  , ready_o    : rdy         );
+        assign z = rdy;
+    }
+    "#;
+    assert_comb_loop("Q2 field-wise writes, two directions", code, false);
+}
+
+#[test]
+fn zz_q3_flatten_cast_of_the_bidirectional_struct() {
+    // An arbiter takes `arb_data_i[i] = fifo_o[i] as W` with `W` the struct's
+    // own bit count -- the WHOLE bus, forward and backward fields together,
+    // cast to a plain vector.
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Dev (
+        v_i    : input  logic<2>,
+        ready_o: output logic   ,
+    ) {
+        assign ready_o = v_i[1];   // reads only the a_valid bit
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        const W: u32 = 2;
+        var h  : Pk::H   ;
+        var hv : logic<2>;
+        var rdy: logic   ;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        assign hv        = h as W;
+        inst d: Dev (v_i: hv, ready_o: rdy);
+        assign z = rdy;
+    }
+    "#;
+    assert_comb_loop("Q3 flatten cast of a bidirectional struct", code, false);
+}
+
+#[test]
+fn zz_q4_arbiter_mux_shape() {
+    // prim_arbiter_ppc: gnt_o = ready_i ? winner : '0, winner <- req_i,
+    // and data_o muxed by winner. Upstream a_ready therefore depends on the
+    // requests -- legitimate -- and must not be read back as a request.
+    let code = r#"
+    module Arb #(
+        param N: u32 = 2,
+    ) (
+        req_i  : input  logic<N>   ,
+        data_i : input  logic<2>[N],
+        gnt_o  : output logic<N>   ,
+        data_o : output logic<2>   ,
+        ready_i: input  logic      ,
+    ) {
+        var winner: logic<N>;
+        assign winner = req_i;
+        assign gnt_o  = if ready_i ? winner : '0;
+        always_comb {
+            data_o = '0;
+            for i in 0..N {
+                if winner[i] {
+                    data_o = data_i[i];
+                }
+            }
+        }
+    }
+    module ModuleA (
+        v0: input  logic,
+        v1: input  logic,
+        rd: input  logic,
+        z : output logic,
+    ) {
+        var req  : logic<2>   ;
+        var dat  : logic<2>[2];
+        var gnt  : logic<2>   ;
+        var dout : logic<2>   ;
+        inst a: Arb (req_i: req, data_i: dat, gnt_o: gnt, data_o: dout, ready_i: rd);
+        assign req    = {v1, v0};
+        assign dat[0] = {v0, gnt[0]};   // the h2d bundle: a_valid + d_ready(=grant)
+        assign dat[1] = {v1, gnt[1]};
+        assign z      = dout[0];
+    }
+    "#;
+    assert_comb_loop(
+        "Q4 arbiter mux with grant folded into the data bundle",
+        code,
+        false,
+    );
+}
+
+#[test]
+fn zz_q5_flatten_through_instance_then_part_select_back() {
+    // The real chain: tl_h2d_t --cast--> logic<W> --through prim_fifo_sync
+    // (pass-through) --> logic<W> --part-select--> fields again.
+    // Forward field (bit 1) and backward field (bit 0) never meet, so there is
+    // no ring; the question is whether the packed coordinate survives the
+    // instance boundary.
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Fifo (
+        wdata_i: input  logic<2>,
+        rdata_o: output logic<2>,
+    ) {
+        assign rdata_o = wdata_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        const W: u32 = 2;
+        var h  : Pk::H   ;
+        var hv : logic<2>;
+        var dv : logic<2>;
+        var rdy: logic   ;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        assign hv        = h as W;
+        inst f: Fifo (wdata_i: hv, rdata_o: dv);
+        assign rdy = dv[1+:1];      // recover a_valid by part-select
+        assign z   = dv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q5 flatten -> instance -> part-select", code, false);
+}
+
+#[test]
+fn zz_q6_no_cast_whole_variable_copy() {
+    // Discriminator: is the CAST special, or is it any WHOLE-VARIABLE
+    // destination? Same shape as Q5 with a plain copy and no cast.
+    let code = r#"
+    module Fifo (
+        wdata_i: input  logic<2>,
+        rdata_o: output logic<2>,
+    ) {
+        assign rdata_o = wdata_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : logic<2>;
+        var hv : logic<2>;
+        var dv : logic<2>;
+        var rdy: logic   ;
+        assign h[0] = rdy;
+        assign h[1] = v;
+        assign hv   = h;            // whole-variable destination, no select
+        inst f: Fifo (wdata_i: hv, rdata_o: dv);
+        assign rdy  = dv[1+:1];
+        assign z    = dv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q6 plain whole-variable copy", code, false);
+}
+
+#[test]
+fn zz_q7_explicit_const_range_on_the_destination() {
+    // Positive control for the MECHANISM: the same graph with an explicit
+    // const range on the destination must be accepted, or the machinery this
+    // fix relies on does not work at all.
+    let code = r#"
+    module Fifo (
+        wdata_i: input  logic<2>,
+        rdata_o: output logic<2>,
+    ) {
+        assign rdata_o = wdata_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : logic<2>;
+        var hv : logic<2>;
+        var dv : logic<2>;
+        var rdy: logic   ;
+        assign h[0]     = rdy;
+        assign h[1]     = v;
+        assign hv[1:0]  = h[1:0];   // explicit const range on both sides
+        inst f: Fifo (wdata_i: hv, rdata_o: dv);
+        assign rdy      = dv[1+:1];
+        assign z        = dv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q7 explicit const range (mechanism control)", code, false);
+}
+
+#[test]
+fn zz_q8_struct_cast_part_select_no_instance() {
+    // Q5 minus the instance: is the module boundary needed?
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        const W: u32 = 2;
+        var h  : Pk::H   ;
+        var hv : logic<2>;
+        var rdy: logic   ;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        assign hv        = h as W;
+        assign rdy       = hv[1+:1];
+        assign z         = hv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q8 struct cast + part-select, no instance", code, false);
+}
+
+#[test]
+fn zz_q9_struct_to_struct_through_instance() {
+    // Q5 with no cast at all: struct in, struct out, field reads.
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Fifo (
+        w_i: input  Pk::H,
+        r_o: output Pk::H,
+    ) {
+        assign r_o = w_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : Pk::H;
+        var d  : Pk::H;
+        var rdy: logic;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        inst f: Fifo (w_i: h, r_o: d);
+        assign rdy       = d.a_valid;
+        assign z         = d.d_ready;
+    }
+    "#;
+    assert_comb_loop("Q9 struct through instance, no cast", code, false);
 }

@@ -818,6 +818,20 @@ pub trait VerylWalker {
         after!(self, reset_sync_low, arg);
     }
 
+    /// Semantic action for non-terminal 'ResetActive'
+    fn reset_active(&mut self, arg: &ResetActive) {
+        before!(self, reset_active, arg);
+        self.veryl_token(&arg.reset_active_token);
+        after!(self, reset_active, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetInactive'
+    fn reset_inactive(&mut self, arg: &ResetInactive) {
+        before!(self, reset_inactive, arg);
+        self.veryl_token(&arg.reset_inactive_token);
+        after!(self, reset_inactive, arg);
+    }
+
     /// Semantic action for non-terminal 'Return'
     fn r#return(&mut self, arg: &Return) {
         before!(self, r#return, arg);
@@ -1185,6 +1199,7 @@ pub trait VerylWalker {
         match arg {
             Factor::Number(x) => self.number(&x.number),
             Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
+            Factor::ResetValueLiteral(x) => self.reset_value_literal(&x.reset_value_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
@@ -1238,6 +1253,16 @@ pub trait VerylWalker {
             BooleanLiteral::False(x) => self.r#false(&x.r#false),
         }
         after!(self, boolean_literal, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetValueLiteral'
+    fn reset_value_literal(&mut self, arg: &ResetValueLiteral) {
+        before!(self, reset_value_literal, arg);
+        match arg {
+            ResetValueLiteral::ResetActive(x) => self.reset_active(&x.reset_active),
+            ResetValueLiteral::ResetInactive(x) => self.reset_inactive(&x.reset_inactive),
+        }
+        after!(self, reset_value_literal, arg);
     }
 
     /// Semantic action for non-terminal 'IdentifierFactor'
@@ -1721,6 +1746,11 @@ pub trait VerylWalker {
             CastingType::UserDefinedType(x) => self.user_defined_type(&x.user_defined_type),
             CastingType::Based(x) => self.based(&x.based),
             CastingType::BaseLess(x) => self.base_less(&x.base_less),
+            CastingType::LParenExpressionRParen(x) => {
+                self.l_paren(&x.l_paren);
+                self.expression(&x.expression);
+                self.r_paren(&x.r_paren);
+            }
         }
         after!(self, casting_type, arg);
     }

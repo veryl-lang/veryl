@@ -1335,6 +1335,157 @@ fn many_comb_declarations_build_the_module_context_once() {
     );
 }
 
+#[test]
+fn independent_assignments_only_check_referenced_source_visibility() {
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        for count in [64, 256, 1_024] {
+            for ty in [format!("logic<{count}>"), format!("logic [{count}]")] {
+                let mut code = format!("module Top (i: input {ty}, o: output {ty}) {{\n");
+                for index in 0..count {
+                    code.push_str(&format!("assign o[{index}] = i[{index}];\n"));
+                }
+                code.push_str("}\n");
+                crate::comb_loop_detect::reset_visible_source_probes();
+                assert!(analyze(&code).is_empty());
+                let probes = crate::comb_loop_detect::visible_source_probes();
+                assert!(
+                    (count..=count * 4).contains(&probes),
+                    "each declaration must inspect its own sources, not every module region: count={count}, probes={probes}"
+                );
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    })
+}
+
+#[test]
+fn comb_loop_module_summary_preserves_if_expression_arm_exclusivity() {
+    assert_comb_loop(
+        "a child summary must not combine mutually exclusive expression arms",
+        r#"
+        module Conditional (
+            i  : input  logic<2>,
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            assign o = if sel ? {i[0], 1'b0} : {1'b0, i[1]};
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic<2>;
+            inst conditional: Conditional (
+                i  : state,
+                sel: sel,
+                o  : state,
+            );
+            assign o = |state;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_retains_feedback_reachable_in_one_expression_arm() {
+    assert_comb_loop(
+        "a child summary retains feedback reachable in one expression arm",
+        r#"
+        module Conditional (
+            i  : input  logic,
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            assign o = if sel ? i : 1'b0;
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic;
+            inst conditional: Conditional (
+                i  : state,
+                sel: sel,
+                o  : state,
+            );
+            assign o = state;
+        }
+        "#,
+        true,
+    );
+}
+
+fn shifted_recurrence_module_code(feedback_output: usize, feedback_input: usize) -> String {
+    let clears = (0..4)
+        .filter(|index| *index != feedback_input)
+        .map(|index| format!("assign child_i[{index}] = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        r#"
+        module ShiftClosure (
+            i: input  logic<4>,
+            o: output logic<4>,
+        ) {{
+            var x: logic<4>;
+            assign x = (x << 1) | i;
+            assign o = x;
+        }}
+        module Top (o: output logic) {{
+            var child_i: logic<4>;
+            var child_o: logic<4>;
+            inst u: ShiftClosure (i: child_i, o: child_o);
+            assign child_i[{feedback_input}] = child_o[{feedback_output}];
+            {clears}
+            assign o = child_o[0];
+        }}
+        "#,
+    )
+}
+
+#[test]
+fn comb_loop_module_summary_shift_closure_terminates_without_wraparound() {
+    assert_comb_loop(
+        "a truncated left-shift recurrence does not wrap its high input to its low output",
+        &shifted_recurrence_module_code(0, 3),
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_shift_closure_retains_reachable_feedback() {
+    assert_comb_loop(
+        "a left-shift recurrence retains transitive low-to-high feedthrough",
+        &shifted_recurrence_module_code(3, 0),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_wide_module_summary_shift_closure_is_sparse() {
+    assert_comb_loop(
+        "a wide truncated-shift recurrence must not enumerate its declared width",
+        r#"
+        module ShiftClosure (
+            i: input  logic<1000000>,
+            o: output logic<1000000>,
+        ) {
+            var x: logic<1000000>;
+            assign x = (x << 1) | i;
+            assign o = x;
+        }
+        module Top (o: output logic) {
+            var child_o: logic<1000000>;
+            inst u: ShiftClosure (i: 0, o: child_o);
+            assign o = child_o[0];
+        }
+        "#,
+        false,
+    );
+}
+
 fn instance_ring_code(feedback_bits: &str) -> String {
     format!(
         r#"
@@ -1543,3 +1694,117 @@ fn comb_loop_generic_specializations_report_one_diagnostic() {
         .count();
     assert_eq!(loops, 1, "{errors:?}");
 }
+
+comb_loop_case!(
+    comb_loop_instance_outputs_reach_only_their_packed_elements,
+    "an instance output reaches only the packed element bound to it",
+    r#"
+    module Cell (a_di: input logic<8>, carry: output logic, sum_do: output logic<8>) {
+        var sum_ext: logic<9>;
+        assign sum_ext = {1'b0, a_di} + 9'd1;
+        assign carry   = sum_ext[8];
+        assign sum_do  = sum_ext[7:0];
+    }
+    module Top (i: input logic<8>, q: output logic<8>) {
+        var a : logic<3, 8>;
+        var s : logic<3, 8>;
+        var cy: logic<3>   ;
+        assign a[0] = i;
+        assign a[1] = {s[0][6:0], ~s[0][7]};
+        assign a[2] = {s[1][6:0], ~s[1][7]};
+        for k in 0..3 :g {
+            inst u: Cell (a_di: a[k], carry: cy[k], sum_do: s[k]);
+        }
+        assign q = s[2];
+    }
+    "#,
+    false
+);
+
+comb_loop_case!(
+    comb_loop_instance_output_element_feeds_its_own_input,
+    "an instance output feeding its own packed element is a loop",
+    r#"
+    module Cell (a_di: input logic<8>, sum_do: output logic<8>) {
+        assign sum_do = a_di + 8'd1;
+    }
+    module Top (i: input logic<8>, q: output logic<8>) {
+        var a: logic<3, 8>;
+        var s: logic<3, 8>;
+        assign a[0] = i;
+        assign a[1] = s[1];
+        assign a[2] = s[1];
+        for k in 0..3 :g {
+            inst u: Cell (a_di: a[k], sum_do: s[k]);
+        }
+        assign q = s[2];
+    }
+    "#,
+    true
+);
+
+const OUTPUT_GATED_BY_OUTPUT: &str = r#"
+    module Child (
+        a_i : input  logic<8>,
+        we_o: output logic   ,
+        d_o : output logic<8>,
+    ) {
+        assign we_o = a_i[0];
+        assign d_o  = if we_o ? a_i : 8'd0;
+    }
+"#;
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_member_is_not_a_loop,
+    "an output selected by another output of the same instance reads only that output's member",
+    format!(
+        r#"{OUTPUT_GATED_BY_OUTPUT}
+        module Top (a: input logic<8>, o: output logic<8>) {{
+            struct s_t {{ we: logic, data: logic<8> }}
+            var p: s_t;
+            inst u: Child (a_i: a, we_o: p.we, d_o: p.data);
+            assign o = p.data;
+        }}
+        "#
+    ),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_in_an_array_element_is_not_a_loop,
+    "an output selected by another output reads only that output's member of the element",
+    format!(
+        r#"{OUTPUT_GATED_BY_OUTPUT}
+        module Top (a: input logic<8>, o: output logic<8>) {{
+            struct s_t {{ we: logic, data: logic<8> }}
+            var p: s_t [2];
+            inst u: Child (a_i: a, we_o: p[1].we, d_o: p[1].data);
+            assign p[0] = 0;
+            assign o = p[1].data;
+        }}
+        "#
+    ),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_keeps_a_real_feedback,
+    "an output selected by another output still loops through the member that selects it",
+    r#"
+    module Child (
+        a_i : input  logic<8>,
+        we_o: output logic   ,
+        d_o : output logic<8>,
+    ) {
+        assign we_o = a_i[0];
+        assign d_o  = if we_o ? 8'd1 : 8'd0;
+    }
+    module Top (o: output logic<8>) {
+        struct s_t { we: logic, data: logic<8> }
+        var p: s_t;
+        inst u: Child (a_i: p.data, we_o: p.we, d_o: p.data);
+        assign o = p.data;
+    }
+    "#,
+    true
+);

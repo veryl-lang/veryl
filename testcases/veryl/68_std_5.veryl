@@ -1,0 +1,3 @@
+package Package68K {
+    const N: u32 = 8;
+}

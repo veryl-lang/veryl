@@ -148,6 +148,56 @@ fn combinational_loop_closed_by_a_later_writer_of_the_bits_read() {
 }
 
 #[test]
+fn combinational_loop_through_one_element_of_a_concat() {
+    // The ring runs through the element `x` alone, and each spelling must
+    // keep it once the concatenation is scheduled per element, in either
+    // order and whether the read takes that element alone or others too.
+    let writes = [
+        "assign v[3:0] = {x, a};",
+        "assign v = {x, a};",
+        "assign v[3] = x; assign v[2:0] = a;",
+    ];
+    let reads = [
+        "assign x = v[3] ^ a[0];",
+        "assign x = v[3] ^ v[0];",
+        "assign x = ^v;",
+    ];
+    for (write, read) in writes
+        .iter()
+        .flat_map(|w| reads.iter().map(move |r| (*w, *r)))
+    {
+        for read_first in [true, false] {
+            let (first, second) = if read_first {
+                (read, write)
+            } else {
+                (write, read)
+            };
+            let code = format!(
+                r#"
+    module Top (
+        a: input  logic<3>,
+        o: output logic<4>,
+    ) {{
+        var v: logic<4>;
+        var x: logic;
+
+        {first}
+        {second}
+        assign o = v;
+    }}
+    "#
+            );
+
+            let result = analyze_top_allowing_comb_loop(&code, &Config::default(), "Top");
+            assert!(
+                matches!(result, Err(SimulatorError::CombinationalLoop { .. })),
+                "{first} {second}",
+            );
+        }
+    }
+}
+
+#[test]
 fn combinational_loop_closed_inside_one_arm_of_a_case() {
     // The ring runs through `2'd0` alone.  Per-arm keying makes `a` several
     // writers where it was one, so WHICH writer binds must stay the
@@ -183,6 +233,68 @@ fn combinational_loop_closed_inside_one_arm_of_a_case() {
     let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
     assert!(matches!(
         result,
+        Err(SimulatorError::CombinationalLoop { .. })
+    ));
+}
+
+#[test]
+fn no_combinational_loop_through_a_parameter_gated_arm() {
+    // A synchronous FIFO gates its pass-through arm with a parameter, and
+    // such cells ring each other.
+    // At `Pass = 0` the cell's outputs come from flops alone, so keeping the
+    // gated-off operand as a read reports a loop the design does not have.
+    //
+    // Both values are checked from one shape: dropping the phantom edge must
+    // not cost the analysis the real edge at `Pass = 1`.
+    let code = |pass: u32| {
+        format!(
+            r#"
+    module Cell #(
+        param Pass: bit = 1,
+    ) (
+        clk_i   : input  clock   ,
+        wvalid_i: input  logic   ,
+        wdata_i : input  logic<8>,
+        rvalid_o: output logic   ,
+        rdata_o : output logic<8>,
+    ) {{
+        var storage: logic<8>;
+        var full_q : logic   ;
+        always_ff (clk_i) {{
+            storage = wdata_i;
+            full_q  = 1'b1;
+        }}
+        assign rvalid_o = full_q || (Pass && wvalid_i);
+        assign rdata_o  = if (full_q || Pass == 1'b0) ? storage : wdata_i;
+    }}
+
+    module Top (
+        clk_i: input  clock   ,
+        seed : input  logic<8>,
+        o    : output logic<8>,
+    ) {{
+        var a: logic<8>;
+        var b: logic<8>;
+        var v: logic   ;
+        inst u: Cell #(
+            Pass: {pass},
+        ) (
+            clk_i             ,
+            wvalid_i: 1'b1    ,
+            wdata_i : a       ,
+            rvalid_o: v       ,
+            rdata_o : b       ,
+        );
+        assign a = b + seed;
+        assign o = if v ? b : 8'd0;
+    }}
+    "#
+        )
+    };
+
+    assert!(analyze_top(&code(0), &Config::default(), "Top").is_ok());
+    assert!(matches!(
+        analyze_top_allowing_comb_loop(&code(1), &Config::default(), "Top"),
         Err(SimulatorError::CombinationalLoop { .. })
     ));
 }
@@ -229,6 +341,22 @@ fn undetermined_width() {
         Err(x) => panic!("unexpected error: {x:?}"),
         Ok(_) => panic!("expected UndeterminedWidth"),
     }
+
+    // The same width reached through a module const.
+    let code = r#"
+    module Top (
+        c: output logic,
+    ) {
+        const W: u32    = $sv::some_pkg::WIDTH;
+        const X: bit<W> = 1;
+        assign c = X[0];
+    }
+    "#;
+
+    assert!(matches!(
+        analyze_top(code, &Config::default(), "Top"),
+        Err(SimulatorError::UndeterminedWidth { .. })
+    ));
 }
 
 #[test]
@@ -367,6 +495,252 @@ fn dynamic_index_leaving_a_sub_array() {
         assert!(
             matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
             "{body}"
+        );
+    }
+}
+
+/// A port connection whose unpacked dimensions disagree with the port's is
+/// illegal SystemVerilog (IEEE 1800-2023 7.6) and the analyzer reports it at
+/// Warning severity, so `build` and `test` still reach the simulator. The two
+/// directions fail differently, so they are checked apart: one is caught by
+/// the assertion, the other only by the value it never computes.
+#[track_caller]
+fn port_dimension_mismatch(child_port: &str, child_drive: &str, parent_var: &str) {
+    let code = format!(
+        r#"
+    package pk {{
+        enum e3_t: logic<3> {{
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }}
+    }}
+    module Child (
+        o: output {child_port},
+    ) {{
+        always_comb {{
+            {child_drive}
+        }}
+    }}
+    module Top (
+        y: output logic<3>,
+    ) {{
+        var r: {parent_var};
+        inst u: Child (
+            o: r,
+        );
+        assign y = r[0];
+    }}
+    "#
+    );
+
+    let result = analyze_top_allowing_mismatch_assignment(&code, &Config::default(), "Top");
+    assert!(
+        matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
+        "{child_port} <- {parent_var}"
+    );
+}
+
+#[test]
+fn parent_array_longer_than_the_port_it_is_wired_to() {
+    // Used to index off the end of the child's elements and abort.
+    port_dimension_mismatch("pk::e3_t<4>", "o = 12'b011_100_100_011;", "pk::e3_t [4]");
+}
+
+#[test]
+fn parent_array_shorter_than_the_port_it_is_wired_to() {
+    // Used to wire the leading elements and drop the rest in silence.
+    // The elements are driven one by one: a whole-array assignment is
+    // declined earlier, which would make this test pass without the fix.
+    port_dimension_mismatch(
+        "pk::e3_t [4]",
+        "o[0] = pk::e3_t::HIGH; o[1] = pk::e3_t::LOW; \
+         o[2] = pk::e3_t::HIGH; o[3] = pk::e3_t::LOW;",
+        "pk::e3_t [2]",
+    );
+}
+
+#[test]
+fn a_loop_diagnostic_carries_its_file_once() {
+    // Every label points into one file; the report must not copy it per label.
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        b: output logic<32>,
+    ) {
+        var x: logic<32>;
+        assign x = b + a;
+        assign b = x;
+    }
+    "#;
+
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    let Err(SimulatorError::CombinationalLoop {
+        input,
+        loop_participants,
+        ..
+    }) = result
+    else {
+        panic!("a combinational loop is reported");
+    };
+    assert!(!loop_participants.is_empty());
+    assert_eq!(input.sources.len(), 1);
+}
+
+#[test]
+fn comb_logic_without_a_one_pass_order_is_rejected() {
+    // The arm writing the selector keeps the `case` whole, and the whole case
+    // both reads `valid` and writes what `valid` reads.  No bit feeds itself,
+    // but no granularity orders it either.
+    let code = r#"
+    module Top (
+        st   : input  logic<2>,
+        hold : input  logic   ,
+        ready: input  logic   ,
+        valid: output logic   ,
+        en   : output logic   ,
+        sel  : output logic<2>,
+    ) {
+        var valid_pre: logic   ;
+        var en_i     : logic   ;
+        var s        : logic<2>;
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+        assign sel   = s;
+
+        always_comb {
+            s         = st;
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            case s {
+                2'd0: {
+                    s = 2'd1;
+                }
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        match analyze_top(code, &config, "Top") {
+            Err(SimulatorError::UnorderedCombinationalLogic { participants, .. }) => {
+                assert!(!participants.is_empty(), "{config:?}");
+            }
+            Err(other) => panic!("{config:?}: {other:?}"),
+            Ok(_) => panic!("{config:?}: accepted"),
+        }
+        let allowed = Config {
+            allow_multi_pass: true,
+            ..config.clone()
+        };
+        assert!(analyze_top(code, &allowed, "Top").is_ok(), "{config:?}");
+    }
+}
+
+#[test]
+fn string_storage_the_simulator_cannot_size() {
+    // A `string` variable is sized from the assignments in its own module.
+    // Text that reaches it any other way would be cut to the nominal 1-bit
+    // width of the `string` type, so these are rejected instead.
+    let cases = [
+        (
+            "input port",
+            r#"
+            module Sub (s: input string) {
+                initial {
+                    $display("%s", s);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub (s: "hello");
+            }
+            "#,
+        ),
+        (
+            "function output argument",
+            r#"
+            function set (o: output string) {
+                o = "hello";
+            }
+            #[test(Top)]
+            module Top {
+                var s: string;
+                initial {
+                    set(s);
+                }
+            }
+            "#,
+        ),
+        (
+            "hierarchical read",
+            r#"
+            module Sub {
+                let m: string = "hello";
+                initial {
+                    $display("%s", m);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub;
+                initial {
+                    $display("%s", u.m);
+                }
+            }
+            "#,
+        ),
+        (
+            "hierarchical write",
+            r#"
+            module Sub {
+                var m: string;
+                assign m = "init";
+                initial {
+                    $display("%s", m);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub;
+                initial {
+                    u.m = "hello";
+                }
+            }
+            "#,
+        ),
+        (
+            "concatenation destination",
+            r#"
+            #[test(Top)]
+            module Top {
+                var s: string;
+                var x: logic<8>;
+                initial {
+                    {s, x} = {"hi", 8'h01};
+                }
+            }
+            "#,
+        ),
+    ];
+
+    for (name, code) in cases {
+        let result = analyze_top(code, &Config::default(), "Top");
+        assert!(
+            matches!(result, Err(SimulatorError::UnsupportedString { .. })),
+            "{name}: expected UnsupportedString, got {:?}",
+            result.err()
         );
     }
 }

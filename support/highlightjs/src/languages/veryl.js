@@ -1,9 +1,12 @@
-/**
- * Language: Veryl
- * Contributors:
- *   Naoya Hatta <dalance@gmail.com>
- */
-module.exports = function (hljs)
+/*
+Language: Veryl
+Author: Naoya Hatta <dalance@gmail.com>
+Description: Veryl is a modern hardware description language which transpiles to SystemVerilog.
+Website: https://veryl-lang.org
+Category: hardware
+*/
+
+export default function (hljs)
 {
   return {
     name: 'Veryl',
@@ -13,7 +16,7 @@ module.exports = function (hljs)
     case_insensitive: false,
     keywords:
       {
-        keyword: 'case default else if_reset if inside outside switch converse inout input output same false lsb msb true for in repeat rev step alias always_comb always_ff assign as bind block connect const final gen import initial inst let mixin param return break type var embed enum function include interface modport module package proto pub struct union unsafe bit bbool lbool clock clock_posedge clock_negedge f32 f64 i8 i16 i32 i64 logic reset reset_async_high reset_async_low reset_sync_high reset_sync_low signed string tri p8 p16 p32 p64 u8 u16 u32 u64',
+        keyword: 'case default else if_reset if inside outside switch converse inout input output same false lsb msb reset_active reset_inactive true for in repeat rev step alias always_comb always_ff assign as bind block connect const final gen import initial inst let mixin param return break type var embed enum function include interface modport module package proto pub struct union unsafe bit bbool lbool clock clock_posedge clock_negedge f32 f64 i8 i16 i32 i64 logic reset reset_async_high reset_async_low reset_sync_high reset_sync_low signed string tri p8 p16 p32 p64 u8 u16 u32 u64',
         literal: ''
       },
     contains:
@@ -22,7 +25,7 @@ module.exports = function (hljs)
         hljs.C_BLOCK_COMMENT_MODE,
         hljs.C_LINE_COMMENT_MODE,
         {
-          scope: 'number',
+          className: 'number',
           contains: [ hljs.BACKSLASH_ESCAPE ],
           variants: [
             { begin: /\b((\d+'([bhodBHOD]))[0-9xzXZa-fA-F_]+)/ },

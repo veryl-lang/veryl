@@ -170,12 +170,14 @@ module veryl_testcase_Module68D
         input var logic [__std_selector_pkg::calc_binary_select_width(N)-1:0] sel ,
         input var logic [N-1:0]                                               data
     ) ;
+        typedef logic T;
         return data[sel];
     endfunction
     function automatic logic __std___select_vector__N__lbool(
         input var logic [N-1:0] sel ,
         input var logic [N-1:0] data
     ) ;
+        typedef logic T;
         localparam int unsigned DEPTH = $clog2(N);
         int unsigned         next_n;
         logic        [N-1:0] next_s;
@@ -219,6 +221,7 @@ module veryl_testcase_Module68D
         input var logic [N-1:0] sel ,
         input var logic [N-1:0] data
     ) ;
+        typedef logic T;
         localparam int unsigned DEPTH = $clog2(N);
         int unsigned         next_n;
         logic        [N-1:0] next_d;
@@ -228,7 +231,7 @@ module veryl_testcase_Module68D
             if (sel[i]) begin
                 next_d[i] = data[i];
             end else begin
-                next_d[i] = logic'(0);
+                next_d[i] = T'(0);
             end
         end
 
@@ -244,7 +247,7 @@ module veryl_testcase_Module68D
                 if ((j + 1) == next_n && (current_n % 2) == 1) begin
                     next_d[j] = current_d[2 * j + 0];
                 end else begin
-                    next_d[j] = logic'((current_d[2 * j + 0] | current_d[2 * j + 1]));
+                    next_d[j] = T'((current_d[2 * j + 0] | current_d[2 * j + 1]));
                 end
             end
         end
@@ -255,6 +258,7 @@ module veryl_testcase_Module68D
         input var logic [__std_selector_pkg::calc_select_width(N, KIND)-1:0] sel ,
         input var logic [N-1:0]                                              data
     ) ;
+        typedef logic T;
         localparam int unsigned BINARY_SEL_WIDTH = __std_selector_pkg::calc_binary_select_width(N);
 
         if (N == 1) begin

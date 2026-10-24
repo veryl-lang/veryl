@@ -63,10 +63,10 @@ pub struct CachedChunk {
     pub output_offsets: Vec<VarOffset>,
     /// Canonical (current) offsets for FF variables written by this function.
     pub ff_canonical_offsets: Vec<isize>,
-    pub stmt_deps: Vec<StmtDep>,
+    pub stmt_deps: Arc<Vec<StmtDep>>,
     /// Originals before JIT compilation; cache hits expand from these
     /// for fine-grained dependency analysis with offset deltas applied.
-    pub original_stmts: Vec<ProtoStatement>,
+    pub original_stmts: Arc<Vec<ProtoStatement>>,
 }
 
 /// Cache entry for a module type's compiled internal logic.  Stores
@@ -89,25 +89,41 @@ pub struct Context {
     /// Keyed by `Arc<Component>` pointer so that distinct parameter
     /// specializations (distinct `Arc`s from the analyzer) do not collide.
     pub chunk_cache: HashMap<*const air::Component, ChunkCacheEntry>,
+    /// `peeled_declarations` of each instantiated component, keyed as
+    /// `chunk_cache` is, so identical instances peel once.
+    pub peel_cache: HashMap<*const air::Component, Option<Vec<air::Declaration>>>,
     pub expanding_functions: HashSet<VarId>,
     pub in_initial: bool,
+    /// True while converting an `always_comb` / `assign` body.
+    ///
+    /// A combinational write reaches FF storage where an `always_ff` writes
+    /// OTHER bits of the same packed word, or where a runtime-indexed array
+    /// forced every element FF.  It has no NBA delay, so it stores directly
+    /// into the current slot and pushes no write-log entry; see
+    /// `ProtoAssignStatement::comb_direct`.
+    pub in_comb: bool,
+    /// Next-slot mirrors of `comb_direct` writes, drained by the
+    /// `Vec<ProtoStatement>` conversion that wraps the statement.
+    pub comb_ff_mirror: Vec<ProtoStatement>,
     /// True while converting a de-aliased DUT's subtree, so only the topmost
     /// boundary is de-aliased — the DUT's internals stay aliased (they relocate
     /// uniformly with it, no per-cycle boundary copies on hot paths).
     pub in_reuse_dut: bool,
-    /// Per-testbench id (assigned at `ProtoModule::conv`).  A component is a reuse
-    /// DUT only when it recurs across DIFFERENT tops; replication within one top
-    /// (SMP harts) shares this id and so does not de-alias.
-    pub test_top_id: u64,
+    /// Shared only by builds in the same `BuildSession`.
+    pub(crate) dut_reuse: Arc<crate::backend::inst::DutReuseCache>,
+    pub(crate) comb_cache: Arc<super::comb_pipeline_cache::CombPipelineCache>,
     /// Populated from `Config`.  Empty → interpreter-only.
     pub backends: BackendRegistry,
     /// See `alloc_internal_event_id`.
     pub internal_event_ids_allocated: u32,
     /// Per-call-site copies of a function's comb scratch, as
     /// `(old_offset, new_offset, bytes)`.  A copy carries no `VariableMeta`,
-    /// so without this record nothing owns it and `cone_gate` pins every
+    /// so without this record nothing owns it and `cone_order` pins every
     /// statement touching it to the root.
     pub comb_reloc: Vec<(isize, isize, usize)>,
+    /// While events compile: the dataflow marks their comb stores and FF log
+    /// pushes set, with a fingerprint for the chunk cache.
+    pub df_event_marks: Option<(crate::ir::opt::dataflow::StoreMarks, u128)>,
 }
 
 impl Context {

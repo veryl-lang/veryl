@@ -1,0 +1,26 @@
+/// Counter module
+module Counter #(
+    param WIDTH: u32 = 8,
+) (
+    i_clk  : input  clock         ,
+    i_rst  : input  reset         ,
+    i_en   : input  logic         ,
+    o_count: output logic  <WIDTH>,
+) {
+    // internal state
+    var count: logic<WIDTH>;
+
+    const MAX  : logic<WIDTH> = 8'hff;
+    const MASK : logic<32>    = 32'b0000_1111;
+    const LABEL: string       = "counter";
+
+    always_ff {
+        if_reset {
+            count = 0;
+        } else if i_en {
+            count = count + 1;
+        }
+    }
+
+    assign o_count = count;
+}

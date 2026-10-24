@@ -1,3 +1,7 @@
+package Package21 {
+    const M: logic<32> = 2;
+}
+
 module Module21 {
     var a: logic   ;
     var b: logic<2>;
@@ -27,4 +31,6 @@ module Module21 {
     for i in 1..4 :g {
         let _e: logic<2> = c as i;
     }
+
+    let _f: logic<2> = c as Package21::M;
 }

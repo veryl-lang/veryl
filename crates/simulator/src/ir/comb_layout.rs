@@ -19,7 +19,7 @@
 //!   shifted by their uniform `comb_delta_bytes`, so every comb byte a block
 //!   touches merges into one rigid unit (`cb_comb_span`).  Blocks cloned
 //!   across instances by a single delta (`try_compile_inst_chunks`,
-//!   `GLOBAL_STMT_CACHE`) stay sound for the same reason.
+//!   `DutReuseCache`) stay sound for the same reason.
 //! - Offsets that appear in statements but in no variable's meta (function
 //!   per-call-site body copies allocate straight from `comb_total_bytes`) are
 //!   promoted to units extending to the next known boundary, so no live byte
@@ -40,12 +40,13 @@ use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta, value_siz
 use veryl_analyzer::ir::VarId;
 
 /// Old-offset → new-offset translation for the comb space, as a sorted set of
-/// relocated intervals.  Anything outside every interval stays in place.
+/// placed intervals.  Anything outside every interval stays in place.
 #[derive(Debug, Default)]
 pub struct CombLayoutSchedule {
-    /// `(old_start, old_end, new_start)`, sorted by `old_start`, pairwise
-    /// disjoint.  A unit keeps its internal layout: `x` in `[old_start,
-    /// old_end)` lands at `new_start + (x - old_start)`.
+    /// `(old_start, old_end, new_start)` of every placed unit, moved or not,
+    /// sorted by `old_start`, pairwise disjoint.  A unit keeps its internal
+    /// layout: `x` in `[old_start, old_end)` lands at `new_start + (x -
+    /// old_start)`.
     units: Vec<(isize, isize, isize)>,
     /// One past the highest byte any placed unit occupies.  The comb buffer
     /// must be at least this large (it never exceeds the old total by more
@@ -69,31 +70,28 @@ impl CombLayoutSchedule {
         }
     }
 
-    /// Translate a byte RANGE through the schedule, piecewise: a unit moves
-    /// as a whole (intra-unit deltas preserved) but adjacent units may land
-    /// apart, so one input range can map to several output ranges.
-    pub fn translate_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
+    #[cfg(test)]
+    pub(crate) fn from_units(units: Vec<(isize, isize, isize)>, buffer_end: usize) -> Self {
+        Self {
+            total_units: units.len(),
+            units,
+            buffer_end,
+            hot_units: 0,
+        }
+    }
+
+    /// The parts of a byte range that some unit places, translated.  Unplaced
+    /// bytes are dead: `translate` leaves them at their old offsets, where
+    /// the packed layout may have put another unit.
+    pub fn placed_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
         let mut out: Vec<(isize, isize)> = Vec::new();
-        let mut x = start;
-        while x < end {
-            let i = self.units.partition_point(|&(s, _, _)| s <= x);
-            let (seg_end, nx) = match i.checked_sub(1) {
-                Some(i) => {
-                    let (s, e, n) = self.units[i];
-                    if x < e {
-                        (e.min(end), n + (x - s))
-                    } else {
-                        let next = self.units.get(i + 1).map(|u| u.0).unwrap_or(isize::MAX);
-                        (next.min(end), x)
-                    }
-                }
-                None => {
-                    let next = self.units.first().map(|u| u.0).unwrap_or(isize::MAX);
-                    (next.min(end), x)
-                }
-            };
-            out.push((nx, nx + (seg_end - x)));
-            x = seg_end;
+        let first = self.units.partition_point(|&(_, e, _)| e <= start);
+        for &(s, e, n) in &self.units[first..] {
+            if s >= end {
+                break;
+            }
+            let (a, b) = (s.max(start), e.min(end));
+            out.push((n + (a - s), n + (b - s)));
         }
         out
     }
@@ -109,16 +107,14 @@ impl CombLayoutSchedule {
 
 /// Everything the caller must gather BEFORE the pipeline for
 /// `build_schedule`: the per-variable spans (the pipeline never sees the meta
-/// tree), the offsets referenced outside any statement list, and the bump
-/// total the units must fit in.
+/// tree) and the offsets referenced outside any statement list.
 pub struct LayoutInputs {
     pub meta_units: Vec<(isize, isize)>,
     pub extra_offsets: Vec<VarOffset>,
-    pub comb_total: usize,
 }
 
 /// Default-on for 2-state storage; `VERYL_COMB_LAYOUT=0` opts out.  Off on
-/// wasm, which has no whole-comb backend to profit from the reordering.
+/// wasm, which has no AOT-C backend to profit from the reordering.
 pub fn enabled(use_4state: bool) -> bool {
     if cfg!(target_family = "wasm") {
         return false;
@@ -188,7 +184,9 @@ pub fn expand_compiled_blocks(stmts: &mut Vec<ProtoStatement>) {
     let mut out = Vec::with_capacity(stmts.len());
     for s in stmts.drain(..) {
         match s {
-            ProtoStatement::CompiledBlock(cb) => out.extend(cb.original_stmts),
+            ProtoStatement::CompiledBlock(cb) => out.extend(
+                std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone()),
+            ),
             other => out.push(other),
         }
     }
@@ -212,7 +210,7 @@ fn cb_comb_span(cb: &CompiledBlockStatement) -> Option<(isize, isize)> {
     }
     let mut ins = vec![];
     let mut outs = vec![];
-    for s in &cb.original_stmts {
+    for s in cb.original_stmts.iter() {
         ins.clear();
         outs.clear();
         s.gather_variable_offsets(&mut ins, &mut outs);
@@ -241,6 +239,36 @@ fn collect_cb_units(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
     }
 }
 
+/// Every comb store's footprint: a store covering several units must keep
+/// them adjacent.  Reads stay inside the variable they name, and
+/// runtime-indexed stores are in `collect_dynamic_spans`.
+fn collect_write_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
+    for s in stmts {
+        match s {
+            ProtoStatement::Assign(a) => {
+                if let VarOffset::Comb(o) = a.dst {
+                    let nb = crate::ir::native_bytes(a.dst_width).max(1) as isize;
+                    out.push((o, o + nb));
+                }
+            }
+            ProtoStatement::If(x) => {
+                collect_write_spans(&x.true_side, out);
+                collect_write_spans(&x.false_side, out);
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    collect_write_spans(&arm.body, out);
+                }
+                collect_write_spans(&x.default, out);
+            }
+            ProtoStatement::For(x) => collect_write_spans(&x.body, out),
+            ProtoStatement::SequentialBlock(b) => collect_write_spans(b, out),
+            ProtoStatement::CompiledBlock(cb) => collect_write_spans(&cb.original_stmts, out),
+            _ => {}
+        }
+    }
+}
+
 /// Whole extents the compressed offset gather does not spell out: a
 /// runtime-indexed access reads `translate(base) + stride*i` and so assumes
 /// the allocation stays contiguous — its full extent must be ONE unit.  For
@@ -257,15 +285,11 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 index_expr,
                 ..
             } => {
-                if let VarOffset::Comb(o) = base_offset {
-                    let span = stride.unsigned_abs() * num_elements.saturating_sub(1)
-                        + element_native_bytes;
-                    let base = if *stride < 0 {
-                        *o + *stride * (num_elements.saturating_sub(1) as isize)
-                    } else {
-                        *o
-                    };
-                    out.push((base, base + span as isize));
+                if let VarOffset::Comb(o) = base_offset
+                    && let Some(span) =
+                        crate::ir::strided_span(*o, *stride, *num_elements, *element_native_bytes)
+                {
+                    out.push(span);
                 }
                 expr(index_expr, out);
             }
@@ -285,7 +309,7 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 }
             }
             ProtoExpression::HierVariable(_) | ProtoExpression::Value { .. } => {}
-            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
             ProtoExpression::Binary { x, y, .. } => {
                 expr(x, out);
                 expr(y, out);
@@ -319,15 +343,15 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 expr(&a.expr, out);
             }
             ProtoStatement::AssignDynamic(a) => {
-                if let VarOffset::Comb(o) = a.dst_base {
-                    let span = a.dst_stride.unsigned_abs() * a.dst_num_elements.saturating_sub(1)
-                        + crate::ir::native_bytes(a.dst_width).max(1);
-                    let base = if a.dst_stride < 0 {
-                        o + a.dst_stride * (a.dst_num_elements.saturating_sub(1) as isize)
-                    } else {
-                        o
-                    };
-                    out.push((base, base + span as isize));
+                if let VarOffset::Comb(o) = a.dst_base
+                    && let Some(span) = crate::ir::strided_span(
+                        o,
+                        a.dst_stride,
+                        a.dst_num_elements,
+                        crate::ir::native_bytes(a.dst_width).max(1),
+                    )
+                {
+                    out.push(span);
                 }
                 expr(&a.dst_index_expr, out);
                 expr(&a.expr, out);
@@ -416,6 +440,10 @@ pub fn build_schedule(
     collect_dynamic_spans(unified, &mut spans);
     for (_, stmts) in &evs {
         collect_dynamic_spans(stmts, &mut spans);
+    }
+    collect_write_spans(unified, &mut spans);
+    for (_, stmts) in &evs {
+        collect_write_spans(stmts, &mut spans);
     }
     spans.retain(|&(s, e)| e > s);
     if diag() {
@@ -522,8 +550,8 @@ pub fn build_schedule(
 
     // -- 4. second sweep: first-use rank over the settle order, then the
     //    events in their deterministic order.
+    let mut idx = 0usize;
     {
-        let mut idx = 0usize;
         let mut ins: Vec<VarOffset> = Vec::new();
         let mut outs: Vec<VarOffset> = Vec::new();
         let mut sweep = |stmts: &[ProtoStatement], units: &mut [Unit], idx: &mut usize| {
@@ -576,19 +604,19 @@ pub fn build_schedule(
     };
     let mut pos: isize = 0;
     let mut placed: Vec<(isize, isize, isize)> = Vec::with_capacity(order.len());
+    let mut moved = 0usize;
     for i in order {
         let u = &units[i];
         let a = align_of(u.start, u.end - u.start);
         pos = (pos + a - 1) & !(a - 1);
-        if pos != u.start {
-            placed.push((u.start, u.end, pos));
-        }
+        moved += usize::from(pos != u.start);
+        placed.push((u.start, u.end, pos));
         pos += u.end - u.start;
     }
     let buffer_end = pos as usize;
     placed.sort_by_key(|&(s, _, _)| s);
 
-    if placed.is_empty() {
+    if moved == 0 {
         return None;
     }
     let sched = CombLayoutSchedule {
@@ -600,12 +628,7 @@ pub fn build_schedule(
     if diag() {
         eprintln!(
             "[comb_layout] units={} hot={} moved={} orphans={} comb_total={} buffer_end={}",
-            sched.total_units,
-            sched.hot_units,
-            sched.units.len(),
-            orphan_count,
-            comb_total,
-            sched.buffer_end,
+            sched.total_units, sched.hot_units, moved, orphan_count, comb_total, sched.buffer_end,
         );
     }
     Some(sched)
@@ -685,10 +708,10 @@ fn rigid_shift(cb: &mut CompiledBlockStatement, sched: &CombLayoutSchedule) {
             *off = VarOffset::Comb(*o + delta);
         }
     }
-    for s in &mut cb.original_stmts {
+    for s in std::sync::Arc::make_mut(&mut cb.original_stmts) {
         s.adjust_offsets(0, delta);
     }
-    for (ins, outs) in &mut cb.stmt_deps {
+    for (ins, outs) in std::sync::Arc::make_mut(&mut cb.stmt_deps) {
         for off in ins.iter_mut().chain(outs.iter_mut()) {
             if let VarOffset::Comb(o) = off {
                 *off = VarOffset::Comb(*o + delta);
@@ -742,6 +765,15 @@ mod tests {
     }
 
     #[test]
+    fn a_placed_range_drops_the_bytes_no_unit_places() {
+        // [16, 24) is placed where it was; [24, 32) belongs to no unit.
+        let s = sched(vec![(0, 8, 8), (8, 16, 0), (16, 24, 16), (32, 40, 24)], 32);
+        assert_eq!(s.placed_range(20, 36), vec![(20, 24), (24, 28)]);
+        assert_eq!(s.placed_range(4, 12), vec![(12, 16), (0, 4)]);
+        assert_eq!(s.placed_range(24, 32), vec![]);
+    }
+
+    #[test]
     fn empty_schedule_is_identity() {
         let s = CombLayoutSchedule::default();
         assert_eq!(s.translate(1234), 1234);
@@ -776,6 +808,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: Default::default(),
         })
     }
@@ -793,6 +826,21 @@ mod tests {
         assert_eq!(sched.translate(0), 4); // second
         assert_eq!(sched.translate(4), 8); // cold -> last
         assert_eq!(sched.buffer_end, 12);
+    }
+
+    #[test]
+    fn store_keeps_the_units_it_covers_together() {
+        let meta_units = vec![(0, 4), (4, 8), (8, 12)];
+        let mut wide = assign(0, 8);
+        if let ProtoStatement::Assign(a) = &mut wide {
+            a.dst_width = 64;
+        }
+        // First use alone would rank 8, then 4, then 0.
+        let unified = vec![assign(8, 8), assign(4, 8), wide];
+        let events = HashMap::default();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 12).unwrap();
+        assert_eq!(sched.translate(8), 0);
+        assert_eq!(sched.translate(4), sched.translate(0) + 4);
     }
 
     /// A per-call-site array read through a runtime index assumes its old
@@ -831,6 +879,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: Default::default(),
         });
         let unified = vec![
@@ -858,8 +907,8 @@ mod tests {
             var_signed: false,
             token: veryl_parser::token_range::TokenRange::default(),
             range: crate::ir::statement::ProtoForRange::Forward {
-                start: crate::ir::statement::ProtoForBound::Const(0),
-                end: crate::ir::statement::ProtoForBound::Const(4),
+                start: crate::ir::statement::ProtoForBound::Const(0, true),
+                end: crate::ir::statement::ProtoForBound::Const(4, true),
                 inclusive: false,
                 step: 1,
             },

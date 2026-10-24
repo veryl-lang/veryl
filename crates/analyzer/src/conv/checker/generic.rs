@@ -412,6 +412,39 @@ pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath)
                             ));
                         }
                     }
+
+                    // `$tb::queue::<T, N>` takes any fixed-width packed type as T.
+                    // TODO: allow `string` once the native simulator holds `string`
+                    // variables (https://github.com/veryl-lang/veryl/issues/3555).
+                    if let SymbolKind::TbComponent(tb) = &symbol.found.kind
+                        && matches!(tb.kind, TbComponentKind::Queue)
+                        && i == 0
+                    {
+                        let packed = |t: &ir::Type| {
+                            t.array.as_slice().is_empty()
+                                && (t.kind.is_bit_sized() || t.kind.is_float())
+                        };
+                        let kind_ok = matches!(&expr.value, ir::ValueVariant::Type(t) if packed(t));
+                        let width_ok = eval_type(context, &arg, TypePosition::Variable)
+                            .ok()
+                            .filter(packed)
+                            .and_then(|t| t.total_width())
+                            .is_some_and(|w| w > 0);
+                        if !(kind_ok && width_ok) {
+                            let actual = match &expr.value {
+                                ir::ValueVariant::Type(t) => t.to_string(),
+                                _ => expr.r#type.to_string(),
+                            };
+                            context.insert_error(AnalyzerError::mismatch_type(
+                                MismatchTypeKind::GenericArgument {
+                                    name: expr.token.end.to_string(),
+                                    expected: "fixed-width packed type".to_string(),
+                                    actual,
+                                },
+                                &expr.token,
+                            ));
+                        }
+                    }
                 }
             }
         }

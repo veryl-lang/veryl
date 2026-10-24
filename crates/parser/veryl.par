@@ -53,8 +53,9 @@ CommentsTerm          : <INITIAL, Generic, EmbedHeader,                         
 StringLiteralTerm     : <INITIAL         ,                                         Attr>"\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}"                   : Token;
 ExponentTerm          : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
-BasedTerm             : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/              : Token;
-AllBitTerm            : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/                                                    : Token;
+// Without the lookahead a number literal eats the head of a clock domain name like 'hclk
+BasedTerm             : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ ?! /[0-9a-zA-Z_$]/ : Token;
+AllBitTerm            : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/ ?! /[0-9a-zA-Z_$]/                                 : Token;
 BaseLessTerm          : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*/                                                                  : Token;
 MinusColonTerm        : <INITIAL                                                       >'-:'                                                                                  : Token;
 MinusGTTerm           : <INITIAL                                                       >'->'                                                                                  : Token;
@@ -164,6 +165,8 @@ ResetAsyncHighTerm    : <INITIAL, Generic                                       
 ResetAsyncLowTerm     : <INITIAL, Generic                                             >'reset_async_low'                                                                     : Token; // Keyword: Type
 ResetSyncHighTerm     : <INITIAL, Generic                                             >'reset_sync_high'                                                                     : Token; // Keyword: Type
 ResetSyncLowTerm      : <INITIAL, Generic                                             >'reset_sync_low'                                                                      : Token; // Keyword: Type
+ResetActiveTerm       : <INITIAL, Generic                                             >'reset_active'                                                                        : Token; // Keyword: Literal
+ResetInactiveTerm     : <INITIAL, Generic                                             >'reset_inactive'                                                                      : Token; // Keyword: Literal
 ReturnTerm            : <INITIAL, Generic                                             >'return'                                                                              : Token; // Keyword: Statement
 RevTerm               : <INITIAL, Generic                                             >'rev'                                                                                 : Token; // Keyword: Repeat
 BreakTerm             : <INITIAL, Generic                                             >'break'                                                                               : Token; // Keyword: Statement
@@ -315,6 +318,8 @@ ResetAsyncHighToken: ResetAsyncHighTerm: Token Comments;
 ResetAsyncLowToken : ResetAsyncLowTerm : Token Comments;
 ResetSyncHighToken : ResetSyncHighTerm : Token Comments;
 ResetSyncLowToken  : ResetSyncLowTerm  : Token Comments;
+ResetActiveToken   : ResetActiveTerm   : Token Comments;
+ResetInactiveToken : ResetInactiveTerm : Token Comments;
 ReturnToken        : ReturnTerm        : Token Comments;
 RevToken           : RevTerm           : Token Comments;
 BreakToken         : BreakTerm         : Token Comments;
@@ -473,6 +478,8 @@ ResetAsyncHigh: ResetAsyncHighToken: VerylToken;
 ResetAsyncLow : ResetAsyncLowToken : VerylToken;
 ResetSyncHigh : ResetSyncHighToken : VerylToken;
 ResetSyncLow  : ResetSyncLowToken  : VerylToken;
+ResetActive   : ResetActiveToken   : VerylToken;
+ResetInactive : ResetInactiveToken : VerylToken;
 Return        : ReturnToken        : VerylToken;
 Rev           : RevToken           : VerylToken;
 Same          : SameToken          : VerylToken;
@@ -542,6 +549,7 @@ Expression02Op: UnaryOperator | Operator06 | Operator05 | Operator03 | Operator0
 
 Factor: Number
       | BooleanLiteral
+      | ResetValueLiteral
       | IdentifierFactor
       | LParen Expression RParen
       | LBrace ConcatenationList RBrace
@@ -557,6 +565,8 @@ Factor: Number
       ;
 
 BooleanLiteral: True | False;
+
+ResetValueLiteral: ResetActive | ResetInactive;
 
 IdentifierFactor: ExpressionIdentifier [ FunctionCall | StructConstructor ];
 
@@ -674,6 +684,7 @@ CastingType: U8
            | UserDefinedType
            | Based
            | BaseLess
+           | LParen Expression RParen
            ;
 
 // ----------------------------------------------------------------------------

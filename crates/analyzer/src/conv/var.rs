@@ -11,7 +11,6 @@ use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
-use veryl_parser::veryl_walker::VerylWalker;
 
 impl Conv<&Identifier> for VarPath {
     fn conv(_context: &mut Context, value: &Identifier) -> IrResult<Self> {
@@ -71,18 +70,10 @@ fn check_select_type(context: &mut Context, expr: &mut ir::Expression, value: &E
 fn check_part_select_width(
     context: &mut Context,
     op: &VarSelectOp,
-    base: (&ir::Expression, &Expression),
-    bound: (&ir::Expression, &Expression),
+    base: &ir::Expression,
+    bound: &ir::Expression,
 ) {
-    let (base, base_ast) = base;
-    let (bound, bound_ast) = bound;
-    // `references_loop_var` only when the IR is const, so a runtime-for
-    // body (loop var non-const) reports once, not twice.
-    let bound_const = if bound.comptime().is_const {
-        !references_loop_var(bound_ast)
-    } else {
-        false
-    };
+    let bound_const = bound.comptime().is_elaboration_const();
     if !bound_const
         && matches!(
             op,
@@ -97,43 +88,12 @@ fn check_part_select_width(
         ));
     }
     // A `[msb:lsb]` range also needs a constant base index (the msb).
-    let base_const = if base.comptime().is_const {
-        !references_loop_var(base_ast)
-    } else {
-        false
-    };
+    let base_const = base.comptime().is_elaboration_const();
     if matches!(op, VarSelectOp::Colon) && !base_const {
         context.insert_error(AnalyzerError::non_constant_select_width(
             &base.token_range(),
         ));
     }
-}
-
-/// Detects a reference to a statement-level for-loop induction variable:
-/// const while the IR unrolls but runtime in the emitted SV `for`, so it
-/// can't size a part-select or bound a `[msb:lsb]`. Genvars stay allowed
-/// (elaboration constants); scans the source AST, before the IR is folded.
-#[derive(Default)]
-struct LoopVarFinder {
-    found: bool,
-}
-
-impl VerylWalker for LoopVarFinder {
-    fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        if !self.found
-            && let Ok(symbol) = crate::symbol_table::resolve(arg)
-            && let crate::symbol::SymbolKind::Variable(x) = &symbol.found.kind
-            && x.loop_variable
-        {
-            self.found = true;
-        }
-    }
-}
-
-fn references_loop_var(expr: &Expression) -> bool {
-    let mut finder = LoopVarFinder::default();
-    finder.expression(expr);
-    finder.found
 }
 
 impl Conv<&ScopedIdentifier> for VarPathSelect {
@@ -210,17 +170,143 @@ fn fold_generate_block_index(
 
 impl Conv<&ExpressionIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &ExpressionIdentifier) -> IrResult<Self> {
-        check_separator(context, value);
+        // Unwound here because the walk returns early on an invalid select.
+        let select_paths = context.select_paths.len();
+        let select_dims = context.select_dims.len();
+        let ret = conv_expression_identifier(context, value);
+        context.select_paths.truncate(select_paths);
+        context.select_dims.truncate(select_dims);
+        ret
+    }
+}
 
-        let mut path: VarPath = Conv::conv(context, value.scoped_identifier.as_ref())?;
-        let mut generic_path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
-        let mut select = VarSelect::default();
-        let token: TokenRange = value.into();
-        let mut end: Option<(VarSelectOp, ir::Expression)> = None;
+/// Whether `symbol` is declared as a scalar `logic`/`bit` (no width, no
+/// array). A modport member stands for the interface variable behind it.
+fn is_scalar_symbol(symbol: &Symbol) -> bool {
+    let symbol = match &symbol.kind {
+        SymbolKind::ModportVariableMember(x) => match symbol_table::get(x.variable) {
+            Some(x) => x,
+            None => return false,
+        },
+        _ => symbol.clone(),
+    };
+    symbol.kind.get_type().is_some_and(|x| x.is_scalar())
+}
 
-        context.select_dims.push(0);
+fn conv_expression_identifier(
+    context: &mut Context,
+    value: &ExpressionIdentifier,
+) -> IrResult<VarPathSelect> {
+    check_separator(context, value);
 
-        for x in &value.expression_identifier_list {
+    let mut path: VarPath = Conv::conv(context, value.scoped_identifier.as_ref())?;
+    let mut generic_path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
+    let mut select = VarSelect::default();
+    let token: TokenRange = value.into();
+    let mut end: Option<(VarSelectOp, ir::Expression)> = None;
+
+    context.select_dims.push(0);
+
+    // SV rejects a select on a scalar, and the IR cannot tell `logic` from
+    // `logic<1>` (both carry a width of 1), so the declaration is checked here.
+    if !value.expression_identifier_list.is_empty()
+        && let Ok(symbol) = symbol_table::resolve(value.scoped_identifier.as_ref())
+        && is_scalar_symbol(&symbol.found)
+    {
+        context.insert_error(AnalyzerError::invalid_select(
+            &InvalidSelectKind::Scalar,
+            &token,
+            &[],
+        ));
+        return Err(ir_error!(token));
+    }
+
+    for x in &value.expression_identifier_list {
+        if end.is_some() {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::SelectAfterRange,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        let base_value = x.select.expression.as_ref();
+        let mut base = Conv::conv(context, base_value)?;
+        check_select_type(context, &mut base, base_value);
+        if let Some(x) = &x.select.select_opt {
+            let op = Conv::conv(context, x.select_operator.as_ref())?;
+            let mut bound = Conv::conv(context, x.expression.as_ref())?;
+            check_select_type(context, &mut bound, &x.expression);
+            check_part_select_width(context, &op, &base, &bound);
+            end = Some((op, bound));
+        }
+        select.push(base);
+        context.select_paths.pop();
+        context.inc_select_dim();
+    }
+
+    let mut current_scope: Option<Namespace> = None;
+    for x in &value.expression_identifier_list0 {
+        let base_token = x.identifier.identifier_token.token;
+        path.push(base_token.text);
+        generic_path.paths.push(GenericSymbol {
+            base: base_token,
+            arguments: vec![],
+        });
+
+        // Cross-instance hops only appear in test modules; gating the lookups
+        // there keeps them off the hot path for ordinary RTL member accesses.
+        let hop = if context.in_test_module {
+            resolve_hop_symbol(&generic_path, current_scope.as_ref(), &base_token)
+        } else {
+            None
+        };
+
+        // Generate-block hop: absorb `[0]` into the segment, then descend so a
+        // nested generate hop resolves in the block's scope.
+        if let Some(symbol) = &hop
+            && !x.expression_identifier_list0_list.is_empty()
+            && let Some(folded) = fold_generate_block_index(
+                context,
+                symbol,
+                &base_token,
+                &x.expression_identifier_list0_list,
+            )
+        {
+            *path.0.last_mut().unwrap() = folded;
+            current_scope = Some(symbol.inner_namespace());
+            continue;
+        }
+
+        // Plain-instance hop: descend into the instantiated module so a
+        // following generate hop resolves there; any other node ends the chain.
+        current_scope = hop.as_ref().and_then(instance_module_scope);
+
+        // Same scalar rule for a selected member (`s.x[0]` on a scalar `x`).
+        if !x.expression_identifier_list0_list.is_empty()
+            && let Ok(symbol) = symbol_table::resolve_base_path(
+                &generic_path,
+                generic_path.paths.len() - 1,
+                base_token.id,
+            )
+            && is_scalar_symbol(&symbol.found)
+        {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::Scalar,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        context.reset_select_dim();
+        for x in &x.expression_identifier_list0_list {
             if end.is_some() {
                 context.insert_error(AnalyzerError::invalid_select(
                     &InvalidSelectKind::SelectAfterRange,
@@ -229,9 +315,6 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                 ));
                 return Err(ir_error!(token));
             }
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
             let base_value = x.select.expression.as_ref();
             let mut base = Conv::conv(context, base_value)?;
             check_select_type(context, &mut base, base_value);
@@ -239,101 +322,117 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut bound = Conv::conv(context, x.expression.as_ref())?;
                 check_select_type(context, &mut bound, &x.expression);
-                check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+                check_part_select_width(context, &op, &base, &bound);
                 end = Some((op, bound));
             }
             select.push(base);
-            context.select_paths.pop();
             context.inc_select_dim();
         }
-
-        let mut current_scope: Option<Namespace> = None;
-        for x in &value.expression_identifier_list0 {
-            let base_token = x.identifier.identifier_token.token;
-            path.push(base_token.text);
-            generic_path.paths.push(GenericSymbol {
-                base: base_token,
-                arguments: vec![],
-            });
-
-            // Cross-instance hops only appear in test modules; gating the lookups
-            // there keeps them off the hot path for ordinary RTL member accesses.
-            let hop = if context.in_test_module {
-                resolve_hop_symbol(&generic_path, current_scope.as_ref(), &base_token)
-            } else {
-                None
-            };
-
-            // Generate-block hop: absorb `[0]` into the segment, then descend so a
-            // nested generate hop resolves in the block's scope.
-            if let Some(symbol) = &hop
-                && !x.expression_identifier_list0_list.is_empty()
-                && let Some(folded) = fold_generate_block_index(
-                    context,
-                    symbol,
-                    &base_token,
-                    &x.expression_identifier_list0_list,
-                )
-            {
-                *path.0.last_mut().unwrap() = folded;
-                current_scope = Some(symbol.inner_namespace());
-                continue;
-            }
-
-            // Plain-instance hop: descend into the instantiated module so a
-            // following generate hop resolves there; any other node ends the chain.
-            current_scope = hop.as_ref().and_then(instance_module_scope);
-
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
-            for x in &x.expression_identifier_list0_list {
-                if end.is_some() {
-                    context.insert_error(AnalyzerError::invalid_select(
-                        &InvalidSelectKind::SelectAfterRange,
-                        &token,
-                        &[],
-                    ));
-                    return Err(ir_error!(token));
-                }
-                let base_value = x.select.expression.as_ref();
-                let mut base = Conv::conv(context, base_value)?;
-                check_select_type(context, &mut base, base_value);
-                if let Some(x) = &x.select.select_opt {
-                    let op = Conv::conv(context, x.select_operator.as_ref())?;
-                    let mut bound = Conv::conv(context, x.expression.as_ref())?;
-                    check_select_type(context, &mut bound, &x.expression);
-                    check_part_select_width(
-                        context,
-                        &op,
-                        (&base, base_value),
-                        (&bound, &x.expression),
-                    );
-                    end = Some((op, bound));
-                }
-                select.push(base);
-                context.inc_select_dim();
-            }
-            context.select_paths.pop();
-        }
-
-        context.select_dims.pop();
-
-        select.1 = end;
-
-        Ok(VarPathSelect(path, select, token))
+        context.select_paths.pop();
     }
+
+    context.select_dims.pop();
+
+    select.1 = end;
+
+    Ok(VarPathSelect(path, select, token))
 }
 
 impl Conv<&HierarchicalIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &HierarchicalIdentifier) -> IrResult<Self> {
-        let mut path: VarPath = Conv::conv(context, value.identifier.as_ref())?;
-        let mut generic_path: GenericSymbolPath = value.identifier.as_ref().into();
-        let mut select = VarSelect::default();
-        let token: TokenRange = value.into();
-        let mut end: Option<(VarSelectOp, ir::Expression)> = None;
+        // Unwound here because the walk returns early on an invalid select.
+        let select_paths = context.select_paths.len();
+        let select_dims = context.select_dims.len();
+        let ret = conv_hierarchical_identifier(context, value);
+        context.select_paths.truncate(select_paths);
+        context.select_dims.truncate(select_dims);
+        ret
+    }
+}
 
-        for x in &value.hierarchical_identifier_list {
+fn conv_hierarchical_identifier(
+    context: &mut Context,
+    value: &HierarchicalIdentifier,
+) -> IrResult<VarPathSelect> {
+    let mut path: VarPath = Conv::conv(context, value.identifier.as_ref())?;
+    let mut generic_path: GenericSymbolPath = value.identifier.as_ref().into();
+    let mut select = VarSelect::default();
+    let token: TokenRange = value.into();
+    let mut end: Option<(VarSelectOp, ir::Expression)> = None;
+
+    context.select_dims.push(0);
+
+    // An assignment target reaches here rather than through
+    // `ExpressionIdentifier`; a select on a scalar is rejected the same way.
+    if !value.hierarchical_identifier_list.is_empty()
+        && let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        && is_scalar_symbol(&symbol.found)
+    {
+        context.insert_error(AnalyzerError::invalid_select(
+            &InvalidSelectKind::Scalar,
+            &token,
+            &[],
+        ));
+        return Err(ir_error!(token));
+    }
+
+    for x in &value.hierarchical_identifier_list {
+        if end.is_some() {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::SelectAfterRange,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        let base_value = x.select.expression.as_ref();
+        let mut base = Conv::conv(context, base_value)?;
+        check_select_type(context, &mut base, base_value);
+        if let Some(x) = &x.select.select_opt {
+            let op = Conv::conv(context, x.select_operator.as_ref())?;
+            let mut bound = Conv::conv(context, x.expression.as_ref())?;
+            check_select_type(context, &mut bound, &x.expression);
+            check_part_select_width(context, &op, &base, &bound);
+            end = Some((op, bound));
+        }
+        select.push(base);
+        context.select_paths.pop();
+        context.inc_select_dim();
+    }
+
+    for x in &value.hierarchical_identifier_list0 {
+        path.push(x.identifier.identifier_token.token.text);
+        let member_token = x.identifier.identifier_token.token;
+        generic_path.paths.push(GenericSymbol {
+            base: x.identifier.identifier_token.token,
+            arguments: vec![],
+        });
+
+        // Same rule for a selected member as an assignment target.
+        if !x.hierarchical_identifier_list0_list.is_empty()
+            && let Ok(symbol) = symbol_table::resolve_base_path(
+                &generic_path,
+                generic_path.paths.len() - 1,
+                member_token.id,
+            )
+            && is_scalar_symbol(&symbol.found)
+        {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::Scalar,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        context.reset_select_dim();
+        for x in &x.hierarchical_identifier_list0_list {
             if end.is_some() {
                 context.insert_error(AnalyzerError::invalid_select(
                     &InvalidSelectKind::SelectAfterRange,
@@ -342,9 +441,6 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                 ));
                 return Err(ir_error!(token));
             }
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
             let base_value = x.select.expression.as_ref();
             let mut base = Conv::conv(context, base_value)?;
             check_select_type(context, &mut base, base_value);
@@ -352,60 +448,30 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut bound = Conv::conv(context, x.expression.as_ref())?;
                 check_select_type(context, &mut bound, &x.expression);
-                check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+                check_part_select_width(context, &op, &base, &bound);
                 end = Some((op, bound));
             }
             select.push(base);
-            context.select_paths.pop();
+            context.inc_select_dim();
         }
-
-        for x in &value.hierarchical_identifier_list0 {
-            path.push(x.identifier.identifier_token.token.text);
-            generic_path.paths.push(GenericSymbol {
-                base: x.identifier.identifier_token.token,
-                arguments: vec![],
-            });
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
-            for x in &x.hierarchical_identifier_list0_list {
-                if end.is_some() {
-                    context.insert_error(AnalyzerError::invalid_select(
-                        &InvalidSelectKind::SelectAfterRange,
-                        &token,
-                        &[],
-                    ));
-                    return Err(ir_error!(token));
-                }
-                let base_value = x.select.expression.as_ref();
-                let mut base = Conv::conv(context, base_value)?;
-                check_select_type(context, &mut base, base_value);
-                if let Some(x) = &x.select.select_opt {
-                    let op = Conv::conv(context, x.select_operator.as_ref())?;
-                    let mut bound = Conv::conv(context, x.expression.as_ref())?;
-                    check_select_type(context, &mut bound, &x.expression);
-                    check_part_select_width(
-                        context,
-                        &op,
-                        (&base, base_value),
-                        (&bound, &x.expression),
-                    );
-                    end = Some((op, bound));
-                }
-                select.push(base);
-            }
-            context.select_paths.pop();
-        }
-
-        select.1 = end;
-
-        Ok(VarPathSelect(path, select, token))
+        context.select_paths.pop();
     }
+
+    context.select_dims.pop();
+
+    select.1 = end;
+
+    Ok(VarPathSelect(path, select, token))
 }
 
 impl Conv<&Expression> for Vec<VarPathSelect> {
     fn conv(context: &mut Context, value: &Expression) -> IrResult<Self> {
         let mut ret = vec![];
+
+        // An anonymous loop variable is also registered as `_`.
+        if value.is_anonymous_expression() {
+            return Ok(ret);
+        }
 
         if let Some(x) = value.unwrap_factor() {
             match x {

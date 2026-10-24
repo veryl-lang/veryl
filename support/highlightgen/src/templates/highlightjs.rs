@@ -2,12 +2,18 @@ use crate::templates::Template;
 use handlebars::Handlebars;
 use std::path::PathBuf;
 
-const TMPL: &str = r###"/**
- * Language: Veryl
- * Contributors:
- *   Naoya Hatta <dalance@gmail.com>
- */
-module.exports = function (hljs)
+// `className` is used instead of the newer `scope` key on purpose: `scope` was
+// introduced in highlight.js v11, and mdbook still bundles v10, which would
+// silently drop the highlighting of the mode. v11 maps `className` to `scope`.
+const TMPL: &str = r###"/*
+Language: Veryl
+Author: Naoya Hatta <dalance@gmail.com>
+Description: Veryl is a modern hardware description language which transpiles to SystemVerilog.
+Website: https://veryl-lang.org
+Category: hardware
+*/
+
+export default function (hljs)
 {
   return {
     name: 'Veryl',
@@ -26,7 +32,7 @@ module.exports = function (hljs)
         hljs.C_BLOCK_COMMENT_MODE,
         hljs.C_LINE_COMMENT_MODE,
         {
-          scope: 'number',
+          className: 'number',
           contains: [ hljs.BACKSLASH_ESCAPE ],
           variants: [
             { begin: /\b((\d+'([bhodBHOD]))[0-9xzXZa-fA-F_]+)/ },

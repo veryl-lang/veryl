@@ -1,12 +1,200 @@
+mod function_return;
+
 use crate::conv::Context;
-use crate::ir::Ir;
+use crate::ir::{Component, Ir};
 use crate::{Analyzer, attribute_table, symbol_table};
 use similar::{ChangeTag, TextDiff};
 use veryl_metadata::Metadata;
 use veryl_parser::{Parser, resource_table};
 
+#[test]
+fn folding_preserves_elaboration_constness() {
+    use crate::ir::{Comptime, Expression, Op};
+    use crate::value::Value;
+    use veryl_parser::token_range::TokenRange;
+
+    for runtime_dependent in [false, true] {
+        let token = TokenRange::default();
+        let mut lhs = Expression::create_value(Value::new(1, 32, false), token);
+        // A procedural induction variable can have exactly the same known
+        // value as a genvar, but only the latter is an elaboration constant.
+        lhs.comptime_mut().runtime_dependent = runtime_dependent;
+        let rhs = Expression::create_value(Value::new(2, 32, false), token);
+        let mut expression = Expression::Binary(
+            Box::new(lhs),
+            Op::Add,
+            Box::new(rhs),
+            Box::new(Comptime::create_unknown(token)),
+        );
+        let mut context = Context::default();
+        for _ in 0..2 {
+            let comptime = expression.eval_comptime(&mut context, None);
+            assert_eq!(comptime.get_value().unwrap().to_u64(), Some(3));
+            assert!(comptime.is_const);
+            assert_eq!(comptime.is_elaboration_const(), !runtime_dependent);
+            assert_eq!(
+                expression.eval_elaboration_const(&context),
+                !runtime_dependent
+            );
+        }
+        assert!(matches!(expression, Expression::Term(_)));
+    }
+}
+
+#[test]
+fn elaboration_constness_does_not_require_a_known_value() {
+    use crate::ir::{Comptime, Expression, Factor};
+    use veryl_parser::token_range::TokenRange;
+
+    let mut comptime = Comptime::create_unknown(TokenRange::default());
+    // External SV constants are eligible even though Veryl has no value.
+    comptime.is_const = true;
+    let mut expression = Expression::Term(Box::new(Factor::Value(comptime)));
+    let mut context = Context::default();
+    let comptime = expression.eval_comptime(&mut context, None);
+    assert!(comptime.value.is_unknown());
+    assert!(comptime.is_elaboration_const());
+}
+
+fn opaque_constant_tree(depth: usize) -> super::Expression {
+    use super::{Comptime, Expression, Factor, Op};
+    use veryl_parser::token_range::TokenRange;
+
+    let token = TokenRange::default();
+    if depth == 0 {
+        let mut comptime = Comptime::create_unknown(token);
+        comptime.is_const = true;
+        Expression::Term(Box::new(Factor::Value(comptime)))
+    } else {
+        Expression::Binary(
+            Box::new(opaque_constant_tree(depth - 1)),
+            Op::Add,
+            Box::new(opaque_constant_tree(depth - 1)),
+            Box::new(Comptime::create_unknown(token)),
+        )
+    }
+}
+
+#[test]
+fn elaboration_constness_reuses_evaluated_unknown_trees() {
+    use super::expression::ELABORATION_CLASSIFICATIONS;
+
+    for depth in [4, 8] {
+        let mut expression = opaque_constant_tree(depth);
+        let mut context = Context::default();
+        expression.eval_comptime(&mut context, None);
+        assert!(expression.comptime().evaluated);
+        assert!(expression.comptime().is_elaboration_const());
+        assert!(expression.comptime().value.is_unknown());
+
+        ELABORATION_CLASSIFICATIONS.set(0);
+        for _ in 0..100 {
+            assert!(expression.eval_elaboration_const(&context));
+            assert!(
+                expression
+                    .eval_comptime(&mut context, None)
+                    .is_elaboration_const()
+            );
+        }
+        assert_eq!(ELABORATION_CLASSIFICATIONS.get(), 0);
+    }
+}
+
+#[test]
+fn elaboration_constness_reuses_unevaluated_subtrees() {
+    use super::expression::ELABORATION_CLASSIFICATIONS;
+    use super::{Comptime, Expression, Op};
+    use veryl_parser::token_range::TokenRange;
+
+    let context = Context::default();
+    let mut expression = opaque_constant_tree(0);
+    ELABORATION_CLASSIFICATIONS.set(0);
+    assert!(expression.eval_elaboration_const(&context));
+    for _ in 0..128 {
+        expression = Expression::Binary(
+            Box::new(expression),
+            Op::Add,
+            Box::new(opaque_constant_tree(0)),
+            Box::new(Comptime::create_unknown(TokenRange::default())),
+        );
+        assert!(expression.eval_elaboration_const(&context));
+    }
+    assert_eq!(ELABORATION_CLASSIFICATIONS.get(), 257);
+}
+
+#[test]
+fn elaboration_constness_cache_does_not_follow_reused_metadata() {
+    use super::{Expression, Op};
+
+    let context = Context::default();
+    let mut source = opaque_constant_tree(1);
+    assert!(source.eval_elaboration_const(&context));
+    let mut runtime = opaque_constant_tree(0);
+    runtime.comptime_mut().is_const = false;
+    let mut expression = Expression::Binary(
+        Box::new(runtime),
+        Op::Add,
+        Box::new(opaque_constant_tree(0)),
+        Box::new(source.comptime().clone()),
+    );
+    assert!(!expression.eval_elaboration_const(&context));
+    // Updating a leaf through the metadata accessor also invalidates its cache.
+    let mut leaf = opaque_constant_tree(0);
+    assert!(leaf.eval_elaboration_const(&context));
+    leaf.comptime_mut().is_const = false;
+    assert!(!leaf.eval_elaboration_const(&context));
+}
+
+#[test]
+fn elaboration_constness_if_chain_work_is_linear() {
+    use super::expression::ELABORATION_CLASSIFICATIONS;
+
+    let mut previous = None;
+    for arms in [16, 32, 64] {
+        let expression = format!("{}32'd0", "if $sv::pkg::COND ? 32'd1 : ".repeat(arms));
+        let code = format!("module Top(o: output logic<32>) {{ assign o = {expression}; }}");
+        ELABORATION_CLASSIFICATIONS.set(0);
+        analyzed_ir(&code, false);
+        let visits = ELABORATION_CLASSIFICATIONS.get();
+        if let Some(previous) = previous {
+            assert!(
+                visits <= 2 * previous + 8,
+                "{arms} arms: {visits} visits, previous: {previous}"
+            );
+        }
+        previous = Some(visits);
+    }
+}
+
 #[track_caller]
 fn check_ir(code: &str, exp: &str) {
+    check_ir_with(code, exp, false);
+}
+
+/// Checks the IR the native simulator builds from, with its decided loops
+/// peeled.
+#[track_caller]
+fn check_peeled_ir(code: &str, exp: &str) {
+    check_ir_with(code, exp, true);
+}
+
+#[track_caller]
+fn check_ir_with(code: &str, exp: &str, peel: bool) {
+    let ir = analyzed_ir(code, peel).to_string();
+    let diff = TextDiff::from_lines(ir.as_str(), exp);
+    for change in diff.iter_all_changes() {
+        if matches!(change.tag(), ChangeTag::Insert | ChangeTag::Delete) {
+            let text = &format!("{}{}", change.tag(), change);
+            dbg!(text);
+        }
+    }
+
+    println!("ir\n{}exp\n{}", ir, exp);
+
+    assert!(ir.as_str() == exp);
+}
+
+fn analyzed_ir(code: &str, peel: bool) -> Ir {
     symbol_table::clear();
     attribute_table::clear();
 
@@ -25,18 +213,62 @@ fn check_ir(code: &str, exp: &str) {
 
     dbg!(&errors);
 
-    let ir = ir.to_string();
-    let diff = TextDiff::from_lines(ir.as_str(), exp);
-    for change in diff.iter_all_changes() {
-        if matches!(change.tag(), ChangeTag::Insert | ChangeTag::Delete) {
-            let text = &format!("{}{}", change.tag(), change);
-            dbg!(text);
+    if peel {
+        for component in &mut ir.components {
+            if let Component::Module(module) = component {
+                let mut context = Context::default();
+                context.variables = module.variables.clone();
+                let mut declarations = module.declarations.clone();
+                crate::ir::peel::peel_decided_loops(&mut context, module, &mut declarations);
+                module.declarations = declarations;
+            }
         }
     }
 
-    println!("ir\n{}exp\n{}", ir, exp);
+    ir
+}
 
-    assert!(ir.as_str() == exp);
+#[test]
+fn constant_type_contexts() {
+    let code = r#"
+module ModuleA {
+    const P: signed logic<8> = 64'd255;
+    const UNSIGNED: logic<8> = 64'd511;
+    const NEGATIVE: signed logic<8> = 64'd384;
+    const POSITIVE: signed logic<8> = 64'd383;
+    const ONE: bit = 64'd3;
+
+    let _value: logic<64> = P;
+    const WIDENED: logic<64> = P;
+    const UNSIGNED_VALUE: logic<64> = UNSIGNED;
+    const NEGATIVE_VALUE: logic<128> = NEGATIVE;
+    const POSITIVE_VALUE: logic<64> = POSITIVE;
+    const MIXED_VALUE: logic<64> = NEGATIVE + 64'd0;
+    const MASK: logic<64> = {ONE repeat 64};
+}
+"#;
+
+    let exp = r#"module ModuleA {
+  const var0(P): signed logic<8> = 8'shff;
+  const var1(UNSIGNED): logic<8> = 8'hff;
+  const var2(NEGATIVE): signed logic<8> = 8'sh80;
+  const var3(POSITIVE): signed logic<8> = 8'sh7f;
+  const var4(ONE): bit = 1'h1;
+  let var5(_value): logic<64> = 64'hxxxxxxxxxxxxxxxx;
+  const var6(WIDENED): logic<64> = 64'hffffffffffffffff;
+  const var7(UNSIGNED_VALUE): logic<64> = 64'h00000000000000ff;
+  const var8(NEGATIVE_VALUE): logic<128> = 128'hffffffffffffffffffffffffffffff80;
+  const var9(POSITIVE_VALUE): logic<64> = 64'h000000000000007f;
+  const var10(MIXED_VALUE): logic<64> = 64'h0000000000000080;
+  const var11(MASK): logic<64> = 64'hffffffffffffffff;
+
+  comb {
+    var5 = 8'shff;
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
@@ -484,22 +716,22 @@ fn system_function() {
   const var11(b5): bit<32> = 32'h00000003;
 
   comb {
-    var0 = 32'h00000000;
+    var0 = 32'sh00000000;
   }
   comb {
-    var1 = 32'h00000000;
+    var1 = 32'sh00000000;
   }
   comb {
-    var2 = 32'h00000001;
+    var2 = 32'sh00000001;
   }
   comb {
-    var3 = 32'h00000002;
+    var3 = 32'sh00000002;
   }
   comb {
-    var4 = 32'h00000002;
+    var4 = 32'sh00000002;
   }
   comb {
-    var5 = 32'h00000003;
+    var5 = 32'sh00000003;
   }
 }
 "#;
@@ -594,16 +826,12 @@ fn comb_for() {
 
     let exp = r#"module ModuleA {
   var var0(a): logic<4> = 4'hx;
-  const var1([0].i): signed bit<32> = 32'sh00000000;
-  const var2([1].i): signed bit<32> = 32'sh00000001;
-  const var3([2].i): signed bit<32> = 32'sh00000002;
-  const var4([3].i): signed bit<32> = 32'sh00000003;
+  const var1(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    var0[32'sh00000000] = 32'sh00000001;
-    var0[32'sh00000001] = 32'sh00000002;
-    var0[32'sh00000002] = 32'sh00000003;
-    var0[32'sh00000003] = 32'sh00000004;
+    for i in 0..4 {
+      var0[var1] = (var1 + 32'sh00000001);
+    }
   }
 }
 "#;
@@ -848,8 +1076,12 @@ fn interface() {
   param var0(WIDTH): bit<32> = 32'h00000008;
   input var1(a.a): logic<8> = 8'hxx;
   output var6(b.a): logic<8> = 8'hxx;
+  const var11(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
+    for i in 0..0 {
+      var6[var11 step 32'sh00000020] = var1[var11 step 32'sh00000020];
+    }
   }
 }
 module ModuleB {
@@ -869,16 +1101,12 @@ module ModuleB {
       param var0(WIDTH): bit<32> = 32'h00000080;
       input var1(a.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
       output var6(b.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
-      const var11([0].i): signed bit<32> = 32'sh00000000;
-      const var12([1].i): signed bit<32> = 32'sh00000001;
-      const var13([2].i): signed bit<32> = 32'sh00000002;
-      const var14([3].i): signed bit<32> = 32'sh00000003;
+      const var11(i): signed bit<32> = 32'shxxxxxxxx;
 
       comb {
-        var6[32'sh00000000 step 32'sh00000020] = var1[32'sh00000000 step 32'sh00000020];
-        var6[32'sh00000001 step 32'sh00000020] = var1[32'sh00000001 step 32'sh00000020];
-        var6[32'sh00000002 step 32'sh00000020] = var1[32'sh00000002 step 32'sh00000020];
-        var6[32'sh00000003 step 32'sh00000020] = var1[32'sh00000003 step 32'sh00000020];
+        for i in 0..4 {
+          var6[var11 step 32'sh00000020] = var1[var11 step 32'sh00000020];
+        }
       }
     }
   }
@@ -953,7 +1181,7 @@ fn array() {
     let code = r#"
     package PackageA {
         struct StructA {
-            x: logic,
+            x: logic<1>,
             y: logic,
         }
     }
@@ -2084,7 +2312,7 @@ fn union() {
         }
 
         struct StructA {
-            v: logic,
+            v: logic<1>,
             w: logic<3>,
         }
 
@@ -2186,7 +2414,7 @@ fn generics_resolve() {
             b: Type ,
         }
 
-        var a: logic  ;
+        var a: logic<1>;
         var b: StructA;
 
         always_ff {
@@ -2612,56 +2840,20 @@ fn assignment_operator_with_array_index() {
   var var3[1](score): logic<32> = 32'hxxxxxxxx;
   var var3[2](score): logic<32> = 32'hxxxxxxxx;
   var var3[3](score): logic<32> = 32'hxxxxxxxx;
-  const var4([0].i): signed bit<32> = 32'sh00000000;
-  const var5([0].[0].j): signed bit<32> = 32'sh00000000;
-  const var6([0].[1].j): signed bit<32> = 32'sh00000001;
-  const var7([0].[2].j): signed bit<32> = 32'sh00000002;
-  const var8([0].[3].j): signed bit<32> = 32'sh00000003;
-  const var9([1].i): signed bit<32> = 32'sh00000001;
-  const var10([1].[0].j): signed bit<32> = 32'sh00000000;
-  const var11([1].[1].j): signed bit<32> = 32'sh00000001;
-  const var12([1].[2].j): signed bit<32> = 32'sh00000002;
-  const var13([1].[3].j): signed bit<32> = 32'sh00000003;
-  const var14([2].i): signed bit<32> = 32'sh00000002;
-  const var15([2].[0].j): signed bit<32> = 32'sh00000000;
-  const var16([2].[1].j): signed bit<32> = 32'sh00000001;
-  const var17([2].[2].j): signed bit<32> = 32'sh00000002;
-  const var18([2].[3].j): signed bit<32> = 32'sh00000003;
-  const var19([3].i): signed bit<32> = 32'sh00000003;
-  const var20([3].[0].j): signed bit<32> = 32'sh00000000;
-  const var21([3].[1].j): signed bit<32> = 32'sh00000001;
-  const var22([3].[2].j): signed bit<32> = 32'sh00000002;
-  const var23([3].[3].j): signed bit<32> = 32'sh00000003;
-  const var24([0].i): signed bit<32> = 32'sh00000000;
-  const var25([1].i): signed bit<32> = 32'sh00000001;
-  const var26([2].i): signed bit<32> = 32'sh00000002;
-  const var27([3].i): signed bit<32> = 32'sh00000003;
+  const var4(i): signed bit<32> = 32'shxxxxxxxx;
+  const var5(j): signed bit<32> = 32'shxxxxxxxx;
+  const var6(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    var3[32'sh00000000] = 32'sh00000000;
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000000]);
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000001]);
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000002]);
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000003]);
-    var3[32'sh00000001] = 32'sh00000000;
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000000]);
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000001]);
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000002]);
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000003]);
-    var3[32'sh00000002] = 32'sh00000000;
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000000]);
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000001]);
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000002]);
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000003]);
-    var3[32'sh00000003] = 32'sh00000000;
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000000]);
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000001]);
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000002]);
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000003]);
-    var2[32'sh00000000] = var3[32'sh00000000];
-    var2[32'sh00000001] = var3[32'sh00000001];
-    var2[32'sh00000002] = var3[32'sh00000002];
-    var2[32'sh00000003] = var3[32'sh00000003];
+    for i in 0..4 {
+      var3[var4] = 32'sh00000000;
+      for j in 0..4 {
+      var3[var4] = (var3[var4] + var1[var5]);
+    }
+    }
+    for i in 0..4 {
+      var2[var6] = var3[var6];
+    }
   }
 }
 "#;
@@ -2735,24 +2927,12 @@ fn assignment_operator_with_array_index() {
     let exp = r#"module ModuleA {
   var var0[0](a): logic<8> = 8'hxx;
   var var0[1](a): logic<8> = 8'hxx;
-  const var1([0].i): signed bit<32> = 32'sh00000000;
-  const var2([1].i): signed bit<32> = 32'sh00000001;
-  const var3([2].i): signed bit<32> = 32'sh00000002;
-  const var4([3].i): signed bit<32> = 32'sh00000003;
-  const var5([4].i): signed bit<32> = 32'sh00000004;
-  const var6([5].i): signed bit<32> = 32'sh00000005;
-  const var7([6].i): signed bit<32> = 32'sh00000006;
-  const var8([7].i): signed bit<32> = 32'sh00000007;
+  const var1(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    var0[1'h0][32'sh00000000+:32'sh00000002] = '0;
-    var0[1'h0][32'sh00000002+:32'sh00000002] = '0;
-    var0[1'h0][32'sh00000004+:32'sh00000002] = '0;
-    var0[1'h0][32'sh00000006+:32'sh00000002] = '0;
-    var0[1'h1][32'sh00000000+:32'sh00000002] = '0;
-    var0[1'h1][32'sh00000002+:32'sh00000002] = '0;
-    var0[1'h1][32'sh00000004+:32'sh00000002] = '0;
-    var0[1'h1][32'sh00000006+:32'sh00000002] = '0;
+    for i in 0..8 {
+      var0[var1[32'sh00000002]][(32'sh00000002 * var1[32'sh00000001:32'sh00000000])+:32'sh00000002] = '0;
+    }
   }
 }
 "#;
@@ -3350,31 +3530,15 @@ fn const_fold_switch_arm() {
     let exp = r#"module ModuleA {
   input var0(a): logic = 1'hx;
   output var1(o): logic<4> = 4'hx;
-  const var2([0].i): signed bit<32> = 32'sh00000000;
-  const var3([1].i): signed bit<32> = 32'sh00000001;
-  const var4([2].i): signed bit<32> = 32'sh00000002;
-  const var5([3].i): signed bit<32> = 32'sh00000003;
+  const var2(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    if var0 {
-      var1[32'sh00000000] = 32'sh00000001;
+    for i in 0..4 {
+      if var0 {
+      var1[var2] = 32'sh00000001;
     } else {
-      var1[32'sh00000000] = 32'sh00000000;
+      var1[var2] = 32'sh00000000;
     }
-    if var0 {
-      var1[32'sh00000001] = 32'sh00000001;
-    } else {
-      var1[32'sh00000001] = 32'sh00000000;
-    }
-    if var0 {
-      var1[32'sh00000002] = 32'sh00000001;
-    } else {
-      var1[32'sh00000002] = 32'sh00000000;
-    }
-    if var0 {
-      var1[32'sh00000003] = 32'sh00000001;
-    } else {
-      var1[32'sh00000003] = 32'sh00000000;
     }
   }
 }
@@ -3385,6 +3549,11 @@ fn const_fold_switch_arm() {
 
 #[track_caller]
 fn ff_flags(code: &str) -> Vec<(String, bool)> {
+    ff_flags_and_table_len(code).0
+}
+
+#[track_caller]
+fn analyzed_module(code: &str) -> (crate::ir::Module, Context) {
     symbol_table::clear();
     attribute_table::clear();
 
@@ -3402,26 +3571,162 @@ fn ff_flags(code: &str) -> Vec<(String, bool)> {
         .components
         .iter()
         .find_map(|x| match x {
-            crate::ir::Component::Module(m) => Some(m),
+            crate::ir::Component::Module(m) => Some(m.clone()),
             _ => None,
         })
         .expect("module");
-    let mut ret: Vec<(String, bool)> = module
-        .ff_table
-        .table
-        .iter()
-        .filter(|(_, entry)| entry.assigned.is_some())
-        .map(|((id, _), entry)| {
+    (module, context)
+}
+
+/// Every element the table records, with those only a write through an
+/// unevaluated index reaches listed one by one.
+fn ff_table_elements(table: &crate::ir::FfTable) -> Vec<(crate::ir::VarId, usize)> {
+    let mut keys: Vec<_> = table.table.keys().copied().collect();
+    for (id, w) in &table.whole_assigned {
+        keys.extend(
+            (0..w.len)
+                .filter(|i| !table.table.contains_key(&(*id, *i)))
+                .map(|i| (*id, i)),
+        );
+    }
+    keys
+}
+
+#[track_caller]
+fn ff_flags_and_table_len(code: &str) -> (Vec<(String, bool)>, usize) {
+    let (module, _) = analyzed_module(code);
+    let table = &module.ff_table;
+    let mut ret: Vec<(String, bool)> = ff_table_elements(table)
+        .into_iter()
+        .filter(|(id, i)| table.writers(*id, *i).0.is_some())
+        .map(|(id, i)| {
             let name = module
                 .variables
-                .get(id)
+                .get(&id)
                 .map(|v| v.path.to_string())
                 .unwrap_or_default();
-            (name, entry.is_ff)
+            (name, table.is_ff(id, i))
         })
         .collect();
     ret.sort();
-    ret
+    (ret, table.table.len())
+}
+
+/// The compact FF table answers every per-element query the way the table
+/// with one entry per element written does.
+#[track_caller]
+fn assert_ff_table_matches_per_element(code: &str) {
+    use crate::ir::FfTable;
+
+    let (module, mut context) = analyzed_module(code);
+    let compact = module.build_ff_table(&mut context, FfTable::default());
+    let reference = module.build_ff_table(&mut context, FfTable::per_element());
+    assert!(!compact.whole_assigned.is_empty(), "nothing to compare");
+
+    let saved_vars = std::mem::replace(&mut context.variables, module.variables.clone());
+    let saved_funcs = std::mem::replace(&mut context.functions, module.functions.clone());
+    let unsafe_compact =
+        crate::ir::write_count::unsafe_self_reads(&module.declarations, &mut context, false);
+    let unsafe_reference =
+        crate::ir::write_count::unsafe_self_reads(&module.declarations, &mut context, true);
+    context.variables = saved_vars;
+    context.functions = saved_funcs;
+
+    let mut forced_compact = compact.clone();
+    forced_compact.force_all_ff();
+    let mut forced_reference = reference.clone();
+    forced_reference.force_all_ff();
+
+    let mut checked = 0;
+    for (id, variable) in &module.variables {
+        let name = variable.path.to_string();
+        assert_eq!(
+            compact.has_ff_writer(*id),
+            reference.has_ff_writer(*id),
+            "{name}"
+        );
+        let Some(total) = variable.r#type.total_array() else {
+            continue;
+        };
+        for i in 0..total {
+            let at = format!("{name}[{i}]");
+            assert_eq!(compact.writers(*id, i), reference.writers(*id, i), "{at}");
+            assert_eq!(compact.is_ff(*id, i), reference.is_ff(*id, i), "{at}");
+            assert_eq!(
+                forced_compact.is_ff(*id, i),
+                forced_reference.is_ff(*id, i),
+                "{at}"
+            );
+            let refered = |table: &FfTable| {
+                let mut x: Vec<_> = table.refered(*id, i).map(|r| format!("{r:?}")).collect();
+                x.sort();
+                x
+            };
+            assert_eq!(refered(&compact), refered(&reference), "{at}");
+            for decl in 0..module.declarations.len() {
+                assert_eq!(
+                    unsafe_compact.contains(decl, *id, i),
+                    unsafe_reference.contains(decl, *id, i),
+                    "{at} in declaration {decl}"
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+    assert!(compact.table.len() < reference.table.len());
+
+    let plans = |table: &FfTable| {
+        let mut x: Vec<_> = crate::ir::comb_to_ff_hoist::plan_hoists(
+            &module.declarations,
+            table,
+            &module.variables,
+        )
+        .into_iter()
+        .map(|p| (p.var_id, p.var_index, p.comb_decl_idx, p.ff_decl_idx))
+        .collect();
+        x.sort();
+        x
+    };
+    assert_eq!(plans(&compact), plans(&reference));
+}
+
+#[test]
+fn comb_function_output_is_a_comb_write() {
+    // A call in an always_comb expression writes its output there, not in
+    // the always_ff that reads it.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock   ,
+        i_rst: input  reset   ,
+        a    : input  logic<4>,
+        o    : output logic<4>,
+    ) {
+        function bump (
+            x: input  logic<4>,
+            y: output logic<4>,
+        ) -> logic<4> {
+            y = x + 1;
+            return x;
+        }
+        var c: logic<4>;
+        var r: logic<4>;
+        var q: logic<4>;
+        always_comb {
+            r = bump(a, c);
+        }
+        always_ff {
+            if_reset {
+                q = 0;
+            } else {
+                q = c;
+            }
+        }
+        assign o = q;
+    }
+    "#;
+
+    assert_eq!(ff_flags(code), vec![("q".to_string(), false)]);
 }
 
 #[test]
@@ -3477,6 +3782,192 @@ fn ff_opt_counts_branches_by_max() {
 }
 
 #[test]
+fn ff_table_keeps_a_runtime_indexed_read_once_per_array() {
+    // `i_idx[1]` does not evaluate, so the read reaches every element of
+    // `mem`: it must still make the element written by the other block a
+    // register, without an entry per element per read.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock         ,
+        i_rst: input  reset         ,
+        i_idx: input  logic<12> [2] ,
+        i_d  : input  logic<8>      ,
+        o_q  : output logic<8>  [4] ,
+    ) {
+        var mem: logic<8> [4096];
+        var q  : logic<8> [4];
+        always_ff {
+            mem[3] = i_d;
+        }
+        always_ff {
+            for k in 0..4 {
+                q[k] = mem[i_idx[1] + k];
+            }
+        }
+        assign o_q = q;
+    }
+    "#;
+
+    let (flags, table_len) = ff_flags_and_table_len(code);
+    assert!(flags.contains(&("mem".to_string(), true)), "{flags:?}");
+    assert!(table_len < 64, "{table_len} entries");
+}
+
+#[test]
+fn ff_table_keeps_a_runtime_indexed_write_once_per_array() {
+    // Each write and the self-read reach every element of `mem` through an
+    // index that does not evaluate: none of them may cost an entry per
+    // element, in the table or in the self-read analysis.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock         ,
+        i_rst: input  reset         ,
+        i_idx: input  logic<12> [4] ,
+        i_d  : input  logic<8>      ,
+        o_q  : output logic<8>      ,
+    ) {
+        var mem: logic<8> [4096];
+        always_ff {
+            mem[i_idx[0]] = i_d;
+            mem[i_idx[1]] = i_d + 1;
+            mem[i_idx[2]] = mem[i_idx[3]] + 1;
+        }
+        assign o_q = mem[i_idx[0]];
+    }
+    "#;
+
+    let (module, mut context) = analyzed_module(code);
+    let table = &module.ff_table;
+    assert!(table.table.len() < 64, "{} entries", table.table.len());
+    let id = *table.whole_assigned.keys().next().expect("a whole write");
+    assert!((0..4096).all(|i| table.is_ff(id, i)));
+
+    let saved_vars = std::mem::replace(&mut context.variables, module.variables.clone());
+    let unsafe_reads =
+        crate::ir::write_count::unsafe_self_reads(&module.declarations, &mut context, false);
+    context.variables = saved_vars;
+    assert!(unsafe_reads.contains(0, id, 4095));
+    assert!(
+        unsafe_reads.stored() < 64,
+        "{} stored",
+        unsafe_reads.stored()
+    );
+}
+
+#[test]
+fn ff_table_compact_writes_keep_the_order_of_writes() {
+    // `assigned` is the last writer in gather order: interleave writes
+    // through an unevaluated index with per-element ones and references in
+    // every order, including elements first seen after a whole write.
+    use crate::ir::{FfTable, VarId};
+
+    let id = VarId::from_raw(1);
+    let len = 6;
+    let mut seed: u64 = 1;
+    let mut next = |n: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((seed >> 33) % n) as usize
+    };
+    for _ in 0..500 {
+        let mut compact = FfTable::default();
+        let mut reference = FfTable::per_element();
+        for _ in 0..next(12) {
+            let (op, index, decl) = (next(5), next(len as u64), next(3));
+            for table in [&mut compact, &mut reference] {
+                match op {
+                    0 => table.insert_assigned(id, index, decl),
+                    1 => table.insert_assigned_whole(id, len, decl),
+                    2 => table.insert_assigned_comb(id, index, decl),
+                    3 => table.insert_assigned_comb_whole(id, len, decl),
+                    _ => table.insert_refered(id, index, decl, None, 1u32.into(), true),
+                }
+            }
+        }
+        assert_eq!(compact.has_ff_writer(id), reference.has_ff_writer(id));
+        for i in 0..len {
+            assert_eq!(compact.writers(id, i), reference.writers(id, i));
+            assert_eq!(
+                compact.refered(id, i).count(),
+                reference.refered(id, i).count()
+            );
+        }
+    }
+}
+
+#[test]
+fn ff_table_compact_form_matches_per_element() {
+    // Runtime-indexed writes mixed with const-indexed ones, self-reads that
+    // name one element or all of them, bit selects, branches, reads from
+    // a second block, a runtime loop bound, and comb writes, one through a
+    // function output: every per-element answer must equal the per-element
+    // table's.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock        ,
+        i_rst: input  reset        ,
+        i_i  : input  logic<4> [3] ,
+        i_c  : input  logic        ,
+        i_d  : input  logic<8>     ,
+        o_q  : output logic<8>     ,
+        o_r  : output logic<8>     ,
+        o_s  : output logic<8>     ,
+    ) {
+        var mem : logic<8> [16];
+        var cnt : logic<8> [16];
+        var pair: logic<8> [16];
+        var lut : logic<8> [16];
+        var q   : logic<8>;
+        var r   : logic<8>;
+
+        function put (
+            v: input  logic<8>,
+            o: output logic<8>,
+        ) {
+            o = v;
+        }
+
+        always_ff {
+            if_reset {
+                mem[0] = 0;
+            } else {
+                if i_c {
+                    mem[i_i[0]] = i_d;
+                } else {
+                    mem[3] = mem[i_i[1]] + 1;
+                }
+                mem[5]           = mem[5] + mem[i_i[0]];
+                mem[i_i[1]][3:0] = mem[i_i[1]][7:4];
+                cnt[i_i[0]]      = cnt[i_i[0]] + 1;
+                cnt[2]           = cnt[2] + 1;
+                pair[i_i[1]]     = i_d;
+                for k in 0..i_i[2] {
+                    cnt[i_i[1]] = cnt[i_i[1]] + 1;
+                }
+            }
+        }
+        always_ff {
+            q = mem[i_i[1]] ^ cnt[i_i[1]];
+            r = cnt[4] ^ pair[7];
+        }
+        always_comb {
+            for k in 0..16 {
+                lut[k] = 0;
+            }
+            lut[i_i[0]] = i_d;
+            put(i_d, lut[i_i[1]]);
+        }
+        assign o_q = q;
+        assign o_r = r ^ pair[i_i[1]];
+        assign o_s = lut[i_i[1]];
+    }
+    "#;
+
+    assert_ff_table_matches_per_element(code);
+}
+
+#[test]
 fn ff_opt_keeps_a_shift_that_reads_before_it_writes() {
     // A pipeline shifted from the far end reads each bit before the loop
     // reaches it, so no read observes a write and the comb form survives;
@@ -3512,4 +4003,774 @@ fn ff_opt_keeps_a_shift_that_reads_before_it_writes() {
         ff_flags(code),
         vec![("down".to_string(), false), ("up".to_string(), true)]
     );
+}
+
+/// A `break` decided by a local initialised before the loop: the loop peels
+/// into its three iterations in the simulator's IR only.
+#[test]
+fn comb_for_break_decided_by_local_peels() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<8>,
+        q: output logic<32>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 6;
+            o = 0;
+            for _s in 0..6 {
+                if n <= 2 {
+                    break;
+                }
+                n = n - n / 3;
+                o = o + d;
+            }
+            q = n;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(q): logic<32> = 32'hxxxxxxxx;
+  var var3(n): bit<32> = 32'hxxxxxxxx;
+  const var4(_s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var3 = 32'sh00000006;
+    var1 = 32'sh00000000;
+    var3 = (var3 - (var3 / 32'sh00000003));
+    var1 = (var1 + var0);
+    var3 = (var3 - (var3 / 32'sh00000003));
+    var1 = (var1 + var0);
+    var3 = (var3 - (var3 / 32'sh00000003));
+    var1 = (var1 + var0);
+    var2 = var3;
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+
+    // The analyzer's own IR, which its checks and the emitter read, keeps
+    // the runtime loop.
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(q): logic<32> = 32'hxxxxxxxx;
+  var var3(n): bit<32> = 32'hxxxxxxxx;
+  const var4(_s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var3 = 32'sh00000006;
+    var1 = 32'sh00000000;
+    for _s in 0..6 {
+      if (var3 <= 32'sh00000002) {
+      break;
+    }
+      var3 = (var3 - (var3 / 32'sh00000003));
+      var1 = (var1 + var0);
+    }
+    var2 = var3;
+  }
+}
+"#;
+    check_ir(code, exp);
+}
+
+/// Every read of the iterator becomes its value, as in an ordinary unrolled
+/// loop, and nothing else in the body changes.
+#[test]
+fn peeled_iterator_reads_are_its_value() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<32>,
+        o: output logic<8>,
+        p: output logic<32>,
+    ) {
+        var ia: logic<8> [4];
+        var ta: logic<8> [8];
+        var n : u32;
+        var st: u32;
+        always_comb {
+            for i in 0..4 {
+                ia[i] = d[i * 8+:8];
+            }
+            for i in 0..8 {
+                ta[i] = 0;
+            }
+            n  = 4;
+            st = 0;
+            o  = 0;
+            for s in 0..4 {
+                if n <= 1 {
+                    break;
+                }
+                ta[s] = ia[s];
+                o[s]  = ia[s][s];
+                n     = n - 1;
+                st    = st + s;
+            }
+            p = st;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<32> = 32'hxxxxxxxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(p): logic<32> = 32'hxxxxxxxx;
+  var var3[0](ia): logic<8> = 8'hxx;
+  var var3[1](ia): logic<8> = 8'hxx;
+  var var3[2](ia): logic<8> = 8'hxx;
+  var var3[3](ia): logic<8> = 8'hxx;
+  var var4[0](ta): logic<8> = 8'hxx;
+  var var4[1](ta): logic<8> = 8'hxx;
+  var var4[2](ta): logic<8> = 8'hxx;
+  var var4[3](ta): logic<8> = 8'hxx;
+  var var4[4](ta): logic<8> = 8'hxx;
+  var var4[5](ta): logic<8> = 8'hxx;
+  var var4[6](ta): logic<8> = 8'hxx;
+  var var4[7](ta): logic<8> = 8'hxx;
+  var var5(n): bit<32> = 32'hxxxxxxxx;
+  var var6(st): bit<32> = 32'hxxxxxxxx;
+  const var7(i): signed bit<32> = 32'shxxxxxxxx;
+  const var8(i): signed bit<32> = 32'shxxxxxxxx;
+  const var9(s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    for i in 0..4 {
+      var3[var7] = var0[(var7 * 32'sh00000008)+:32'sh00000008];
+    }
+    for i in 0..8 {
+      var4[var8] = 32'sh00000000;
+    }
+    var5 = 32'sh00000004;
+    var6 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    var4[32'sh00000000] = var3[32'sh00000000];
+    var1[32'sh00000000] = var3[32'sh00000000][32'sh00000000];
+    var5 = (var5 - 32'sh00000001);
+    var6 = (var6 + 32'sh00000000);
+    var4[32'sh00000001] = var3[32'sh00000001];
+    var1[32'sh00000001] = var3[32'sh00000001][32'sh00000001];
+    var5 = (var5 - 32'sh00000001);
+    var6 = (var6 + 32'sh00000001);
+    var4[32'sh00000002] = var3[32'sh00000002];
+    var1[32'sh00000002] = var3[32'sh00000002][32'sh00000002];
+    var5 = (var5 - 32'sh00000001);
+    var6 = (var6 + 32'sh00000002);
+    var2 = var6;
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// Native peeling agrees with per-iteration analysis specialization on
+/// the values and types of iterator reads, indices and selects.
+#[test]
+fn peeled_copy_matches_iteration_specialization() {
+    use crate::ir::{Declaration, Expression, Factor, Statement, VarIndex, VarSelect};
+
+    fn selector(index: &VarIndex, select: &VarSelect) -> String {
+        let mut ret: Vec<String> = index.indices.iter().chain(&select.0).map(expr).collect();
+        if let Some((op, x)) = &select.1 {
+            ret.push(format!("{op:?} {}", expr(x)));
+        }
+        ret.join(", ")
+    }
+
+    fn expr(x: &Expression) -> String {
+        match x {
+            Expression::Term(x) => match x.as_ref() {
+                Factor::Variable(id, index, select, _) => {
+                    format!("{id}[{}]", selector(index, select))
+                }
+                Factor::Value(x) => {
+                    format!("{:?} {:?} {}", x.get_value(), x.r#type, x.is_const)
+                }
+                _ => unreachable!(),
+            },
+            Expression::Binary(x, op, y, _) => format!("({} {op} {})", expr(x), expr(y)),
+            _ => unreachable!(),
+        }
+    }
+
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        m: input  logic<8>,
+        x: output logic<8>,
+        y: output logic<8>,
+    ) {
+        var a: logic<8> [8];
+        var b: logic<8> [8];
+        var n: u32;
+        always_comb {
+            n = 0;
+            for i in 0..8 {
+                if n == 1 {
+                    break;
+                }
+                a[i] = d & m;
+                x[i] = d[i] ^ m[i];
+            }
+        }
+        always_comb {
+            for i in 0..8 {
+                b[i] = d & m;
+                y[i] = d[i] ^ m[i];
+            }
+        }
+    }
+    "#;
+
+    let ir = analyzed_ir(code, true);
+    let Some(Component::Module(module)) = ir.components.first() else {
+        unreachable!();
+    };
+    let combs: Vec<&[Statement]> = module
+        .declarations
+        .iter()
+        .filter_map(|x| match x {
+            Declaration::Comb(x) => Some(x.statements.as_slice()),
+            _ => None,
+        })
+        .collect();
+    let [peeled, unrolled] = combs.as_slice() else {
+        unreachable!();
+    };
+    let stmt = |x: &Statement| match x {
+        Statement::Assign(x) => {
+            let dst: Vec<String> = x
+                .dst
+                .iter()
+                .map(|x| selector(&x.index, &x.select))
+                .collect();
+            format!("[{}] = {}", dst.join(", "), expr(&x.expr))
+        }
+        _ => unreachable!(),
+    };
+    let peeled: Vec<String> = peeled[1..].iter().map(stmt).collect();
+    let [Statement::For(looped)] = *unrolled else {
+        unreachable!();
+    };
+    let mut context = crate::conv::Context::default();
+    context.variables = module.variables.clone();
+    let unrolled: Vec<String> = (0..8)
+        .flat_map(|iteration| {
+            crate::ir::peel::specialize_iteration(&mut context, looped, iteration).unwrap()
+        })
+        .map(|statement| stmt(&statement))
+        .collect();
+    assert_eq!(peeled.len(), 16);
+    assert_eq!(peeled, unrolled);
+}
+
+/// Each copy reads the iterator as its constant, in an `if` it decides and
+/// in an assignment alike.
+#[test]
+fn peeled_iterator_reads_are_constants() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<32>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 0;
+            o = 0;
+            for s in 0..4 {
+                if n == 2 {
+                    break;
+                }
+                if s == 0 {
+                    o = o + d;
+                }
+                o = o + s;
+                n = n + 1;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<32> = 32'hxxxxxxxx;
+  var var2(n): bit<32> = 32'hxxxxxxxx;
+  const var3(s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var2 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    var1 = (var1 + var0);
+    var1 = (var1 + 32'sh00000000);
+    var2 = (var2 + 32'sh00000001);
+    var1 = (var1 + 32'sh00000001);
+    var2 = (var2 + 32'sh00000001);
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// A select of the iterator is read as the select of its constant.
+#[test]
+fn peeled_iterator_select_is_constant() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 0;
+            o = 0;
+            for s in 0..4 {
+                if n == 2 {
+                    break;
+                }
+                o = o + s[1:0];
+                n = n + 1;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  output var0(o): logic<32> = 32'hxxxxxxxx;
+  var var1(n): bit<32> = 32'hxxxxxxxx;
+  const var2(s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var1 = 32'sh00000000;
+    var0 = 32'sh00000000;
+    var0 = (var0 + 2'h0);
+    var1 = (var1 + 32'sh00000001);
+    var0 = (var0 + 2'h1);
+    var1 = (var1 + 32'sh00000001);
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// The outer `break` sits in a `case` arm and the inner loop's in an
+/// `if` chain whose other arms read the outer local: every copy of both
+/// decides.
+#[test]
+fn comb_for_break_in_case_and_nested_for_peels() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<8>,
+        q: output logic<8>,
+    ) {
+        var k: logic<8>;
+        always_comb {
+            k = 0;
+            o = 0;
+            for _i in 0..3 {
+                case k {
+                    2      : break;
+                    default: o = o + d;
+                }
+                for j in 0..4 {
+                    if j == 2 {
+                        break;
+                    } else if k == 1 {
+                        o = o + 2;
+                    } else {
+                        o = o + 1;
+                    }
+                }
+                k = k + 1;
+            }
+            q = k;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(q): logic<8> = 8'hxx;
+  var var3(k): logic<8> = 8'hxx;
+  const var4(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var5(j): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var3 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    var1 = (var1 + var0);
+    var1 = (var1 + 32'sh00000001);
+    var1 = (var1 + 32'sh00000001);
+    var3 = (var3 + 32'sh00000001);
+    var1 = (var1 + var0);
+    var1 = (var1 + 32'sh00000002);
+    var1 = (var1 + 32'sh00000002);
+    var3 = (var3 + 32'sh00000001);
+    var2 = var3;
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// A runtime loop inside a peeled one is kept as converted: nothing its
+/// body writes folds its conditions, and after it that write is unknown.
+/// Its two copies are no more runtime loops than the two loops they replace.
+#[test]
+fn runtime_loop_inside_peeled_loop_is_kept() {
+    let code = r#"
+    module ModuleA (
+        m: input  logic<4>,
+        d: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var t: logic<8>;
+        var n: u32;
+        always_comb {
+            n = 2;
+            o = 0;
+            t = 0;
+            for _s in 0..4 {
+                if n == 0 {
+                    break;
+                }
+                for _j in 0..m {
+                    t = 1;
+                    if t == 1 {
+                        o = o + d;
+                    } else {
+                        o = o + 1;
+                    }
+                }
+                if t == 1 {
+                    o = o + 4;
+                }
+                n = n - 1;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(m): logic<4> = 4'hx;
+  input var1(d): logic<8> = 8'hxx;
+  output var2(o): logic<8> = 8'hxx;
+  var var3(t): logic<8> = 8'hxx;
+  var var4(n): bit<32> = 32'hxxxxxxxx;
+  const var5(_s): signed bit<32> = 32'shxxxxxxxx;
+  const var6(_j): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var4 = 32'sh00000002;
+    var2 = 32'sh00000000;
+    var3 = 32'sh00000000;
+    for _j in 0..var0 {
+      var3 = 32'sh00000001;
+      if (var3 == 32'sh00000001) {
+      var2 = (var2 + var1);
+    } else {
+      var2 = (var2 + 32'sh00000001);
+    }
+    }
+    if (var3 == 32'sh00000001) {
+      var2 = (var2 + 32'sh00000004);
+    }
+    var4 = (var4 - 32'sh00000001);
+    for _j in 0..var0 {
+      var3 = 32'sh00000001;
+      if (var3 == 32'sh00000001) {
+      var2 = (var2 + var1);
+    } else {
+      var2 = (var2 + 32'sh00000001);
+    }
+    }
+    if (var3 == 32'sh00000001) {
+      var2 = (var2 + 32'sh00000004);
+    }
+    var4 = (var4 - 32'sh00000001);
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// Loops that stay exactly as converted: a `break` on data, on a local only
+/// conditionally written, on a local after a call that writes it, on a local
+/// holding X, and in an `always_ff`.
+#[test]
+fn undecided_break_loops_are_kept_as_converted() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        a    : input  logic<8>,
+        o    : output logic<8>,
+        p    : output logic<8>,
+        q    : output logic<8>,
+        r    : output logic<8>,
+        f    : output logic<8>,
+    ) {
+        function bump (
+            x: input  logic<8>,
+            y: output logic<8>,
+        ) -> logic<8> {
+            y = x + 1;
+            return x + 2;
+        }
+        var k: logic<8>;
+        var c: logic<8>;
+        var m: logic<8>;
+        always_comb {
+            o = 4'hf;
+            for i in 0..8 {
+                if a[i] {
+                    o = i[7:0];
+                    break;
+                }
+            }
+        }
+        always_comb {
+            if a[0] {
+                c = 1;
+            } else {
+                c = 2;
+            }
+            p = 0;
+            for _i in 0..8 {
+                if c == 3 {
+                    break;
+                }
+                p = p + 1;
+                c = c + 1;
+            }
+        }
+        always_comb {
+            k = 0;
+            q = a;
+            for _i in 0..8 {
+                if k >= 3 {
+                    break;
+                }
+                q = bump(q, k);
+            }
+        }
+        always_comb {
+            m = 'x;
+            r = 0;
+            for _i in 0..8 {
+                if m == 0 {
+                    break;
+                }
+                r = r + 1;
+            }
+        }
+        always_ff {
+            if_reset {
+                f = 0;
+            } else {
+                for i in 0..8 {
+                    if i == 3 {
+                        break;
+                    }
+                    f = f + a;
+                }
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(i_clk): clock = 1'hx;
+  input var1(i_rst): reset = 1'hx;
+  input var2(a): logic<8> = 8'hxx;
+  output var3(o): logic<8> = 8'hxx;
+  output var4(p): logic<8> = 8'hxx;
+  output var5(q): logic<8> = 8'hxx;
+  output var6(r): logic<8> = 8'hxx;
+  output var7(f): logic<8> = 8'hxx;
+  var var9(bump.return): logic<8> = 8'hxx;
+  input var10(bump.x): logic<8> = 8'hxx;
+  output var11(bump.y): logic<8> = 8'hxx;
+  var var12(k): logic<8> = 8'hxx;
+  var var13(c): logic<8> = 8'hxx;
+  var var14(m): logic<8> = 8'hxx;
+  const var15(i): signed bit<32> = 32'shxxxxxxxx;
+  const var16(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var17(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var18(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var19(i): signed bit<32> = 32'shxxxxxxxx;
+  func var8(bump) -> var9 {
+    var11 = (var10 + 32'sh00000001);
+    var9 = (var10 + 32'sh00000002);
+  }
+
+  comb {
+    var3 = 4'hf;
+    for i in 0..8 {
+      if var2[var15] {
+      var3 = var15[32'sh00000007:32'sh00000000];
+      break;
+    }
+    }
+  }
+  comb {
+    if var2[32'sh00000000] {
+      var13 = 32'sh00000001;
+    } else {
+      var13 = 32'sh00000002;
+    }
+    var4 = 32'sh00000000;
+    for _i in 0..8 {
+      if (var13 == 32'sh00000003) {
+      break;
+    }
+      var4 = (var4 + 32'sh00000001);
+      var13 = (var13 + 32'sh00000001);
+    }
+  }
+  comb {
+    var12 = 32'sh00000000;
+    var5 = var2;
+    for _i in 0..8 {
+      if (var12 >= 32'sh00000003) {
+      break;
+    }
+      var5 = var8(x: var5, y: var12);
+    }
+  }
+  comb {
+    var14 = 'x;
+    var6 = 32'sh00000000;
+    for _i in 0..8 {
+      if (var14 == 32'sh00000000) {
+      break;
+    }
+      var6 = (var6 + 32'sh00000001);
+    }
+  }
+  ff (var0, var1) {
+    if_reset {
+      var7 = 32'sh00000000;
+    } else {
+      for i in 0..8 {
+        if (var19 == 32'sh00000003) {
+        break;
+      }
+        var7 = (var7 + var2);
+      }
+    }
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// A loop that would flatten into more nodes than a peel may emit stays as
+/// converted, here 3000 copies of its body.
+#[test]
+fn break_loop_over_emit_limit_is_kept_as_converted() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 0;
+            o = 0;
+            for _i in 0..5000 {
+                if n == 3000 {
+                    break;
+                }
+                n = n + 1;
+                o = o + (d ^ 8'd1) + (d ^ 8'd2) + (d ^ 8'd3) + (d ^ 8'd4);
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  var var2(n): bit<32> = 32'hxxxxxxxx;
+  const var3(_i): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var2 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    for _i in 0..5000 {
+      if (var2 == 32'sh00000bb8) {
+      break;
+    }
+      var2 = (var2 + 32'sh00000001);
+      var1 = ((((var1 + (var0 ^ 8'h01)) + (var0 ^ 8'h02)) + (var0 ^ 8'h03)) + (var0 ^ 8'h04));
+    }
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+#[test]
+fn ff_table_array_slice_reads_match_per_element() {
+    assert_ff_table_matches_per_element(
+        r#"
+    module ModuleA(clk: input clock, idx: input logic<3>[1], d: input logic<8>, o: output logic<16>) {
+        var mem: logic<8>[8];
+        var selected: logic<8>[2];
+        always_ff { mem[idx[0]] = d; }
+        always_ff { selected = mem[2+:2]; }
+        assign o = {selected[1], selected[0]};
+    }
+    "#,
+    );
+    assert_ff_table_matches_per_element(
+        r#"
+    module ModuleA(clk: input clock, idx: input logic<3>[1], d: input logic<8>, o: output logic<8>) {
+        var mem: logic<8>[8];
+        function first(pair: input logic<8>[2]) -> logic<8> { return pair[0]; }
+        always_ff {
+            mem[idx[0]] = d;
+            mem[idx[0]] = first(mem[2+:2]);
+            mem[0] = mem[0] + 1;
+        }
+        assign o = mem[0];
+    }
+    "#,
+    );
+}
+
+#[test]
+fn constant_procedural_loops_keep_one_body_and_one_iterator() {
+    for count in [4, 16_384] {
+        let code = format!(
+            "module Top(o: output logic<32>) {{ always_comb {{ for i in 0..{count} {{ o = i; }} }} }}"
+        );
+        let ir = analyzed_ir(&code, false);
+        let [Component::Module(module)] = ir.components.as_slice() else {
+            panic!("expected one module");
+        };
+        assert_eq!(module.variables.len(), 2, "count={count}");
+        let [crate::ir::Declaration::Comb(comb)] = module.declarations.as_slice() else {
+            panic!("expected one process");
+        };
+        let [crate::ir::Statement::For(statement)] = comb.statements.as_slice() else {
+            panic!("expected a retained loop");
+        };
+        assert_eq!(statement.body.len(), 1, "count={count}");
+        assert!(matches!(statement.body[0], crate::ir::Statement::Assign(_)));
+    }
 }

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+non_constant_output_select (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#non_constant_output_select)
+
+  × a select of an output port connection must be a constant
+   ╭─[../../testcases/error/non_constant_output_select.veryl:7:20]
+ 6 │     inst u: ModuleB (
+ 7 │         o: {o_bits[i_index], o_tail},
+   ·                    ───┬───
+   ·                       ╰── Error location
+ 8 │     );
+   ╰────
+  help: use a constant index for the output connection

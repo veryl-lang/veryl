@@ -1252,6 +1252,153 @@ fn component_on_gated_clock_fires_with_the_gate() {
 }
 
 #[test]
+fn component_on_a_falling_edge_stages_settled_inputs() {
+    // Staging reads the component's inputs, so a falling-edge batch a
+    // component listens to must see a settled comb, or the mirror samples
+    // `w` from before the rising edge.
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<8>;
+        var q_comp: logic<8>;
+        var q_rtl: logic<8>;
+        let w: logic<8> = cnt + 1;
+        let clk_n: '_ clock_negedge = clk;
+
+        inst dut: Counter (clk, rst, cnt);
+
+        always_ff (clk_n) { q_rtl = cnt; }
+        // A reader outside the component keeps `w` in storage.
+        var w_rtl: logic<8>;
+        always_ff (clk) { w_rtl = w; }
+
+        inst mirror: $comp::mirror ( clk: clk_n, d: w, q: q_comp );
+
+        initial {
+            q_comp = 0;
+            rst.assert();
+            clk.next(3);
+            $assert(q_rtl == cnt, "rtl flop on the falling edge");
+            $assert(q_comp == cnt + 1, "component staged a settled w");
+            clk.next(2);
+            $assert(q_comp == cnt + 1, "component staged a settled w");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn component_input_read_by_no_statement_stays_in_storage() {
+    // `w`'s only reader is the component.
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<8>;
+        var q_comp: logic<8>;
+        let w: logic<8> = cnt + 1;
+        let clk_n: '_ clock_negedge = clk;
+
+        inst dut: Counter (clk, rst, cnt);
+
+        inst mirror: $comp::mirror ( clk: clk_n, d: w, q: q_comp );
+
+        initial {
+            q_comp = 0;
+            rst.assert();
+            clk.next(3);
+            $assert(q_comp == cnt + 1, "component staged a settled w");
+            clk.next(2);
+            $assert(q_comp == cnt + 1, "component staged a settled w");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn component_input_with_a_runtime_index_keeps_every_element() {
+    // `arr[1]`'s only reader is the component, through a runtime index.
+    let code = r#"
+    module Child (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<8>,
+    ) {
+        var arr: logic<8> [4];
+        always_comb {
+            arr[0] = cnt;
+            arr[2] = cnt + 2;
+            arr[3] = cnt + 3;
+        }
+        assign arr[1][3:0] = cnt[3:0] + 1;
+        assign arr[1][7:4] = cnt[7:4];
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<8>;
+        var q_comp: logic<8>;
+        var sel: logic<2>;
+        let clk_n: '_ clock_negedge = clk;
+
+        inst dut: Child (clk, rst, cnt);
+
+        inst mirror: $comp::mirror ( clk: clk_n, d: dut.arr[sel], q: q_comp );
+
+        initial {
+            q_comp = 0;
+            sel = 1;
+            rst.assert();
+            clk.next(3);
+            $assert(q_comp[3:0] == cnt[3:0] + 1 && q_comp[7:4] == cnt[7:4], "component staged a settled arr[1]");
+            clk.next(2);
+            $assert(q_comp[3:0] == cnt[3:0] + 1 && q_comp[7:4] == cnt[7:4], "component staged a settled arr[1]");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
 fn component_on_reset_fires_on_reset_edges() {
     // A connected reset port fires `on_reset` on every reset edge, and all
     // of them precede the first `on_clock` (the component asserts the

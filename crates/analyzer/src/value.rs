@@ -86,16 +86,8 @@ pub fn string_to_byte_value(s: &str) -> Value {
     }
 }
 
-/// Convert a byte-packed Value back to a String (inverse of string_to_byte_value).
-pub fn byte_value_to_string(value: &Value) -> Option<String> {
-    let width = value.width();
-    if width == 0 {
-        return Some(String::new());
-    }
-    if !width.is_multiple_of(8) {
-        return None;
-    }
-    let num_bytes = width / 8;
+/// The value's bytes, most significant first, zero-filled above its width.
+fn byte_value_bytes(value: &Value, num_bytes: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; num_bytes];
     match value {
         Value::U64(v) => {
@@ -114,7 +106,36 @@ pub fn byte_value_to_string(value: &Value) -> Option<String> {
             }
         }
     }
-    String::from_utf8(bytes).ok()
+    bytes
+}
+
+/// Convert a byte-packed Value back to a String (inverse of string_to_byte_value).
+pub fn byte_value_to_string(value: &Value) -> Option<String> {
+    let width = value.width();
+    if width == 0 {
+        return Some(String::new());
+    }
+    if !width.is_multiple_of(8) {
+        return None;
+    }
+    String::from_utf8(byte_value_bytes(value, width / 8)).ok()
+}
+
+/// Text for a `%s` argument. Unlike `byte_value_to_string` this always
+/// renders characters: a width that is not a whole number of bytes is
+/// zero-extended to one, and bytes that are not valid UTF-8 are replaced.
+/// Leading NUL bytes are the zero padding of text shorter than its storage
+/// (a `string` variable sized for its longest value), so they are skipped.
+pub fn byte_value_to_string_lossy(value: &Value) -> String {
+    let num_bytes = value.width().div_ceil(8);
+    let bytes = byte_value_bytes(value, num_bytes);
+    let start = bytes.iter().position(|x| *x != 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
+}
+
+/// The low 64 bits of a BigUint; `to_u64` is `None` once a higher bit is set.
+fn biguint_low_u64(v: &BigUint) -> u64 {
+    v.iter_u64_digits().next().unwrap_or(0)
 }
 
 /// Convert a BigUint to u128. Returns the low 128 bits.
@@ -1042,8 +1063,28 @@ impl Value {
         }
     }
 
+    /// Replicate a packed value with linear total bit-copying work. The
+    /// geometrically growing blocks avoid copying every preceding repetition
+    /// again. Concatenation also supplies the required unsigned result.
+    pub fn repeat(&self, mut count: usize) -> Value {
+        let mut result = Value::new(0, 0, false);
+        let mut block = self.clone();
+        while count != 0 {
+            if count & 1 != 0 {
+                result = result.concat(&block);
+            }
+            count >>= 1;
+            if count != 0 {
+                block = block.concat(&block);
+            }
+        }
+        result
+    }
+
     pub fn concat(&self, x: &Value) -> Value {
         let width = self.width() + x.width();
+        #[cfg(test)]
+        CONCATENATED_BITS.set(CONCATENATED_BITS.get().saturating_add(width));
 
         if width > 64 {
             let (mut payload, mut mask_xz) = match self {
@@ -1249,8 +1290,8 @@ impl Value {
                 let value = match value {
                     Value::U64(v) => v,
                     Value::BigUint(v) => ValueU64 {
-                        payload: v.payload.to_u64().unwrap_or(0),
-                        mask_xz: v.mask_xz.to_u64().unwrap_or(0),
+                        payload: biguint_low_u64(&v.payload),
+                        mask_xz: biguint_low_u64(&v.mask_xz),
                         width: v.width,
                         signed: v.signed,
                     },
@@ -1339,17 +1380,43 @@ impl Value {
         }
     }
 
-    /// Shift-amount conversion for `>>`/`<<`/`>>>`/`<<<`: a defined amount past
-    /// usize saturates to usize::MAX so the arms clamp it to the width (a full
-    /// shift), where to_usize() would return None and the arms read it as x/0,
-    /// dropping even an in-range amount on a >64-bit operand. x/z keeps None.
+    /// The value as a count, index or bound, whatever its storage width:
+    /// `to_usize` is `None` for every value wider than 64 bits, even a small
+    /// one. A value past usize saturates to usize::MAX, so a bounds check or
+    /// a shift clamp still sees it as too large. x/z is `None`.
     #[inline(always)]
-    pub fn to_shift_amount(&self) -> Option<usize> {
+    pub fn to_usize_saturating(&self) -> Option<usize> {
         match self {
-            Self::U64(x) => x.to_usize(),
+            Self::U64(x) if x.is_xz() => None,
+            Self::U64(x) => Some(x.payload.to_usize().unwrap_or(usize::MAX)),
             Self::BigUint(x) if x.is_xz() => None,
-            Self::BigUint(x) => Some(x.to_usize().unwrap_or(usize::MAX)),
+            Self::BigUint(x) => Some(x.payload.to_usize().unwrap_or(usize::MAX)),
         }
+    }
+
+    /// Logical value (IEEE 1800 11.4.7 and 12.4): `Some(true)` when any bit
+    /// is a known 1, `Some(false)` when every bit is a known 0, and `None`
+    /// when it is ambiguous (no known 1, some x/z).
+    pub fn truth(&self) -> Option<bool> {
+        let (known_one, xz) = match self {
+            Self::U64(x) => (x.payload & !x.mask_xz != 0, x.mask_xz != 0),
+            Self::BigUint(x) => {
+                let known = x.payload.as_ref() ^ (x.payload.as_ref() & x.mask_xz.as_ref());
+                (!known.is_zero(), !x.mask_xz.is_zero())
+            }
+        };
+        if known_one {
+            Some(true)
+        } else if xz {
+            None
+        } else {
+            Some(false)
+        }
+    }
+
+    /// Whether an `if` takes its true branch: x/z alone reads as false.
+    pub fn is_true(&self) -> bool {
+        self.truth() == Some(true)
     }
 
     #[inline(always)]
@@ -1409,7 +1476,7 @@ impl Value {
     pub fn payload_u64(&self) -> u64 {
         match self {
             Self::U64(x) => x.payload,
-            Self::BigUint(x) => x.payload.to_u64().unwrap_or(0),
+            Self::BigUint(x) => biguint_low_u64(&x.payload),
         }
     }
 
@@ -1445,8 +1512,8 @@ impl Value {
         let m = biguint_from_le_bytes(mask_xz);
         if width <= 64 {
             Value::U64(ValueU64 {
-                payload: p.to_u64().unwrap_or(0),
-                mask_xz: m.to_u64().unwrap_or(0),
+                payload: biguint_low_u64(&p),
+                mask_xz: biguint_low_u64(&m),
                 width: width as u32,
                 signed,
             })
@@ -1963,6 +2030,11 @@ impl MaskCache {
 }
 
 #[cfg(test)]
+thread_local! {
+    static CONCATENATED_BITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ir::{Op, TypeKind};
@@ -2020,6 +2092,54 @@ mod tests {
         assert_eq!(&format!("{:x}", x10), "16'hf0f0");
         assert_eq!(&format!("{:x}", x11), "32'h0000f0f0");
         assert_eq!(&format!("{:x}", x12), "72'hd00000e0e00000f0f0");
+    }
+
+    #[test]
+    fn repeat_matches_bit_strings_and_preserves_xz() {
+        for literal in [
+            "1'b1",
+            "8'b10xz0101",
+            "37'h12xz89abc",
+            "65'h123456789abcdefxz",
+        ] {
+            let mut value = from_based_str(literal);
+            for signed in [false, true] {
+                value.set_signed(signed);
+                let pattern = format!("{:b}", value);
+                let pattern = pattern.split_once('b').unwrap().1;
+                for count in [0, 1, 2, 3, 7, 8, 9, 17] {
+                    let repeated = value.repeat(count);
+                    assert_eq!(repeated.width(), value.width() * count);
+                    assert!(!repeated.signed());
+                    if count != 0 {
+                        assert_eq!(
+                            format!("{:b}", repeated),
+                            format!("{}'b{}", repeated.width(), pattern.repeat(count))
+                        );
+                    } else {
+                        assert_eq!(repeated.to_u64(), Some(0));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn repeat_bit_copying_work_is_linear_in_result_width() {
+        let value = from_based_str("8'b10xz0101");
+        for count in [1, 31, 32, 33, 1024, 1_000_003] {
+            CONCATENATED_BITS.set(0);
+            let repeated = value.repeat(count);
+            let work = CONCATENATED_BITS.get();
+            assert!(work <= 4 * repeated.width(), "count={count}, work={work}");
+            for index in [0, count / 2, count - 1] {
+                assert_eq!(repeated.select(index * 8 + 7, index * 8), value);
+            }
+            eprintln!(
+                "constant repeat count={count} width={} copied_bits={work}",
+                repeated.width()
+            );
+        }
     }
 
     #[test]
@@ -2121,8 +2241,8 @@ mod tests {
     #[test]
     fn shift_wide_amount() {
         // A shift amount whose operand type is wider than 64 bits is stored as a
-        // BigUint; to_usize() returns None for it, so before to_shift_amount the
-        // shift arms produced x (0 in 2-state) even for an in-range amount.
+        // BigUint, which to_usize() cannot read; an in-range amount must still
+        // shift rather than give x (0 in 2-state).
         let mut mc = MaskCache::default();
         let x = Value::from_str("8'h80").unwrap();
 
@@ -2135,6 +2255,31 @@ mod tests {
         let amt256 = Value::from_str("70'd256").unwrap();
         let r = Op::LogicShiftR.eval_value_binary(&x, &amt256, 8, false, &mut mc);
         assert_eq!(format!("{:x}", r), "8'h00");
+    }
+
+    #[test]
+    fn wide_value_truth_and_count() {
+        let v = |s: &str| Value::from_str(s).unwrap();
+        assert_eq!(v("128'h1_0000_0000_0000_0000").truth(), Some(true));
+        assert_eq!(v("128'd1").truth(), Some(true));
+        assert_eq!(v("128'd0").truth(), Some(false));
+        assert_eq!(v("70'bx1").truth(), Some(true));
+        assert_eq!(v("70'bx0").truth(), None);
+        assert_eq!(v("4'b1x").truth(), Some(true));
+        assert_eq!(v("4'b0z").truth(), None);
+
+        assert_eq!(v("128'd2").to_usize_saturating(), Some(2));
+        assert_eq!(
+            v("128'h1_0000_0000_0000_0000").to_usize_saturating(),
+            Some(usize::MAX)
+        );
+        assert_eq!(v("128'bx").to_usize_saturating(), None);
+
+        // Writing a wider value into a narrow one keeps its low bits.
+        let mut n = Value::new(0, 8, false);
+        n.assign(v("128'h1_0000_0000_0000_00a5"), 7, 0);
+        assert_eq!(n.to_u64(), Some(0xa5));
+        assert_eq!(v("128'h1_0000_0000_0000_00a5").payload_u64(), 0xa5);
     }
 
     #[test]

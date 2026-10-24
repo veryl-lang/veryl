@@ -3,7 +3,7 @@ use crate::HashMap;
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::Context;
-use crate::ir::assign_table::{AssignTable, ReferencedEntry};
+use crate::ir::assign_table::{AssignTable, AssignTableEntry, ReferencedEntry};
 use crate::ir::{
     Declaration, FfTable, Function, Signature, Type, VarId, VarIndex, VarKind, VarPath, Variable,
 };
@@ -34,6 +34,14 @@ pub struct Module {
     /// function captures them. They have paths and IDs for dependency
     /// analysis, but are not ordinary module variables or signal ports.
     pub interface_members: HashMap<VarId, Variable>,
+    /// Per-element write masks through direction-free interface ports. Retain
+    /// definite, dynamic and unknown-direction writes across instance boundaries.
+    /// `None` records a member whose array exceeds the assignment-analysis
+    /// limit; consumers must not interpret unavailable masks as read-only.
+    pub interface_assignments: HashMap<VarId, Option<AssignTableEntry>>,
+    /// Keep independent driving processes separate when ports alias at a
+    /// later instance boundary, including through pass-through modules.
+    pub interface_assignment_processes: Vec<HashMap<VarId, AssignTableEntry>>,
     pub declarations: Vec<Declaration>,
     pub suppress_unassigned: bool,
     /// Per-declaration `AssignTable.refernced` snapshot, captured at the end
@@ -174,18 +182,21 @@ impl Module {
     /// Runs `gather_ff` over every declaration and applies
     /// `update_is_ff` so the resulting table is ready for consumers.
     pub fn rebuild_ff_table(&mut self, context: &mut Context) {
+        self.ff_table = self.build_ff_table(context, FfTable::default());
+    }
+
+    pub fn build_ff_table(&self, context: &mut Context, mut table: FfTable) -> FfTable {
         let saved_vars = std::mem::take(&mut context.variables);
         let saved_funcs = std::mem::take(&mut context.functions);
         context.variables = self.variables.clone();
         context.functions = self.functions.clone();
 
-        let mut table = FfTable::default();
         self.gather_ff(context, &mut table);
         table.update_is_ff(&self.declarations, context);
-        self.ff_table = table;
 
         context.variables = saved_vars;
         context.functions = saved_funcs;
+        table
     }
 }
 

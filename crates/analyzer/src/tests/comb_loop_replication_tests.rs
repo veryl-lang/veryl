@@ -1,0 +1,605 @@
+use super::*;
+
+#[test]
+fn constant_repeat_checks_materialized_width_before_allocation() {
+    let code = "module Top(o: output logic<8>) { assign o = {8'hff repeat 200000}; }";
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::ExceedLimit { .. })),
+        "{errors:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_arithmetic_sign_fill_through_whole_copy() {
+    let mut mismatches = Vec::new();
+    for op in [">>", ">>>"] {
+        for shift in [0, 1, 7, 8, 9] {
+            for bit in [0, 6, 7] {
+                let code = format!(
+                    r#"
+                    module Top(o: output i8) {{
+                        var middle: i8;
+                        var feedback: logic;
+                        assign middle = ({{feedback, 7'b0}} as i8) {op} {shift};
+                        assign o = middle;
+                        assign feedback = o[{bit}];
+                    }}
+                    "#
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors
+                        .iter()
+                        .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    "{errors:#?}"
+                );
+                let actual = !errors.is_empty();
+                let expected = if op == ">>>" {
+                    bit >= 7usize.saturating_sub(shift)
+                } else {
+                    shift < 8 && bit == 7 - shift
+                };
+                eprintln!(
+                    "SIGNFILL op={op} shift={shift} bit={bit} loop={actual} expected={expected}"
+                );
+                if actual != expected {
+                    mismatches.push((op, shift, bit, actual, expected));
+                }
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    }
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+}
+
+#[test]
+fn comb_loop_repeated_concat_through_whole_copy() {
+    let mut mismatches = Vec::new();
+    for repeated in [false, true] {
+        let expression = if repeated {
+            "{{feedback, 7'b0} repeat 2}"
+        } else {
+            "{feedback, 7'b0, feedback, 7'b0}"
+        };
+        for bit in [0, 7, 8, 15] {
+            let code = format!(
+                "module Top(o: output logic<16>) {{ var middle: logic<16>; var feedback: logic; assign middle = {expression}; assign o = middle; assign feedback = o[{bit}]; }}"
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            let actual = !errors.is_empty();
+            let expected = bit % 8 == 7;
+            eprintln!(
+                "REPEAT packed repeated={repeated} bit={bit} loop={actual} expected={expected}"
+            );
+            if actual != expected {
+                mismatches.push((repeated, bit, actual, expected));
+            }
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+}
+
+#[test]
+fn comb_loop_repeated_array_through_whole_copy() {
+    let mut mismatches = Vec::new();
+    for repeated in [false, true] {
+        let expression = if repeated {
+            "'{'{feedback, 1'b0} repeat 2}"
+        } else {
+            "'{'{feedback, 1'b0}, '{feedback, 1'b0}}"
+        };
+        for row in [0, 1] {
+            for column in [0, 1] {
+                let code = format!(
+                    "module Top(o: output logic[2, 2]) {{ var middle: logic[2, 2]; var feedback: logic; assign middle = {expression}; assign o = middle; assign feedback = o[{row}][{column}]; }}"
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors
+                        .iter()
+                        .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    "{errors:#?}"
+                );
+                let actual = !errors.is_empty();
+                let expected = column == 0;
+                eprintln!(
+                    "REPEAT array repeated={repeated} row={row} column={column} loop={actual} expected={expected}"
+                );
+                if actual != expected {
+                    mismatches.push((repeated, row, column, actual, expected));
+                }
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    }
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+}
+
+fn assert_replication_feedback(code: &str, expected: bool) {
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{code}\n{errors:#?}"
+    );
+    assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+    assert!(comb_loop_analysis_is_complete(code), "{code}");
+}
+
+#[test]
+fn comb_loop_array_literal_repetition_keeps_module_input_positions() {
+    for expression in [
+        "'{1'b0, default: o}",
+        "'{1'b0, o repeat 2}",
+        "'{1'b0, o, o}",
+    ] {
+        for index in 0..3 {
+            let code = format!(
+                "module Pick(i: input logic[3], o: output logic) {{ assign o = i[{index}]; }}
+                 module Top(o: output logic) {{ inst u: Pick(i: {expression}, o: o); }}"
+            );
+            assert_replication_feedback(&code, index != 0);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_array_literal_repetition_keeps_nested_item_positions() {
+    for expression in [
+        "'{'{1'b0, 1'b0}, default: '{o, 1'b0}}",
+        "'{'{1'b0, 1'b0}, '{o, 1'b0} repeat 2}",
+        "'{'{1'b0, 1'b0}, '{o, 1'b0}, '{o, 1'b0}}",
+    ] {
+        for row in 0..3 {
+            for column in 0..2 {
+                let code = format!(
+                    "module Pick(i: input logic[3, 2], o: output logic) {{ assign o = i[{row}][{column}]; }}
+                     module Top(o: output logic) {{ inst u: Pick(i: {expression}, o: o); }}"
+                );
+                assert_replication_feedback(&code, row != 0 && column == 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_array_literal_repetition_survives_calls_and_runtime_transfers() {
+    // The inner packed repeat and outer array repeat must keep separate axes.
+    let expression = "'{'{4'b0, 4'b0}, '{{{x, 1'b0} repeat 2}, 4'b0} repeat 2, '{4'b0, 4'b0}}";
+    for transfer in ["input", "return", "module", "runtime_return"] {
+        for row in 0..4 {
+            for column in 0..2 {
+                for bit in 0..4 {
+                    let read = format!("middle[{row}][{column}][{bit}]");
+                    let assignment = match transfer {
+                        "input" => format!("assign o = pick({});", expression.replace('x', "o")),
+                        "return" => "var middle: logic<4>[4, 2]; assign middle = spread(o); assign o = pick(middle);".into(),
+                        "module" => format!("inst u: Pick(i: {}, o: o);", expression.replace('x', "o")),
+                        "runtime_return" => format!(
+                            "var middle: logic<4>[4, 2];
+                             always_comb {{ middle = '{{default: '{{default: 4'b0}}}}; for _i in 0..n {{ middle = spread(o); }} }}
+                             assign o = {read};"
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let input = if transfer == "runtime_return" {
+                        "n: input u32,"
+                    } else {
+                        ""
+                    };
+                    let code = format!(
+                        "module Pick(i: input logic<4>[4, 2], o: output logic) {{ assign o = i[{row}][{column}][{bit}]; }}
+                         module Top({input} o: output logic) {{
+                             type Matrix = logic<4>[4, 2];
+                             function spread(x: input logic) -> Matrix {{ return {expression}; }}
+                             function pick(i: input logic<4>[4, 2]) -> logic {{ return i[{row}][{column}][{bit}]; }}
+                             {assignment}
+                         }}"
+                    );
+                    assert_replication_feedback(
+                        &code,
+                        (1..3).contains(&row) && column == 0 && bit % 2 == 1,
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_array_literal_repetition_keeps_nested_repetitions() {
+    for expression in [
+        "'{'{'{1'b0, 1'b0} repeat 3}, '{'{1'b0, 1'b0}, '{o, 1'b0} repeat 2} repeat 2}",
+        "'{'{default: '{default: 1'b0}}, default: '{'{1'b0, 1'b0}, default: '{o, 1'b0}}}",
+    ] {
+        for plane in 0..3 {
+            for row in 0..3 {
+                for column in 0..2 {
+                    let code = format!(
+                        "module Pick(i: input logic[3, 3, 2], o: output logic) {{ assign o = i[{plane}][{row}][{column}]; }}
+                         module Top(o: output logic) {{ inst u: Pick(i: {expression}, o: o); }}"
+                    );
+                    assert_replication_feedback(&code, plane > 0 && row > 0 && column == 0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_large_array_literal_repetition_stays_sparse() {
+    for count in [2, 1024, 100_003] {
+        for default in [false, true] {
+            let rows = count + if default { 1 } else { 2 };
+            let expression = if default {
+                "'{'{1'b0, 1'b0}, default: '{o, 1'b0}}".into()
+            } else {
+                format!("'{{'{{1'b0, 1'b0}}, '{{o, 1'b0}} repeat {count}, '{{1'b0, 1'b0}}}}")
+            };
+            for row in [0, 1, count, rows - 1] {
+                for column in 0..2 {
+                    let code = format!(
+                        "module Pick(i: input logic[{rows}, 2], o: output logic) {{ assign o = i[{row}][{column}]; }}
+                         module Top(o: output logic) {{ inst u: Pick(i: {expression}, o: o); }}"
+                    );
+                    crate::comb_loop_detect::reset_analysis_size();
+                    crate::comb_loop_detect::reset_cycle_decision_work();
+                    let errors = analyze(&code);
+                    assert!(
+                        errors
+                            .iter()
+                            .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                        "{code}\n{errors:#?}"
+                    );
+                    assert_eq!(
+                        !errors.is_empty(),
+                        (1..=count).contains(&row) && column == 0,
+                        "{code}\n{errors:#?}"
+                    );
+                    let (atoms, nodes, edges) = crate::comb_loop_detect::analysis_size();
+                    let work = crate::comb_loop_detect::cycle_decision_work();
+                    eprintln!(
+                        "array repeat count={count} default={default} row={row} column={column}: atoms={atoms} nodes={nodes} edges={edges} decision_work={work}"
+                    );
+                    assert!(
+                        atoms < 20 && nodes < 100 && edges < 150,
+                        "count={count}: {atoms} atoms, {nodes} nodes, {edges} edges"
+                    );
+                    assert!(work < 10_000, "count={count}: {work} decision work");
+                    assert!(comb_loop_analysis_is_complete(&code), "{code}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_repeated_shifts_complete_with_other_guarded_paths() {
+    for width in [20, 24, 32] {
+        for feedback in ["a", "data"] {
+            let code = format!(
+                r#"
+                module Top(sel: input bit<2>, data: input bit<{width}>, o: output bit<{width}>) {{
+                    var a: bit<{width}>;
+                    var next_a: bit<{width}>;
+                    var b: bit<{width}>;
+                    var next_b: bit<{width}>;
+                    assign next_a = if sel[0] ?
+                        (({{b[13:2] repeat 2}} << 1) | ({{{feedback}[19:8] repeat 2}} << 3)) : 0;
+                    assign a = next_a;
+                    assign next_b = if sel[1] ? (a << 3) : 0;
+                    assign b = next_b;
+                    assign o = a;
+                }}
+                "#
+            );
+            // With feedback, a[19:8] cycles through shifts of +7 and -5.
+            // The path through b only shifts upward by +2 or +14 and must
+            // neither hide that cycle nor invent one when feedback is cut.
+            assert_replication_feedback(&code, feedback == "a");
+        }
+    }
+}
+
+#[test]
+fn comb_loop_repeated_shifts_find_a_cycle_before_all_paths_are_explored() {
+    let code = r#"
+        module Top(sel: input bit<3>, data: input bit<24>, o: output bit<24>) {
+            var a: bit<24>;
+            var next_a: bit<24>;
+            var b: bit<24>;
+            var next_b: bit<24>;
+            var c: bit<24>;
+            var next_c: bit<24>;
+            assign next_a = if sel[0] ?
+                (({a[10:9] repeat 3} << 5) | (a >> 19) | ({a[19:14] repeat 5} << 7)) :
+                (({a[16:16] repeat 3} << 8) | (b << 10));
+            assign a = next_a;
+            assign next_b = if sel[1] ?
+                (({c[21:17] repeat 5} << 3) | ({data[23:23] repeat 3} << 7)) :
+                ((data << 17) | (c << 8) | (c >> 17));
+            assign b = next_b;
+            assign next_c = if sel[2] ?
+                (({c[19:12] repeat 3} << 5) | (a << 2)) : ((data << 13) | (a << 4));
+            assign c = next_c;
+            assign o = a;
+        }
+    "#;
+    // For sel[0] = 1, the first repeat maps a[9] back to itself. Further paths
+    // through the other repeats must not consume the budget before that
+    // already discovered cycle is checked.
+    assert_replication_feedback(code, true);
+}
+
+#[test]
+fn comb_loop_replication_survives_calls_modules_and_runtime_transfers() {
+    for (width, expression, bits) in [
+        (8, "x >>> 1", [(0, false), (5, false), (6, true), (7, true)]),
+        (
+            24,
+            "{x repeat 3}",
+            [(0, false), (7, true), (8, false), (23, true)],
+        ),
+    ] {
+        for transfer in [
+            "direct",
+            "return",
+            "output",
+            "module",
+            "runtime_return",
+            "runtime_output",
+        ] {
+            let assignment = match transfer {
+                "direct" => format!("assign middle = {};", expression.replace('x', "source")),
+                "return" => "assign middle = transform(source);".into(),
+                "output" => "always_comb { copy(source, middle); }".into(),
+                "module" => "inst u: Transform(x: source, y: middle);".into(),
+                "runtime_return" => {
+                    "always_comb { middle = 0; for _i in 0..n { middle = transform(source); } }"
+                        .into()
+                }
+                "runtime_output" => {
+                    "always_comb { middle = 0; for _i in 0..n { copy(source, middle); } }".into()
+                }
+                _ => unreachable!(),
+            };
+            let input = if transfer.starts_with("runtime") {
+                "n: input u32,"
+            } else {
+                ""
+            };
+            for (bit, expected) in bits {
+                let code = format!(
+                    r#"
+                    module Transform(x: input i8, y: output signed logic<{width}>) {{ assign y = {expression}; }}
+                    module Top({input} o: output signed logic<{width}>) {{
+                        function transform(x: input i8) -> signed logic<{width}> {{ return {expression}; }}
+                        function copy(x: input i8, y: output signed logic<{width}>) {{ y = {expression}; }}
+                        var source: i8;
+                        var middle: signed logic<{width}>;
+                        var feedback: logic;
+                        assign source = {{feedback, 7'b0}} as i8;
+                        {assignment}
+                        assign o = middle;
+                        assign feedback = o[{bit}];
+                    }}
+                "#
+                );
+                assert_replication_feedback(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_repeat_clips_padding_and_destination_slices() {
+    for assignment in [
+        "wide = {2'b0, {{feedback, 7'b0} repeat 3}, 2'b0};",
+        "wide[25:2] = {{feedback, 7'b0} repeat 3};",
+        "{wide[25:14], wide[13:2]} = {{feedback, 7'b0} repeat 3};",
+    ] {
+        for bit in [0, 2, 9, 10, 17, 25, 26, 27] {
+            let code = format!(
+                r#"
+                module Top(o: output logic<28>) {{
+                    var feedback: logic;
+                    var wide: logic<28>;
+                    always_comb {{ wide = 0; {assignment} }}
+                    assign o = wide;
+                    assign feedback = o[{bit}];
+                }}
+            "#
+            );
+            assert_replication_feedback(&code, [9, 17, 25].contains(&bit));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_large_repeat_has_bounded_graph_and_search_work() {
+    // Keep the HDL widths below the default constant-evaluation limit.
+    for count in [3, 1024, 100_003] {
+        let width = count * 8;
+        for bit in [0, 7, width - 8, width - 1] {
+            let code = format!(
+                r#"
+                module Top(o: output logic<{width}>) {{
+                    function spread(x: input logic<8>) -> logic<{width}> {{ return {{x repeat {count}}}; }}
+                    var feedback: logic;
+                    var middle: logic<{width}>;
+                    assign middle = spread({{feedback, 7'b0}});
+                    assign o = middle;
+                    assign feedback = o[{bit}];
+                }}
+            "#
+            );
+            crate::comb_loop_detect::reset_function_evaluation_count();
+            crate::comb_loop_detect::reset_cycle_decision_work();
+            // Measure the decision using the production budget. Optional
+            // diagnostic path recovery may traverse individual self steps.
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                !errors.is_empty(),
+                bit % 8 == 7,
+                "count={count}, bit={bit}: {errors:#?}"
+            );
+            let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
+            let work = crate::comb_loop_detect::cycle_decision_work();
+            eprintln!("replication count={count} bit={bit} nodes={nodes} decision_work={work}");
+            assert!(nodes < 20, "count={count}: {nodes} nodes");
+            assert!(work < 10_000, "count={count}: {work} decision work");
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_repeated_function_imports_stay_shared() {
+    const COUNT: usize = 32;
+    const WIDTH: usize = COUNT * 8;
+    for depth in [1, 4, 8] {
+        let mut functions = format!(
+            "function f0(x: input logic<8>) -> logic<{WIDTH}> {{ return {{x repeat {COUNT}}}; }}\n"
+        );
+        for level in 1..=depth {
+            let previous = level - 1;
+            functions.push_str(&format!("function f{level}(x: input logic<8>) -> logic<{WIDTH}> {{ return f{previous}(x) | f{previous}(x); }}\n"));
+        }
+        let code = format!(
+            "module Top(x: input logic<8>, o: output logic<{WIDTH}>) {{ {functions} assign o = f{depth}(x); }}"
+        );
+        crate::comb_loop_detect::reset_function_evaluation_count();
+        let errors = analyze(&code);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
+        eprintln!("replication imports depth={depth} nodes={nodes}");
+        assert!(nodes < 12 * depth + 4, "depth={depth}: {nodes} nodes");
+    }
+}
+
+#[test]
+fn comb_loop_replication_keeps_dynamic_array_destination_coordinates() {
+    for (width, expression, bits) in [
+        (8, "narrow[index] >>> 1", [(0, false), (6, true), (7, true)]),
+        (
+            24,
+            "{narrow[index] repeat 3}",
+            [(0, false), (7, true), (23, true)],
+        ),
+    ] {
+        for (bit, expected) in bits {
+            let code = format!(
+                r#"
+                module Top(index: input logic, o: output logic) {{
+                    var feedback: logic;
+                    var narrow: i8[2];
+                    var wide: signed logic<{width}>[2];
+                    var copied: signed logic<{width}>[2];
+                    assign narrow[0] = 0;
+                    assign narrow[1] = {{feedback, 7'b0}} as i8;
+                    always_comb {{ wide = '{{default: 0}}; wide[index] = {expression}; }}
+                    assign copied = wide;
+                    assign feedback = copied[1][{bit}];
+                    assign o = feedback;
+                }}
+            "#
+            );
+            assert_replication_feedback(&code, expected);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_nested_replication_is_sparse() {
+    for (inner, outer) in [(3, 3), (1024, 101)] {
+        let width = 8 * inner * outer;
+        for bit in [0, 7, width - 8, width - 1] {
+            let code = format!(
+                r#"
+                module Top(o: output logic<{width}>) {{
+                    function spread(x: input logic<8>) -> logic<{width}> {{
+                        return {{{{x repeat {inner}}} repeat {outer}}};
+                    }}
+                    var feedback: logic;
+                    var middle: logic<{width}>;
+                    assign middle = spread({{feedback, 7'b0}});
+                    assign o = middle;
+                    assign feedback = o[{bit}];
+                }}
+            "#
+            );
+            assert_replication_feedback(&code, bit % 8 == 7);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_replication_samples_function_results_before_copy_out() {
+    for (width, expression, bits) in [
+        (
+            8,
+            "take(value, value) >>> 1",
+            [(0, false), (6, true), (7, true)],
+        ),
+        (
+            24,
+            "{take(value, value) repeat 3}",
+            [(0, false), (7, true), (23, true)],
+        ),
+    ] {
+        for (bit, expected) in bits {
+            let code = format!(
+                r#"
+                module Top(o: output signed logic<{width}>) {{
+                    function take(x: input i8, y: output i8) -> i8 {{ y = 0; return x; }}
+                    var feedback: logic;
+                    var middle: signed logic<{width}>;
+                    always_comb {{
+                        var value: i8;
+                        value = {{feedback, 7'b0}} as i8;
+                        middle = {expression};
+                    }}
+                    assign o = middle;
+                    assign feedback = o[{bit}];
+                }}
+            "#
+            );
+            assert_replication_feedback(&code, expected);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_multiple_repeat_terms_preserve_their_own_offsets() {
+    for bit in 0..14 {
+        let code = format!(
+            r#"
+            module Top(o: output logic<14>) {{
+                var feedback: logic;
+                var middle: logic<14>;
+                assign middle = {{{{feedback, 3'b0}} repeat 2, {{feedback, 1'b0}} repeat 3}};
+                assign o = middle;
+                assign feedback = o[{bit}];
+            }}
+        "#
+        );
+        assert_replication_feedback(&code, [1, 3, 5, 9, 13].contains(&bit));
+    }
+}

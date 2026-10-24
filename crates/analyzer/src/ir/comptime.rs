@@ -34,18 +34,102 @@ pub struct PartSelectPath {
     pub part_select: Vec<PartSelect>,
 }
 
+/// Contiguous base-variable storage identified by the member path and the
+/// constant coordinates before an access's first dynamic coordinate (the
+/// longest static prefix, IEEE 1800-2023 11.5.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemberSelectDomain {
+    pub high: usize,
+    pub low: usize,
+}
+
 impl PartSelectPath {
+    pub(crate) fn to_base_select_with_domain(
+        &self,
+        context: &mut Context,
+        select: &VarSelect,
+    ) -> Option<(VarSelect, Option<MemberSelectDomain>)> {
+        let rebased = self.to_base_select(context, select)?;
+        let domain = self.longest_static_domain(context, select);
+        Some((rebased, domain))
+    }
+
+    /// Return the base-coordinate span denoted by the constant coordinates
+    /// before the first dynamic coordinate. A field below a dynamic packed
+    /// coordinate is not part of that prefix, so stop at the containing aggregate.
+    fn longest_static_domain(
+        &self,
+        context: &mut Context,
+        select: &VarSelect,
+    ) -> Option<MemberSelectDomain> {
+        if select.is_const_with_range() {
+            return None;
+        }
+
+        // A range consumes its final expression as the bound in the current
+        // dimension. A dynamic range therefore retains only the coordinates
+        // of the dimensions outside it.
+        let coordinate_len = select
+            .0
+            .len()
+            .checked_sub(usize::from(select.1.is_some()))?;
+        let coordinates = &select.0[..coordinate_len];
+        let prefix_len = coordinates
+            .iter()
+            .take_while(|expression| expression.comptime().is_const)
+            .count();
+
+        let mut consumed_dims = 0;
+        let mut containing_part = None;
+        for (part, r#type) in std::iter::once(&self.base)
+            .chain(self.part_select.iter().map(|part| &part.r#type))
+            .enumerate()
+        {
+            consumed_dims += r#type.width.dims();
+            if prefix_len < consumed_dims {
+                containing_part = Some(part);
+                break;
+            }
+        }
+
+        let containing_part = containing_part?;
+        let prefix_path = Self {
+            base: self.base.clone(),
+            path: self.path.clone(),
+            part_select: self.part_select[..containing_part].to_vec(),
+        };
+        let prefix_select = VarSelect(coordinates[..prefix_len].to_vec(), None);
+        let (high, low) = prefix_path
+            .to_base_select(context, &prefix_select)?
+            .eval_value(context, &self.base, false)?;
+        Some(MemberSelectDomain { high, low })
+    }
+
     pub fn to_base_select(&self, context: &mut Context, select: &VarSelect) -> Option<VarSelect> {
         let mut pos_width: Option<(Expression, usize, Option<usize>)> = None;
 
         let (range_select, range_op_width) = if let Some((op, end)) = &select.1 {
-            // Keep `+:`/`-:` width so the rebased select stays `low +: w`.
+            // Keep the width so the rebased select stays `low +: w`. A constant
+            // `[hi:lo]` needs it too when an outer coordinate is dynamic.
             let op_width = if matches!(op, VarSelectOp::Colon) {
-                None
+                let (coords, beg) = select.0.split_at(select.0.len() - 1);
+                let beg = &beg[0];
+                if coords.iter().any(|x| !x.comptime().is_const)
+                    && beg.comptime().is_const
+                    && end.comptime().is_const
+                {
+                    let beg = const_usize(context, beg);
+                    let end = const_usize(context, end);
+                    beg.zip(end)
+                        .and_then(|(beg, end)| beg.checked_sub(end))
+                        .map(|w| w + 1)
+                } else {
+                    None
+                }
             } else {
                 end.clone()
                     .eval_value(context)
-                    .and_then(|v| v.to_usize())
+                    .and_then(|v| v.to_usize_saturating())
                     .map(|w| w.max(1))
             };
             let (beg, end) = op.eval_expr(select.0.last().unwrap(), end);
@@ -93,7 +177,7 @@ impl PartSelectPath {
                         && let Some(value) = coord.eval_value(context)
                         && !value.is_xz()
                     {
-                        let idx = value.to_usize().unwrap_or(0);
+                        let idx = value.to_usize_saturating().unwrap_or(0);
                         if idx >= size {
                             context.insert_error(AnalyzerError::invalid_select(
                                 &InvalidSelectKind::OutOfRange {
@@ -136,7 +220,7 @@ impl PartSelectPath {
                     if let Some(value) = coord.eval_value(context)
                         && !value.is_xz()
                     {
-                        let idx = value.to_usize().unwrap_or(0);
+                        let idx = value.to_usize_saturating().unwrap_or(0);
                         if idx >= size {
                             context.insert_error(AnalyzerError::invalid_select(
                                 &InvalidSelectKind::OutOfRange {
@@ -272,6 +356,12 @@ impl PartSelectPath {
     }
 }
 
+fn const_usize(context: &mut Context, x: &Expression) -> Option<usize> {
+    x.eval_value(context)
+        .filter(|v| !v.is_xz())
+        .and_then(|v| v.to_usize_saturating())
+}
+
 impl fmt::Display for PartSelectPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut ret = format!("{}: ", self.path);
@@ -303,20 +393,85 @@ impl ExpressionContext {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct Comptime {
     pub value: ValueVariant,
     pub r#type: Type,
+    /// Eligible for evaluation/constant folding within the current IR context.
+    /// This includes procedural loop variables while their loop is unrolled.
     pub is_const: bool,
+    /// The source expression depends on runtime values, even if optimization
+    /// has replaced it with a value. Keep this when folding or substituting IR.
+    /// Type queries do not depend on the value of their queried operand.
+    pub runtime_dependent: bool,
+    /// Cached source classification, independent of value evaluation. Cleared
+    /// when cloning metadata, which may be reused for a different expression.
+    pub elaboration_const: Option<bool>,
     pub is_global: bool,
     pub part_select: Option<PartSelectPath>,
+    /// Packed base-variable domain retained from the member path and the
+    /// constant coordinates before this access's first dynamic coordinate.
+    pub member_select_domain: Option<MemberSelectDomain>,
+    /// Signedness of the member that `rebase_part_select` replaced by the
+    /// base type.
+    pub member_signed: Option<bool>,
     pub clock_domain: ClockDomain,
     pub expr_context: ExpressionContext,
     pub evaluated: bool,
     pub token: TokenRange,
 }
 
+impl Clone for Comptime {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            r#type: self.r#type.clone(),
+            is_const: self.is_const,
+            runtime_dependent: self.runtime_dependent,
+            elaboration_const: None,
+            is_global: self.is_global,
+            part_select: self.part_select.clone(),
+            member_select_domain: self.member_select_domain,
+            member_signed: self.member_signed,
+            clock_domain: self.clock_domain,
+            expr_context: self.expr_context,
+            evaluated: self.evaluated,
+            token: self.token,
+        }
+    }
+}
+
 impl Comptime {
+    /// Whether an evaluated expression is a legal elaboration-time constant.
+    /// A concrete numeric value is not required (e.g. an external SV constant).
+    pub fn is_elaboration_const(&self) -> bool {
+        self.is_const && !self.runtime_dependent
+    }
+
+    /// Rebase a struct/union member onto the whole variable's type, and report
+    /// the array dimensions a select has to be split on.
+    ///
+    /// `part_select.base` is the type as DECLARED, so it misses an array the
+    /// member picked up afterwards: importing an interface instance array
+    /// prepends the instance's dimensions to each member's own type, not to
+    /// the base it was declared with. Taking the larger of the two keeps both
+    /// -- an array of structs (`s[2].f`, on the base) and a member of an
+    /// interface array (`arr[2].s.f`, on the member).
+    pub fn rebase_part_select(&mut self) -> usize {
+        if let Some(part_select) = &self.part_select {
+            let mut member = self.r#type.clone();
+            member.flatten_struct_union_enum();
+            self.member_signed = Some(member.signed);
+            let own = self.r#type.array.clone();
+            let mut base = part_select.base.clone();
+            if own.dims() > base.array.dims() {
+                base.array = own;
+            }
+            self.r#type = base;
+        }
+        self.r#type.array.dims()
+    }
+
     pub fn create_unknown(token: TokenRange) -> Self {
         Self {
             value: ValueVariant::Unknown,
@@ -375,7 +530,19 @@ pub enum ValueVariant {
 impl ValueVariant {
     pub fn expand_value(&mut self, width: usize) {
         if let ValueVariant::Numeric(x) = self {
-            x.expand(width, false);
+            let expanded = x.expand(width, false).into_owned();
+            *x = expanded;
+        }
+    }
+
+    /// Drop the bits above `width`. Narrower values are left alone: a
+    /// parameter's use site sizes them, and widening here would change what
+    /// every existing override means.
+    pub fn trunc_value(&mut self, width: usize) {
+        if let ValueVariant::Numeric(x) = self
+            && x.width() > width
+        {
+            x.trunc(width);
         }
     }
 
@@ -595,6 +762,10 @@ impl Type {
         matches!(&self.kind, TypeKind::Struct(_) | TypeKind::Union(_))
     }
 
+    pub fn is_enum(&self) -> bool {
+        matches!(&self.kind, TypeKind::Enum(_))
+    }
+
     pub fn is_interface(&self) -> bool {
         match &self.kind {
             TypeKind::Instance(_, kind) => *kind == InstanceKind::Interface,
@@ -637,6 +808,35 @@ impl Type {
         Some(self.kind.width()? * self.width.total()?)
     }
 
+    /// Every bit the type holds, unpacked dimensions included. This is what
+    /// `$bits` answers; `total_width` stops at one element.
+    pub fn total_bits(&self) -> Option<usize> {
+        Some(self.total_width()? * self.array.total()?)
+    }
+
+    /// Size of the `n`th dimension (1-based) as numbered by `$size(x, n)`:
+    /// unpacked array dimensions first, then packed ones.
+    pub fn dimension(&self, n: usize) -> Option<usize> {
+        let index = n.checked_sub(1)?;
+        let array = self.array.dims();
+        if index < array {
+            return *self.array.get(index)?;
+        }
+        let index = index - array;
+        if self.width.is_empty() {
+            if index == 0 { self.kind.width() } else { None }
+        } else {
+            *self.width.get(index)?
+        }
+    }
+
+    /// Elements in the leftmost dimension, which is what `$size` answers:
+    /// the outermost unpacked dimension, else the outermost packed one, else
+    /// the kind's own width (a struct or enum is one packed vector).
+    pub fn leading_dimension(&self) -> Option<usize> {
+        self.dimension(1)
+    }
+
     /// An unevaluated width (generics) counts as single-bit to avoid
     /// false positives.
     pub fn is_single_bit_plain(&self) -> bool {
@@ -656,6 +856,33 @@ impl Type {
 
     pub fn total_array(&self) -> Option<usize> {
         self.array.total()
+    }
+
+    /// Whether an incompatibility is a mismatch of the UNPACKED dimensions.
+    /// That one is illegal SystemVerilog (IEEE 1800-2023 7.6 at a port, an
+    /// unmatched array assignment elsewhere) and it miscompiles in silence,
+    /// so the diagnostic names it rather than reporting a bare
+    /// incompatibility.
+    pub fn array_shape_mismatch(&self, src: &Comptime) -> bool {
+        if self.is_unknown()
+            || self.is_systemverilog()
+            || src.r#type.is_unknown()
+            || src.r#type.is_systemverilog()
+        {
+            return false;
+        }
+        // An UNSIZED fill (`'0` / `'1`) has no width of its own -- the
+        // sentinel is `bit<0>` -- and SystemVerilog lets it fill any target,
+        // an unpacked array included. It is not a shape mismatch, and calling
+        // it one rejects `mem = '0;`, which every port writes.
+        if src.r#type.array.is_empty()
+            && let ValueVariant::Numeric(x) = &src.value
+            && x.width() == 0
+        {
+            return false;
+        }
+        (self.is_array() || src.r#type.is_array())
+            && !array_compatible(&self.array, &src.r#type.array)
     }
 
     pub fn compatible(&self, src: &Comptime, in_generic: bool) -> bool {
@@ -817,10 +1044,16 @@ impl Type {
                 self.kind = x.r#type.kind.clone();
                 self.signed = x.r#type.signed;
                 let mut array = x.r#type.array.clone();
-                let mut width = x.r#type.width.clone();
                 array.append(&mut self.array);
-                width.append(&mut self.width);
                 self.array = array;
+                // The DECLARED packed dimensions are the outer ones and the
+                // enum's own width the innermost: `e3_t<8>` emits
+                // `p_e3_t [8-1:0]`, eight elements of three bits. Composing
+                // them the other way round bounded an index by the element's
+                // width, so `i[3]` on an eight-element array was rejected as
+                // "out of range [3] > 3" while `i[2]` was accepted.
+                let mut width = self.width.clone();
+                width.append(&mut x.r#type.width.clone());
                 self.set_concrete_width(width);
             }
             _ => (),
@@ -997,6 +1230,47 @@ pub enum TypeKind {
 }
 
 impl TypeKind {
+    /// Whether `width()` is a real BIT width. It answers `Some(1)` for a
+    /// whole bucket of kinds that have no bit width at all -- `String`,
+    /// `F32`/`F64`, `Type`, a module or interface handle -- so anything that
+    /// resizes a value by it has to ask this first.
+    pub fn is_bit_sized(&self) -> bool {
+        match self {
+            TypeKind::Clock
+            | TypeKind::ClockPosedge
+            | TypeKind::ClockNegedge
+            | TypeKind::Reset
+            | TypeKind::ResetAsyncHigh
+            | TypeKind::ResetAsyncLow
+            | TypeKind::ResetSyncHigh
+            | TypeKind::ResetSyncLow
+            | TypeKind::Bit
+            | TypeKind::Logic => true,
+            TypeKind::Union(_) | TypeKind::Struct(_) | TypeKind::Enum(_) => true,
+            TypeKind::F32
+            | TypeKind::F64
+            | TypeKind::Type
+            | TypeKind::String
+            | TypeKind::Unknown
+            | TypeKind::SystemVerilog
+            | TypeKind::Module(_)
+            | TypeKind::Interface(_)
+            | TypeKind::Modport(_, _)
+            | TypeKind::Package(_)
+            | TypeKind::Instance(_, _)
+            | TypeKind::AbstractInterface(_)
+            | TypeKind::Void => false,
+        }
+    }
+
+    /// True for a user `enum`, whose element width lives in the kind while
+    /// its packed dimensions stay in the shape. The dynamic-select lowering
+    /// asks, because that is the one kind whose select index is an element
+    /// number rather than an absolute bit position.
+    pub fn is_enum(&self) -> bool {
+        matches!(self, TypeKind::Enum(_))
+    }
+
     pub fn width(&self) -> Option<usize> {
         match self {
             TypeKind::Clock

@@ -16,7 +16,7 @@
 //! statements are the testbench.  The retired packed word keeps its meta and
 //! its (stale) storage; external byte-level machinery is either conservative
 //! about unknown bytes (`tb_dirty`) or fed the field spans through
-//! `Context::comb_reloc` (cone gating).
+//! `Context::comb_reloc` (the owner tables).
 //!
 //! Reads that span several fields — or bits no field covers, which under
 //! zero-initial two-state storage are constant zero — are rebuilt as a
@@ -220,7 +220,9 @@ fn census_expr(e: &ProtoExpression, c: &mut Census, poison: bool) {
             }
         }
         ProtoExpression::Value { .. } => {}
-        ProtoExpression::Unary { x, .. } => census_expr(x, c, poison),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            census_expr(x, c, poison)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             census_expr(x, c, poison);
             census_expr(y, c, poison);
@@ -375,7 +377,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
         // Executes a pre-compiled artifact with baked offsets; the original
         // statements say what it touches, and none of that may move.
         ProtoStatement::CompiledBlock(x) => {
-            for s in &x.original_stmts {
+            for s in x.original_stmts.iter() {
                 census_stmt(s, c, true);
             }
         }
@@ -411,6 +413,11 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     }
                 }
                 K::RandomSeed { value } => census_expr(value, c, poison),
+                K::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        census_expr(v, c, poison);
+                    }
+                }
                 K::RandomGetRange { min, max, .. } => {
                     census_expr(min, c, poison);
                     census_expr(max, c, poison);
@@ -426,6 +433,9 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
             }
         }
         ProtoStatement::Break => {}
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -572,7 +582,7 @@ impl Rewriter<'_> {
                 self.stats.gathers += 1;
             }
             ProtoExpression::Value { .. } => {}
-            ProtoExpression::Unary { x, .. } => self.expr(x),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => self.expr(x),
             ProtoExpression::Binary { x, y, .. } => {
                 self.expr(x);
                 self.expr(y);
@@ -703,6 +713,9 @@ impl Rewriter<'_> {
             ProtoStatement::CompiledBlock(_)
             | ProtoStatement::TbMethodCall { .. }
             | ProtoStatement::Break => {}
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 }
@@ -715,6 +728,40 @@ impl Rewriter<'_> {
 pub fn inline_fields() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("VERYL_FIELD_UNFUSE_INLINE").as_deref() == Ok("1"))
+}
+
+/// Digest of the census this pass takes of the event statements, which is all
+/// it reads of them.  Hashing the accesses rather than the statements keeps
+/// per-test `$readmemh` paths and `$display` strings, which cannot change a
+/// split decision, out of the key.
+pub fn event_census_digest(events: &HashMap<crate::ir::Event, Vec<ProtoStatement>>) -> u128 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut c = Census::default();
+    for stmts in events.values() {
+        for s in stmts {
+            census_stmt(s, &mut c, true);
+        }
+    }
+    let mut vars: Vec<(&isize, &VarInfo)> = c.vars.iter().collect();
+    vars.sort_unstable_by_key(|(o, _)| **o);
+    let mut h = DefaultHasher::new();
+    c.bail.hash(&mut h);
+    for (off, v) in vars {
+        off.hash(&mut h);
+        v.full_width.hash(&mut h);
+        v.width_conflict.hash(&mut h);
+        v.write_ranges.hash(&mut h);
+        v.read_ranges.hash(&mut h);
+        v.whole_write.hash(&mut h);
+        v.disqualified.hash(&mut h);
+        v.self_ref.hash(&mut h);
+        v.nonconst_write.hash(&mut h);
+    }
+    let mut spans = c.dyn_spans.clone();
+    spans.sort_unstable();
+    spans.hash(&mut h);
+    u128::from(h.finish())
 }
 
 /// Run the pass over the unified comb list.  `event_statements` (the initial

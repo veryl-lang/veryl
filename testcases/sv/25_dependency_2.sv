@@ -100,13 +100,24 @@ module veryl_testcase_Module25F
 
 
 #(
-    parameter int unsigned WIDTH = 8
+    parameter  int unsigned WIDTH = 8                ,
+    localparam type         TYPE  = logic [WIDTH-1:0]
 ) (
     input  var logic [WIDTH-1:0] i_a,
     input  var logic [WIDTH-1:0] i_b,
-    output var logic [WIDTH-1:0] o_c
+    output var logic [WIDTH-1:0] o_c,
+    input  var TYPE              i_d,
+    input  var TYPE              i_e,
+    output var TYPE              o_f,
+    output var TYPE              o_g
 );
-    always_comb o_c = veryl_sample4___foo_func_1__WIDTH(i_a, i_b);
+    typedef logic [WIDTH-1:0] T;
+
+    always_comb begin
+        o_c = veryl_sample4___foo_func_1__WIDTH(i_a, i_b);
+        o_f = veryl_sample4___foo_func_3__TYPE(i_d, i_e);
+        o_g = veryl_sample4___foo_func_4__T(i_d, i_e);
+    end
 
     function automatic int unsigned veryl_sample4_foo_func_2() ;
         return 2;
@@ -116,6 +127,24 @@ module veryl_testcase_Module25F
         input var logic [WIDTH-1:0] b
     ) ;
         return a + b + veryl_sample4_foo_func_2();
+    endfunction
+    function automatic TYPE veryl_sample4___foo_func_3__TYPE(
+        input var TYPE a,
+        input var TYPE b
+    ) ;
+        return a + b;
+    endfunction
+    function automatic T veryl_sample4___foo_func_3__T(
+        input var T a,
+        input var T b
+    ) ;
+        return a + b;
+    endfunction
+    function automatic T veryl_sample4___foo_func_4__T(
+        input var T a,
+        input var T b
+    ) ;
+        return veryl_sample4___foo_func_3__T(a, b);
     endfunction
 endmodule
 

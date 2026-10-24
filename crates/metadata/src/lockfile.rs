@@ -25,7 +25,7 @@ pub struct Lockfile {
     version: usize,
     projects: Vec<Lock>,
     #[serde(skip)]
-    pub lock_table: HashMap<UrlPath, Vec<Lock>>,
+    pub lock_table: BTreeMap<UrlPath, Vec<Lock>>,
     #[serde(skip)]
     force_update: bool,
     #[serde(skip)]

@@ -1,6 +1,7 @@
 use crate::analyzer_error::{
-    AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForRangeKind,
-    InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+    AnalyzerError, CaseLabelMismatch, ComponentInterfaceMismatchKind, ExceedLimitKind,
+    InvalidForRangeKind, InvalidForStepKind, MismatchAssignmentKind, MismatchTypeKind,
+    MultipleDefaultKind, UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -11,10 +12,11 @@ use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
 use crate::ir::{
-    self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, Shape, ShapeRef,
-    Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind,
-    VarPath, VarPathSelect, VarSelect, Variable,
+    self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, QueueOp, Shape,
+    ShapeRef, Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex,
+    VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
+use crate::namespace::DefineContext;
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, GenericMap, ProtoBound,
     Symbol, SymbolKind, TbComponentKind, TypeKind,
@@ -206,6 +208,14 @@ pub fn eval_expr(
             comptime.value = ValueVariant::NumericArray(values);
         }
 
+        if comptime.is_const
+            && let ir::Expression::Term(factor) = &expr
+            && factor.array_index().is_some_and(VarIndex::is_range)
+            && let Some(values) = factor.array_values(context)
+        {
+            comptime.value = ValueVariant::NumericArray(values);
+        }
+
         Ok((comptime, expr))
     } else {
         let comptime = Comptime::create_unknown(token);
@@ -239,13 +249,26 @@ pub fn eval_range_const(
     eval_range_inner(context, range, true)
 }
 
+/// A signed bound is read back as an `i64`, where a saturated value would
+/// wrap negative.
+fn const_for_bound(value: &Value, signed: bool) -> usize {
+    let val = value.to_usize_saturating().unwrap_or(0);
+    if signed {
+        val.min(i64::MAX as usize)
+    } else {
+        val
+    }
+}
+
 fn eval_range_inner(
     context: &mut Context,
     range: &Range,
     require_const: bool,
 ) -> IrResult<(ir::ForBound, ir::ForBound, bool)> {
+    // The emitted SV compares an `int` iterator against the bound, so the
+    // bound is evaluated at no less than 32 bits.
     let mut beg: ir::Expression = Conv::conv(context, range.expression.as_ref())?;
-    let beg_comptime = beg.eval_comptime(context, None);
+    let beg_comptime = beg.eval_comptime(context, Some(32));
     if require_const && !beg_comptime.is_const {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ForRange,
@@ -264,15 +287,15 @@ fn eval_range_inner(
             ));
             return Err(ir_error!(token));
         }
-        let val = value.to_usize().unwrap_or(0);
-        ir::ForBound::Const(val)
+        let signed = beg_comptime.r#type.signed;
+        ir::ForBound::Const(const_for_bound(value, signed), signed)
     } else {
         ir::ForBound::Expression(Box::new(beg))
     };
 
     let (end, inclusive) = if let Some(x) = &range.range_opt {
         let mut end: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-        let end_comptime = end.eval_comptime(context, None);
+        let end_comptime = end.eval_comptime(context, Some(32));
         if require_const && !end_comptime.is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::ForRange,
@@ -289,8 +312,8 @@ fn eval_range_inner(
                 ));
                 return Err(ir_error!(token));
             }
-            let val = value.to_usize().unwrap_or(0);
-            ir::ForBound::Const(val)
+            let signed = end_comptime.r#type.signed;
+            ir::ForBound::Const(const_for_bound(value, signed), signed)
         } else {
             ir::ForBound::Expression(Box::new(end))
         };
@@ -324,7 +347,7 @@ impl ArrayLiteralExpression {
             );
             ret.push(expr);
         }
-        VarIndex(ret)
+        VarIndex::new(ret)
     }
 
     pub fn to_var_select(&self) -> VarSelect {
@@ -448,7 +471,10 @@ pub fn eval_array_literal(
                     let repeat = if let Some(repeat) = repeat {
                         let repeat =
                             eval_repeat(context, repeat).ok_or_else(|| ir_error!(token))?;
-                        repeat.to_usize().unwrap_or(0)
+                        let repeat = repeat.to_usize_saturating().unwrap_or(0);
+                        context
+                            .check_size(repeat, token)
+                            .ok_or_else(|| ir_error!(token))?
                     } else {
                         1
                     };
@@ -603,10 +629,17 @@ pub fn eval_size(
         context.insert_error(AnalyzerError::invalid_size_type(&token));
         return Err(ir_error!(token));
     }
-    if let Ok(x) = comptime.get_value() {
-        let value = x.to_usize().unwrap_or(0);
+    // Only a value that is really zero is a zero size. One with X/Z bits, or
+    // one too wide for `usize`, is not known and must not be reported as
+    // zero; a non-constant cast operand reaches here the same way.
+    if let Ok(x) = comptime.get_value()
+        && let Some(value) = x.to_usize_saturating()
+    {
         let value = context.check_size(value, expr.token_range());
+        // A zero size emits `[X-1:0]`, which tools disagree on: Verilator
+        // rejects it and most others silently make it 2 bits.
         if value == Some(0) {
+            context.insert_error(AnalyzerError::zero_size(&expr.token_range()));
             Ok((comptime, None))
         } else {
             Ok((comptime, value))
@@ -614,6 +647,18 @@ pub fn eval_size(
     } else {
         Ok((comptime, None))
     }
+}
+
+/// A declaration the active defines guard out is not one placed further down,
+/// and saying so sends the reader to the wrong line.
+fn report_unreachable_definition(context: &mut Context, definition: Token, reference: &TokenRange) {
+    let define_context: DefineContext = definition.into();
+    let error = if define_context.is_active(&context.config.defines) {
+        AnalyzerError::referring_before_definition(&definition.to_string(), reference)
+    } else {
+        AnalyzerError::referring_inactive_definition(&definition.to_string(), reference)
+    };
+    context.insert_error(error);
 }
 
 /// A write to a variable declared further down is invisible to every analysis,
@@ -632,10 +677,7 @@ pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
             .find_path(&VarPath::new(symbol.found.token.text))
             .is_none()
     {
-        context.insert_error(AnalyzerError::referring_before_definition(
-            &token.text.to_string(),
-            &token.into(),
-        ));
+        report_unreachable_definition(context, symbol.found.token, &token.into());
     }
 }
 
@@ -720,9 +762,14 @@ pub fn eval_assign_statement(
 
             let mut dst = dst.clone();
             dst.index.append(&index);
+            // The emitted RHS initializes the indexed element. Preserve only
+            // dimensions not consumed by this lowering; explicit LHS indices
+            // have already been removed from the destination type.
+            dst.comptime.r#type.array.drain(0..index.dimension());
             dst.select = select;
 
             let statement = ir::Statement::Assign(ir::AssignStatement {
+                hier_dst: None,
                 dst: vec![dst],
                 width,
                 expr: expr.expr,
@@ -734,6 +781,7 @@ pub fn eval_assign_statement(
         check_reset_non_elaborative(context, expr);
 
         let statement = ir::Statement::Assign(ir::AssignStatement {
+            hier_dst: None,
             dst: vec![dst.clone()],
             width,
             expr: expr.clone(),
@@ -782,10 +830,8 @@ pub fn eval_array_range_assign(
     let Some((_, mut comptime)) = context.find_path(&lhs.0) else {
         return Ok(None);
     };
-    if let Some(part_select) = &comptime.part_select {
-        comptime.r#type = part_select.base.clone();
-    }
-    let (array_select, _) = select.split(comptime.r#type.array.dims());
+    let array_dims = comptime.rebase_part_select();
+    let (array_select, _) = select.split(array_dims);
     if !array_select.is_range() {
         return Ok(None);
     }
@@ -822,7 +868,10 @@ pub fn eval_array_range_assign(
         match item {
             ir::ArrayLiteralItem::Value(expr, repeat) => {
                 let count = if let Some(repeat) = repeat {
-                    match eval_repeat(context, repeat).and_then(|v| v.to_usize()) {
+                    match eval_repeat(context, repeat)
+                        .and_then(|v| v.to_usize_saturating())
+                        .and_then(|n| context.check_size(n, token))
+                    {
                         Some(count) => count,
                         // Non-const repeat: already reported by eval_repeat. Skip the
                         // count below so we don't pile on a spurious dimension error.
@@ -881,13 +930,26 @@ fn eval_array_literal_expressions(
     context: &mut Context,
     r#type: &ir::Type,
     exprs: Vec<ArrayLiteralExpression>,
-    token: TokenRange,
-) -> IrResult<Vec<Value>> {
+) -> IrResult<Option<Vec<Value>>> {
     let mut ret = vec![];
 
     let mut value: Option<Value> = None;
     let mut prev = None;
     for expr in exprs {
+        if let ir::Expression::Term(factor) = &expr.expr
+            && factor.array_index().is_some_and(VarIndex::is_range)
+        {
+            let Some(values) = factor.array_values(context) else {
+                return Ok(None);
+            };
+            if let Some(part) = value.take() {
+                ret.push(part);
+            }
+            ret.extend(values);
+            prev = None;
+            continue;
+        }
+
         if prev != Some(expr.index.clone())
             && let Some(x) = value
         {
@@ -899,8 +961,17 @@ fn eval_array_literal_expressions(
         part_type.width_mut().drain(0..expr.select.len());
 
         if let Some(mut part_value) = expr.expr.eval_value(context) {
-            let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
-            part_value.trunc(part_width);
+            // A `string` has no declared width -- `total_width()` answers 1 for
+            // it -- so the element carries its own, and truncating to the
+            // declared type would leave one bit of the text.
+            if !part_type.is_string() {
+                // The parts of one element are concatenated, so a width that
+                // will not resolve would lay them out at their own widths.
+                let Some(part_width) = part_type.total_width() else {
+                    return Ok(None);
+                };
+                part_value.trunc(part_width);
+            }
 
             value = if let Some(x) = value {
                 Some(x.concat(&part_value))
@@ -918,7 +989,7 @@ fn eval_array_literal_expressions(
         ret.push(x);
     }
 
-    Ok(ret)
+    Ok(Some(ret))
 }
 
 /// Fold an array-literal expression into its per-element values, or `None`
@@ -928,14 +999,11 @@ fn eval_array_literal_values(
     r#type: &ir::Type,
     expr: &mut ir::Expression,
 ) -> IrResult<Option<Vec<Value>>> {
-    let token = expr.token_range();
     let Some(exprs) = eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?
     else {
         return Ok(None);
     };
-    Ok(Some(eval_array_literal_expressions(
-        context, r#type, exprs, token,
-    )?))
+    eval_array_literal_expressions(context, r#type, exprs)
 }
 
 /// Register a const/param variable from its element `values`. The scalar arm
@@ -968,8 +1036,12 @@ fn insert_const_variable(
 /// source variable (inherited/sliced array params) keep the source width, so a
 /// narrower signed source must be sign-extended -- the array-literal path can't
 /// hit this because it evaluates each element in the destination type context.
-/// A `None` width (e.g. `string`) is left untouched.
+/// A width that isn't a real one is left untouched: `None`, and `string`, whose
+/// `total_width()` answers 1 while the text lives in the element itself.
 fn fit_array_elements(mut values: Vec<Value>, r#type: &ir::Type) -> Vec<Value> {
+    if r#type.is_string() {
+        return values;
+    }
     if let Some(total_width) = r#type.total_width() {
         for value in &mut values {
             if value.width() > total_width {
@@ -1000,7 +1072,7 @@ pub fn eval_const_assign(
     {
         comptime.value = ValueVariant::Numeric(value);
     }
-    let comptime = comptime.clone();
+    let mut comptime = comptime.clone();
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
@@ -1011,15 +1083,39 @@ pub fn eval_const_assign(
         ir::Expression::ArrayLiteral(_, _)
             if !matches!(comptime.value, ValueVariant::NumericArray(_)) =>
         {
-            let Some(values) = eval_array_literal_values(context, r#type, expr)? else {
-                return Err(ir_error!(token));
-            };
+            // A constant absent from the path table reads as one placed ahead
+            // of its own declaration, so it is bound valueless instead.
+            let values = eval_array_literal_values(context, r#type, expr)?.unwrap_or_default();
             insert_const_variable(context, dst, kind, r#type, comptime, values);
         }
         _ => {
             match &comptime.value {
                 ValueVariant::Numeric(value) => {
-                    let id = context.insert_var_path(path.clone(), comptime.clone());
+                    let mut value = value.clone();
+                    // Giving up on a width that will not resolve would leave the
+                    // constant out of the path table, where a later reference to
+                    // it reads as one placed ahead of its own declaration.
+                    if !comptime.r#type.is_string() {
+                        // Normalize to the declared type: extend by the RHS's own
+                        // signedness, then adopt the type's signed flag — downstream folds
+                        // (==, <:, /, ternary, casts) trust it, and a stray RHS flag
+                        // diverges from the emitted SV.
+                        if let Some(total_width) = comptime.r#type.total_width() {
+                            if value.width() < total_width && value.width() != 0 {
+                                value = value.expand(total_width, value.signed()).into_owned();
+                            }
+                            value.trunc(total_width);
+                        }
+                        value.set_signed(r#type.signed);
+                    }
+
+                    // Keep constant metadata consistent with the stored Variable:
+                    // later folds can also read the value without a variable table.
+                    comptime.value = ValueVariant::Numeric(value.clone());
+                    // A later reference has its own expression context, not the
+                    // initializer's width/signedness cached by eval_expr.
+                    comptime.evaluated = false;
+                    let id = context.insert_var_path(path.clone(), comptime);
 
                     for x in r#type.expand_struct_union(path, &[], None) {
                         let r#type = x.part_select.last().unwrap().r#type.clone();
@@ -1031,23 +1127,6 @@ pub fn eval_const_assign(
                         // its lowest field.
                         comptime.part_select = Some(x);
                         context.insert_var_path_with_id(path, id, comptime);
-                    }
-
-                    let mut value = value.clone();
-                    if !comptime.r#type.is_string() {
-                        let total_width = comptime
-                            .r#type
-                            .total_width()
-                            .ok_or_else(|| ir_error!(token))?;
-                        // Normalize to the declared type: extend by the RHS's own
-                        // signedness, then adopt the type's signed flag — downstream folds
-                        // (==, <:, /, ternary, casts) trust it, and a stray RHS flag
-                        // diverges from the emitted SV.
-                        if value.width() < total_width && value.width() != 0 {
-                            value = value.expand(total_width, value.signed()).into_owned();
-                        }
-                        value.trunc(total_width);
-                        value.set_signed(r#type.signed);
                     }
 
                     let array_limit = context.config.evaluate_array_limit;
@@ -1076,7 +1155,9 @@ pub fn eval_const_assign(
                     context.insert_var_path(path.clone(), comptime);
                 }
                 ValueVariant::Unknown => {
-                    context.insert_var_path(path.clone(), comptime);
+                    // The variable behind the path is what the const-assignment
+                    // check and the simulator look for.
+                    insert_const_variable(context, dst, kind, r#type, comptime, vec![]);
                 }
             }
         }
@@ -1131,10 +1212,38 @@ pub fn eval_variable(
 
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
     let comptime = expr.eval_comptime(context, None);
-    if context.in_if_reset && !comptime.is_const {
+    if !context.in_if_reset || comptime.is_const {
+        return;
+    }
+    let token = comptime.token;
+    // A constant-range iterator is elaborative for reset-value checks, but
+    // remains a variable in the shared IR. Check a temporary expression so
+    // each iteration still computes its own value at runtime.
+    let elaborative = if context.for_ranges.is_empty() {
+        false
+    } else {
+        let mut specialized = Some(expr.clone());
+        for (id, range) in context.for_ranges.clone() {
+            let Some(iterations) = range.eval_iter(context) else {
+                continue;
+            };
+            let Some(iteration) = iterations.first() else {
+                continue;
+            };
+            let variable = &context.variables[&id];
+            let Some(width) = variable.r#type.total_width() else {
+                continue;
+            };
+            let value = Value::new(*iteration as u64, width, variable.r#type.signed);
+            specialized = specialized
+                .and_then(|expr| ir::peel::specialize_expression(context, &expr, id, value));
+        }
+        specialized.is_some_and(|mut expr| expr.gather_context(context).is_const)
+    };
+    if !elaborative {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ResetValue,
-            &comptime.token,
+            &token,
         ));
     }
 }
@@ -1162,31 +1271,65 @@ pub fn eval_struct_member(
     if let Ok(symbol) = symbol_table::resolve(&parent_path) {
         match &symbol.found.kind {
             SymbolKind::Parameter(x) if !x.is_proto => {
-                if let Some(expr) = &x.value {
-                    let path = VarPath::new(symbol.found.token.text);
+                let path = VarPath::new(symbol.found.token.text);
+                // A member of an overridden parameter is not the member of the
+                // declaration default.
+                let overridden = context
+                    .get_override(&symbol.found.namespace, &path)
+                    .map(|(c, _)| c.clone());
+
+                if overridden.is_some() || x.value.is_some() {
                     let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
-                    let (_, mut expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
+                    let whole = if let Some(x) = overridden {
+                        x
+                    } else {
+                        let expr = x.value.as_ref().ok_or_else(|| ir_error!(token))?;
+                        let (comptime, mut expr) =
+                            eval_expr(context, Some(r#type.clone()), expr, false)?;
+                        // An array literal's per-element values are carried by
+                        // the comptime `eval_expr` builds; `eval_comptime`
+                        // alone leaves an array literal unevaluated.
+                        if matches!(comptime.value, ValueVariant::NumericArray(_)) {
+                            comptime
+                        } else {
+                            expr.eval_comptime(context, None).clone()
+                        }
+                    };
 
                     member_path.add_prelude(&path.0);
                     for x in r#type.expand_struct_union(&path, &[], None) {
                         if x.path == member_path {
-                            let mut comptime = expr.eval_comptime(context, None).clone();
+                            let mut comptime = whole.clone();
                             comptime.token = token;
                             // Extract the field value from the full struct value.
                             // part_select encodes the bit position of the field: the sum of
                             // all pos values gives the LSB (end), and the last entry's type
                             // width gives the field width (beg = end + width - 1).
-                            if let ValueVariant::Numeric(ref full_value) = comptime.value.clone() {
-                                let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
-                                if let Some(width) =
-                                    x.part_select.last().and_then(|ps| ps.r#type.total_width())
-                                {
-                                    let beg = end + width - 1;
-                                    comptime.value =
-                                        ValueVariant::Numeric(full_value.select(beg, end));
-                                }
+                            let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
+                            let mut member_type = get_member_type(context, member_symbol)?;
+                            member_type.array = r#type.array.clone();
+                            if let Some(width) =
+                                x.part_select.last().and_then(|ps| ps.r#type.total_width())
+                            {
+                                let beg = end + width - 1;
+                                // `Value::select` drops the member's sign.
+                                let field = |v: &Value| {
+                                    let mut v = v.select(beg, end);
+                                    v.set_signed(member_type.signed);
+                                    v
+                                };
+                                comptime.value = match &comptime.value {
+                                    ValueVariant::Numeric(v) => ValueVariant::Numeric(field(v)),
+                                    // Every element holds a whole struct, so the
+                                    // field is taken element by element and the
+                                    // array dimension stays on the type.
+                                    ValueVariant::NumericArray(v) => {
+                                        ValueVariant::NumericArray(v.iter().map(field).collect())
+                                    }
+                                    v => v.clone(),
+                                };
                             }
-                            comptime.r#type = get_member_type(context, member_symbol)?;
+                            comptime.r#type = member_type;
                             return Ok(ir::Factor::Value(comptime));
                         }
                     }
@@ -1280,6 +1423,24 @@ pub fn eval_type(
         None
     };
 
+    let non_const_cast = matches!(pos, TypePosition::Cast)
+        && path
+            .to_var_path()
+            .is_some_and(|x| context.var_paths.get(&x).is_some_and(|x| !x.1.is_const));
+    if non_const_cast {
+        let resolved = context.resolve_path(path.clone());
+        if let Ok(symbol) = symbol_table::resolve(&resolved) {
+            context.insert_error(AnalyzerError::mismatch_type(
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "enum, union, struct, typedef or integer constant".to_string(),
+                    actual: symbol.found.kind.to_kind_name(),
+                },
+                &path.range,
+            ));
+        }
+    }
+
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
     {
@@ -1290,11 +1451,12 @@ pub fn eval_type(
                 // append internal width/array
                 width.append(x.width_mut());
                 array.append(&mut x.array);
+                signed = x.signed;
 
                 x.kind
             }
             ValueVariant::Numeric(x) => {
-                let value = x.to_usize().unwrap_or(0);
+                let value = x.to_usize_saturating().unwrap_or(0);
                 let value = context.check_size(value, path.paths[0].base.into());
                 width.push(value);
                 ir::TypeKind::Bit
@@ -1303,8 +1465,11 @@ pub fn eval_type(
         }
     } else {
         let mut path = resolved.unwrap_or_else(|| context.resolve_path(path.clone()));
+        // Before unaliasing: a declared alias is not a generic reference here.
         check_generic_refereence(context, &path);
 
+        let use_site_range = path.range;
+        path.unalias(None);
         let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
             if matches!(pos, TypePosition::Cast) && !symbol.found.is_casting_type() {
@@ -1314,7 +1479,7 @@ pub fn eval_type(
                         expected: "enum, union, struct, typedef or integer constant".to_string(),
                         actual: symbol.found.kind.to_kind_name(),
                     },
-                    &path.range,
+                    &use_site_range,
                 ));
             }
 
@@ -1328,13 +1493,14 @@ pub fn eval_type(
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
 
-                            if let SymbolKind::StructMember(x) = member.kind {
+                            if let SymbolKind::StructMember(x) = &member.kind {
                                 if symbol.found.token.text == x.r#type.token.beg.text {
                                     // Prevent cyclic reference
                                     continue;
                                 }
 
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                                check_unpacked_member(c, &member, &x.r#type.token, &r#type);
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
@@ -1358,13 +1524,14 @@ pub fn eval_type(
                         for x in &x.members {
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
-                            if let SymbolKind::UnionMember(x) = member.kind {
+                            if let SymbolKind::UnionMember(x) = &member.kind {
                                 if symbol.found.token.text == x.r#type.token.beg.text {
                                     // Prevent cyclic reference
                                     continue;
                                 }
 
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                                check_unpacked_member(c, &member, &x.r#type.token, &r#type);
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
@@ -1499,6 +1666,7 @@ pub fn eval_type(
                         if let ValueVariant::Type(mut x) = comptime.value {
                             width.append(x.width_mut());
                             array.append(&mut x.array);
+                            signed = x.signed;
                             x.kind
                         } else {
                             ir::TypeKind::Unknown
@@ -1532,32 +1700,23 @@ pub fn eval_type(
                         return Err(ir_error!(token));
                     }
                 }
-                SymbolKind::TbComponent(x)
-                    if matches!(
-                        x.kind,
-                        TbComponentKind::File
-                            | TbComponentKind::External(_)
-                            | TbComponentKind::Random
-                    ) =>
-                {
+                SymbolKind::TbComponent(x) if x.kind.is_variable() => {
                     if !context.in_test_module {
                         let token: TokenRange = path.paths[0].base.into();
                         context.insert_error(AnalyzerError::invalid_tb_usage(&token));
                     }
 
-                    if matches!(x.kind, TbComponentKind::Random)
+                    if x.kind.is_generic()
                         && let Some(arg) =
                             path.paths.last().and_then(|p| p.arguments.first()).cloned()
                     {
-                        // `$tb::random::<T>`'s element type is its generic argument
-                        // (already resolved through the generic maps above); its
-                        // validity is diagnosed by `check_generic_refereence`. The
-                        // file/component descriptor lives in the simulator and has
-                        // no element type, so its slot is backed by a throwaway
-                        // 32-bit width.
+                        // The first generic argument is the element type; its validity
+                        // is diagnosed by `check_generic_refereence`.
                         return eval_type(context, &arg, pos);
                     }
 
+                    // The file/component descriptor lives in the simulator, so its
+                    // slot is backed by a throwaway 32-bit width.
                     width.push(Some(32));
                     ir::TypeKind::Bit
                 }
@@ -1661,6 +1820,25 @@ pub fn eval_type(
         r#type.set_concrete_width(width);
     }
     Ok(r#type)
+}
+
+/// A struct/union member is emitted inside a `struct packed`, where an unpacked
+/// array is illegal SystemVerilog. Spelling one directly (`m: t [8]`) is a
+/// parse error, but a `type` alias carries one past the grammar.
+fn check_unpacked_member(
+    context: &mut Context,
+    member: &Symbol,
+    token: &TokenRange,
+    r#type: &ir::Type,
+) {
+    if context.in_generic || r#type.array.is_empty() {
+        return;
+    }
+
+    context.insert_error(AnalyzerError::unpacked_struct_union_member(
+        &member.token.to_string(),
+        token,
+    ));
 }
 
 fn check_struct_union_members(
@@ -1845,7 +2023,7 @@ fn build_for_range_inner(
         let mut step_expr: ir::Expression = Conv::conv(context, expr)?;
         let step_comptime = step_expr.eval_comptime(context, None);
         let step_value = step_comptime.get_value()?;
-        let step_val = step_value.to_usize().unwrap_or(0);
+        let step_val = step_value.to_usize_saturating().unwrap_or(0);
         let step_negative = step_value.is_semantically_not_positive() && step_val != 0;
         let op: ir::Op = Conv::conv(context, op)?;
 
@@ -1984,8 +2162,7 @@ fn build_for_range_inner(
     }
 }
 
-/// Convert a `ForStatement` AST node into a runtime `ir::Statement::For`.
-/// Used for dynamic-range for-loops that cannot be unrolled at compile time.
+/// Preserve a procedural loop, including constant ranges, in the shared IR.
 pub fn build_for_statement(
     context: &mut Context,
     value: &ForStatement,
@@ -2020,7 +2197,10 @@ pub fn build_for_statement(
     );
     context.insert_variable(loop_var_id, variable);
 
-    let body: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+    context.for_ranges.push((loop_var_id, for_range.clone()));
+    let body: IrResult<ir::StatementBlock> = Conv::conv(context, value.statement_block.as_ref());
+    context.for_ranges.pop();
+    let body = body?;
 
     Ok(ir::StatementBlock(vec![ir::Statement::For(Box::new(
         ir::ForStatement {
@@ -2070,7 +2250,7 @@ pub fn eval_function_call(
             return Err(ir_error!(token));
         }
 
-        let args = if let Some(x) = &x.function_call.function_call_opt {
+        let mut args = if let Some(x) = &x.function_call.function_call_opt {
             argument_list(context, x.argument_list.as_ref())?
         } else {
             ir::Arguments::Null
@@ -2112,6 +2292,8 @@ pub fn eval_function_call(
             SymbolKind::SystemVerilog => {
                 let mut x = Comptime::create_unknown(token);
                 x.is_const = true;
+                // The external function is opaque, but its arguments are not.
+                x.runtime_dependent = !args.eval_elaboration_const(context);
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
             _ => {
@@ -2361,6 +2543,76 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
     }
 }
 
+/// The write-side counterpart of the `HierReference::Resolved` arm in
+/// [`eval_factor_path_inner`]: turns `dut.u_core.mem[0]` on the left of an
+/// assignment into a [`ir::HierAssignDestination`], which the simulator
+/// resolves to a buffer offset after elaboration.
+///
+/// Returns `None` when the path is not a hierarchical reference at all, so the
+/// caller can fall through to its ordinary "destination not found" handling.
+/// Like the read side this is testbench-only; a hierarchical write from RTL is
+/// reported as an invisible identifier.
+pub fn to_hier_assign_destination(
+    context: &mut Context,
+    dst: VarPathSelect,
+) -> IrResult<Option<ir::HierAssignDestination>> {
+    let (path, select, token) = dst.into();
+    let HierReference::Resolved {
+        inst_path,
+        var_path,
+        r#type,
+        part_select,
+    } = classify_hier_reference(context, &path)
+    else {
+        return Ok(None);
+    };
+
+    if !context.in_tb_block {
+        context.insert_error(AnalyzerError::invisible_identifier(
+            &path.0[1].to_string(),
+            &token,
+        ));
+        return Err(ir_error!(token));
+    }
+
+    let mut comptime = Comptime::from_type(*r#type, ClockDomain::None, token);
+
+    let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+    let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+    let width_select = if let Some(part_select) = &part_select {
+        part_select.to_base_select(context, &width_select)
+    } else {
+        eval_width_select(context, &var_path, &comptime.r#type, width_select)
+    }
+    .ok_or_else(|| ir_error!(token))?;
+
+    // An array RANGE destination would need one write per covered element;
+    // `to_assign_destinations` does that for local paths and has no
+    // hierarchical twin, so reject it rather than write the wrong element.
+    if array_select.is_range() {
+        return Err(ir_error!(token));
+    }
+
+    let index = array_select.to_index();
+    comptime.r#type.array.drain(0..index.dimension());
+    if !width_select.is_empty() {
+        comptime.r#type.flatten_struct_union_enum();
+        if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
+            comptime.r#type.set_concrete_width(width);
+        }
+    }
+    comptime.token = token;
+
+    Ok(Some(ir::HierAssignDestination {
+        inst_path,
+        var_path,
+        index,
+        select: width_select,
+        comptime,
+        token,
+    }))
+}
+
 pub fn eval_factor_path(
     context: &mut Context,
     symbol_path: GenericSymbolPath,
@@ -2372,7 +2624,7 @@ pub fn eval_factor_path(
     // resolved to a base case here; otherwise it recurses until the native
     // stack overflows.
     context.function_eval_depth += 1;
-    let ret = if context.function_eval_depth > context.config.function_instance_depth_limit {
+    let ret = if context.function_eval_depth > context.config.symbol_eval_depth_limit {
         if context.function_eval_overflow.is_none() {
             context.function_eval_overflow = Some((token, context.function_eval_depth));
         }
@@ -2394,8 +2646,17 @@ fn eval_factor_path_inner(
     let (path, select, _) = var_path.into();
 
     let mut generic_path = context.resolve_path(symbol_path);
-    generic_path.unalias(None);
+    // Before unaliasing: a declared alias is not a generic reference here.
     check_generic_refereence(context, &generic_path);
+    generic_path.unalias(None);
+
+    // An anonymous loop variable is also registered as `_`.
+    if generic_path.is_anonymous() {
+        let mut comptime = Comptime::create_unknown(token);
+        comptime.is_const = true;
+        comptime.is_global = true;
+        return Ok(ir::Factor::Anonymous(comptime));
+    }
 
     let found = if let Some(path) = generic_path.to_var_path()
         && let Some((var_id, comptime)) = context.find_path(&path)
@@ -2415,17 +2676,22 @@ fn eval_factor_path_inner(
     };
 
     if let Some((var_id, mut comptime)) = found {
-        if let Some(part_select) = &comptime.part_select {
-            comptime.r#type = part_select.base.clone();
-        }
+        let array_dims = comptime.rebase_part_select();
 
-        let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+        let (array_select, width_select) = select.split(array_dims);
 
         // Array select type check
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
 
+        if !width_select.is_empty() {
+            comptime.member_signed = None;
+        }
         let width_select = if let Some(part_select) = &comptime.part_select {
-            part_select.to_base_select(context, &width_select)
+            let (select, domain) = part_select
+                .to_base_select_with_domain(context, &width_select)
+                .ok_or_else(|| ir_error!(token))?;
+            comptime.member_select_domain = domain;
+            Some(select)
         } else {
             eval_width_select(context, &path, &comptime.r#type, width_select)
         };
@@ -2433,36 +2699,52 @@ fn eval_factor_path_inner(
 
         comptime.is_global = false;
 
-        if array_select.is_range() {
-            // TODO
-            Err(ir_error!(token))
-        } else {
-            let index = array_select.to_index();
-            comptime.r#type.array.drain(0..index.dimension());
+        let index = array_select.to_index();
+        let array = comptime.r#type.array.clone();
+        comptime.r#type.array = index.selected_shape(context, &array, token)?;
 
-            comptime.is_const &= index.is_const() && width_select.is_const();
+        comptime.is_const &= index.is_const() && width_select.is_const();
 
-            // The whole-array value doesn't describe a selected part of it; drop
-            // it so consumers resolve the selection from the variable table.
-            if (index.dimension() > 0 || !width_select.is_empty())
-                && matches!(comptime.value, ValueVariant::NumericArray(_))
-            {
-                comptime.value = ValueVariant::Unknown;
-            }
-
-            comptime.token = token;
-            if comptime.r#type.is_type() {
-                Ok(ir::Factor::Value(comptime))
+        // The whole-array value doesn't describe a selected part of it; drop
+        // it so consumers resolve the selection from the variable table.
+        if (index.dimension() > 0 || !width_select.is_empty())
+            && let ValueVariant::NumericArray(values) = &comptime.value
+        {
+            // Except for a `string`: it has no width to lay out, so the
+            // variable table holds nothing to resolve against and the
+            // element has to be folded here.
+            let element = if comptime.r#type.is_string() && width_select.is_empty() {
+                index
+                    .eval_value(context)
+                    .and_then(|x| array.calc_index(&x))
+                    .and_then(|x| values.get(x))
+                    .cloned()
             } else {
-                // Params arrive with evaluated=true (set by eval_expr), which
-                // would make gather_context skip applying the select width —
-                // and skip the index/select clock-domain check, laundering a
-                // foreign-domain index into a const lookup table.
-                if !width_select.is_empty() || !index.is_const() {
-                    comptime.evaluated = false;
-                }
-                Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
+                None
+            };
+            comptime.value = match element {
+                Some(x) => ValueVariant::Numeric(x),
+                None => ValueVariant::Unknown,
+            };
+        }
+
+        comptime.token = token;
+        // A `string` read is only ever its value: there is no variable
+        // behind it for a later stage to look up.
+        let is_folded_string = comptime.r#type.is_string()
+            && width_select.is_empty()
+            && matches!(comptime.value, ValueVariant::Numeric(_));
+        if comptime.r#type.is_type() || is_folded_string {
+            Ok(ir::Factor::Value(comptime))
+        } else {
+            // Params arrive with evaluated=true (set by eval_expr), which
+            // would make gather_context skip applying the select width —
+            // and skip the index/select clock-domain check, laundering a
+            // foreign-domain index into a const lookup table.
+            if !width_select.is_empty() || !index.is_const() || index.is_range() {
+                comptime.evaluated = false;
             }
+            Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
         }
     } else if let HierReference::Resolved {
         inst_path,
@@ -2483,6 +2765,15 @@ fn eval_factor_path_inner(
 
         let (array_select, width_select) = select.split(comptime.r#type.array.dims());
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+        // A part-select is unsigned; a whole member keeps its sign.
+        let member_signed = match part_select.as_ref().and_then(|x| x.part_select.last()) {
+            Some(member) if width_select.is_empty() => {
+                let mut member = member.r#type.clone();
+                member.flatten_struct_union_enum();
+                member.signed
+            }
+            _ => false,
+        };
         let width_select = if let Some(part_select) = &part_select {
             part_select.to_base_select(context, &width_select)
         } else {
@@ -2490,28 +2781,27 @@ fn eval_factor_path_inner(
         }
         .ok_or_else(|| ir_error!(token))?;
 
-        if array_select.is_range() {
-            Err(ir_error!(token))
-        } else {
-            let index = array_select.to_index();
-            comptime.r#type.array.drain(0..index.dimension());
-
-            if !width_select.is_empty() {
-                comptime.r#type.flatten_struct_union_enum();
-                if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
-                    comptime.r#type.set_concrete_width(width);
-                }
+        let array = comptime.r#type.array.clone();
+        let index = array_select.to_index();
+        comptime.r#type.array = index.selected_shape(context, &array, token)?;
+        if !width_select.is_empty() {
+            comptime.r#type.flatten_struct_union_enum();
+            if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
+                comptime.r#type.set_concrete_width(width);
             }
-            comptime.token = token;
-
-            Ok(ir::Factor::HierVariable(Box::new(ir::HierVarRef {
-                inst_path,
-                var_path,
-                index,
-                select: width_select,
-                comptime,
-            })))
+            comptime.r#type.signed = member_signed;
         }
+        comptime.token = token;
+
+        let source = ir::Factor::HierVariable(Box::new(ir::HierVarRef {
+            inst_path,
+            var_path,
+            index,
+            select: width_select,
+            array,
+            comptime,
+        }));
+        Ok(source)
     } else if !matches!(hier, HierReference::NotHier) {
         match hier {
             HierReference::UnknownMember { owner, member } => {
@@ -2548,11 +2838,6 @@ fn eval_factor_path_inner(
     } else if let Some(x) = generic_path.to_literal() {
         let x = x.eval_comptime(token);
         Ok(ir::Factor::Value(x))
-    } else if generic_path.is_anonymous() {
-        let mut comptime = Comptime::create_unknown(token);
-        comptime.is_const = true;
-        comptime.is_global = true;
-        Ok(ir::Factor::Anonymous(comptime))
     } else if let Ok(symbol) = symbol_table::resolve(&generic_path) {
         let is_inernal = context
             .current_namespace()
@@ -2589,7 +2874,7 @@ fn eval_factor_path_inner(
 fn apply_symbol_select(
     context: &mut Context,
     factor: ir::Factor,
-    select: VarSelect,
+    mut select: VarSelect,
     symbol: &Symbol,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
@@ -2599,6 +2884,8 @@ fn apply_symbol_select(
     let ir::Factor::Value(mut comptime) = factor else {
         return Ok(factor);
     };
+    // Selecting an external/parameter value may fold away the select itself.
+    comptime.runtime_dependent |= !select.eval_elaboration_const(context);
     let values = match &comptime.value {
         ValueVariant::NumericArray(values) => values.clone(),
         ValueVariant::Numeric(value) => vec![value.clone()],
@@ -2606,6 +2893,15 @@ fn apply_symbol_select(
         // has to shrink its type, or the select is invisible to the operand
         // and compatibility checks.
         _ => {
+            let (array_select, _) = select.clone().split(comptime.r#type.array.dims());
+            if array_select.is_range() {
+                comptime.r#type.array = array_select.to_index().selected_shape(
+                    context,
+                    &comptime.r#type.array,
+                    token,
+                )?;
+                return Ok(ir::Factor::Value(comptime));
+            }
             reduce_unevaluable_select(context, &mut comptime, select, token);
             return Ok(ir::Factor::Value(comptime));
         }
@@ -2616,8 +2912,15 @@ fn apply_symbol_select(
     // Array select type check (out-of-range / wrong-order).
     let _ = array_select.eval_comptime(context, &comptime.r#type, true);
     if array_select.is_range() {
-        // TODO: array range select.
-        return Err(ir_error!(token));
+        let id = materialize_const(context, &comptime, values, symbol, token)?;
+        let index = array_select.to_index();
+        comptime.r#type.array = index.selected_shape(context, &array, token)?;
+        comptime.is_const &= index.is_const() && width_select.is_const_with_range();
+        comptime.is_global &= comptime.is_const;
+        comptime.value = ValueVariant::Unknown;
+        comptime.evaluated = false;
+        comptime.token = token;
+        return Ok(ir::Factor::Variable(id, index, width_select, comptime));
     }
     let index = array_select.to_index();
     let is_const_select = index.is_const() && width_select.is_const_with_range();
@@ -2675,6 +2978,7 @@ fn reduce_unevaluable_select(
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
+        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
     }
     comptime.token = token;
 }
@@ -2713,11 +3017,21 @@ fn fold_symbol_select(
         if let Some(width) = select.eval_comptime(context, &element, false) {
             comptime.r#type.set_concrete_width(width);
         }
+        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
     }
 
     let flat = array.calc_index(&indices)?;
-    let (beg, end) = select.eval_value(context, &element, false)?;
-    comptime.value = ValueVariant::Numeric(values.get(flat)?.select(beg, end));
+    let value = values.get(flat)?;
+    comptime.value = if comptime.r#type.is_string() && select.is_empty() {
+        // An empty select reads the declared width, which for a `string` is the
+        // nominal 1 bit rather than the text the element holds.
+        ValueVariant::Numeric(value.clone())
+    } else {
+        let (beg, end) = select.eval_value(context, &element, false)?;
+        let mut value = value.select(beg, end);
+        value.set_signed(comptime.r#type.signed);
+        ValueVariant::Numeric(value)
+    };
     Some(comptime)
 }
 
@@ -2826,14 +3140,34 @@ pub fn eval_factor_symbol(
 ) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
         SymbolKind::Parameter(x) if !x.is_proto => {
-            // Parameter should be found through context.find_path from the defined namespace
-            if let Some(namespace) = context.current_namespace()
+            // Parameter should be found through context.find_path from the
+            // defined namespace. Not while sizing a declared width, where a
+            // component instantiating itself would name its own scope.
+            if !context.sizing_component_width()
+                && !context.is_global_func_caller(&symbol.found.namespace)
+                && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
+            }
+
+            // Reached while a width names a parameter of a component whose body
+            // has not been converted yet, so the declaration default is not
+            // what that parameter stands for.
+            if let Some((comptime, _)) = context.get_override(
+                &symbol.found.namespace,
+                &VarPath::new(symbol.found.token.text),
+            ) {
+                let mut comptime = comptime.clone();
+                // A value whose representation is narrower than its type
+                // reaches the back end as a store the variable's width does
+                // not match.
+                if let Some(width) = comptime.r#type.total_width() {
+                    comptime.value.expand_value(width);
+                }
+
+                comptime.token = token;
+                return Ok(ir::Factor::Value(comptime));
             }
 
             if let Some(expr) = &x.value {
@@ -3041,10 +3375,7 @@ pub fn eval_factor_symbol(
                 }
             });
             if module_variable {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
             return eval_struct_member(context, &symbol.found, &path, VarPath::default(), token);
         }
@@ -3121,10 +3452,7 @@ pub fn eval_factor_symbol(
         SymbolKind::Variable(x) => {
             // Module local variable should be found through context.find_path
             if x.affiliation == Affiliation::Module {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
 
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
@@ -3192,43 +3520,235 @@ pub fn eval_factor_symbol(
     Err(ir_error!(token))
 }
 
-/// Extract source-level `CasePattern`s from a `CaseCondition` (one per
-/// `RangeItem`).
+/// A target that is not self-determined stays unfolded, so that each
+/// comparison can size it again.
+pub fn eval_case_target(context: &mut Context, tgt: &mut ir::Expression) -> Comptime {
+    let prev = context.disalbe_const_opt;
+    context.disalbe_const_opt |= !tgt.is_self_determined();
+    let ret = tgt.eval_comptime(context, None).clone();
+    context.disalbe_const_opt = prev;
+    ret
+}
+
+/// The sign and width a `case` target or pattern value has on its own.
+#[derive(Clone, Copy)]
+pub struct CaseOperand {
+    signed: bool,
+    width: usize,
+    /// The width it adds to the one SystemVerilog sizes the whole `case` at.
+    sv_width: usize,
+    /// Its value can change with the width it is evaluated at.
+    widens: bool,
+    /// Its value can change with the sign it is evaluated with.
+    sign_sensitive: bool,
+    /// The bit length of a non-negative constant.
+    magnitude: Option<usize>,
+    /// It is a range bound, compared by order rather than equality.
+    bound: bool,
+    /// An exclusive upper bound, emitted as `(hi)-1`.
+    exclusive: bool,
+    is_const: bool,
+    is_zero: bool,
+    is_min: bool,
+    known: bool,
+    is_string: bool,
+    token: TokenRange,
+}
+
+impl CaseOperand {
+    /// `expr` is not yet evaluated, or was evaluated by `eval_case_target`.
+    pub fn new(context: &mut Context, expr: &ir::Expression) -> Self {
+        let mut probe = expr.clone();
+        let comptime = probe.eval_comptime(context, None);
+        let r#type = &comptime.r#type;
+        let known = !(r#type.is_unknown() || r#type.is_systemverilog() || r#type.is_type());
+        let self_determined = expr.is_self_determined();
+        let width = comptime.expr_context.width;
+        let signed = comptime.expr_context.signed;
+        let value = comptime
+            .get_value()
+            .ok()
+            .filter(|x| comptime.is_const && width > 0 && !x.is_xz());
+        let msb_set = value.is_some_and(|x| !x.select(width - 1, width - 1).is_zero());
+        let non_negative = value.is_some() && !(signed && msb_set);
+        let is_zero = value.is_some_and(|x| x.is_zero());
+        let is_min = signed
+            && msb_set
+            && value.is_some_and(|x| width == 1 || x.select(width - 2, 0).is_zero());
+        let magnitude = value
+            .filter(|_| non_negative)
+            .and_then(|x| x.to_u64())
+            .map(|x| (u64::BITS - x.leading_zeros()) as usize);
+        Self {
+            signed,
+            width,
+            sv_width: width,
+            // An unsized fill takes the context's width; only `'0` is the
+            // same at every width.
+            widens: !self_determined
+                || (width == 0 && !comptime.get_value().is_ok_and(|x| x.is_zero())),
+            sign_sensitive: !(non_negative && self_determined),
+            magnitude,
+            bound: false,
+            exclusive: false,
+            is_const: value.is_some(),
+            is_zero,
+            is_min,
+            known,
+            is_string: r#type.is_string(),
+            token: expr.token_range(),
+        }
+    }
+
+    fn bound(self) -> Self {
+        Self {
+            bound: true,
+            ..self
+        }
+    }
+
+    /// `(hi)-1` has at least the 32 bits of `1`.
+    fn exclusive_bound(self) -> Self {
+        Self {
+            sv_width: self.width.max(32),
+            exclusive: true,
+            ..self.bound()
+        }
+    }
+
+    /// The `values` SystemVerilog, sizing and signing `target` and all of
+    /// them together, may compare differently from Veryl, which compares each
+    /// with the target alone.
+    fn mismatches<'a>(target: &Self, values: &'a [Self]) -> Vec<(&'a Self, CaseLabelMismatch)> {
+        if !target.known || values.iter().any(|x| !x.known) {
+            return Vec::new();
+        }
+        let width = values
+            .iter()
+            .map(|x| x.sv_width)
+            .fold(target.width, usize::max);
+        let signed = target.signed && values.iter().all(|x| x.signed);
+        values
+            .iter()
+            .filter_map(|x| {
+                // `(hi)-1` wraps at the minimum of the type it is evaluated
+                // in, which a signed bound reaches only if nothing widens it.
+                let wraps = !x.is_const
+                    || (!signed && x.is_zero)
+                    || (signed && x.is_min && x.width >= width);
+                if x.exclusive && wraps {
+                    return Some((x, CaseLabelMismatch::ExclusiveBound));
+                }
+                let widens = x.widens || target.widens;
+                let width_kept = x.width.max(target.width) == width || !widens;
+                // A negative target extended either way differs from a
+                // non-negative constant narrower than its sign bit.
+                let below_target_sign = x.magnitude.is_some_and(|m| m < target.width);
+                let sign_kept = (target.signed && x.signed) == signed
+                    || !(target.sign_sensitive || x.sign_sensitive)
+                    || (!x.bound && !widens && target.width == width && x.width == width)
+                    || (!x.bound && !widens && !x.sign_sensitive && below_target_sign);
+                (!(width_kept && sign_kept)).then_some((x, CaseLabelMismatch::Joint))
+            })
+            .collect()
+    }
+
+    pub fn check(context: &mut Context, target: &Self, values: &[Self]) {
+        // A generic definition's widths are known only per instance.
+        if context.in_generic {
+            return;
+        }
+        for (x, kind) in Self::mismatches(target, values) {
+            context.insert_error(AnalyzerError::mismatch_case_label(kind, &x.token));
+        }
+    }
+}
+
+/// Each value is evaluated within its comparison with `tgt`, as in an `if`,
+/// and its own shape appended to `operands`.
 pub fn case_patterns(
     context: &mut Context,
     cond: &CaseCondition,
+    tgt: &ir::Expression,
+    operands: &mut Vec<CaseOperand>,
 ) -> IrResult<Vec<ir::CasePattern>> {
     let mut ret = Vec::with_capacity(1 + cond.case_condition_list.len());
-    ret.push(range_item_pattern(context, &cond.range_item)?);
+    ret.push(range_item_pattern(
+        context,
+        &cond.range_item,
+        tgt,
+        operands,
+    )?);
     for x in &cond.case_condition_list {
-        ret.push(range_item_pattern(context, &x.range_item)?);
+        ret.push(range_item_pattern(context, &x.range_item, tgt, operands)?);
     }
     Ok(ret)
 }
 
-fn range_item_pattern(context: &mut Context, range_item: &RangeItem) -> IrResult<ir::CasePattern> {
-    let mut lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+/// Gives `value` the context of its comparison with `tgt`.
+fn eval_against_target(
+    context: &mut Context,
+    tgt: &ir::Expression,
+    op: Op,
+    value: ir::Expression,
+    value_first: bool,
+) -> ir::Expression {
+    let comptime = Box::new(Comptime::create_unknown(value.token_range()));
+    let (x, y) = if value_first {
+        (Box::new(value), Box::new(tgt.clone()))
+    } else {
+        (Box::new(tgt.clone()), Box::new(value))
+    };
+    let mut cond = ir::Expression::Binary(x, op, y, comptime);
+    let expr_context = cond.gather_context(context);
+    cond.apply_context(context, expr_context);
+    let ir::Expression::Binary(x, _, y, _) = cond else {
+        unreachable!()
+    };
+    if value_first { *x } else { *y }
+}
 
-    let comptime = lo.eval_comptime(context, None);
-    if !comptime.is_const {
-        context.insert_error(AnalyzerError::unevaluable_value(
-            UnevaluableValueKind::CaseCondition,
-            &range_item.into(),
-        ));
-    }
+fn range_item_pattern(
+    context: &mut Context,
+    range_item: &RangeItem,
+    tgt: &ir::Expression,
+    operands: &mut Vec<CaseOperand>,
+) -> IrResult<ir::CasePattern> {
+    let lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+    let lo_operand = CaseOperand::new(context, &lo);
+    operands.push(lo_operand);
 
     let Some(opt) = &range_item.range.range_opt else {
+        // A string has no wildcard digits, and `==?` does not take one.
+        let op = if lo_operand.is_string {
+            Op::Eq
+        } else {
+            Op::EqWildcard
+        };
+        let lo = eval_against_target(context, tgt, op, lo, false);
+        if !lo.comptime().is_const {
+            context.insert_error(AnalyzerError::unevaluable_value(
+                UnevaluableValueKind::CaseCondition,
+                &range_item.into(),
+            ));
+        }
         return Ok(ir::CasePattern::Eq(Box::new(lo)));
     };
-    let mut hi: ir::Expression = Conv::conv(context, opt.expression.as_ref())?;
-    let comptime = hi.eval_comptime(context, None);
-    if !comptime.is_const {
-        context.insert_error(AnalyzerError::unevaluable_value(
-            UnevaluableValueKind::CaseCondition,
-            &range_item.into(),
-        ));
-    }
+    let lo = eval_against_target(context, tgt, Op::LessEq, lo, true);
+    let hi: ir::Expression = Conv::conv(context, opt.expression.as_ref())?;
     let inclusive = matches!(opt.range_operator.as_ref(), RangeOperator::DotDotEqu(_));
+    if let Some(lo) = operands.last_mut() {
+        *lo = lo.bound();
+    }
+    let hi_operand = CaseOperand::new(context, &hi);
+    operands.push(if inclusive {
+        hi_operand.bound()
+    } else {
+        hi_operand.exclusive_bound()
+    });
+
+    let op = if inclusive { Op::LessEq } else { Op::Less };
+    let hi = eval_against_target(context, tgt, op, hi, false);
     Ok(ir::CasePattern::Range {
         lo: Box::new(lo),
         hi: Box::new(hi),
@@ -3241,9 +3761,10 @@ pub fn case_condition(
     tgt: &ir::Expression,
     cond: &CaseCondition,
 ) -> IrResult<ir::Expression> {
-    let mut ret = range_item(context, tgt, &cond.range_item)?;
+    let target = Some(CaseOperand::new(context, tgt));
+    let mut ret = range_item(context, tgt, &cond.range_item, target)?;
     for x in &cond.case_condition_list {
-        let item = range_item(context, tgt, &x.range_item)?;
+        let item = range_item(context, tgt, &x.range_item, target)?;
         let comptime = Box::new(Comptime::create_unknown(item.token_range()));
         ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item), comptime);
     }
@@ -3255,25 +3776,38 @@ pub fn range_list(
     tgt: &ir::Expression,
     list: &RangeList,
 ) -> IrResult<ir::Expression> {
-    let mut ret = range_item(context, tgt, &list.range_item)?;
+    let mut ret = range_item(context, tgt, &list.range_item, None)?;
     for x in &list.range_list_list {
-        let item = range_item(context, tgt, &x.range_item)?;
+        let item = range_item(context, tgt, &x.range_item, None)?;
         let comptime = Box::new(Comptime::create_unknown(item.token_range()));
         ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item), comptime);
     }
     Ok(ret)
 }
 
+/// A `case` item's values (`target` set) are left for their comparisons
+/// with the target to evaluate, as in an `if`.
 fn range_item(
     context: &mut Context,
     tgt: &ir::Expression,
     range_item: &RangeItem,
+    target: Option<CaseOperand>,
 ) -> IrResult<ir::Expression> {
-    let mut exp: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+    fn eval(context: &mut Context, exp: &mut ir::Expression, in_case: bool) -> Comptime {
+        if in_case {
+            exp.clone().eval_comptime(context, None).clone()
+        } else {
+            exp.eval_comptime(context, None).clone()
+        }
+    }
 
-    let comptime = exp.eval_comptime(context, None);
+    let mut exp: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+    let lo_operand = target.map(|_| CaseOperand::new(context, &exp));
+
+    let comptime = eval(context, &mut exp, target.is_some());
     let lo_value = comptime.get_value().ok().and_then(|v| v.to_usize());
-    if !comptime.is_const {
+    let lo_is_string = comptime.r#type.is_string();
+    if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
             &range_item.into(),
@@ -3284,13 +3818,15 @@ fn range_item(
         let mut exp0: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
 
         let token: TokenRange = range_item.into();
-        let comptime = exp0.eval_comptime(context, None);
-        if !comptime.is_const {
-            context.insert_error(AnalyzerError::unevaluable_value(
-                UnevaluableValueKind::CaseCondition,
-                &token,
-            ));
+        if let (Some(target), Some(lo)) = (target, lo_operand) {
+            let hi = CaseOperand::new(context, &exp0);
+            let hi = match x.range_operator.as_ref() {
+                RangeOperator::DotDot(_) => hi.exclusive_bound(),
+                RangeOperator::DotDotEqu(_) => hi.bound(),
+            };
+            CaseOperand::check(context, &target, &[lo.bound(), hi]);
         }
+        let comptime = eval(context, &mut exp0, target.is_some());
 
         // An empty exclusive range (constant `lo >= hi`) miscompiles: the emitter's
         // `(hi)-1` underflows an unsigned `hi == 0` to a near-universal range.
@@ -3344,12 +3880,9 @@ fn range_item(
     } else {
         let token: TokenRange = range_item.into();
         let comptime = Box::new(Comptime::create_unknown(token));
-        ir::Expression::Binary(
-            Box::new(tgt.clone()),
-            Op::EqWildcard,
-            Box::new(exp),
-            comptime,
-        )
+        // A string has no wildcard digits, and `==?` does not take one.
+        let op = if lo_is_string { Op::Eq } else { Op::EqWildcard };
+        ir::Expression::Binary(Box::new(tgt.clone()), op, Box::new(exp), comptime)
     };
     Ok(ret)
 }
@@ -3420,6 +3953,24 @@ pub fn get_component(
     sig: &Signature,
     token: TokenRange,
 ) -> IrResult<Arc<ir::Component>> {
+    get_component_at(context, sig, token, None)
+}
+
+/// Records `token` as the instantiation site for diagnostics raised inside.
+pub fn get_instantiated_component(
+    context: &mut Context,
+    sig: &Signature,
+    token: TokenRange,
+) -> IrResult<Arc<ir::Component>> {
+    get_component_at(context, sig, token, Some(token))
+}
+
+fn get_component_at(
+    context: &mut Context,
+    sig: &Signature,
+    token: TokenRange,
+    site: Option<TokenRange>,
+) -> IrResult<Arc<ir::Component>> {
     // Normalize before any cache operations so keys always match what push() stores.
     let mut sig = sig.clone();
     sig.normalize();
@@ -3431,7 +3982,7 @@ pub fn get_component(
             // if the `in_generic` flag is set.
             // Such result should be removed from the cache and be created again.
             context.remove_instance_history(sig);
-            get_component(context, sig, token)
+            get_component_at(context, sig, token, site)
         } else {
             Ok(component)
         }
@@ -3446,7 +3997,7 @@ pub fn get_component(
             return Ok(Arc::new(ir::Component::SystemVerilog(component)));
         }
 
-        let err = context.push_instance_history(sig.clone());
+        let err = context.push_instance_history(sig.clone(), site);
 
         if let Err(x) = err {
             match x {
@@ -3493,13 +4044,9 @@ pub fn get_component(
 
                         let component = Arc::new(ir::Component::Module(component));
                         c.set_instance_history(sig, component.clone());
-                        c.pop_instance_history();
                         Ok(component)
                     }
-                    Err(x) => {
-                        c.pop_instance_history();
-                        Err(x)
-                    }
+                    Err(x) => Err(x),
                 }
             }
             SymbolKind::Interface(x) if !x.is_proto => {
@@ -3512,18 +4059,11 @@ pub fn get_component(
                 };
 
                 let component: IrResult<ir::Interface> = Conv::conv(c, x);
-                match component {
-                    Ok(component) => {
-                        let component = Arc::new(ir::Component::Interface(component));
-                        c.set_instance_history(sig, component.clone());
-                        c.pop_instance_history();
-                        Ok(component)
-                    }
-                    Err(x) => {
-                        c.pop_instance_history();
-                        Err(x)
-                    }
-                }
+                component.map(|component| {
+                    let component = Arc::new(ir::Component::Interface(component));
+                    c.set_instance_history(sig, component.clone());
+                    component
+                })
             }
             SymbolKind::Module(x) if x.is_proto => {
                 let definition =
@@ -3543,18 +4083,16 @@ pub fn get_component(
 
                         let component = Arc::new(ir::Component::Module(component));
                         c.set_instance_history(sig, component.clone());
-                        c.pop_instance_history();
                         Ok(component)
                     }
-                    Err(x) => {
-                        c.pop_instance_history();
-                        Err(x)
-                    }
+                    Err(x) => Err(x),
                 }
             }
             _ => Err(ir_error!(token)),
         });
 
+        // Outside the block so an early `?` in it cannot skip the pop.
+        context.pop_instance_history();
         context.pop_generic_map();
         ret
     }
@@ -3629,18 +4167,64 @@ fn resolve_array_value(
     }
 }
 
+/// The width expression names the component's scope, so the instantiating
+/// module's variables must not be in reach: they resolve first, and a parameter
+/// the two modules happen to give the same name would answer with the caller's
+/// value. With none, resolution goes through the symbol route, where this
+/// instantiation's overrides are what a parameter stands for.
+fn size_in_component_scope(
+    context: &mut Context,
+    r#type: &crate::symbol::Type,
+) -> IrResult<ir::Type> {
+    let mut external = Context::default();
+    external.inherit(context);
+    external.enter_component_sizing();
+    let ret = external.block(|c| r#type.to_ir_type(c, TypePosition::Variable));
+    external.leave_component_sizing();
+    context.inherit(&mut external);
+    ret
+}
+
+/// Follow `alias module` / `alias interface` to the symbol that declares the
+/// parameters. The chain is bounded the way the instantiation checker bounds
+/// it: a revisited symbol ends the walk rather than looping.
+fn resolve_alias_target(symbol: &Rc<Symbol>) -> Rc<Symbol> {
+    let mut current = Rc::clone(symbol);
+    let mut visited = vec![current.id];
+    loop {
+        let target = match &current.kind {
+            SymbolKind::AliasModule(x) => &x.target,
+            SymbolKind::AliasInterface(x) => &x.target,
+            _ => return current,
+        };
+        let path: SymbolPathNamespace = (&target.generic_path(), &current.namespace).into();
+        let Ok(resolved) = symbol_table::resolve(&path) else {
+            return current;
+        };
+        if visited.contains(&resolved.found.id) {
+            return current;
+        }
+        visited.push(resolved.found.id);
+        current = Rc::clone(&resolved.found);
+    }
+}
+
 pub fn get_overridden_params(
     context: &mut Context,
     arg: &ComponentInstantiation,
 ) -> IrResult<HashMap<VarPath, (Comptime, ir::Expression)>> {
-    let mut ret = HashMap::default();
-
     let token: TokenRange = arg.scoped_identifier.as_ref().into();
     let symbol =
         symbol_table::resolve(arg.scoped_identifier.as_ref()).map_err(|_| ir_error!(token))?;
-    let component_namespace = symbol.found.inner_namespace();
+    // An `alias module` has its own namespace, and the parameters live in the
+    // TARGET's. Resolving them in the alias's finds nothing, and the loop
+    // below skips what it cannot resolve -- so every override through an
+    // alias was dropped in silence. `get_parameters` is empty for an alias
+    // too, which would leave the declaration order below unknown.
+    let component = resolve_alias_target(&symbol.found);
+    let component_namespace = component.inner_namespace();
 
-    let params = if let Some(ref x) = arg.component_instantiation_opt1 {
+    let params: Vec<_> = if let Some(ref x) = arg.component_instantiation_opt1 {
         if let Some(x) = &x.inst_parameter.inst_parameter_opt {
             x.inst_parameter_list.as_ref().into()
         } else {
@@ -3650,67 +4234,113 @@ pub fn get_overridden_params(
         Vec::new()
     };
 
-    for param in params {
-        let name = param.identifier.text();
+    // A parameter's declared width can name a parameter that precedes it, so
+    // the values are bound in declaration order: by the time one is sized,
+    // everything its width may legally name is already bound. An instantiation
+    // may write them in any order.
+    let order: HashMap<StrId, usize> = component
+        .kind
+        .get_parameters()
+        .iter()
+        .enumerate()
+        .map(|(i, x)| (x.name, i))
+        .collect();
+    let mut params: Vec<_> = params.into_iter().enumerate().collect();
+    params.sort_by_key(|(i, param)| {
+        (
+            order
+                .get(&param.identifier.text())
+                .copied()
+                .unwrap_or(usize::MAX),
+            *i,
+        )
+    });
 
-        let Ok(target) = symbol_table::resolve((param.identifier.as_ref(), &component_namespace))
-            .map(|x| Rc::clone(&x.found))
-        else {
-            continue;
-        };
+    context.push_override(component_namespace.clone(), HashMap::default());
+    let result = (|| -> IrResult<()> {
+        for (_, param) in params {
+            let name = param.identifier.text();
 
-        let target_type = if let Some(x) = target.kind.get_type() {
-            let x = x.to_ir_type(context, TypePosition::Variable);
-            if let Ok(x) = x {
-                Some(x)
-            } else {
+            let Ok(target) =
+                symbol_table::resolve((param.identifier.as_ref(), &component_namespace))
+                    .map(|x| Rc::clone(&x.found))
+            else {
                 continue;
+            };
+
+            // A type that will not size is no reason to drop the binding; a
+            // parameter declaring no type takes this same route.
+            let target_type = target
+                .kind
+                .get_type()
+                .and_then(|x| size_in_component_scope(context, x).ok());
+
+            let mut expr = if let Some(x) = &param.inst_parameter_item_opt {
+                eval_expr(context, target_type.clone(), &x.expression, false)?
+            } else {
+                let src: Expression = param.identifier.as_ref().into();
+                eval_expr(context, target_type.clone(), &src, false)?
+            };
+
+            // Carry an array override's element values as a NumericArray so the
+            // signature distinguishes them and eval_const_assign can materialize it.
+            if expr.0.value.is_unknown()
+                && let Some(r#type) = &target_type
+                && let Some(values) = resolve_array_value(context, r#type, &expr.1)
+            {
+                expr.0.value = ValueVariant::NumericArray(values);
             }
-        } else {
-            None
-        };
 
-        let mut expr = if let Some(x) = &param.inst_parameter_item_opt {
-            eval_expr(context, target_type.clone(), &x.expression, false)?
-        } else {
-            let src: Expression = param.identifier.as_ref().into();
-            eval_expr(context, target_type.clone(), &src, false)?
-        };
+            // An element of an unpacked-array parameter arrives const but
+            // unfolded, so no instance is specialised and a width derived from it
+            // stays symbolic — which the simulator cannot elaborate.
+            if expr.0.value.is_unknown()
+                && expr.0.is_const
+                && let Some(value) = expr.1.eval_value(context)
+            {
+                expr.0.value = ValueVariant::Numeric(value);
+            }
 
-        // Carry an array override's element values as a NumericArray so the
-        // signature distinguishes them and eval_const_assign can materialize it.
-        if expr.0.value.is_unknown()
-            && let Some(r#type) = &target_type
-            && let Some(values) = resolve_array_value(context, r#type, &expr.1)
-        {
-            expr.0.value = ValueVariant::NumericArray(values);
+            let is_type_param = matches!(
+                &target.kind,
+                SymbolKind::Parameter(x) if !x.is_proto && matches!(x.r#type.kind, TypeKind::Type)
+            );
+            if !is_type_param && !expr.0.is_const {
+                let token: TokenRange = param.identifier.as_ref().into();
+                context.insert_error(AnalyzerError::unevaluable_value(
+                    UnevaluableValueKind::ParameterValue,
+                    &token,
+                ));
+            }
+
+            // An override is converted to the parameter's DECLARED type
+            // (IEEE 1800-2023 23.10), so a wider value keeps only the low
+            // bits. The variable the parameter becomes is fitted on its own,
+            // which is why the wrapper reads correctly; what is stored here is
+            // what the next level down is handed, and an untruncated value
+            // there reaches a wider child parameter whole.
+            //
+            // `is_bit_sized` is the gate, not the presence of a width:
+            // `TypeKind::width` answers `Some(1)` for `string` as well, and
+            // fitting a `string` parameter to one bit loses the text.
+            if !is_type_param
+                && let Some(r#type) = &target_type
+                && r#type.kind.is_bit_sized()
+                && let Some(width) = r#type
+                    .total_width()
+                    .zip(r#type.total_array())
+                    .map(|(w, n)| w * n)
+            {
+                expr.0.value.trunc_value(width);
+            }
+
+            context.insert_override(VarPath::new(name), expr);
         }
 
-        // An element of an unpacked-array parameter arrives const but
-        // unfolded, so no instance is specialised and a width derived from it
-        // stays symbolic — which the simulator cannot elaborate.
-        if expr.0.value.is_unknown()
-            && expr.0.is_const
-            && let Some(value) = expr.1.eval_value(context)
-        {
-            expr.0.value = ValueVariant::Numeric(value);
-        }
-
-        let is_type_param = matches!(
-            &target.kind,
-            SymbolKind::Parameter(x) if !x.is_proto && matches!(x.r#type.kind, TypeKind::Type)
-        );
-        if !is_type_param && !expr.0.is_const {
-            let token: TokenRange = param.identifier.as_ref().into();
-            context.insert_error(AnalyzerError::unevaluable_value(
-                UnevaluableValueKind::ParameterValue,
-                &token,
-            ));
-        }
-
-        let path = VarPath::new(name);
-        ret.insert(path, expr);
-    }
+        Ok(())
+    })();
+    let ret = context.take_override();
+    result?;
 
     Ok(ret)
 }
@@ -3735,7 +4365,10 @@ pub fn get_port_connects(
     let mut ret = vec![];
     let mut interface_binding = None;
 
-    if let ir::TypeKind::Modport(_, _) = &port_type.kind {
+    if matches!(
+        port_type.kind,
+        ir::TypeKind::Modport(_, _) | ir::TypeKind::AbstractInterface(_)
+    ) {
         if let Some(x) = &port.inst_port_item_opt {
             // for check_compatibility
             let _ = eval_expr(context, Some(port_type.clone()), &x.expression, false)?;
@@ -3744,12 +4377,29 @@ pub fn get_port_connects(
         let (dst_path, dst_select) = if let Some(x) = &port.inst_port_item_opt {
             let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
             let dst = dst.first().ok_or_else(|| ir_error!(token))?;
-            (dst.0.clone(), dst.1.clone())
+            let mut path = dst.0.clone();
+            // An explicit modport selects a view of the interface; its members
+            // still live under the interface instance, not under that view.
+            if let Some(identifier) = x.expression.unwrap_identifier()
+                && let Ok(symbol) = symbol_table::resolve(identifier)
+                && matches!(symbol.found.kind, SymbolKind::Modport(_))
+            {
+                path.0.pop();
+            }
+            (path, dst.1.clone())
         } else {
             (port_path.clone(), VarSelect::default())
         };
         interface_binding = Some(VarPathSelect(dst_path.clone(), dst_select.clone(), token));
 
+        if matches!(port_type.kind, ir::TypeKind::AbstractInterface(_)) {
+            // Direction-free members use reference bindings. Their masks
+            // cannot be represented by ordinary whole-signal output ports.
+            return Ok(PortConnects {
+                connects: ret,
+                interface_binding,
+            });
+        }
         let members = port_type.expand_modport(context, &dst_path, token)?;
         for member in members {
             if member.1.is_input() | member.1.is_output() {
@@ -3780,7 +4430,7 @@ pub fn get_port_connects(
                 // append member name to port_path
                 let mut port_path = port_path.clone();
                 let mut member_name = member_path.0.clone();
-                member_name.remove(0);
+                member_name.drain(..dst_path.0.len());
                 port_path.append(&member_name);
 
                 ret.push((port_path.clone(), dst, expr));
@@ -3832,40 +4482,11 @@ pub fn get_port_connects(
     })
 }
 
-/// Expands an unpacked-array slice connection (`i: arr[2*n+:2]`) into one
-/// expression per port element; anything else stays a single expression.
-///
-/// Separate from `insert_port_connect` so the caller can clock-domain check the
-/// result: unexpanded, the slice evaluates to `Unknown`, which carries no domain.
-pub fn expand_input_connect(
-    context: &mut Context,
-    variable: &ir::Variable,
-    dst: &[VarPathSelect],
-    expr: ir::Expression,
-) -> Vec<ir::Expression> {
-    if variable.kind != VarKind::Input
-        || variable.r#type.array.is_empty()
-        || dst.len() != 1
-        || !dst[0].is_array_range(context)
-    {
-        return vec![expr];
-    }
-
-    // A mismatched count keeps the single-expression form, so a malformed
-    // connection is diagnosed downstream as before.
-    let exprs = dst[0].clone().to_expressions(context);
-    if exprs.len() == variable.r#type.total_array().unwrap_or(1) {
-        exprs
-    } else {
-        vec![expr]
-    }
-}
-
 pub fn insert_port_connect(
     context: &mut Context,
     variable: &ir::Variable,
     dst: Vec<VarPathSelect>,
-    exprs: Vec<ir::Expression>,
+    expr: ir::Expression,
     inputs: &mut Vec<ir::InstInput>,
     outputs: &mut Vec<ir::InstOutput>,
 ) {
@@ -3873,14 +4494,24 @@ pub fn insert_port_connect(
         VarKind::Input => {
             inputs.push(ir::InstInput {
                 id: variable.id,
-                exprs,
+                expr,
             });
         }
         VarKind::Output => {
-            // Expansion applies to inputs only, so an output always has one.
-            let expr = &exprs[0];
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
+            }
+            // An output connection is a continuous assignment, whose packed selects
+            // must be constant.
+            for VarPathSelect(_, select, _) in &dst {
+                let part_select = select.1.iter().map(|(_, x)| x);
+                for x in select.0.iter().chain(part_select) {
+                    if !x.comptime().is_const {
+                        context.insert_error(AnalyzerError::non_constant_output_select(
+                            &x.token_range(),
+                        ));
+                    }
+                }
             }
             let dst = var_path_to_assign_destination(context, dst, false);
             outputs.push(ir::InstOutput {
@@ -3965,6 +4596,7 @@ pub fn expand_connect(
                 {
                     let width = dst.total_width(context);
                     let statement = ir::Statement::Assign(ir::AssignStatement {
+                        hier_dst: None,
                         dst: vec![dst],
                         width,
                         expr: src,
@@ -4013,6 +4645,7 @@ pub fn expand_connect_const(
                 if let Some(dst) = dst.to_assign_destination(context, false) {
                     let width = dst.total_width(context);
                     let statement = ir::Statement::Assign(ir::AssignStatement {
+                        hier_dst: None,
                         dst: vec![dst],
                         width,
                         expr: src,
@@ -4081,39 +4714,22 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             let ret = conv_function(context, definition, path);
             ret?;
         } else {
-            let generic_arg_paths = if is_global {
-                path.sig
-                    .generic_parameters
-                    .iter()
-                    .filter_map(|(_, x)| x.to_var_path())
-                    .collect()
-            } else {
-                vec![]
-            };
-
             let mut local_context = Context::default();
             local_context.var_id = context.var_id;
             local_context.inherit(context);
             local_context.extract_var_paths(context, &path.path, &array);
 
-            for path in &generic_arg_paths {
-                // Copy var path referenced as resolved generic arg from the given context
-                if let Some((var_id, comptime)) = context.find_path(path)
-                    && let Some(var) = context.variables.get(&var_id)
-                {
-                    local_context
-                        .var_paths
-                        .insert(path.clone(), (var_id, comptime));
-                    local_context.variables.insert(var_id, var.clone());
-                }
+            let caller = is_global
+                .then(|| local_context.current_namespace())
+                .flatten();
+            if let Some(namespace) = &caller {
+                local_context.push_global_func_caller(namespace.clone());
             }
 
             let ret = conv_function(&mut local_context, definition, path);
 
-            for path in &generic_arg_paths {
-                if let Some((var_id, _)) = local_context.var_paths.remove(path) {
-                    local_context.variables.remove(&var_id);
-                }
+            if caller.is_some() {
+                local_context.pop_global_func_caller();
             }
 
             context.extract_function(&mut local_context, &path.path, &array);
@@ -4313,12 +4929,22 @@ pub fn check_compatibility(
         check_implicit_clock_conversion(context, dst, src, token);
         return;
     }
-    if !dst.compatible(src, context.in_generic) {
-        let src_type = src.r#type.to_string();
-        let dst_type = dst.to_string();
+    // The unpacked dimensions are asked on their own axis rather than inside
+    // `compatible`, which answers from the element kind for a 2-state, clock or
+    // reset destination and never reaches its array branch for one. The answer
+    // only refines the help: the severity is the same conservative warning.
+    let kind = if dst.array_shape_mismatch(src) {
+        Some(MismatchAssignmentKind::ArrayShape)
+    } else if !dst.compatible(src, context.in_generic) {
+        Some(MismatchAssignmentKind::Normal)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
         context.insert_error(AnalyzerError::mismatch_assignment(
-            &src_type,
-            &dst_type,
+            &src.r#type.to_string(),
+            &dst.to_string(),
+            kind,
             token,
             &[],
         ));
@@ -4650,6 +5276,7 @@ pub fn tb_method_call(
 
     let mut ret_width = None;
     let mut ret_signed = false;
+    let mut ret_4state = false;
     let method = match (tb_kind, method_name) {
         (TbComponentKind::ClockGen, "next") => {
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
@@ -4754,6 +5381,32 @@ pub fn tb_method_call(
             ret_width = Some(64);
             TbMethod::RandomGetSeed
         }
+        (TbComponentKind::Queue, _) => {
+            let Some(op) = QueueOp::from_method_name(method_name) else {
+                return Err(ir_error!(token));
+            };
+            let (width, signed, four_state) = resolve_queue_elem_type(context, type_path);
+            let capacity = resolve_queue_capacity(context, type_path);
+            let value = queue_arg(context, &args, op, width, method_name, &token)?;
+            match op {
+                QueueOp::Size => ret_width = Some(32),
+                QueueOp::IsEmpty | QueueOp::IsFull => ret_width = Some(1),
+                _ if op.returns_element() => {
+                    ret_width = Some(width);
+                    ret_signed = signed;
+                    ret_4state = four_state;
+                }
+                _ => {}
+            }
+            TbMethod::Queue {
+                op,
+                value,
+                width,
+                signed,
+                four_state,
+                capacity,
+            }
+        }
         // Any method name is accepted on a user-defined component; the
         // component validates it at run time. With a manifest present the
         // name and arity are also diagnosed here.
@@ -4774,6 +5427,7 @@ pub fn tb_method_call(
         ret_strict: false,
         ret_width,
         ret_signed,
+        ret_4state,
     })))
 }
 
@@ -4807,6 +5461,83 @@ fn random_arg(
             token,
         ));
         Err(ir_error!(*token))
+    }
+}
+
+/// Captures the pushed value of a `$tb::queue` method, evaluated in the
+/// element width like an assignment RHS. Emits an arity error and fails when
+/// the argument count does not match the method.
+fn queue_arg(
+    context: &mut Context,
+    args: &Option<ir::Arguments>,
+    op: QueueOp,
+    width: u32,
+    method_name: &str,
+    token: &TokenRange,
+) -> IrResult<Option<ir::Expression>> {
+    let positional: &[_] = if let Some(ir::Arguments::Positional(positional)) = args {
+        positional
+    } else {
+        &[]
+    };
+    let arity = if matches!(op, QueueOp::PushBack | QueueOp::PushFront) {
+        1
+    } else {
+        0
+    };
+    if positional.len() != arity {
+        context.insert_error(AnalyzerError::mismatch_function_arity(
+            method_name,
+            arity,
+            positional.len(),
+            token,
+        ));
+        return Err(ir_error!(*token));
+    }
+    Ok(positional.first().map(|arg| {
+        let mut expr = arg.0.clone();
+        expr.eval_comptime(context, Some(width as usize));
+        expr
+    }))
+}
+
+/// Resolves the element type `T` of a `$tb::queue::<T, N>` variable, returning
+/// its `(width, signed, four_state)`. Falls back to a 32-bit unsigned 2-state
+/// type when resolution fails; the error is diagnosed by `check_generic_refereence`.
+fn resolve_queue_elem_type(
+    context: &mut Context,
+    type_path: &GenericSymbolPath,
+) -> (u32, bool, bool) {
+    let resolved = context.resolve_path(type_path.clone());
+    if let Some(arg) = resolved.paths.last().and_then(|p| p.arguments.first())
+        && let Ok(ty) = eval_type(context, &arg.clone(), TypePosition::Variable)
+        && let Some(width) = ty.total_width()
+    {
+        (width as u32, ty.signed, ty.is_4state())
+    } else {
+        (32, false, false)
+    }
+}
+
+/// Resolves the capacity `N` of a `$tb::queue::<T, N>` variable (`0`, i.e.
+/// unbounded, when omitted or unevaluable).
+fn resolve_queue_capacity(context: &mut Context, type_path: &GenericSymbolPath) -> u32 {
+    let resolved = context.resolve_path(type_path.clone());
+    let Some(arg) = resolved.paths.last().and_then(|p| p.arguments.get(1)) else {
+        return 0;
+    };
+    let range = arg.range;
+    let Ok(factor) = eval_factor_path(context, arg.clone(), VarPathSelect::default(), false, range)
+    else {
+        return 0;
+    };
+    let comptime = factor.comptime();
+    if comptime.is_const
+        && let ValueVariant::Numeric(v) = &comptime.value
+    {
+        v.to_u64().map(|v| v as u32).unwrap_or(0)
+    } else {
+        0
     }
 }
 
@@ -4854,7 +5585,12 @@ pub fn hoist_component_method_call(
     let name = format!("__tb_method_ret_{}", context.tb_hoist_count);
     context.tb_hoist_count += 1;
     let path = VarPath::new(resource_table::insert_str(&name));
-    let mut r#type = ir::Type::new(ir::TypeKind::Bit);
+    let kind = if method_call.ret_4state {
+        ir::TypeKind::Logic
+    } else {
+        ir::TypeKind::Bit
+    };
+    let mut r#type = ir::Type::new(kind);
     r#type.set_concrete_width(Shape::new(vec![Some(width)]));
     r#type.signed = signed;
 

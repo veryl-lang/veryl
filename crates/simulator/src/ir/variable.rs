@@ -45,10 +45,25 @@ impl VarOffset {
     }
 }
 
-/// Returns native storage width in bytes: 4 for width <= 32, 8 for 33-64, 16 for 65-128,
-/// and 8-byte aligned for >128.
+/// The bytes `[lo, hi)` that `n` elements of `nb` bytes cover, element `k`
+/// at `base + stride * k`.  A negative stride puts element 0 at the top.
+pub fn strided_span(base: isize, stride: isize, n: usize, nb: usize) -> Option<(isize, isize)> {
+    let reach = stride.checked_mul(isize::try_from(n.saturating_sub(1)).ok()?)?;
+    let lo = base.checked_add(reach.min(0))?;
+    let hi = base
+        .checked_add(reach.max(0))?
+        .checked_add(isize::try_from(nb).ok()?)?;
+    Some((lo, hi))
+}
+
+/// The load/store, write-log and payload paths handle exactly these sizes.
+/// Slots are packed with no alignment.
 pub fn native_bytes(width: usize) -> usize {
-    if width <= 32 {
+    if width <= 8 {
+        1
+    } else if width <= 16 {
+        2
+    } else if width <= 32 {
         4
     } else if width <= 64 {
         8
@@ -57,6 +72,14 @@ pub fn native_bytes(width: usize) -> usize {
     } else {
         width.div_ceil(64) * 8
     }
+}
+
+/// Clip a part-select to the width the variable declares; `None` once the
+/// whole window is past it.  Windows do overhang: a runtime index is clamped
+/// to the last ELEMENT rather than the last legal window start, and a constant
+/// one can name a position the analyzer's bounds check never evaluated.
+pub fn clip_select_to_width(beg: usize, end: usize, width: usize) -> Option<(usize, usize)> {
+    (end < width && beg >= end).then(|| (beg.min(width - 1), end))
 }
 
 /// The single authority for register-vs-pointer representation: a value wider
@@ -326,8 +349,138 @@ fn report_subject(v: &air::Variable) -> String {
     }
 }
 
+/// Storage width of each runtime `string` variable: the widest text any
+/// assignment can store into it.  A `string` type's own width is a nominal
+/// 1 bit -- the text lives in the byte-packed value -- so a slot sized from
+/// the type keeps one bit of it.  A string read from another string variable
+/// takes that variable's width, hence the fixed point.
+pub fn collect_string_widths(
+    variables: &HashMap<VarId, air::Variable>,
+    decls: &[air::Declaration],
+) -> Result<HashMap<VarId, usize>, SimulatorError> {
+    let mut assigns: Vec<(VarId, &air::Expression)> = Vec::new();
+    for decl in decls {
+        let stmts = match decl {
+            air::Declaration::Comb(x) => &x.statements,
+            air::Declaration::Ff(x) => &x.statements,
+            air::Declaration::Initial(x) => &x.statements,
+            air::Declaration::Final(x) => &x.statements,
+            _ => continue,
+        };
+        for stmt in stmts {
+            collect_string_assigns(stmt, variables, &mut assigns);
+        }
+    }
+
+    let mut widths: HashMap<VarId, usize> = HashMap::default();
+    for (id, v) in variables {
+        if v.r#type.is_string() && !matches!(v.kind, air::VarKind::Param | air::VarKind::Const) {
+            // A port is driven from the other side of a connection or a
+            // call, which this scan cannot size.
+            if matches!(
+                v.kind,
+                air::VarKind::Input | air::VarKind::Output | air::VarKind::Inout
+            ) {
+                return Err(SimulatorError::unsupported_string(
+                    &format!("port \"{}\"", v.path),
+                    &v.token,
+                ));
+            }
+            let init = v.value.iter().map(|x| x.width()).max().unwrap_or(0);
+            widths.insert(*id, init);
+        }
+    }
+
+    loop {
+        let mut changed = false;
+        for (id, expr) in &assigns {
+            let width = string_expr_width(expr, &widths);
+            if let Some(x) = widths.get_mut(id)
+                && width > *x
+            {
+                *x = width;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    Ok(widths)
+}
+
+fn collect_string_assigns<'a>(
+    stmt: &'a air::Statement,
+    variables: &HashMap<VarId, air::Variable>,
+    out: &mut Vec<(VarId, &'a air::Expression)>,
+) {
+    match stmt {
+        air::Statement::Assign(x) => {
+            for dst in &x.dst {
+                if variables.get(&dst.id).is_some_and(|v| v.r#type.is_string()) {
+                    out.push((dst.id, &x.expr));
+                }
+            }
+        }
+        air::Statement::If(x) => {
+            for s in x.true_side.iter().chain(&x.false_side) {
+                collect_string_assigns(s, variables, out);
+            }
+        }
+        air::Statement::IfReset(x) => {
+            for s in x.true_side.iter().chain(&x.false_side) {
+                collect_string_assigns(s, variables, out);
+            }
+        }
+        air::Statement::Case(x) => {
+            for arm in &x.arms {
+                for s in &arm.body {
+                    collect_string_assigns(s, variables, out);
+                }
+            }
+            for s in &x.default {
+                collect_string_assigns(s, variables, out);
+            }
+        }
+        air::Statement::For(x) => {
+            for s in &x.body {
+                collect_string_assigns(s, variables, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn string_expr_width(expr: &air::Expression, widths: &HashMap<VarId, usize>) -> usize {
+    match expr {
+        air::Expression::Term(factor) => {
+            if let air::Factor::Variable(id, _, _, _) = factor.as_ref()
+                && let Some(x) = widths.get(id)
+            {
+                return *x;
+            }
+            comptime_string_width(factor.comptime())
+        }
+        air::Expression::Ternary(_, x, y, _) => {
+            string_expr_width(x, widths).max(string_expr_width(y, widths))
+        }
+        _ => comptime_string_width(expr.comptime()),
+    }
+}
+
+fn comptime_string_width(comptime: &air::Comptime) -> usize {
+    let value_width = match &comptime.value {
+        air::ValueVariant::Numeric(x) => x.width(),
+        _ => 0,
+    };
+    let type_width = comptime.r#type.total_width().unwrap_or(0);
+    value_width.max(type_width)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn create_variable_meta(
     src: &HashMap<VarId, air::Variable>,
+    string_widths: &HashMap<VarId, usize>,
     ff_table: &air::FfTable,
     multi_rmw_set: &HashSet<(VarId, usize)>,
     dyn_indexed: &HashSet<VarId>,
@@ -363,10 +516,13 @@ pub fn create_variable_meta(
         // In practice a `$sv::` constant, whose value lives in external
         // SystemVerilog. Reported here because only this loop knows which
         // variable carries the width.
-        let width = v
-            .r#type
-            .total_width()
-            .ok_or_else(|| SimulatorError::undetermined_width(&report_subject(v), &v.token))?;
+        let width = if let Some(x) = string_widths.get(k) {
+            (*x).max(1)
+        } else {
+            v.r#type
+                .total_width()
+                .ok_or_else(|| SimulatorError::undetermined_width(&report_subject(v), &v.token))?
+        };
 
         // Analyzer collapses all-same initial arrays down to a single
         // template value (eval_variable), so derive the real array length

@@ -2,7 +2,9 @@
 const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency_1", "25_dependency_2"];
 
 #[cfg(test)]
-const STD_TESTS: [&str; 4] = ["68_std_1", "68_std_2", "68_std_3", "68_std_4"];
+const STD_TESTS: [&str; 6] = [
+    "68_std_1", "68_std_2", "68_std_3", "68_std_4", "68_std_5", "68_std_6",
+];
 
 #[cfg(test)]
 const PACKAGE_SELF_REF_TESTS: [&str; 2] = ["84_package_self_ref_1", "84_package_self_ref_2"];
@@ -169,7 +171,9 @@ mod formatter {
             "../../testcases/error",
             "../../testcases/filelist/a/src",
             "../../testcases/native_test/src",
-            "../../testcases/sample/src",
+            "../../testcases/sample_projects/sample_a/src",
+            "../../testcases/sample_projects/sample_b/src",
+            "../../testcases/sample_projects/sample_c/src",
         ];
         for dir in dirs {
             for entry in fs::read_dir(dir).unwrap() {
@@ -214,11 +218,34 @@ mod formatter {
         include!(concat!(env!("OUT_DIR"), "/native_test_test.rs"));
     }
 
-    mod sample {
+    mod sample_a {
         fn test(name: &str) {
-            super::run(&format!("../../testcases/sample/src/{}.veryl", name));
+            super::run(&format!(
+                "../../testcases/sample_projects/sample_a/src/{}.veryl",
+                name
+            ));
         }
-        include!(concat!(env!("OUT_DIR"), "/sample_test.rs"));
+        include!(concat!(env!("OUT_DIR"), "/sample_a_test.rs"));
+    }
+
+    mod sample_b {
+        fn test(name: &str) {
+            super::run(&format!(
+                "../../testcases/sample_projects/sample_b/src/{}.veryl",
+                name
+            ));
+        }
+        include!(concat!(env!("OUT_DIR"), "/sample_b_test.rs"));
+    }
+
+    mod sample_c {
+        fn test(name: &str) {
+            super::run(&format!(
+                "../../testcases/sample_projects/sample_c/src/{}.veryl",
+                name
+            ));
+        }
+        include!(concat!(env!("OUT_DIR"), "/sample_c_test.rs"));
     }
 }
 
@@ -758,6 +785,9 @@ mod filelist {
             "c_pkg.veryl",
             "d_01_pkg.veryl",
             "d_02_module.veryl",
+            "e_01_02_module.veryl",
+            "e_03_pkg.veryl",
+            "e_04_pkg.veryl",
         ];
         check_list(&paths, all);
 
@@ -780,6 +810,9 @@ mod filelist {
         check_order(&paths, "b_pkg.veryl", "22_dependency_r.veryl");
         check_order(&paths, "d_02_module.veryl", "22_dependency_r.veryl");
         check_order(&paths, "d_01_pkg.veryl", "d_02_module.veryl");
+        check_order(&paths, "e_01_02_module.veryl", "22_dependency_r.veryl");
+        check_order(&paths, "e_03_pkg.veryl", "e_01_02_module.veryl");
+        check_order(&paths, "e_04_pkg.veryl", "e_01_02_module.veryl");
         // 23_embed_s is opaque, so it must not float ahead of files with a visible dependency
         check_order(&paths, "22_dependency_r.veryl", "23_embed_s.veryl");
     }

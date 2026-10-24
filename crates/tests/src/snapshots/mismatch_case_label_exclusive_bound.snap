@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+mismatch_case_label (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_case_label)
+
+  × case label is compared with the target differently in SystemVerilog: an exclusive upper bound is written as `hi - 1`, which can wrap
+   ╭─[../../testcases/error/mismatch_case_label_exclusive_bound.veryl:8:16]
+ 7 │         case i_a {
+ 8 │             0..i_b : o_y = 1;
+   ·                ─┬─
+   ·                 ╰── Error location
+ 9 │             default: o_y = 0;
+   ╰────
+  help: use an inclusive range, or compare with `if`

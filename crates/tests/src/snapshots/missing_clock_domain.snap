@@ -12,4 +12,4 @@ missing_clock_domain (https://doc.veryl-lang.org/book/07_appendix/02_semantic_er
    ·          ╰── Error location
  4 │ }
    ╰────
-  help: add clock domain annotation
+  help: name each independent clock's domain ('a, 'b) and annotate every port and variable in it, or use '_ for the implicit domain

@@ -1,16 +1,19 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::conv::statement::check_true_false;
 use crate::conv::utils::{
-    TypePosition, case_condition, eval_expr, eval_factor_path, eval_function_call, eval_size,
-    eval_struct_constructor, eval_type, range_list, switch_condition,
+    TypePosition, case_condition, eval_case_target, eval_expr, eval_factor_path,
+    eval_function_call, eval_size, eval_struct_constructor, eval_type, range_list,
+    switch_condition,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
     self, Comptime, IrResult, Op, Shape, Type, TypeKind, ValueVariant, VarPath, VarPathSelect,
 };
-use crate::symbol::SymbolKind;
+use crate::reset_value_table;
+use crate::symbol::{SymbolKind, TypeKind as SymTypeKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
+use crate::utils::{resolve_op, split_index};
 use crate::value::{Value, string_to_byte_value};
 use crate::{ir_error, msb_table};
 use veryl_parser::token_range::TokenRange;
@@ -22,6 +25,25 @@ impl Conv<&Expression> for ir::Expression {
     }
 }
 
+/// `dim` numbers the unpacked dimensions first, then the packed ones, to match
+/// the `$size` numbering the emitter relies on. An aggregate has no per-dimension
+/// packed shape, so a select landing on it takes its whole width.
+fn msb_dimension_width(r#type: &Type, dim: usize) -> Option<usize> {
+    let array_dims = r#type.array.dims();
+    if dim < array_dims {
+        r#type.array.as_slice().get(dim).copied().flatten()
+    } else if r#type.is_struct_union() || r#type.is_enum() || r#type.is_unknown() {
+        r#type.total_width()
+    } else {
+        r#type
+            .width()
+            .as_slice()
+            .get(dim - array_dims)
+            .copied()
+            .flatten()
+    }
+}
+
 fn is_if_expression(value: &Expression) -> bool {
     !value.if_expression.if_expression_list.is_empty()
 }
@@ -30,9 +52,12 @@ impl Conv<&IfExpression> for ir::Expression {
     fn conv(context: &mut Context, value: &IfExpression) -> IrResult<Self> {
         let mut ret: ir::Expression = Conv::conv(context, value.expression01.as_ref())?;
         for x in value.if_expression_list.iter().rev() {
-            let (y_comptime, y): (Comptime, ir::Expression) =
+            let (y_comptime, mut y): (Comptime, ir::Expression) =
                 eval_expr(context, None, x.expression.as_ref(), false)?;
-            let z: ir::Expression = Conv::conv(context, x.expression0.as_ref())?;
+            let mut z: ir::Expression = Conv::conv(context, x.expression0.as_ref())?;
+            let runtime_dependent = !y.eval_elaboration_const(context)
+                || !z.eval_elaboration_const(context)
+                || !ret.eval_elaboration_const(context);
 
             if is_if_expression(&x.expression) {
                 let token: TokenRange = x.expression.as_ref().into();
@@ -50,7 +75,10 @@ impl Conv<&IfExpression> for ir::Expression {
             // folding a constant `if` STATEMENT already gets.  Only with
             // SAME-TYPE arms, so the result's width and sign cannot move.
             let (true_only, false_only) = check_true_false(&y_comptime);
-            let same_type = z.comptime().r#type == ret.comptime().r#type;
+            let same_type = matches!(
+                (arm_type(context, &z), arm_type(context, &ret)),
+                (Some(z), Some(r)) if z == r
+            );
             ret = if same_type && true_only {
                 z
             } else if same_type && false_only {
@@ -61,16 +89,19 @@ impl Conv<&IfExpression> for ir::Expression {
                 // arm with a constant of its own type instead, which keeps
                 // both while dropping reads that never happen.
                 let (z, r) = if true_only {
-                    let blank = blank_arm(&ret);
+                    let blank = blank_arm(context, &ret);
                     (z, blank.unwrap_or(ret))
                 } else {
-                    let blank = blank_arm(&z);
+                    let blank = blank_arm(context, &z);
                     (blank.unwrap_or(z), ret)
                 };
                 ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(r), comptime)
             } else {
                 ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime)
             };
+            let comptime = ret.comptime_mut();
+            comptime.runtime_dependent |= runtime_dependent;
+            comptime.elaboration_const = Some(!comptime.runtime_dependent);
         }
         Ok(ret)
     }
@@ -79,72 +110,36 @@ impl Conv<&IfExpression> for ir::Expression {
 /// A constant standing in for an arm a constant condition rules out: same
 /// type, so the ternary's width and sign do not move, and no reads at all.
 /// `None` when the arm has no single width to build one from.
-fn blank_arm(arm: &ir::Expression) -> Option<ir::Expression> {
+fn blank_arm(context: &mut Context, arm: &ir::Expression) -> Option<ir::Expression> {
     let comptime = arm.comptime();
-    let width = comptime.r#type.total_width()?;
-    let signed = comptime.r#type.signed;
-    let mut blank = Comptime::create_value(Value::new(0, width, signed), comptime.token);
-    blank.r#type = comptime.r#type.clone();
+    let r#type = arm_type(context, arm)?;
+    let width = r#type.total_width()?;
+    let mut blank = Comptime::create_value(Value::new(0, width, r#type.signed), comptime.token);
+    blank.r#type = r#type;
     blank.expr_context = comptime.expr_context;
     Some(ir::Expression::Term(Box::new(ir::Factor::Value(blank))))
 }
 
-fn resolve_op(op: &Expression01Op) -> (Op, u32) {
-    match op {
-        Expression01Op::Operator01(x) => {
-            let tok = x.operator01.operator01_token.to_string();
-            match tok.as_str() {
-                "||" => (Op::LogicOr, 1),
-                "&&" => (Op::LogicAnd, 2),
-                _ => unreachable!(),
+/// An arm's type when it is known before evaluation, with a select applied
+/// as `eval_comptime` applies it.
+fn arm_type(context: &mut Context, arm: &ir::Expression) -> Option<ir::Type> {
+    let ir::Expression::Term(factor) = arm else {
+        return None;
+    };
+    match factor.as_ref() {
+        ir::Factor::Value(comptime) => Some(comptime.r#type.clone()),
+        ir::Factor::Variable(_, _, select, comptime) => {
+            if select.is_empty() || comptime.evaluated {
+                return Some(comptime.r#type.clone());
             }
+            let (beg, end) = select.eval_value(context, &comptime.r#type, false)?;
+            let mut r#type = comptime.r#type.clone();
+            r#type.flatten_struct_union_enum();
+            r#type.set_concrete_width(Shape::new(vec![Some(beg - end + 1)]));
+            r#type.signed = comptime.member_signed.unwrap_or(false);
+            Some(r#type)
         }
-        Expression01Op::Operator03(_) => (Op::BitOr, 3),
-        Expression01Op::Operator04(x) => {
-            let tok = x.operator04.operator04_token.to_string();
-            match tok.as_str() {
-                "^" => (Op::BitXor, 4),
-                "~^" => (Op::BitXnor, 4),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Operator05(_) => (Op::BitAnd, 5),
-        Expression01Op::Operator02(x) => {
-            let tok = x.operator02.operator02_token.to_string();
-            match tok.as_str() {
-                "==" => (Op::Eq, 6),
-                "!=" => (Op::Ne, 6),
-                "==?" => (Op::EqWildcard, 6),
-                "!=?" => (Op::NeWildcard, 6),
-                "<=" => (Op::LessEq, 7),
-                ">=" => (Op::GreaterEq, 7),
-                "<:" => (Op::Less, 7),
-                ">:" => (Op::Greater, 7),
-                "<<<" => (Op::ArithShiftL, 8),
-                ">>>" => (Op::ArithShiftR, 8),
-                "<<" => (Op::LogicShiftL, 8),
-                ">>" => (Op::LogicShiftR, 8),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Operator06(x) => {
-            let tok = x.operator06.operator06_token.to_string();
-            match tok.as_str() {
-                "+" => (Op::Add, 9),
-                "-" => (Op::Sub, 9),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Operator07(x) => {
-            let tok = x.operator07.operator07_token.to_string();
-            match tok.as_str() {
-                "/" => (Op::Div, 10),
-                "%" => (Op::Rem, 10),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Star(_) => (Op::Mul, 10),
-        Expression01Op::Operator08(_) => (Op::Pow, 11),
+        _ => None,
     }
 }
 
@@ -158,27 +153,7 @@ fn prec_climb(
     if lo == hi {
         return Conv::conv(context, exprs[lo]);
     }
-    // Find the lowest-precedence operator in [lo..hi) to use as the subtree
-    // root. For left-associative operators pick the rightmost one at the
-    // minimum precedence (so `a - b - c` groups as `(a - b) - c`); for the
-    // right-associative power operator (precedence 11) pick the leftmost
-    // (so `a ** b ** c` groups as `a ** (b ** c)`, matching SystemVerilog).
-    let mut min_idx = lo;
-    let mut min_prec = ops[lo].1;
-    for (i, op) in ops.iter().enumerate().take(hi).skip(lo + 1) {
-        // `**` is the only right-associative operator; identify it by Op, not
-        // by its precedence number, so the rule survives precedence changes.
-        let right_assoc = matches!(op.0, Op::Pow);
-        let better = if right_assoc {
-            op.1 < min_prec
-        } else {
-            op.1 <= min_prec
-        };
-        if better {
-            min_idx = i;
-            min_prec = op.1;
-        }
-    }
+    let min_idx = split_index(ops, lo, hi);
     let left = prec_climb(context, exprs, ops, lo, min_idx)?;
     let right = prec_climb(context, exprs, ops, min_idx + 1, hi)?;
     let token = TokenRange::from_range(&left.token_range(), &right.token_range());
@@ -441,7 +416,7 @@ impl Conv<&CastingType> for ir::Factor {
                     let comptime: Comptime = Conv::conv(context, x.based.as_ref())?;
 
                     if let Ok(value) = comptime.get_value()
-                        && let Some(value) = value.to_usize()
+                        && let Some(value) = value.to_usize_saturating()
                     {
                         let _ = context.check_size(value, token);
                     }
@@ -453,10 +428,15 @@ impl Conv<&CastingType> for ir::Factor {
                     let comptime: Comptime = Conv::conv(context, x.base_less.as_ref())?;
 
                     if let Ok(value) = comptime.get_value()
-                        && let Some(value) = value.to_usize()
+                        && let Some(value) = value.to_usize_saturating()
                     {
                         let _ = context.check_size(value, token);
                     }
+
+                    return Ok(ir::Factor::Value(comptime));
+                }
+                CastingType::LParenExpressionRParen(x) => {
+                    let (comptime, _) = eval_size(context, x.expression.as_ref(), false)?;
 
                     return Ok(ir::Factor::Value(comptime));
                 }
@@ -513,6 +493,34 @@ impl Conv<&Factor> for ir::Expression {
                     ..Default::default()
                 };
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(ret))))
+            }
+            Factor::ResetValueLiteral(x) => {
+                let (kind, literal) = match x.reset_value_literal.as_ref() {
+                    ResetValueLiteral::ResetActive(x) => (
+                        ir::ResetValueKind::Active,
+                        &x.reset_active.reset_active_token,
+                    ),
+                    ResetValueLiteral::ResetInactive(x) => (
+                        ir::ResetValueKind::Inactive,
+                        &x.reset_inactive.reset_inactive_token,
+                    ),
+                };
+                // An invalid literal is not registered, and reported as an error.
+                let polarity = match reset_value_table::get(literal.token.id) {
+                    Some(SymTypeKind::ResetAsyncHigh | SymTypeKind::ResetSyncHigh) => {
+                        ir::ResetPolarity::High
+                    }
+                    Some(SymTypeKind::ResetAsyncLow | SymTypeKind::ResetSyncLow) => {
+                        ir::ResetPolarity::Low
+                    }
+                    _ => ir::ResetPolarity::Default,
+                };
+                let mut comptime = Comptime::create_unknown(token);
+                comptime.is_const = true;
+                comptime.is_global = true;
+                Ok(ir::Expression::Term(Box::new(ir::Factor::ResetValue(
+                    kind, polarity, comptime,
+                ))))
             }
             Factor::IdentifierFactor(x) => Conv::conv(context, x.identifier_factor.as_ref()),
             Factor::LParenExpressionRParen(x) => Conv::conv(context, x.expression.as_ref()),
@@ -577,7 +585,7 @@ impl Conv<&Factor> for ir::Expression {
             Factor::CaseExpression(x) => {
                 let mut tgt: ir::Expression =
                     Conv::conv(context, x.case_expression.expression.as_ref())?;
-                tgt.eval_comptime(context, None);
+                eval_case_target(context, &mut tgt);
                 let exp: ir::Expression =
                     Conv::conv(context, x.case_expression.expression0.as_ref())?;
                 let defaul: ir::Expression =
@@ -689,26 +697,11 @@ impl Conv<&Factor> for ir::Expression {
                                 return Err(ir_error!(token));
                             }
 
-                            let dim = context.get_select_dim().unwrap();
-                            let array_dims = comptime.r#type.array.dims();
+                            let Some(dim) = context.get_select_dim() else {
+                                return Err(ir_error!(token));
+                            };
 
-                            let width =
-                                if comptime.r#type.is_struct() || comptime.r#type.is_unknown() {
-                                    comptime.r#type.total_width()
-                                } else if dim < array_dims {
-                                    comptime.r#type.array.as_slice().get(dim).copied().flatten()
-                                } else {
-                                    // packed dim: `dim` also counts the unpacked dims, so
-                                    // skip them before indexing the packed-width Shape.
-                                    let packed_dim = dim - array_dims;
-                                    comptime
-                                        .r#type
-                                        .width()
-                                        .as_slice()
-                                        .get(packed_dim)
-                                        .copied()
-                                        .flatten()
-                                };
+                            let width = msb_dimension_width(&comptime.r#type, dim);
                             let comptime = if let Some(width) = width {
                                 let msb = width.saturating_sub(1);
                                 Comptime::create_value(Value::new(msb as u64, 32, false), token)
@@ -724,25 +717,15 @@ impl Conv<&Factor> for ir::Expression {
                             && !x.is_proto
                         {
                             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
-                            let dim = context.get_select_dim().unwrap();
+                            let Some(dim) = context.get_select_dim() else {
+                                return Err(ir_error!(token));
+                            };
 
                             msb_table::insert(msb.msb.msb_token.token.id, dim + 1);
 
-                            let array_dims = r#type.array.dims();
-                            let width = if r#type.is_struct() {
-                                r#type.total_width()
-                            } else if dim < array_dims {
-                                r#type.array.as_slice().get(dim).copied().flatten()
-                            } else {
-                                // packed dimension: skip the unpacked array dims.
-                                let packed_dim = dim - array_dims;
-                                r#type.width().as_slice().get(packed_dim).copied().flatten()
-                            };
-                            let msb = if let Some(width) = width {
-                                width - 1
-                            } else {
-                                0
-                            };
+                            let msb = msb_dimension_width(&r#type, dim)
+                                .map(|x| x.saturating_sub(1))
+                                .unwrap_or(0);
                             Ok(ir::Expression::create_value(
                                 Value::new(msb as u64, 32, false),
                                 token,
@@ -787,7 +770,29 @@ impl Conv<&Factor> for ir::Expression {
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(ret))))
             }
             Factor::FactorTypeFactor(x) => {
-                let ret = Conv::conv(context, x.factor_type_factor.factor_type.as_ref())?;
+                let factor = x.factor_type_factor.as_ref();
+                let mut ret = Conv::conv(context, factor.factor_type.as_ref())?;
+                // `signed` applies only to `bit`/`logic`, the rule the
+                // declaration path enforces; a fixed type keeps its own.
+                let signed = factor
+                    .factor_type_factor_list
+                    .iter()
+                    .any(|x| matches!(*x.type_modifier, TypeModifier::Signed(_)))
+                    && matches!(
+                        factor.factor_type.factor_type_group.as_ref(),
+                        FactorTypeGroup::VariableTypeFactorTypeOpt(x)
+                            if matches!(
+                                *x.variable_type,
+                                VariableType::Logic(_) | VariableType::Bit(_)
+                            )
+                    );
+                if signed
+                    && let ir::Factor::Value(comptime) = &mut ret
+                    && let ValueVariant::Type(value) = &mut comptime.value
+                {
+                    value.signed = true;
+                    comptime.r#type.signed = true;
+                }
                 Ok(ir::Expression::Term(Box::new(ret)))
             }
         }

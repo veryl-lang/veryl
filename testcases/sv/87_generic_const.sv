@@ -2,6 +2,7 @@ module veryl_testcase___Module87A__3__logic_3 (
     output var logic [3-1:0] a,
     output var logic [3-1:0] b
 );
+    typedef logic [3-1:0] T;
     always_comb begin
         a = '0;
         b = '0;
@@ -11,6 +12,7 @@ endmodule
 module veryl_testcase___Module87B__1__2__3;
 
 
+    typedef logic [3-1:0] T;
 
     logic [3-1:0] a;
     logic [3-1:0] b;
