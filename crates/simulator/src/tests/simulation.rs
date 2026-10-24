@@ -37551,3 +37551,51 @@ fn reset_value_literal_context() {
         }
     }
 }
+
+#[test]
+fn two_always_ff_on_one_clock_writing_fields_of_one_register_both_land() {
+    // The blocks differ in their reset but share the clock event and its
+    // commit, so `x` takes a write from each in the same step.  The fields
+    // share a byte: a field write logs only the bytes it covers.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a  : input  logic<4>,
+        b  : input  logic<4>,
+        y  : output logic<8>,
+    ) {
+        var x: logic<8>;
+        var r: logic<8>;
+        always_ff (clk) {
+            x[3:0] = a;
+        }
+        always_ff (clk, rst) {
+            if_reset {
+                x[7:4] = 0;
+                r      = 0;
+            } else {
+                x[7:4] = b;
+                r      = x;
+            }
+        }
+        assign y = r;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("a", Value::new(0x3, 4, false));
+        sim.set("b", Value::new(0x5, 4, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0x53, 8, false),
+            "{config:?}"
+        );
+    }
+}

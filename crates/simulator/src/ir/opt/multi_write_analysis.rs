@@ -1,8 +1,8 @@
 //! Analyzer-IR multi-RMW write analysis.
 //!
 //! Walks `air::Declaration` (post comb_to_ff_hoist) and computes
-//! per-`(VarId, element_index)` max writes per cycle event.  An element
-//! with ≥2 writes in any event is "multi-RMW" and requires dual-slot
+//! per-`(VarId, element_index)` max writes per commit.  An element
+//! with ≥2 writes in any commit is "multi-RMW" and requires dual-slot
 //! storage (the packed layout cannot be applied).
 //!
 //! Operating on analyzer IR lets `create_variable_meta` allocate
@@ -18,7 +18,7 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::VarId;
 
 /// Returns the set of `(VarId, element_index)` pairs that receive ≥2
-/// writes in any single cycle event.  `decls` should be the post-hoist
+/// writes in any single commit.  `decls` should be the post-hoist
 /// declaration list so comb-to-FF hoist writes are attributed to FF
 /// blocks.
 ///
@@ -30,20 +30,16 @@ pub fn analyze_multi_write(
     analyzer_ctx: &mut AnalyzerContext,
     force_all_ff: bool,
 ) -> HashSet<(VarId, usize)> {
-    // Group declarations by event identity.  Multiple `FfDeclaration`s
-    // with the same `(clock, reset)` are merged at simulator level
-    // (`events.values()` in `collect_multi_write_offsets`), so writes
-    // within them accumulate per cycle.
+    // Writes accumulate over every declaration that can land in one commit:
+    // the `always_ff` blocks on a clock share its event whatever their reset,
+    // a copied clock's event joins its source's, and blocks on different
+    // clocks sharing an async reset fire in one reset event.
     let mut events: HashMap<EventKey, Vec<&Vec<air::Statement>>> = HashMap::default();
 
     for decl in decls {
         match decl {
             air::Declaration::Ff(ff) => {
-                let key = EventKey::Ff {
-                    clock: ff.clock.id,
-                    reset: ff.reset.as_ref().map(|r| r.id),
-                };
-                events.entry(key).or_default().push(&ff.statements);
+                events.entry(EventKey::Ff).or_default().push(&ff.statements);
             }
             air::Declaration::Comb(c) if force_all_ff => {
                 events
@@ -76,7 +72,7 @@ pub fn analyze_multi_write(
 
 #[derive(Eq, PartialEq, Hash, Clone)]
 enum EventKey {
-    Ff { clock: VarId, reset: Option<VarId> },
+    Ff,
     Comb,
 }
 
