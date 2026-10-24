@@ -516,12 +516,57 @@ fn stable_topo_sort_impl(
             _ => Vec::new(),
         }
     }
+    // A split If can read a temporary only in the branch which first writes
+    // it. Correlate identical static guards, but not an arbitrary predicate:
+    // its storage must remain unchanged from the writer through the reader.
+    type GuardKey = (VarOffset, BitRange, usize, usize, ExpressionContext);
+    fn static_guard(expr: &ProtoExpression) -> Option<GuardKey> {
+        match expr {
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select: None,
+                width,
+                var_full_width,
+                expr_context,
+            } => Some((*var_offset, *select, *width, *var_full_width, *expr_context)),
+            _ => None,
+        }
+    }
+    let guarded_write_spans = |writer_idx: usize, reader_idx: usize, key: &VarOffset| {
+        let (ProtoStatement::If(writer), ProtoStatement::If(reader)) =
+            (&statements[writer_idx], &statements[reader_idx])
+        else {
+            return Vec::new();
+        };
+        let Some(guard) = writer.cond.as_ref().and_then(static_guard) else {
+            return Vec::new();
+        };
+        if reader.cond.as_ref().and_then(static_guard) != Some(guard)
+            || guard.0 == *key
+            || stmt_outputs[writer_idx..=reader_idx]
+                .iter()
+                .any(|outputs| outputs.contains(&guard.0))
+        {
+            return Vec::new();
+        }
+        // An empty opposite arm makes every read of key conditional on this
+        // one guard value. A read in the condition itself was excluded above.
+        let body = match (reader.true_side.is_empty(), reader.false_side.is_empty()) {
+            (false, true) => &writer.true_side,
+            (true, false) => &writer.false_side,
+            _ => return Vec::new(),
+        };
+        body.iter()
+            .flat_map(|s| guaranteed_write_spans(s, key))
+            .collect()
+    };
+
     // A prior-bound read stays stable across passes iff every bit a LATER
     // overlapping writer can leave in the slot (the only cross-pass leak
-    // channel) is re-produced unconditionally by the reader's own block
-    // before the read (conditional producers reach here via
-    // uncovered-branch latch designs — that diagnostic is a warning).
-    let prior_unconditional_cover = |reader_idx: usize, key: &VarOffset, rr: BitRange| -> bool {
+    // channel) is re-produced by the reader's own block before the read:
+    // unconditionally, or whenever its unchanged guard selects the read.
+    let prior_guaranteed_cover = |reader_idx: usize, key: &VarOffset, rr: BitRange| -> bool {
         let wranges = &writer_ranges[key];
         let mut spans: Vec<(usize, usize)> = Vec::new();
         let mut last_p = usize::MAX;
@@ -531,6 +576,7 @@ fn stable_topo_sort_impl(
             }
             last_p = *p;
             spans.extend(guaranteed_write_spans(&statements[*p], key));
+            spans.extend(guarded_write_spans(*p, reader_idx, key));
         }
         let merged = merge_spans(spans);
         for (p, wr) in wranges {
@@ -693,7 +739,7 @@ fn stable_topo_sort_impl(
                 if relevant
                     .iter()
                     .any(|&w| w > reader_idx && !exclusive_pieces(reader_idx, w))
-                    && !prior_unconditional_cover(reader_idx, key, *rr)
+                    && !prior_guaranteed_cover(reader_idx, key, *rr)
                 {
                     if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
                         let later: Vec<String> = wranges
