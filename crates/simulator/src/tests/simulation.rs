@@ -37599,3 +37599,263 @@ fn two_always_ff_on_one_clock_writing_fields_of_one_register_both_land() {
         );
     }
 }
+
+#[test]
+fn a_constant_index_write_after_a_runtime_index_write_to_its_wide_element_wins() {
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        rst:  input  reset,
+        we:   input  logic,
+        wc:   input  logic,
+        idx:  input  logic<2>,
+        ridx: input  logic<2>,
+        a:    input  logic<100>,
+        b:    input  logic<100>,
+        q:    output logic<100>,
+    ) {
+        var mem: logic<100> [4];
+        var r: logic<100>;
+        assign q = r;
+        always_ff {
+            if_reset {
+                mem = '{0, 0, 0, 0};
+                r = 0;
+            } else {
+                if we {
+                    mem[idx] = a;
+                }
+                if wc {
+                    mem[2] = b;
+                }
+                r = mem[ridx];
+            }
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("we", Value::new(0, 1, false));
+        sim.set("wc", Value::new(1, 1, false));
+        sim.set("idx", Value::new(2, 2, false));
+        sim.set("ridx", Value::new(2, 2, false));
+        sim.set("a", Value::new(0x55, 100, false));
+        sim.set("b", Value::new(0x11, 100, false));
+        // Element 2 holds `b` before the step that writes both, so a write
+        // compared against the current value would see `b` as unchanged.
+        sim.step(&clk);
+        sim.set("we", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x11, 100, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn interpreted_and_compiled_writes_to_one_wide_element_keep_their_order() {
+    // `$display` keeps its branch interpreted while the other is compiled, so
+    // the two writes to element 2 are logged by different backends.
+    for (first, second, want) in [
+        ("mem[2] = b; $display(\"\");", "mem[idx] = a;", 0x55),
+        ("mem[idx] = a; $display(\"\");", "mem[2] = b;", 0x11),
+    ] {
+        let code = format!(
+            r#"
+    module Top (
+        clk:  input  clock,
+        we:   input  logic,
+        idx:  input  logic<2>,
+        a:    input  logic<100>,
+        b:    input  logic<100>,
+        q:    output logic<100>,
+    ) {{
+        var mem: logic<100> [4];
+        assign q = mem[2];
+        always_ff (clk) {{
+            if we {{
+                {first}
+            }}
+            if we {{
+                {second}
+            }}
+        }}
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("we", Value::new(1, 1, false));
+            sim.set("idx", Value::new(2, 2, false));
+            sim.set("a", Value::new(0x55, 100, false));
+            sim.set("b", Value::new(0x11, 100, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(want, 100, false),
+                "{first} / {second} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_clock_event_and_a_reset_event_in_one_commit_keep_their_write_order() {
+    // `step_reset` fires the clk block and the clk2 block's reset in one
+    // commit.  `m[i][j]` keeps the reset event off AOT-C while the clk event
+    // runs on it, and the `$display` variant leaves its write interpreted.
+    for extra in ["", "if j != 0 { x[29:0] = 0; $display(\"\"); }"] {
+        let code = r#"
+    module Top (
+        clk:  input 'd clock,
+        clk2: input 'd clock,
+        rst:  input 'd reset_async_high,
+        i:    input 'd logic<2>,
+        j:    input 'd logic<3>,
+        a:    input 'd logic<70>,
+        b:    input 'd logic<30>,
+        q:    output logic<100>,
+        y:    output logic<100>,
+    ) {
+        var x: 'd logic<100>;
+        var m: 'd logic<8> [4];
+        var yy: 'd logic<100>;
+        assign y = yy;
+        assign q = x;
+        always_ff (clk) {
+            x[99:30] = a;
+            yy = x;
+        }
+        always_ff (clk2, rst) {
+            if_reset {
+                x[29:0] = 0;
+                m[i][j] = 0;
+                EXTRA
+            } else {
+                x[29:0] = b;
+                m[i][j] = 1;
+            }
+        }
+    }
+    "#
+        .replace("EXTRA", extra);
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let clk2 = sim.get_clock("clk2").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.set("i", Value::new(0, 2, false));
+            sim.set("j", Value::new(1, 3, false));
+            sim.set("a", Value::new(0x3, 70, false));
+            sim.set("b", Value::new(0x3fff_ffff, 30, false));
+            sim.step(&clk2);
+            sim.step(&clk);
+            sim.set("a", Value::new(0x7, 70, false));
+            sim.step_reset(&clk, &rst);
+            assert_eq!(
+                sim.get("q").unwrap().payload_u128(),
+                0x7u128 << 30,
+                "{extra:?} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_sixteen_byte_write_into_a_wider_register_lands_after_a_whole_write() {
+    // The later write is 16 bytes, but its register is wider, so both writes
+    // go to the wide pool.
+    for (decl, [lo, hi], write, want) in [
+        (
+            "logic<256>",
+            ["x[127:0]", "x[255:128]"],
+            "x[191:64] = b;",
+            (0x1234u128 << 64 | 0xffff, 0),
+        ),
+        (
+            "logic<2, 128>",
+            ["x[0]", "x[1]"],
+            "x[idx] = b;",
+            (0xffff, 0x1234),
+        ),
+    ] {
+        let code = format!(
+            r#"
+    module Top (
+        clk:  input  clock,
+        idx:  input  logic,
+        a:    input  logic<256>,
+        b:    input  logic<128>,
+        q_lo: output logic<128>,
+        q_hi: output logic<128>,
+    ) {{
+        var x: {decl};
+        assign q_lo = {lo};
+        assign q_hi = {hi};
+        always_ff (clk) {{
+            x = a;
+            {write}
+        }}
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("idx", Value::new(1, 1, false));
+            sim.set("a", Value::new(0xffff, 256, false));
+            sim.set("b", Value::new(0x1234, 128, false));
+            sim.step(&clk);
+            let got = (
+                sim.get("q_lo").unwrap().payload_u128(),
+                sim.get("q_hi").unwrap().payload_u128(),
+            );
+            assert_eq!(got, want, "{decl} {write} {config:?}");
+        }
+    }
+}
+
+#[test]
+fn a_field_write_after_a_runtime_index_write_to_its_element_merges_with_it() {
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        idx:  input  logic<2>,
+        a:    input  logic<8>,
+        b:    input  logic<4>,
+        q:    output logic<8>,
+    ) {
+        var mem: logic<8> [4];
+        assign q = mem[2];
+        always_ff (clk) {
+            mem[idx]      = a;
+            mem[2][3:0]   = b;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("idx", Value::new(2, 2, false));
+        sim.set("a", Value::new(0xa0, 8, false));
+        sim.set("b", Value::new(0x5, 4, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0xa5, 8, false),
+            "{config:?}"
+        );
+    }
+}

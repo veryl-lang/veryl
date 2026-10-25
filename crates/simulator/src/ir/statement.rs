@@ -15,7 +15,8 @@ use crate::ir::variable::{
     write_native_value,
 };
 use crate::ir::write_log::{
-    event_write_log_push_static, event_write_log_push_wide_range, static_field_byte_span,
+    event_write_log_push_static, event_write_log_push_wide_range, log_window_for_span,
+    static_field_byte_span,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
@@ -4628,16 +4629,15 @@ fn conv_assign_statements(
 }
 
 /// Push FF write-log entries for `value` at canonical `base_offset`.
-/// Narrow FFs emit a payload (+ optional mask in 4-state) at `base_offset`
-/// and `base_offset + nb`.  Wide FFs split into per-word entries that
-/// `ff_commit_from_log` reassembles.
+/// The payload goes at `base_offset` and, in 4-state, the mask at
+/// `base_offset + nb`.
 ///
 /// SAFETY: requires an `EVENT_WRITE_LOG` buffer to be installed; no-op
 /// otherwise.
 /// `span` is the `(high, low)` BIT range when the write is a statically
-/// bounded slice of a wide FF: only those bytes changed, so the wide push is
-/// narrowed to them.  None (runtime index, or a genuine whole-element store)
-/// keeps the full split.
+/// bounded slice of an FF wider than 8 bytes: only those bytes changed, so
+/// the push is narrowed to them.  None (runtime index, or a genuine
+/// whole-element store) logs the whole element.
 fn emit_ff_log(
     value: &Value,
     base_offset: u32,
@@ -4654,6 +4654,36 @@ fn emit_ff_log(
             if use_4state {
                 let mask = value.mask_xz_u128() as u64;
                 event_write_log_push_static(base_offset + nb_u32, mask, nb_u16);
+            }
+        }
+        return;
+    }
+    // Up to 16 bytes goes to the narrow pool, as the compiled paths log it:
+    // one commit can hold interpreted and compiled writes, and it applies the
+    // narrow pool before the wide one.
+    if nb <= 16 {
+        let payload = value.payload_u128();
+        let mask = use_4state.then(|| value.mask_xz_u128());
+        let window = span.and_then(|(hi, lo)| log_window_for_span(lo / 8, hi / 8, nb));
+        let pieces = match window {
+            Some((start, w)) => vec![(start, w)],
+            None => (0..nb).step_by(8).map(|i| (i, 8)).collect(),
+        };
+        for (start, w) in pieces {
+            let shift = start * 8;
+            unsafe {
+                event_write_log_push_static(
+                    base_offset + start as u32,
+                    (payload >> shift) as u64,
+                    w as u16,
+                );
+                if let Some(m) = mask {
+                    event_write_log_push_static(
+                        base_offset + nb_u32 + start as u32,
+                        (m >> shift) as u64,
+                        w as u16,
+                    );
+                }
             }
         }
         return;
@@ -5795,7 +5825,7 @@ mod emit_ff_log_tests {
         })
     }
 
-    /// Without a span the whole 16-byte element is logged; with one, only the
+    /// Without a span the whole 24-byte element is logged; with one, only the
     /// bytes the field touches.  A passing simulation suite does NOT prove
     /// this fires -- the narrowed and unnarrowed forms commit identical bytes,
     /// so only the entry's own offset/length distinguishes them.
@@ -5805,18 +5835,18 @@ mod emit_ff_log_tests {
         let mut whole = WriteLogBuffer::with_capacity(0, 4);
         unsafe {
             set_event_write_log(&mut whole);
-            emit_ff_log(&wide_value(), 0x100, 16, false, None);
+            emit_ff_log(&wide_value(), 0x100, 24, false, None);
             clear_event_write_log();
         }
         assert_eq!(whole.wide_count, 1);
         let e = &whole.wide_entries_slice()[0];
-        assert_eq!((e.offset, e.native_bytes), (0x100, 16));
+        assert_eq!((e.offset, e.native_bytes), (0x100, 24));
 
         // Bits [17:16] live in byte 2 alone.
         let mut field = WriteLogBuffer::with_capacity(0, 4);
         unsafe {
             set_event_write_log(&mut field);
-            emit_ff_log(&wide_value(), 0x100, 16, false, Some((17, 16)));
+            emit_ff_log(&wide_value(), 0x100, 24, false, Some((17, 16)));
             clear_event_write_log();
         }
         assert_eq!(field.wide_count, 1);
@@ -5833,14 +5863,14 @@ mod emit_ff_log_tests {
     /// spans the whole element must not be narrowed at all.
     #[test]
     fn interpreter_wide_ff_log_span_edges() {
-        for (hi, lo, off, nb) in [(23u32, 8u32, 0x101u32, 2u8), (127, 0, 0x100, 16)] {
+        for (hi, lo, off, nb) in [(23u32, 8u32, 0x101u32, 2u8), (191, 0, 0x100, 24)] {
             let mut buf = WriteLogBuffer::with_capacity(0, 4);
             unsafe {
                 set_event_write_log(&mut buf);
                 emit_ff_log(
                     &wide_value(),
                     0x100,
-                    16,
+                    24,
                     false,
                     Some((hi as usize, lo as usize)),
                 );
@@ -5848,6 +5878,32 @@ mod emit_ff_log_tests {
             }
             let e = &buf.wide_entries_slice()[0];
             assert_eq!((e.offset, e.native_bytes), (off, nb), "span [{hi}:{lo}]");
+        }
+    }
+
+    /// A 16-byte element is logged to the narrow pool: as two words whole,
+    /// as the field's aligned window with a span.
+    #[test]
+    fn interpreter_sixteen_byte_ff_log_is_narrow() {
+        for (span, want) in [
+            (None, vec![(0x100, 8, 0x0807_0605_0403_0201), (0x108, 8, 0)]),
+            (Some((17, 16)), vec![(0x102, 1, 0x03)]),
+        ] {
+            let mut buf = WriteLogBuffer::with_capacity(4, 4);
+            unsafe {
+                set_event_write_log(&mut buf);
+                emit_ff_log(&wide_value(), 0x100, 16, false, span);
+                clear_event_write_log();
+            }
+            assert_eq!(buf.wide_count, 0, "span {span:?}");
+            let got: Vec<_> = buf.narrow_entries_slice()[..buf.narrow_count() as usize]
+                .iter()
+                .map(|e| {
+                    let keep = u64::MAX >> (64 - 8 * e.width_class as u32);
+                    (e.offset, e.width_class, e.payload & keep)
+                })
+                .collect();
+            assert_eq!(got, want, "span {span:?}");
         }
     }
 }

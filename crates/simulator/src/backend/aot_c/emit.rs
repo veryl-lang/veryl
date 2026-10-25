@@ -2099,16 +2099,11 @@ fn extend_scalar_operand(s: &str, src_width: usize, width: usize, signed: bool) 
 
 /// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
 /// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`
-/// (a C expression).  Each entry holds ≤56 bytes; larger values chunk.
+/// (a C expression), known to lie in FF bytes `span` (see
+/// `emit_log_push_in`).  Each entry holds ≤56 bytes; larger values chunk.
 /// Unchecked: the event prologue's bulk reserve guarantees room.
-/// Mirrors `event_write_log_push_wide` / `emit_wide_log_chunks`.
-fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
-    emit_wide_log_chunks_in(src_ptr, base_off, nb, None)
-}
-
-/// `emit_wide_log_chunks` for a runtime `base_off` known to lie in FF bytes
-/// `span` (see `emit_log_push_in`).
-fn emit_wide_log_chunks_in(
+/// Mirrors `event_write_log_push_wide` and Cranelift's `emit_wide_log_chunks`.
+fn emit_wide_log_chunks(
     src_ptr: &str,
     base_off: &str,
     nb: usize,
@@ -2149,6 +2144,35 @@ fn emit_wide_log_chunks_in(
     out
 }
 
+/// Log bytes `[blo, blo + blen)` of an FF element of `ff_nb` bytes, read from
+/// `elem_ptr` and placed from FF byte `elem_off`.  An element up to 16 bytes
+/// goes to the narrow pool, as the interpreter and Cranelift log it: events of
+/// different backends can share a commit, and the commit applies the narrow
+/// pool before the wide one.  The narrow entries are the 8-byte words around
+/// the range, so `elem_ptr` must hold the pending value over those words.
+fn emit_ff_elem_log(
+    elem_ptr: &str,
+    elem_off: &str,
+    ff_nb: usize,
+    (blo, blen): (usize, usize),
+    span: Option<(u32, u32)>,
+) -> String {
+    let from = format!("(({elem_ptr}) + {blo}u)");
+    let at = format!("(({elem_off}) + {blo}u)");
+    if ff_nb > 16 {
+        return emit_wide_log_chunks(&from, &at, blen, span);
+    }
+    let mut out = df_ff_wide_push_mark(&at, &from, blen, span);
+    for w in blo / 8..(blo + blen).div_ceil(8) {
+        out.push_str(&emit_log_entry(
+            &format!("(({elem_off}) + {}u)", w * 8),
+            &format!("*(const veryl_u64_ua *)(({elem_ptr}) + {}u)", w * 8),
+            8,
+        ));
+    }
+    out
+}
+
 /// Lazily-published compiled `.so`.  `None` while the background
 /// compile runs; callers fall back to Cranelift until then.  Shared
 /// via `Arc` across `Ir`s built from one `ProtoModule`.
@@ -2176,10 +2200,10 @@ fn set_event_mode(on: bool) {
     EVENT_MODE.with(|c| c.set(on));
 }
 
-/// Whether a wide FF write may leave the log unadvanced when the value it
-/// deposits is what its write slot already holds.  Wide only: a wide entry
-/// costs 64 bytes to push and to commit, a narrow one too little to be worth
-/// a compare at every write site.  Sound because the write slot carries the
+/// Whether a write to an FF wider than 8 bytes may leave the log unadvanced
+/// when the value it deposits is what its write slot already holds.  Not
+/// narrower FFs: their single entry costs too little to be worth a compare at
+/// every write site.  Sound because the write slot carries the
 /// pending value: a dual-slot FF's next slot accumulates the step's writes,
 /// and a packed FF's current slot is written once per event and changed only
 /// by the commit.  Off for reset events: they fire after the clock events of
@@ -2228,6 +2252,12 @@ fn emit_log_push_in(
     wc: usize,
     span: Option<(u32, u32)>,
 ) -> String {
+    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
+    format!("{mark}{}", emit_log_entry(offset_expr, payload_expr, wc))
+}
+
+/// The narrow entry push of `emit_log_push_in`, without its dataflow mark.
+fn emit_log_entry(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
     // Offsets shared with the Cranelift push via write_log.rs consts,
     // so a layout change can't silently desync this emitted C.
     use crate::ir::write_log::{
@@ -2236,9 +2266,8 @@ fn emit_log_push_in(
         WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
     };
     EVENT_NARROW_PUSHES.with(|c| c.set(c.get() + 1));
-    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
     format!(
-        "{mark}{{ unsigned char* _lb = (unsigned char*)write_log; \
+        "{{ unsigned char* _lb = (unsigned char*)write_log; \
             unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
             unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
             *(unsigned int*)(_ls + {o_off}) = (unsigned int)({off}); \
@@ -2915,14 +2944,14 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 }
 
 /// Event-path WIDE FF write (static dst, `dst_width > 64`): materialize the
-/// masked RHS into a scratch and push it through the 64-byte WriteLogWideEntry
-/// pool (≤56-byte payload chunks).  Covers 65-128 bit (scalar promoted) and
-/// `>128` bit (helper-table value).  A static slice covering whole words
-/// reduces to the full-width form at a shifted offset: the commit is a plain
-/// byte-range copy, so a byte-exact subrange needs no read-modify-write
-/// against uncommitted state.  A slice that covers neither (`ff4232[1287:1196]`
-/// — 92-bit fields never land on a word boundary) goes through the general
-/// read-modify-write in `emit_event_ff_assign_wide_select`; a runtime index
+/// masked RHS into a scratch and log it (`emit_ff_elem_log`).  Covers 65-128
+/// bit (scalar promoted) and `>128` bit (helper-table value).  A static slice
+/// covering whole words reduces to the full-width form at a shifted offset:
+/// the commit is a plain byte-range copy, so a byte-exact subrange needs no
+/// read-modify-write against uncommitted state.  A slice that covers neither
+/// (`ff4232[1287:1196]`: 92-bit fields never land on a word boundary) goes
+/// through the general read-modify-write in
+/// `emit_event_ff_assign_wide_select`; a runtime index
 /// goes to the `_dynsel*` siblings.  rhs_select bails.  2-state only.
 fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
     // A sign-extended RHS is only expressible on the static-select path below;
@@ -3032,7 +3061,13 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -
     );
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb),
+        &emit_ff_elem_log(
+            &format!("(uint8_t*)_w{d}"),
+            &format!("{cur_off:#x}"),
+            native_bytes(a.dst_width),
+            (0, nb),
+            None,
+        ),
     );
     Some(format!("{{ {pre}{flag}{store}{push} }}"))
 }
@@ -3066,7 +3101,7 @@ fn emit_wide_ff_rmw_prologue(
 /// Shared tail for the wide-FF read-modify-write paths.  `span` is the byte
 /// range the write changed, `None` for the whole register; a narrowed span
 /// still composes, since entries apply in push order, last-write-wins per
-/// byte, and one FF's entries all share the wide pool.
+/// byte, and one FF's entries all share a pool.
 fn emit_wide_ff_rmw_tail(
     reg: &str,
     nb: usize,
@@ -3091,10 +3126,12 @@ fn emit_wide_ff_rmw_tail(
     }
     out.push_str(&guard_push(
         &flag,
-        &emit_wide_log_chunks(
-            &format!("((uint8_t*){reg} + {blo}u)"),
-            &format!("{:#x}", cur_off + blo as isize),
-            blen,
+        &emit_ff_elem_log(
+            &format!("(uint8_t*){reg}"),
+            &format!("{cur_off:#x}"),
+            nb,
+            (blo, blen),
+            None,
         ),
     ));
     out
@@ -3138,10 +3175,12 @@ fn emit_event_ff_assign_wide_field(
     // `emit_event_ff_assign_wide_select`.
     if !packed && hi < a.dst_width {
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
-        let log = emit_wide_log_chunks(
-            &format!("((uint8_t*)(ff_values + {dst_raw:#x}) + {blo}u)"),
-            &format!("{:#x}", cur_off + blo as isize),
-            blen,
+        let log = emit_ff_elem_log(
+            &format!("(uint8_t*)(ff_values + {dst_raw:#x})"),
+            &format!("{cur_off:#x}"),
+            nb,
+            (blo, blen),
+            None,
         );
         if let Some(store) =
             emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, Some(&log), |k| {
@@ -3283,11 +3322,7 @@ fn emit_event_ff_assign_wide_select(
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
         body.push_str(&guard_push(
             &flag,
-            &emit_wide_log_chunks(
-                &format!("({dst} + {blo}u)"),
-                &format!("{:#x}", cur_off + blo as isize),
-                blen,
-            ),
+            &emit_ff_elem_log(&dst, &format!("{cur_off:#x}"), nb, (blo, blen), None),
         ));
         return Some(format!("{{ {body} }}"));
     }
@@ -3548,10 +3583,11 @@ fn emit_event_ff_assign_wide_dynsel(
     );
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks_in(
+        &emit_ff_elem_log(
             &format!("(uint8_t*)_w{d}"),
             &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
-            nb,
+            native_bytes(a.dst_width),
+            (0, nb),
             u32::try_from(cur_off)
                 .ok()
                 .and_then(|lo| Some((lo, lo.checked_add(u32::try_from(ne * nb).ok()?)?))),
@@ -3953,7 +3989,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
     let span = dyn_ff_span(a, cur_base, nb);
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks_in(&format!("(uint8_t*)_w{d}"), "_woff", nb, span),
+        &emit_ff_elem_log(&format!("(uint8_t*)_w{d}"), "_woff", nb, (0, nb), span),
     );
     let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
@@ -10958,7 +10994,8 @@ mod tests {
     }
 
     /// Run an emitted event function over a hand-built `WriteLogBuffer` and
-    /// return the wide entries it pushed, as `(offset, payload_bytes)`.
+    /// return the entries it pushed, wide then narrow, as
+    /// `(offset, payload_bytes)`.
     fn run_wide_ff_event(src: &str, what: &str, ff: &mut [u8]) -> Option<Vec<(u32, Vec<u8>)>> {
         let mut comb = vec![0u8; 256];
         run_wide_ff_event_in(src, what, ff, &mut comb)
@@ -11024,9 +11061,46 @@ mod tests {
                 let p = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD as usize;
                 (off, e[p..p + nb].to_vec())
             })
-            .collect();
+            .collect::<Vec<_>>();
         let _ = fs::remove_dir_all(&tmp);
-        Some(out)
+        Some(
+            out.into_iter()
+                .chain(narrow_log_entries(&log, &narrow))
+                .collect(),
+        )
+    }
+
+    /// The narrow entries `run_wide_ff_event_in` left in `log`, as
+    /// `(offset, payload bytes)`.
+    fn narrow_log_entries(log: &[u8], narrow: &[u8]) -> Vec<(u32, Vec<u8>)> {
+        use crate::ir::write_log::{
+            WRITE_LOG_ENTRY_OFFSET_OFFSET, WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
+            WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
+            WRITE_LOG_NARROW_OFFSET_COUNT,
+        };
+        let field = |b: &[u8], at: i32, n: usize| b[at as usize..at as usize + n].to_vec();
+        let count = u32::from_le_bytes(
+            field(log, WRITE_LOG_NARROW_OFFSET_COUNT, 4)
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let esz = WRITE_LOG_ENTRY_SIZE as usize;
+        (0..count)
+            .map(|i| {
+                let e = &narrow[i * esz..(i + 1) * esz];
+                let off = u32::from_le_bytes(
+                    field(e, WRITE_LOG_ENTRY_OFFSET_OFFSET, 4)
+                        .try_into()
+                        .unwrap(),
+                );
+                let wc = u16::from_le_bytes(
+                    field(e, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, 2)
+                        .try_into()
+                        .unwrap(),
+                ) as usize;
+                (off, field(e, WRITE_LOG_ENTRY_OFFSET_PAYLOAD, wc))
+            })
+            .collect()
     }
 
     #[test]
@@ -11172,6 +11246,20 @@ mod tests {
         );
     }
 
+    /// A 16-byte element reassembled from its two narrow words.
+    fn element_from_words(entries: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut words: Vec<_> = entries.to_vec();
+        words.sort_by_key(|(off, _)| *off);
+        assert_eq!(
+            words
+                .iter()
+                .map(|(off, p)| (*off, p.len()))
+                .collect::<Vec<_>>(),
+            [(0, 8), (8, 8)]
+        );
+        words.into_iter().flat_map(|(_, p)| p).collect()
+    }
+
     #[test]
     fn emit_event_ff_wide_dynamic_bit_merges_at_the_runtime_index() {
         // `ff72[idx] <= bit`: a one-bit field at a runtime offset inside a
@@ -11203,10 +11291,7 @@ mod tests {
         let Some(entries) = run_wide_ff_event(&src, "wff_dyn", &mut ff) else {
             return;
         };
-        assert_eq!(entries.len(), 1);
-        let (off, payload) = &entries[0];
-        assert_eq!(*off, 0);
-        assert_eq!(payload.len(), 16, "72 bits sits in the 128-bit size class");
+        let payload = element_from_words(&entries);
         let hi = u64::from_le_bytes(payload[8..16].try_into().unwrap());
         assert_eq!(hi, 1u64 << (70 - 64), "bit 70 set, nothing else");
         assert_eq!(
@@ -11247,8 +11332,7 @@ mod tests {
         let Some(entries) = run_wide_ff_event(&src, "wff_spill", &mut ff) else {
             return;
         };
-        assert_eq!(entries.len(), 1);
-        let hi = u64::from_le_bytes(entries[0].1[8..16].try_into().unwrap());
+        let hi = u64::from_le_bytes(element_from_words(&entries)[8..16].try_into().unwrap());
         assert_eq!(
             hi,
             1u64 << (71 - 64),

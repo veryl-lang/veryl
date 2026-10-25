@@ -3,7 +3,8 @@
 //! Walks `air::Declaration` (post comb_to_ff_hoist) and computes
 //! per-`(VarId, element_index)` max writes per commit.  An element
 //! with ≥2 writes in any commit is "multi-RMW" and requires dual-slot
-//! storage (the packed layout cannot be applied).
+//! storage (the packed layout cannot be applied).  A runtime-index write
+//! counts against every element of its array and is reported at element 0.
 //!
 //! Operating on analyzer IR lets `create_variable_meta` allocate
 //! packed-aware FF storage from the start, avoiding a post-hoc remap
@@ -60,9 +61,19 @@ pub fn analyze_multi_write(
                 *event_counts.entry(k).or_insert(0) += n;
             }
         }
-        for (k, n) in event_counts {
-            if n >= 2 {
-                result.insert(k);
+        let dynamic: HashMap<VarId, u32> = event_counts
+            .iter()
+            .filter(|((_, elem), _)| *elem == DYNAMIC)
+            .map(|((id, _), n)| (*id, *n))
+            .collect();
+        for ((id, elem), n) in event_counts {
+            let total = if elem == DYNAMIC {
+                n
+            } else {
+                n + dynamic.get(&id).copied().unwrap_or(0)
+            };
+            if total >= 2 {
+                result.insert((id, if elem == DYNAMIC { 0 } else { elem }));
             }
         }
     }
@@ -144,22 +155,27 @@ fn count_writes_one(
     result
 }
 
+/// Per-key max, except that an element's count is taken together with its
+/// array's runtime-index count, so that their sum stays the worst path's.
 fn merge_branches_max(
     a: &HashMap<(VarId, usize), u32>,
     b: &HashMap<(VarId, usize), u32>,
     out: &mut HashMap<(VarId, usize), u32>,
 ) {
-    for (k, n) in a {
-        let e = out.entry(*k).or_insert(0);
-        if *n > *e {
-            *e = *n;
-        }
-    }
-    for (k, n) in b {
-        let e = out.entry(*k).or_insert(0);
-        if *n > *e {
-            *e = *n;
-        }
+    let dynamic =
+        |m: &HashMap<(VarId, usize), u32>, id: VarId| m.get(&(id, DYNAMIC)).copied().unwrap_or(0);
+    for k in a.keys().chain(b.keys()) {
+        let (id, elem) = *k;
+        let (da, db) = (dynamic(a, id), dynamic(b, id));
+        let d = da.max(db);
+        let n = if elem == DYNAMIC {
+            d
+        } else {
+            let na = a.get(k).copied().unwrap_or(0) + da;
+            let nb = b.get(k).copied().unwrap_or(0) + db;
+            na.max(nb) - d
+        };
+        out.insert(*k, n);
     }
 }
 
@@ -230,10 +246,12 @@ fn check_dyn_dst(dst: &air::AssignDestination, out: &mut HashSet<VarId>) {
     }
 }
 
-/// Mirror of `AssignDestination::gather_ff` element resolution.  A
-/// non-const index in the simulator becomes `AssignDynamic` at
-/// `base_offset = element[0].current_offset`, so we key the
-/// indeterminate case at `(id, 0)` to match.
+/// The element key of a write that may land on any element: a runtime index,
+/// a whole array, or a partial index into a multi-dimensional one.
+const DYNAMIC: usize = usize::MAX;
+
+/// `AssignDestination::gather_ff` element resolution, except that a runtime
+/// index is keyed at `DYNAMIC`.
 fn add_dst_write(
     dst: &air::AssignDestination,
     ctx: &mut AnalyzerContext,
@@ -261,5 +279,5 @@ fn add_dst_write(
         return;
     }
 
-    *out.entry((dst.id, 0)).or_insert(0) += n;
+    *out.entry((dst.id, DYNAMIC)).or_insert(0) += n;
 }

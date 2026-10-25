@@ -8,6 +8,7 @@ use super::runtime::{
 };
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain};
 use crate::ir::variable::native_bytes as calc_native_bytes;
+use crate::ir::write_log::log_window_for_span;
 use crate::ir::{
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoDynamicBitSelect,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
@@ -19,23 +20,6 @@ use cranelift::prelude::types::{I8, I16, I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
-
-/// Aligned 1/2/4/8-byte window containing byte span `[blo, bhi]`, or None.
-/// It must not run past `nb`: the commit writes the whole window.
-fn log_window_for_span(blo: usize, bhi: usize, nb: usize) -> Option<(usize, usize)> {
-    if bhi < blo || bhi >= nb {
-        return None;
-    }
-    let mut w = 1usize;
-    while w <= 8 {
-        let start = blo & !(w - 1);
-        if start + w > bhi && start + w <= nb {
-            return Some((start, w));
-        }
-        w <<= 1;
-    }
-    None
-}
 
 /// Push an FF write-log entry for a post-RMW `payload` (+ optional 4-state
 /// `mask_xz`). Narrow FFs (`nb <= 8`) push one I64 entry; wide FFs (`nb > 8`,
@@ -2751,6 +2735,24 @@ fn emit_wide_log_chunks_dyn(
     nb: usize,
 ) {
     use crate::ir::write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    // An element up to 16 bytes is logged to the narrow pool, as every other
+    // write to it is: the commit applies the narrow pool before the wide one,
+    // so writes split across the two would lose their order.
+    if nb <= 16 {
+        let width_class = builder.ins().iconst(I32, 8);
+        for i in 0..nb / 8 {
+            let word = builder
+                .ins()
+                .load(I64, MemFlagsData::trusted(), src_ptr, (i * 8) as i32);
+            let off = if i == 0 {
+                base_offset_val
+            } else {
+                builder.ins().iadd_imm_s(base_offset_val, (i * 8) as i64)
+            };
+            emit_inline_write_log_push(context, builder, off, word, width_class);
+        }
+        return;
+    }
     let mut written: usize = 0;
     while written < nb {
         let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
