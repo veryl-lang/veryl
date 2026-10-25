@@ -32588,6 +32588,170 @@ fn an_async_reset_the_design_produces_itself_asserts_when_it_falls() {
 }
 
 #[test]
+fn copies_of_a_design_reset_assert_together_from_one_monitored_net() {
+    // `rst_a` and `rst_b` only copy `rst_l`: the three resets are watched as
+    // one net, and its assertion still fires every domain they reset.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q0  : output logic,
+        q1  : output logic,
+        q2  : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let rst_l: '_ reset_async_low = ~f;
+        let rst_a: '_ reset_async_low = rst_l;
+        let rst_b: '_ reset_async_low = rst_a;
+        inst u0: Sub (clk, rst_l, q: q0);
+        inst u1: Sub (clk, rst_l: rst_a, q: q1);
+        inst u2: Sub (clk, rst_l: rst_b, q: q2);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X; the assertion edge is what is under test.
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let resets = &ir.derived_clock_schedule.resets;
+        assert!(
+            resets.len() < resets.iter().map(|r| r.members.len()).sum::<usize>(),
+            "the copies share a monitored net: {resets:?}"
+        );
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(1, 1, false),
+                "{q} released ({config:?})"
+            );
+        }
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(0, 1, false),
+                "{q} reset ({config:?})"
+            );
+        }
+    }
+}
+
+#[test]
+fn reset_copies_of_a_plain_net_assert_from_that_net() {
+    // `n` is not a reset and no event reads it, yet it is what the two copies
+    // are watched through, so it has to stay in the comb buffer.  `rst_h`
+    // inverts and watches its own net.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module SubH (
+        clk  : input  clock           ,
+        rst_h: input  reset_async_high,
+        q    : output logic           ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_h) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q0  : output logic,
+        q1  : output logic,
+        q2  : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let n    : logic                = ~f;
+        let rst_a: '_ reset_async_low  = n;
+        let rst_b: '_ reset_async_low  = n;
+        let rst_h: '_ reset_async_high = ~rst_a;
+        inst u0: Sub (clk, rst_l: rst_a, q: q0);
+        inst u1: Sub (clk, rst_l: rst_b, q: q1);
+        inst u2: SubH (clk, rst_h, q: q2);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X; the assertion edge is what is under test.
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(1, 1, false),
+                "{q} released ({config:?})"
+            );
+        }
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(0, 1, false),
+                "{q} reset ({config:?})"
+            );
+        }
+    }
+}
+
+#[test]
 fn an_abstract_reset_the_design_produces_itself_uses_the_configured_polarity() {
     // Same shape as the test above, but the reset carries no declared
     // polarity: the edge to monitor comes from the project's `reset_type`.
