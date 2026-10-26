@@ -518,7 +518,6 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
             .extract_if(|_, v| v.affiliation != Affiliation::Function)
             .collect();
 
-        context.pop_namespace();
         upper_context.inherit(&mut context);
 
         ret?;

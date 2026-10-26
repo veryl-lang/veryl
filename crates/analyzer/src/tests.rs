@@ -17331,6 +17331,84 @@ fn type_inference_var_conflict() {
 }
 
 #[test]
+fn interface_instance_keeps_enclosing_namespace() {
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 1,
+    ) {
+        var a: logic<W>;
+    }
+
+    module ModuleA {
+        inst u: ModuleB;
+    }
+
+    module ModuleB {
+        inst b: InterfaceA #(W: 2);
+        assign b.a = 0;
+
+        var _x: logic;
+        for i in 0..1 :g {
+            assign _x = FuncA();
+        }
+
+        function FuncA () -> logic {
+            return 0;
+        }
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let var_names = |module: &crate::ir::Module| {
+        let mut names: Vec<_> = module
+            .variables
+            .values()
+            .map(|x| x.path.to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    let module = |name: &str| {
+        ir.components
+            .iter()
+            .find_map(|x| match x {
+                crate::ir::Component::Module(x) if x.name.to_string() == name => Some(x),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let instantiated = module("ModuleA")
+        .declarations
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Declaration::Inst(x) => match x.component.as_ref() {
+                crate::ir::Component::Module(x) => Some(x),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    // A function first called inside a generate block of its own module is
+    // converted in that block's scope.
+    assert!(var_names(instantiated).contains(&"g[0].FuncA.return".to_string()));
+    assert_eq!(var_names(instantiated), var_names(module("ModuleB")));
+}
+
+#[test]
 fn type_inference_var_chain_in_overridden_instance() {
     let code = r#"
     module ModuleA #(
