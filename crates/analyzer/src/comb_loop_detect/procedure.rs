@@ -175,10 +175,19 @@ impl SampledAffineIndex {
     }
 }
 
+// Counts and positions need an exact value, regardless of its storage width.
+// Keep unknown and unrepresentable values on the conservative fallback path.
+fn constant_usize(value: &Value) -> Option<usize> {
+    match value {
+        Value::U64(value) => value.to_usize(),
+        Value::BigUint(value) => value.to_usize(),
+    }
+}
+
 fn affine_constant(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
     let constant = expression
         .eval_value(ctx)
-        .and_then(|value| value.to_usize())
+        .and_then(|value| constant_usize(&value))
         .and_then(|value| isize::try_from(value).ok())?;
     Some(AffineIndex {
         terms: Vec::new(),
@@ -389,7 +398,7 @@ fn destination_packed_shape(destination: &AssignDestination) -> Cow<'_, [Option<
             .comptime()
             .get_value()
             .ok()
-            .and_then(|value| value.to_usize())
+            .and_then(constant_usize)
     };
     let length = match &select.1 {
         None => Some(1),
@@ -3469,7 +3478,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 Op::LogicShiftL | Op::ArithShiftL => {
                     let shift = right
                         .eval_value(&mut self.ctx)
-                        .and_then(|value| value.to_usize());
+                        .and_then(|value| value.to_usize_saturating());
                     let mut reads = ExpressionSources::whole(self.eval_expr(right));
                     if let Some(shift) = shift {
                         let start = requested.start.max(shift);
@@ -3501,7 +3510,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 Op::LogicShiftR | Op::ArithShiftR => {
                     let shift = right
                         .eval_value(&mut self.ctx)
-                        .and_then(|value| value.to_usize());
+                        .and_then(|value| value.to_usize_saturating());
                     let mut reads = ExpressionSources::whole(self.eval_expr(right));
                     if let Some(shift) = shift {
                         let width = context.width;
@@ -3649,7 +3658,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     let count = if let Some(repeat) = repeat {
                         let Some(count) = repeat
                             .eval_value(&mut self.ctx)
-                            .and_then(|value| value.to_usize())
+                            .and_then(|value| constant_usize(&value))
                         else {
                             return ExpressionSources::whole(self.eval_expr(expression));
                         };
@@ -3774,7 +3783,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     let count = if let Some(repeat) = repeat {
                         let Some(count) = repeat
                             .eval_value(&mut self.ctx)
-                            .and_then(|value| value.to_usize())
+                            .and_then(|value| constant_usize(&value))
                         else {
                             return ExpressionSources::whole(self.eval_expr(expression));
                         };
@@ -3985,7 +3994,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .map(|repeat| {
                             repeat
                                 .eval_value(&mut self.ctx)
-                                .and_then(|value| value.to_usize())
+                                .and_then(|value| constant_usize(&value))
                         })
                         .unwrap_or(Some(1))?;
                     total = total.checked_add(value_extent.checked_mul(repeat)?)?;
@@ -4320,15 +4329,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         repeat.map_or(Some(1), |repeat| {
             repeat
                 .eval_value(&mut self.ctx)
-                .and_then(|value| value.to_usize())
+                .and_then(|value| constant_usize(&value))
         })
     }
 
     fn constant_truth(&mut self, expression: &Expression) -> Option<bool> {
         expression
             .eval_value(&mut self.ctx)
-            .and_then(|value| value.to_usize())
-            .map(|value| value != 0)
+            .and_then(|value| value.truth())
     }
 
     fn eval_factor(&mut self, factor: &Factor, reads: &mut Vec<VersionId>) {
