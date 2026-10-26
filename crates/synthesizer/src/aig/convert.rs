@@ -6,9 +6,9 @@
 //! plain `And2` / `Not` cells so the existing postpass can fuse them
 //! into compound library primitives.
 //!
-//! Only combinational cells are touched — FFs are preserved verbatim
-//! across the round-trip; their Q outputs enter the AIG as primary
-//! inputs and their D inputs become sinks.
+//! Only combinational cells are touched. FFs and RAM blocks survive the
+//! round trip; Q/read-data outputs are primary inputs, and D/RAM-input
+//! nets are sinks.
 
 use std::collections::HashSet;
 
@@ -18,9 +18,9 @@ use crate::ir::{
 };
 
 /// Convert the combinational part of `gate` into an AIG. Inputs (module
-/// ports, FF Q outputs, undriven nets) become primary inputs; every
+/// ports, FF Q outputs, RAM read outputs, undriven nets) become primary inputs; every
 /// combinational cell is expanded into hash-consed ANDs; module output
-/// ports and FF D inputs become sinks.
+/// ports, FF D inputs, and RAM inputs become sinks.
 pub fn aigify(gate: &GateModule) -> AigModule {
     let mut aig = AigModule::new();
 
@@ -38,7 +38,10 @@ pub fn aigify(gate: &GateModule) -> AigModule {
         let edge = match gate.nets[net as usize].driver {
             NetDriver::Const(false) => AigEdge::CONST0,
             NetDriver::Const(true) => AigEdge::CONST1,
-            NetDriver::PortInput | NetDriver::FfQ(_) | NetDriver::Undriven => {
+            NetDriver::PortInput
+            | NetDriver::FfQ(_)
+            | NetDriver::RamRead(_, _, _)
+            | NetDriver::Undriven => {
                 // Treat any non-combinational driver as a primary input
                 // for the AIG. The caller wires the same NetId back when
                 // re-emitting cells.
@@ -132,7 +135,7 @@ pub fn aigify(gate: &GateModule) -> AigModule {
         }
     }
 
-    // Seed sinks: every output / FF D input. These root the traversal;
+    // Seed output and sequential-input sinks. These root the traversal;
     // anything not reachable from them stays out of the AIG.
     for port in &gate.ports {
         if matches!(port.dir, PortDir::Output | PortDir::Inout) {
@@ -149,11 +152,19 @@ pub fn aigify(gate: &GateModule) -> AigModule {
         aig.add_sink(ff.d, edge);
     }
 
+    let mut ram_inputs = HashSet::new();
+    gate.for_each_ram_input_net(|net| {
+        if ram_inputs.insert(net) {
+            let edge = lower_net(&mut aig, gate, net);
+            aig.add_sink(net, edge);
+        }
+    });
+
     aig
 }
 
 /// Reconstruct a [`GateModule`] from an optimised AIG while preserving
-/// the original ports and FFs. All combinational cells come from ANDs
+/// the original ports, FFs, and RAM blocks. All combinational cells come from ANDs
 /// and inverters in the AIG — the postpass then fuses them into
 /// compound library cells.
 pub fn aig_to_cells(aig: &AigModule, original: &GateModule) -> GateModule {
@@ -163,6 +174,7 @@ pub fn aig_to_cells(aig: &AigModule, original: &GateModule) -> GateModule {
         nets: Vec::new(),
         cells: Vec::new(),
         ffs: original.ffs.clone(),
+        ram_blocks: original.ram_blocks.clone(),
     };
 
     // Preserve the original net table layout so port / FF references
@@ -175,6 +187,7 @@ pub fn aig_to_cells(aig: &AigModule, original: &GateModule) -> GateModule {
                 NetDriver::Const(b) => NetDriver::Const(b),
                 NetDriver::PortInput => NetDriver::PortInput,
                 NetDriver::FfQ(idx) => NetDriver::FfQ(idx),
+                NetDriver::RamRead(block, port, bit) => NetDriver::RamRead(block, port, bit),
                 _ => NetDriver::Undriven,
             },
             origin: n.origin,
@@ -268,9 +281,9 @@ pub fn aig_to_cells(aig: &AigModule, original: &GateModule) -> GateModule {
         }
     }
 
-    // Wire sinks: port outputs and FF D pins read from the edge's net.
+    // Wire sinks: port and RAM inputs retain their net IDs; FF D pins may change.
     // Sinks appear in the order they were added: ports first, FFs
-    // second (see `aigify`).
+    // second, then RAM inputs (see `aigify`).
     let port_out_count: usize = original
         .ports
         .iter()
@@ -280,7 +293,7 @@ pub fn aig_to_cells(aig: &AigModule, original: &GateModule) -> GateModule {
 
     for (i, sink) in aig.sinks.iter().enumerate() {
         let src_net = resolve_fanin(&mut out, &mut pos_net, &mut neg_net, sink.edge);
-        if i < port_out_count {
+        if i < port_out_count || i >= port_out_count + out.ffs.len() {
             let target = sink.target;
             if src_net != target {
                 // Buffer target so the worklist / postpass collapses the

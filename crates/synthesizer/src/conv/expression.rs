@@ -427,10 +427,14 @@ fn synth_factor(
             let element_nets: Vec<NetId> = if ctx.ram_vars.contains_key(id) {
                 read_ram(ctx, id, index, current)?
             } else {
-                // The `current` map shadows the persistent nets within a block
-                // so that `a = a + 1`-style reads pick up the previous value.
-                let src_nets = current
-                    .get(id)
+                // FF right-hand sides read the pre-edge state; `current` retains
+                // pending writes for the last-assignment and branch merges.
+                let pending = if ctx.ff_snapshot_reads && ctx.ff_allocation.contains_key(id) {
+                    None
+                } else {
+                    current.get(id)
+                };
+                let src_nets = pending
                     .cloned()
                     .or_else(|| ctx.variables.get(id).map(|s| s.nets.clone()))
                     .ok_or_else(|| {

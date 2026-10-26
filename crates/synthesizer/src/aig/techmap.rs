@@ -23,7 +23,7 @@ use crate::ir::{
 };
 
 /// Convert an AIG back to a [`GateModule`]. `original` carries ports,
-/// primary-input nets, and FF structure that must be preserved verbatim;
+/// primary-input nets, and FF/RAM structure that must be preserved verbatim;
 /// only combinational cells are regenerated.
 pub fn aig_to_cells_techmap(aig: &AigModule, original: &GateModule) -> GateModule {
     let mut out = GateModule {
@@ -32,6 +32,7 @@ pub fn aig_to_cells_techmap(aig: &AigModule, original: &GateModule) -> GateModul
         nets: Vec::new(),
         cells: Vec::new(),
         ffs: original.ffs.clone(),
+        ram_blocks: original.ram_blocks.clone(),
     };
     out.nets = original
         .nets
@@ -41,6 +42,7 @@ pub fn aig_to_cells_techmap(aig: &AigModule, original: &GateModule) -> GateModul
                 NetDriver::Const(b) => NetDriver::Const(b),
                 NetDriver::PortInput => NetDriver::PortInput,
                 NetDriver::FfQ(idx) => NetDriver::FfQ(idx),
+                NetDriver::RamRead(block, port, bit) => NetDriver::RamRead(block, port, bit),
                 _ => NetDriver::Undriven,
             },
             origin: n.origin,
@@ -155,7 +157,7 @@ pub fn aig_to_cells_techmap(aig: &AigModule, original: &GateModule) -> GateModul
         }
     }
 
-    // Wire sinks: ports first, then FF Ds.
+    // Wire sinks: ports, FF Ds, then RAM inputs.
     let port_out_count: usize = original
         .ports
         .iter()
@@ -164,7 +166,7 @@ pub fn aig_to_cells_techmap(aig: &AigModule, original: &GateModule) -> GateModul
         .sum();
     for (i, sink) in aig.sinks.iter().enumerate() {
         let src_net = resolve(&mut out, &mut pos_net, &mut neg_net, sink.edge);
-        if i < port_out_count {
+        if i < port_out_count || i >= port_out_count + out.ffs.len() {
             let target = sink.target;
             if src_net != target {
                 let cell_idx = out.cells.len();

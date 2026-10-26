@@ -142,3 +142,11 @@ pub fn synthesize_with(
         timing,
     })
 }
+
+#[cfg(all(test, feature = "aig"))]
+mod ram_regressions;
+#[cfg(test)]
+mod regression_support;
+
+#[cfg(test)]
+mod ff_snapshot_regressions;

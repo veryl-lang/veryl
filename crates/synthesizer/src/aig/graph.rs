@@ -78,7 +78,7 @@ pub struct AigSink {
 pub struct AigModule {
     pub nodes: Vec<AigNode>,
     /// One entry per combinational output: module output port bits plus
-    /// every FF's D input. Mapping back to the gate IR fills these in.
+    /// every FF's D input and RAM input net. Mapping back to the gate IR fills these in.
     pub sinks: Vec<AigSink>,
     /// Structural hash-cons table: `(canonical_fanin0, canonical_fanin1)`
     /// → node index. Inputs are stored with the smaller raw edge first

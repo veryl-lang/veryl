@@ -244,6 +244,7 @@ pub(crate) struct ConvContext {
     pub nets: Vec<NetInfo>,
     pub variables: HashMap<air::VarId, VarSlot>,
     pub ff_allocation: HashMap<air::VarId, PreFf>,
+    pub ff_snapshot_reads: bool,
     /// User functions, for inline expansion at call sites. Cloned (not borrowed)
     /// because the module borrow wouldn't survive recursive child conversion.
     pub functions: HashMap<air::VarId, Function>,
@@ -299,6 +300,7 @@ impl ConvContext {
             nets,
             variables: HashMap::new(),
             ff_allocation: HashMap::new(),
+            ff_snapshot_reads: false,
             functions,
             eval_ctx: veryl_analyzer::Context::default(),
             ram_vars: HashMap::new(),
@@ -735,7 +737,11 @@ impl ConvContext {
                         }
                     }
                 }
-                process_statements(self, &main_stmts, &mut current)?;
+                let previous_snapshot_reads = self.ff_snapshot_reads;
+                self.ff_snapshot_reads = true;
+                let result = process_statements(self, &main_stmts, &mut current);
+                self.ff_snapshot_reads = previous_snapshot_reads;
+                result?;
                 for (vid, nets) in current {
                     let pre = match self.ff_allocation.get(&vid) {
                         Some(p) => p.ff_indices.clone(),
