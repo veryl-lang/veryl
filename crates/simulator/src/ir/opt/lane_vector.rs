@@ -1375,6 +1375,8 @@ mod tests {
             var_offset: VarOffset::Comb(0x90),
             select: None,
             dynamic_select: Some(crate::ir::expression::ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(ProtoExpression::Variable {
                     var_offset: VarOffset::Comb(0x40),
                     select: Some((1, 0)),

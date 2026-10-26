@@ -5,7 +5,7 @@ use crate::backend::ChunkArtifact;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::expression::{
-    DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
+    DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_write_select,
     build_linear_index_expr, inline_function_call,
 };
 use crate::ir::module::BitRange;
@@ -2557,6 +2557,8 @@ impl ProtoStatement {
                     );
                     let dynamic_select =
                         x.dynamic_select.as_ref().map(|dyn_sel| DynamicBitSelect {
+                            low_adjust: dyn_sel.low_adjust,
+                            row_elements: dyn_sel.row_elements,
                             index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
                                 ff_values_ptr,
                                 ff_len,
@@ -3037,14 +3039,18 @@ impl AssignStatement {
             value
         };
         if let Some(dyn_sel) = &self.dynamic_select {
-            let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
-            if idx >= dyn_sel.num_elements {
+            let Some(idx) = dyn_sel.index_expr.eval(mask_cache).to_usize() else {
                 return;
-            }
-            let end = idx * dyn_sel.elem_width;
-            let beg = end + dyn_sel.window - 1;
-            let Some((beg, end)) = clip_select_to_width(beg, end, self.dst_width) else {
+            };
+            let Some((beg, end, skip)) = dyn_sel.write_bounds(idx, self.dst_width) else {
                 return;
+            };
+            let value = if skip == 0 {
+                value
+            } else {
+                value
+                    .expand(dyn_sel.window, false)
+                    .select(dyn_sel.window - 1, skip)
             };
             let mut current = unsafe {
                 read_native_value(
@@ -3154,7 +3160,9 @@ impl AssignStatement {
 impl AssignDynamicStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
         let idx_val = self.dst_index_expr.eval(mask_cache);
-        let idx = idx_val.to_usize().unwrap_or(0);
+        let Some(idx) = idx_val.to_usize() else {
+            return;
+        };
         // IEEE 1800-2023 11.5.1: a write through an out-of-range index has
         // no effect.  Clamping, which is what this did, overwrites the last
         // element with a value the design meant for nobody.
@@ -3193,14 +3201,18 @@ impl AssignDynamicStatement {
             }
         };
         if let Some(dyn_sel) = &self.dynamic_select {
-            let dyn_idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
-            if dyn_idx >= dyn_sel.num_elements {
+            let Some(dyn_idx) = dyn_sel.index_expr.eval(mask_cache).to_usize() else {
                 return;
-            }
-            let end = dyn_idx * dyn_sel.elem_width;
-            let beg = end + dyn_sel.window - 1;
-            let Some((beg, end)) = clip_select_to_width(beg, end, self.dst_width) else {
+            };
+            let Some((beg, end, skip)) = dyn_sel.write_bounds(dyn_idx, self.dst_width) else {
                 return;
+            };
+            let value = if skip == 0 {
+                value
+            } else {
+                value
+                    .expand(dyn_sel.window, false)
+                    .select(dyn_sel.window - 1, skip)
             };
             let mut current = unsafe {
                 read_native_value(
@@ -3411,6 +3423,8 @@ impl ProtoAssignStatement {
                 .dynamic_select
                 .as_ref()
                 .map(|dyn_sel| DynamicBitSelect {
+                    low_adjust: dyn_sel.low_adjust,
+                    row_elements: dyn_sel.row_elements,
                     index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -4502,15 +4516,18 @@ fn conv_assign_statements(
                 let scope = context.scope();
                 let meta = scope.variable_meta.get(&id).unwrap();
 
-                let select = if !dst.select.is_empty() {
+                let need_dynamic = crate::ir::expression::packed_select_needs_dynamic(
+                    &dst.select,
+                    meta.r#type.width(),
+                    &mut scope.analyzer_context,
+                );
+
+                let select = if !dst.select.is_empty() && !need_dynamic {
                     dst.select
                         .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
                 } else {
                     None
                 };
-                // A runtime (non-constant) bit-select destination uses the
-                // dynamic-select path, which writes only the selected window.
-                let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
                 let const_index = if dst.index.is_const() {
                     dst.index.eval_value(&mut scope.analyzer_context)
                 } else {
@@ -4530,7 +4547,7 @@ fn conv_assign_statements(
             };
 
             let dynamic_select = if need_dynamic {
-                Some(build_dynamic_bit_select(
+                Some(build_dynamic_write_select(
                     context,
                     &width_shape,
                     &dst.select,
@@ -4650,7 +4667,7 @@ fn emit_ff_log(
     let nb_u16 = nb as u16;
     let nb_u32 = nb as u32;
     if nb <= 8 {
-        let payload = value.to_u64().unwrap_or(0);
+        let payload = value.payload_u64();
         unsafe {
             event_write_log_push_static(base_offset, payload, nb_u16);
             if use_4state {
@@ -4980,6 +4997,45 @@ impl ProtoStatement {
         let in_initial = context.in_initial;
         let in_comb = context.in_comb;
 
+        if !in_initial
+            && src.dst.len() == 1
+            && let Some(row_type) =
+                crate::ir::expression::packed_range_row_type(context, id, &dst.select)
+        {
+            let mut expr = match rhs {
+                Some(expr) => expr,
+                None => Conv::conv(context, &src.expr)?,
+            };
+            let width = src.width.unwrap_or(expr.width());
+            size_literal_rhs(&mut expr, None, Some(width), width);
+            let expr = crate::ir::expression::snapshot_expression(context, expr);
+            let meta = context.scope().variable_meta.get(&id).unwrap().clone();
+            let dynamic_select = crate::ir::expression::build_packed_range_select(
+                context,
+                &dst.select,
+                meta.r#type.width(),
+                &row_type,
+            )?;
+            let element = &meta.elements[0];
+            let comb_direct = element.is_ff() && in_comb && !in_initial;
+            let offset = if element.is_ff() && !in_initial && !comb_direct {
+                VarOffset::Ff(element.next_offset)
+            } else {
+                element.current
+            };
+            return Ok(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: offset,
+                dst_width: meta.width,
+                select: None,
+                dynamic_select: Some(dynamic_select),
+                rhs_select: None,
+                expr,
+                dst_ff_current_offset: element.current_offset(),
+                comb_direct,
+                token: src.token,
+            }));
+        }
+
         let (
             select,
             dst_width,
@@ -4991,7 +5047,12 @@ impl ProtoStatement {
         ) = {
             let scope = context.scope();
             let meta = scope.variable_meta.get(&id).unwrap();
-            let select = if !dst.select.is_empty() {
+            let need_dynamic = crate::ir::expression::packed_select_needs_dynamic(
+                &dst.select,
+                meta.r#type.width(),
+                &mut scope.analyzer_context,
+            );
+            let select = if !dst.select.is_empty() && !need_dynamic {
                 dst.select
                     .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
             } else {
@@ -5003,7 +5064,6 @@ impl ProtoStatement {
             } else {
                 None
             };
-            let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
             let select = if need_dynamic { None } else { select };
             let width_shape = meta.r#type.width().clone();
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
@@ -5035,7 +5095,7 @@ impl ProtoStatement {
         };
 
         let dynamic_select = if need_dynamic_select {
-            Some(build_dynamic_bit_select(
+            Some(build_dynamic_write_select(
                 context,
                 &width_shape,
                 &dst.select,
@@ -5193,7 +5253,13 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             let index = dst.index.eval_value(&mut scope.analyzer_context).unwrap();
             let index = meta.r#type.array.calc_index(&index).unwrap();
 
-            let select = if !dst.select.is_empty() {
+            let need_dynamic = crate::ir::expression::packed_select_needs_dynamic(
+                &dst.select,
+                meta.r#type.width(),
+                &mut scope.analyzer_context,
+            );
+
+            let select = if !dst.select.is_empty() && !need_dynamic {
                 dst.select
                     .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
             } else {
@@ -5205,7 +5271,6 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             let current_offset = element.current_offset();
             let next_offset = element.next_offset;
             let dst_width = meta.width;
-            let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
             let select = if need_dynamic { None } else { select };
             let width_shape = meta.r#type.width().clone();
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
@@ -5225,7 +5290,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
         };
 
         let dynamic_select = if need_dynamic_select {
-            Some(build_dynamic_bit_select(
+            Some(build_dynamic_write_select(
                 context,
                 &width_shape,
                 &dst.select,

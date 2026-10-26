@@ -7,6 +7,9 @@
 //! Uncovered constructs return `None` from the emitters and fall back
 //! to Cranelift (per-module for comb, per-event for events).
 
+#[path = "selection.rs"]
+mod selection;
+
 use crate::FuncPtr;
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
 use crate::ir::opt::event_gate::{
@@ -814,6 +817,10 @@ fn emit_wide_const(
 /// reduction, which produce a narrow register handled in `emit_expr_inner`).
 /// Returns `None` (→ module bails to Cranelift) for any uncovered shape.
 fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
+    if selection::handles(expr) {
+        return selection::read(expr, pre);
+    }
+
     match expr {
         ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
@@ -3612,6 +3619,9 @@ fn emit_event_ff_assign_wide_dynsel(
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
 /// canonical current offset.  2-state narrow packed FFs only.
 fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
+    if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+        return selection::assign(a);
+    }
     if a.dst_width == 0 {
         ev_diag("static FF: width=0");
         return None;
@@ -3756,6 +3766,9 @@ fn dyn_ff_span(a: &ProtoAssignDynamicStatement, cur_base: isize, nb: usize) -> O
 /// AssignDynamicStatement::eval_step: merge into the NEXT slot, since
 /// same-event prior writes must be visible, and push the merged element.
 fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<String> {
+    if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+        return selection::assign_dynamic(a);
+    }
     if let Some(ds) = &a.dynamic_select
         && (ds.elem_width == 0 || ds.window == 0 || ds.index_expr.width() > 64)
     {
@@ -4611,6 +4624,7 @@ fn emit_event_function(
     );
     src.push_str(WIDEOPS_C_DECLS);
     src.push_str(WIDEOPS_C_INLINE);
+    src.push_str(selection::INLINE);
     src.push('\n');
     src.push_str(&gate_fns);
     // The bulk reserve is the ENTRY PREAMBLE, not body text: split or not it
@@ -6499,6 +6513,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     }
     match stmt {
         ProtoStatement::Assign(a) => {
+            if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+                return selection::assign(a);
+            }
             // A rhs_select on a plain variable is a bit-select on that variable
             // (value.select(hi, lo)); fold it into the variable's own select so
             // the wide-var select paths (emit_expr / emit_wide_expr) handle a
@@ -7257,6 +7274,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             Some(format!("{{ {} }}", inner))
         }
         ProtoStatement::AssignDynamic(a) => {
+            if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+                return selection::assign_dynamic(a);
+            }
             // Narrow signed bare RHS sign-extends at the store; bail to the
             // Cranelift/interpreter path (see the Assign arm above).
             if a.rhs_select.is_none() && a.expr.store_sign_extend_from(a.dst_width).is_some() {
@@ -8253,6 +8273,24 @@ pub fn emit_expr_root(expr: &ProtoExpression) -> Option<String> {
 }
 
 fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> {
+    if selection::handles(expr) {
+        let mut pre = String::new();
+        let value = selection::read(expr, &mut pre)?;
+        if value.width > 128 {
+            return None;
+        }
+        let ty = if value.width > 64 {
+            "__uint128_t"
+        } else {
+            "uint64_t"
+        };
+        return Some(format!(
+            "({{ {pre} {ty} _selected = 0; __builtin_memcpy(&_selected, {}, {}u); _selected; }})",
+            value.addr,
+            native_bytes(value.width)
+        ));
+    }
+
     match expr {
         ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
@@ -10288,6 +10326,7 @@ pub fn emit_dataflow_function(
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
+    body.push_str(selection::INLINE);
     body.push('\n');
     // Each cell's code, indented for a function body.
     let mut cell_code: Vec<String> = Vec::with_capacity(cells.len());
@@ -10517,11 +10556,406 @@ mod tests {
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(selection::INLINE);
         src.push_str(&format!(
             "\n{ENTRY_ATTR}\nvoid veryl_aot_eval{ENTRY_SIG} {{\n    (void)write_log;\n{}{body}}}\n",
             emit_reserve_prologue(narrow, wide)
         ));
         Some(src)
+    }
+
+    #[test]
+    fn adjusted_selections_compile_and_preserve_aliasing() {
+        if !cc_available() {
+            return;
+        }
+        for (width, window, rows) in [(64, 8, false), (129, 65, false), (8192, 8, true)] {
+            let ds = ProtoDynamicBitSelect {
+                low_adjust: 7,
+                row_elements: rows.then_some(4096),
+                index_expr: Box::new(var_expr(VarOffset::Comb(2048), 64)),
+                elem_width: 1,
+                window,
+                num_elements: if rows { 2 * 8192 } else { width },
+            };
+            let write = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0),
+                dst_width: width,
+                select: None,
+                dynamic_select: Some(ds.clone()),
+                rhs_select: None,
+                expr: var_expr(VarOffset::Comb(0), width),
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            });
+            let read = ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0),
+                select: None,
+                dynamic_select: Some(ds),
+                width: window,
+                var_full_width: width,
+                expr_context: ctx(window, false),
+            };
+            let output = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(2064),
+                dst_width: window,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: read,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            });
+            assert!(write.can_build_binary() && output.can_build_binary());
+            let statements = vec![write, output];
+            let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                &crate::ir::Config::default(),
+                statements.clone(),
+                false,
+                None,
+            )
+            .expect("adjusted field must stay in JIT");
+            let src = emit_test_function(&statements).expect("adjusted field must stay in C");
+            let tmp = std::env::temp_dir().join(format!(
+                "veryl_adjusted_{}_{}",
+                std::process::id(),
+                width
+            ));
+            let module = compile_for_test(&tmp, &src, "adjusted C");
+            for func in module.iter().map(|m| m.func).chain([jit]) {
+                let mut ff = [0; 8];
+                let mut comb = vec![0u8; 2112];
+                let nb = native_bytes(width);
+                for (i, byte) in comb[..nb].iter_mut().enumerate() {
+                    *byte = (i as u8).wrapping_mul(73).wrapping_add(11);
+                }
+                for index in [0usize, 3, 8, 71, if rows { 8192 + 9 } else { width + 6 }] {
+                    let old = comb.clone();
+                    comb[2048..2056].copy_from_slice(&(index as u64).to_le_bytes());
+                    let mut expected = old[..nb].to_vec();
+                    let (row, local, elements) = if rows {
+                        (index / 8192, index % 8192, 4096)
+                    } else {
+                        (0, index, width)
+                    };
+                    let start = local as i128 - 7;
+                    for bit in 0..window {
+                        let dst = start + bit as i128;
+                        if dst >= 0 && dst < elements as i128 {
+                            let dst = row * elements + dst as usize;
+                            let value = (old[bit / 8] >> (bit % 8)) & 1;
+                            expected[dst / 8] =
+                                (expected[dst / 8] & !(1 << (dst % 8))) | (value << (dst % 8));
+                        }
+                    }
+                    let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                    unsafe {
+                        (func)(
+                            ff.as_mut_ptr(),
+                            comb.as_mut_ptr(),
+                            &mut log as *mut _ as *mut u8,
+                            0,
+                        );
+                    }
+                    assert_eq!(&comb[..nb], expected, "width={width} index={index}");
+                    for bit in 0..window {
+                        let src = start + bit as i128;
+                        let expected = if src >= 0 && src < elements as i128 {
+                            let src = row * elements + src as usize;
+                            (comb[src / 8] >> (src % 8)) & 1
+                        } else {
+                            0
+                        };
+                        assert_eq!(
+                            (comb[2064 + bit / 8] >> (bit % 8)) & 1,
+                            expected,
+                            "read width={width} index={index} bit={bit}"
+                        );
+                    }
+                }
+            }
+            let _ = fs::remove_dir_all(&tmp);
+        }
+    }
+
+    #[test]
+    fn adjusted_ff_selections_stay_compiled_and_commit_after_the_edge() {
+        if !cc_available() {
+            return;
+        }
+        for width in [8, 64, 129] {
+            for packed in [false, true] {
+                for dynamic in [false, true] {
+                    let nb = native_bytes(width);
+                    let next = if packed { 0 } else { 2 * nb };
+                    let ds = ProtoDynamicBitSelect {
+                        low_adjust: 7,
+                        row_elements: None,
+                        index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                        elem_width: 1,
+                        window: 8,
+                        num_elements: width,
+                    };
+                    let stmt = if dynamic {
+                        ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+                            dst_base: VarOffset::Ff(next as isize),
+                            dst_stride: nb as isize,
+                            dst_num_elements: 2,
+                            dst_index_expr: const_expr(1, 1),
+                            dst_width: width,
+                            select: None,
+                            dynamic_select: Some(ds),
+                            rhs_select: None,
+                            expr: const_expr(0xa5, 8),
+                            dst_ff_current_base_offset: 0,
+                            comb_direct: false,
+                        })
+                    } else {
+                        ProtoStatement::Assign(ProtoAssignStatement {
+                            dst: VarOffset::Ff(next as isize),
+                            dst_width: width,
+                            select: None,
+                            dynamic_select: Some(ds),
+                            rhs_select: None,
+                            expr: const_expr(0xa5, 8),
+                            dst_ff_current_offset: 0,
+                            comb_direct: false,
+                            token: dummy_token(),
+                        })
+                    };
+                    assert!(stmt.can_build_binary());
+                    let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                        &crate::ir::Config::default(),
+                        vec![stmt.clone()],
+                        false,
+                        None,
+                    )
+                    .expect("adjusted FF must stay in JIT");
+                    let src = emit_test_function(&[stmt]).expect("adjusted FF must stay in C");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "veryl_adjusted_ff_{}_{width}_{packed}_{dynamic}",
+                        std::process::id()
+                    ));
+                    let module = compile_for_test(&tmp, &src, "adjusted FF C");
+                    for func in module.iter().map(|m| m.func).chain([jit]) {
+                        for index in [0usize, 15.min(width - 1), width + 6, width + 7] {
+                            let mut ff = vec![0; 4 * nb];
+                            for element in 0..4 {
+                                for bit in 0..width {
+                                    if bit % 3 != 0 {
+                                        ff[element * nb + bit / 8] |= 1 << (bit % 8);
+                                    }
+                                }
+                            }
+                            let current = if dynamic { nb } else { 0 };
+                            let old = ff[current..current + nb].to_vec();
+                            let mut expected = old.clone();
+                            for bit in 0..8 {
+                                let dst = index as i128 - 7 + bit as i128;
+                                if dst >= 0 && dst < width as i128 {
+                                    let dst = dst as usize;
+                                    expected[dst / 8] = (expected[dst / 8] & !(1 << (dst % 8)))
+                                        | (((0xa5 >> bit) & 1) << (dst % 8));
+                                }
+                            }
+                            let mut comb = index.to_le_bytes();
+                            let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                            unsafe {
+                                (func)(
+                                    ff.as_mut_ptr(),
+                                    comb.as_mut_ptr(),
+                                    &mut log as *mut _ as *mut u8,
+                                    0,
+                                );
+                            }
+                            assert_eq!(
+                                &ff[current..current + nb],
+                                old,
+                                "premature FF write width={width} packed={packed} dynamic={dynamic}"
+                            );
+                            crate::ir::write_log::ff_commit_from_log(&mut ff, &log);
+                            assert_eq!(
+                                &ff[current..current + nb],
+                                expected,
+                                "width={width} packed={packed} dynamic={dynamic} index={index}"
+                            );
+                        }
+                    }
+                    let _ = fs::remove_dir_all(tmp);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjusted_ff_selections_preserve_mixed_write_order() {
+        if !cc_available() {
+            return;
+        }
+        for width in [65, 100, 128, 129, 200] {
+            let nb = native_bytes(width);
+            for dynamic in [false, true] {
+                let selected = if dynamic {
+                    ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+                        dst_base: VarOffset::Ff((2 * nb) as isize),
+                        dst_stride: nb as isize,
+                        dst_num_elements: 2,
+                        dst_index_expr: const_expr(1, 1),
+                        dst_width: width,
+                        select: None,
+                        dynamic_select: Some(ProtoDynamicBitSelect {
+                            low_adjust: 7,
+                            row_elements: None,
+                            index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                            elem_width: 1,
+                            window: 8,
+                            num_elements: width,
+                        }),
+                        rhs_select: None,
+                        expr: const_expr(0, 8),
+                        dst_ff_current_base_offset: 0,
+                        comb_direct: false,
+                    })
+                } else {
+                    ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: VarOffset::Ff((2 * nb) as isize),
+                        dst_width: width,
+                        select: None,
+                        dynamic_select: Some(ProtoDynamicBitSelect {
+                            low_adjust: 7,
+                            row_elements: None,
+                            index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                            elem_width: 1,
+                            window: 8,
+                            num_elements: width,
+                        }),
+                        rhs_select: None,
+                        expr: const_expr(0, 8),
+                        dst_ff_current_offset: 0,
+                        comb_direct: false,
+                        token: dummy_token(),
+                    })
+                };
+                let mut whole = selected.clone();
+                match &mut whole {
+                    ProtoStatement::Assign(a) => {
+                        a.dynamic_select = None;
+                        a.expr = var_expr(VarOffset::Comb(32), width);
+                    }
+                    ProtoStatement::AssignDynamic(a) => {
+                        a.dynamic_select = None;
+                        a.expr = var_expr(VarOffset::Comb(32), width);
+                    }
+                    _ => unreachable!(),
+                }
+                for reverse in [false, true] {
+                    let stmts = if reverse {
+                        vec![selected.clone(), whole.clone()]
+                    } else {
+                        vec![whole.clone(), selected.clone()]
+                    };
+                    let src = emit_event_function(&stmts, false, &[]).expect("C event must emit");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "veryl_adjusted_order_{}_{width}_{dynamic}_{reverse}",
+                        std::process::id()
+                    ));
+                    let module = compile_for_test(&tmp, &src, "adjusted C event");
+                    let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                        &crate::ir::Config::default(),
+                        stmts,
+                        false,
+                        None,
+                    )
+                    .expect("JIT event must compile");
+                    for func in module.iter().map(|m| m.func).chain([jit]) {
+                        let mut ff = vec![0; 4 * nb];
+                        let mut comb = vec![0; 32 + nb];
+                        comb[..8].copy_from_slice(&7u64.to_le_bytes());
+                        for bit in 0..width {
+                            comb[32 + bit / 8] |= 1 << (bit % 8);
+                        }
+                        let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                        unsafe {
+                            func(
+                                ff.as_mut_ptr(),
+                                comb.as_mut_ptr(),
+                                &mut log as *mut _ as *mut u8,
+                                0,
+                            );
+                        }
+                        assert!(ff[..2 * nb].iter().all(|&b| b == 0));
+                        crate::ir::write_log::ff_commit_from_log(&mut ff, &log);
+                        let current = if dynamic { nb } else { 0 };
+                        let mut expected = comb[32..].to_vec();
+                        if !reverse {
+                            expected[0] = 0;
+                        }
+                        assert_eq!(
+                            &ff[current..current + nb],
+                            expected,
+                            "width={width} dynamic={dynamic} reverse={reverse}"
+                        );
+                        let other = if dynamic { 0 } else { nb };
+                        assert!(ff[other..other + nb].iter().all(|&b| b == 0));
+                        if nb <= 16 {
+                            assert_eq!(log.wide_count(), 0);
+                        } else {
+                            assert_eq!(log.narrow_count(), 0);
+                        }
+                    }
+                    let _ = fs::remove_dir_all(tmp);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjusted_selection_store_clips_a_wide_rhs() {
+        if !cc_available() {
+            return;
+        }
+        let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 7,
+                row_elements: None,
+                index_expr: Box::new(var_expr(VarOffset::Comb(16), 64)),
+                elem_width: 1,
+                window: 8,
+                num_elements: 64,
+            }),
+            rhs_select: None,
+            expr: var_expr(VarOffset::Comb(32), 128),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        });
+        let src = emit_test_function(&[stmt]).expect("C store must emit");
+        let tmp = std::env::temp_dir().join(format!("veryl_adjusted_rhs_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "adjusted C store") else {
+            let _ = fs::remove_dir_all(tmp);
+            return;
+        };
+        for index in 0..8u64 {
+            let mut comb = [0; 48];
+            comb[16..24].copy_from_slice(&index.to_le_bytes());
+            comb[32..].fill(0xff);
+            unsafe {
+                (module.func)(
+                    std::ptr::null_mut(),
+                    comb.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                );
+            }
+            let got = u64::from_le_bytes(comb[..8].try_into().unwrap());
+            assert_eq!(got, (1 << (index + 1)) - 1);
+        }
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -10763,6 +11197,8 @@ mod tests {
             dst_width: 40,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(var_expr(VarOffset::Comb(0x8), 8)),
                 elem_width: 4,
                 window: 4,
@@ -11284,6 +11720,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(70, 8)),
                 elem_width: 1,
                 window: 1,
@@ -11325,6 +11763,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(71, 8)),
                 elem_width: 1,
                 window: 8,
@@ -11406,6 +11846,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(16, 8)), // 16 * 8 = 128 >= 72
                 elem_width: 8,
                 window: 8,
@@ -12895,6 +13337,8 @@ mod tests {
                 var_offset: VarOffset::Comb(base),
                 select: None,
                 dynamic_select: Some(ProtoDynamicBitSelect {
+                    low_adjust: 0,
+                    row_elements: None,
                     index_expr: Box::new(var_expr(VarOffset::Comb(idx_off), 32)),
                     elem_width: ew,
                     window: ew,
@@ -13031,6 +13475,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(var_expr(VarOffset::Comb(72), 32)),
                 elem_width: 192,
                 window: 192,
@@ -13195,6 +13641,8 @@ mod tests {
             var_offset: VarOffset::Comb(0x80),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 4,
                 window: 4,
@@ -13222,6 +13670,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 4,
                 window: 4,
@@ -13247,6 +13697,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 8,
                 window: 8,
@@ -13300,6 +13752,8 @@ mod tests {
             num_elements: 8,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(5, 8)),
                 elem_width: 1,
                 window: 1,
@@ -13329,6 +13783,8 @@ mod tests {
             num_elements: 4,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(0, 8)),
                 elem_width: 1,
                 window: 1,
@@ -14379,6 +14835,7 @@ mod tests {
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(selection::INLINE);
         src.push_str(
             "\n__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *ff_values, uint8_t *comb_values, uint64_t *write_log, intptr_t ff_delta) {\n\
