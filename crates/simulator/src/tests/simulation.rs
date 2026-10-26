@@ -2298,6 +2298,8 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         dst_width: 5888,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(idx2.clone()),
             elem_width: 92,
             window: 92,
@@ -2318,6 +2320,8 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         dst_width: 1536,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(idx2),
             elem_width: 1,
             window: 32,
@@ -28389,6 +28393,8 @@ fn wide_dynamic_bit_select_store_gate() {
         dst_width,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(index.clone()),
             elem_width: 1,
             window,

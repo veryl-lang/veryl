@@ -2088,6 +2088,8 @@ mod tests {
             num_elements: 4,
             select: None,
             dynamic_select: Some(crate::ir::ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(deep),
                 elem_width: 8,
                 window: 1,

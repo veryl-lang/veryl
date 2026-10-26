@@ -47,6 +47,85 @@ fn guard_out_of_range(
     (payload, mask_xz)
 }
 
+fn finish_packed_read(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    planes: (CraneliftValue, Option<CraneliftValue>),
+    position: (
+        CraneliftValue,
+        Option<CraneliftValue>,
+        Option<CraneliftValue>,
+    ),
+    source_bits: usize,
+    window: usize,
+    wide_result: bool,
+) -> (CraneliftValue, Option<CraneliftValue>) {
+    let (mut payload, mut mask_xz) = planes;
+    let (shift, in_range, padding) = position;
+    if builder.func.dfg.value_type(payload) == I128 {
+        payload = builder.ins().ireduce(I64, payload);
+        mask_xz = mask_xz.map(|m| builder.ins().ireduce(I64, m));
+    }
+    let Some(padding) = padding else {
+        let mask = gen_mask_for_width(window) as i64;
+        payload = builder.ins().band_imm_u(payload, mask);
+        mask_xz = mask_xz.map(|m| builder.ins().band_imm_u(m, mask));
+        let (payload, mask_xz) =
+            guard_out_of_range(context, builder, in_range, window, payload, mask_xz);
+        return if wide_result {
+            (
+                builder.ins().uextend(I128, payload),
+                mask_xz.map(|m| builder.ins().uextend(I128, m)),
+            )
+        } else {
+            (payload, mask_xz)
+        };
+    };
+    let full = builder.ins().iconst(I64, source_bits as i64);
+    let zero = builder.ins().iconst(I64, 0);
+    let inside = builder.ins().icmp(IntCC::UnsignedLessThan, shift, full);
+    let available = builder.ins().isub(full, shift);
+    let available = builder.ins().select(inside, available, zero);
+    let limit = builder.ins().iconst(I64, window as i64);
+    let short = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThan, available, limit);
+    let count = builder.ins().select(short, available, limit);
+    let ones = builder.ins().iconst(I64, -1);
+    let high = builder.ins().ishl(ones, count);
+    let low = builder.ins().bnot(high);
+    let entire = builder
+        .ins()
+        .icmp_imm_s(IntCC::UnsignedGreaterThanOrEqual, count, 64);
+    let low = builder.ins().select(entire, ones, low);
+    let valid = builder.ins().ishl(low, padding);
+    let valid = builder
+        .ins()
+        .band_imm_u(valid, gen_mask_for_width(window) as i64);
+    payload = builder.ins().ishl(payload, padding);
+    payload = builder.ins().band(payload, valid);
+    mask_xz = if context.use_4state {
+        let mask = mask_xz.unwrap_or(zero);
+        let mask = builder.ins().ishl(mask, padding);
+        let mask = builder.ins().band(mask, valid);
+        let missing = builder
+            .ins()
+            .bxor_imm_u(valid, gen_mask_for_width(window) as i64);
+        Some(builder.ins().bor(mask, missing))
+    } else {
+        None
+    };
+    (payload, mask_xz) = guard_out_of_range(context, builder, in_range, window, payload, mask_xz);
+    if wide_result {
+        (
+            builder.ins().uextend(I128, payload),
+            mask_xz.map(|m| builder.ins().uextend(I128, m)),
+        )
+    } else {
+        (payload, mask_xz)
+    }
+}
+
 /// Marshal one wide-binary operand into an `op_nb`-sized buffer.
 /// `is_pointer` mirrors `returns_wide_pointer()`.  Pass-through is only safe
 /// when the source allocation already spans `op_nb` and no sign extension is
@@ -57,103 +136,117 @@ fn guard_out_of_range(
 /// limb: `wide[idx * e +: w]`, `w > 64`, as `ceil(w / 64)` two-limb funnels
 /// instead of an interpreter round trip through `BigUint`.
 ///
-/// The result form follows the representation contract keyed by `w`
-/// (`returns_wide_pointer`).  Source limbs at or past the storage read as
-/// zero, which is what `Value::select` yields for a window that runs off
-/// the end.
+/// Assemble a dynamic field from bounded source loads and per-word defaults.
+/// The result uses a register through 128 bits and storage above that width.
 fn emit_wide_dynsel_read_multi(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
     ptr: CraneliftValue,
     nb: usize,
     dyn_sel: &crate::ir::ProtoDynamicBitSelect,
+    element_in_range: Option<CraneliftValue>,
 ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
-    let (shift, in_range) = build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+    let source_bits = dyn_sel.elem_width.checked_mul(dyn_sel.num_elements)?;
+    if dyn_sel.window > source_bits || nb < 8 || !nb.is_multiple_of(8) {
+        return None;
+    }
+    let (shift, in_range, padding) = build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+    let in_range = match (in_range, element_in_range) {
+        (Some(a), Some(b)) => Some(builder.ins().band(a, b)),
+        (a, b) => a.or(b),
+    };
     let flags = MemFlagsData::trusted();
     let n_limbs = (nb / 8) as i64;
-    let word_idx = builder.ins().ushr_imm_s(shift, 6);
-    let bit_off = builder.ins().band_imm_s(shift, 63);
-    let c63 = builder.ins().iconst(I64, 63);
-    let inv = builder.ins().isub(c63, bit_off);
-    let out_bits = dyn_sel.window;
-    let out_limbs = out_bits.div_ceil(64);
-
-    // Source limb `word_idx + k`, or zero once that runs past the storage.
-    // The address is clamped as well as the value selected, so the load itself
-    // stays inside the allocation.
-    let limb = |builder: &mut FunctionBuilder, base: CraneliftValue, k: i64| {
-        let idx = builder.ins().iadd_imm_s(word_idx, k);
-        let ok = builder
+    let zero = builder.ins().iconst(I64, 0);
+    let mut words = Vec::with_capacity(dyn_sel.window.div_ceil(64));
+    for output_word in 0..dyn_sel.window.div_ceil(64) {
+        let output_start = builder.ins().iconst(I64, (output_word * 64) as i64);
+        let prefix = builder
             .ins()
-            .icmp_imm_s(IntCC::UnsignedLessThan, idx, n_limbs);
-        let last = builder.ins().iconst(I64, n_limbs - 1);
-        let idxc = builder.ins().select(ok, idx, last);
-        let off = builder.ins().ishl_imm_s(idxc, 3);
-        let addr = builder.ins().iadd(base, off);
-        let raw = builder.ins().load(I64, flags, addr, 0);
-        let zero = builder.ins().iconst(I64, 0);
-        builder.ins().select(ok, raw, zero)
-    };
-    // `(hi << 1) << (63 - bit_off)` is `hi << (64 - bit_off)` without the
-    // shift-amount wraparound a plain shift has at `bit_off == 0`.
-    let funnel = |builder: &mut FunctionBuilder, base: CraneliftValue, j: i64| {
-        let lo = limb(builder, base, j);
-        let hi = limb(builder, base, j + 1);
-        let lo_sh = builder.ins().ushr(lo, bit_off);
-        let hi1 = builder.ins().ishl_imm_s(hi, 1);
-        let hi_sh = builder.ins().ishl(hi1, inv);
-        builder.ins().bor(lo_sh, hi_sh)
-    };
-    let top_mask = {
-        let rem = out_bits % 64;
-        if rem == 0 {
-            u64::MAX
+            .icmp(IntCC::UnsignedGreaterThan, padding, output_start);
+        let skip = builder.ins().isub(padding, output_start);
+        let skip = builder.ins().select(prefix, skip, zero);
+        let advance = builder.ins().isub(output_start, padding);
+        let advance = builder.ins().select(prefix, zero, advance);
+        let source_start = builder.ins().iadd(shift, advance);
+        let word_idx = builder.ins().ushr_imm_s(source_start, 6);
+        let bit_off = builder.ins().band_imm_s(source_start, 63);
+        let c63 = builder.ins().iconst(I64, 63);
+        let inv = builder.ins().isub(c63, bit_off);
+        let limb = |builder: &mut FunctionBuilder, base, next| {
+            let idx = builder.ins().iadd_imm_s(word_idx, next);
+            let ok = builder
+                .ins()
+                .icmp_imm_s(IntCC::UnsignedLessThan, idx, n_limbs);
+            let last = builder.ins().iconst(I64, n_limbs - 1);
+            let clamped = builder.ins().select(ok, idx, last);
+            let offset = builder.ins().ishl_imm_s(clamped, 3);
+            let addr = builder.ins().iadd(base, offset);
+            let raw = builder.ins().load(I64, flags, addr, 0);
+            builder.ins().select(ok, raw, zero)
+        };
+        let funnel = |builder: &mut FunctionBuilder, base| {
+            let lo = limb(builder, base, 0);
+            let hi = limb(builder, base, 1);
+            let lo = builder.ins().ushr(lo, bit_off);
+            // Split the shift so an aligned source contributes no upper limb.
+            let hi = builder.ins().ishl_imm_s(hi, 1);
+            let hi = builder.ins().ishl(hi, inv);
+            builder.ins().bor(lo, hi)
+        };
+        let payload = funnel(builder, ptr);
+        let mask_xz = if context.use_4state {
+            let base = builder.ins().iadd_imm_s(ptr, nb as i64);
+            Some(funnel(builder, base))
         } else {
-            (1u64 << rem) - 1
-        }
-    };
-    let plane = |builder: &mut FunctionBuilder, base: CraneliftValue| {
-        if out_bits <= 128 {
-            let lo = funnel(builder, base, 0);
-            let hi = funnel(builder, base, 1);
-            let hi = builder.ins().band_imm_u(hi, top_mask as i64);
-            builder.ins().iconcat(lo, hi)
-        } else {
-            let slot = alloc_wide_slot(builder, calc_native_bytes(out_bits));
-            for j in 0..out_limbs {
-                let mut v = funnel(builder, base, j as i64);
-                if j + 1 == out_limbs {
-                    v = builder.ins().band_imm_u(v, top_mask as i64);
-                }
-                builder.ins().store(flags, v, slot, (j * 8) as i32);
-            }
-            slot
-        }
-    };
-    let payload = plane(builder, ptr);
-    let mask_xz = if context.use_4state {
-        let mask_base = builder.ins().iadd_imm_s(ptr, nb as i64);
-        Some(plane(builder, mask_base))
-    } else {
-        None
-    };
-    // Out of range reads the element default.  Above 128 bits the result is
-    // storage, so the default is a slot rather than a register constant.
-    if out_bits > 128
-        && let Some(c) = in_range
-    {
-        let out_nb = calc_native_bytes(out_bits);
-        let d = alloc_wide_out_of_range(builder, out_nb, context.use_4state);
-        let payload = builder.ins().select(c, payload, d);
-        let mask_xz = mask_xz.map(|m| {
-            let dm = builder.ins().iadd_imm_s(d, out_nb as i64);
-            builder.ins().select(c, m, dm)
+            None
+        };
+        let window = (dyn_sel.window - output_word * 64).min(64);
+        let overlaps = builder
+            .ins()
+            .icmp_imm_u(IntCC::UnsignedLessThan, skip, window as i64);
+        let valid = Some(match in_range {
+            Some(c) => builder.ins().band(c, overlaps),
+            None => overlaps,
         });
-        return Some((payload, mask_xz));
+        words.push(finish_packed_read(
+            context,
+            builder,
+            (payload, mask_xz),
+            (
+                source_start,
+                valid,
+                (dyn_sel.low_adjust != 0 || dyn_sel.window > dyn_sel.elem_width).then_some(skip),
+            ),
+            source_bits,
+            window,
+            false,
+        ));
     }
-    Some(guard_out_of_range(
-        context, builder, in_range, out_bits, payload, mask_xz,
-    ))
+    if dyn_sel.window <= 128 {
+        let payload = builder.ins().iconcat(words[0].0, words[1].0);
+        let mask_xz = if context.use_4state {
+            Some(
+                builder
+                    .ins()
+                    .iconcat(words[0].1.unwrap(), words[1].1.unwrap()),
+            )
+        } else {
+            None
+        };
+        Some((payload, mask_xz))
+    } else {
+        let out_nb = calc_native_bytes(dyn_sel.window);
+        let payload = alloc_wide_slot(builder, out_nb);
+        let mask_xz = context.use_4state.then(|| alloc_wide_slot(builder, out_nb));
+        for (i, (p, m)) in words.into_iter().enumerate() {
+            builder.ins().store(flags, p, payload, (i * 8) as i32);
+            if let Some(base) = mask_xz {
+                builder.ins().store(flags, m.unwrap(), base, (i * 8) as i32);
+            }
+        }
+        Some((payload, mask_xz))
+    }
 }
 
 /// Kill switch for the wide-source dynamic-select JIT path
@@ -176,7 +269,7 @@ fn const_shift_amount(y: &ProtoExpression) -> Option<u64> {
     }
 }
 
-fn marshal_wide_operand(
+pub(super) fn marshal_wide_operand(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
     is_pointer: bool,
@@ -359,6 +452,17 @@ fn place_concat_element(
 
 impl ProtoExpression {
     pub fn can_build_binary(&self) -> bool {
+        if let Some(ds) = super::selection::selected(self) {
+            return ds.window > 0
+                && ds.index_expr.width() <= 64
+                && ds.index_expr.can_build_binary()
+                && match self {
+                    Self::DynamicVariable { index_expr, .. } => {
+                        index_expr.width() <= 64 && index_expr.can_build_binary()
+                    }
+                    _ => true,
+                };
+        }
         match self {
             ProtoExpression::HierVariable(_) => false,
             ProtoExpression::Variable {
@@ -368,7 +472,7 @@ impl ProtoExpression {
                 ..
             } => match dynamic_select {
                 Some(dyn_sel) => {
-                    let span = dyn_sel.elem_width * dyn_sel.num_elements;
+                    let span = dyn_sel.storage_width();
                     // Narrow sources load into a register; wide (>128-bit)
                     // sources take the funnel-load path (no combined static
                     // select, span within the storage).  The window sets the
@@ -477,8 +581,7 @@ impl ProtoExpression {
             } => {
                 let dyn_ok = match dynamic_select {
                     Some(dyn_sel) => {
-                        dyn_sel.elem_width * dyn_sel.num_elements <= 128
-                            && dyn_sel.index_expr.can_build_binary()
+                        dyn_sel.storage_width() <= 128 && dyn_sel.index_expr.can_build_binary()
                     }
                     None => true,
                 };
@@ -512,6 +615,9 @@ impl ProtoExpression {
         builder: &mut FunctionBuilder,
         skip_root_mask: bool,
     ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        if super::selection::selected(self).is_some() {
+            return super::selection::read(self, context, builder);
+        }
         match self {
             ProtoExpression::HierVariable(_) => None,
             ProtoExpression::Variable {
@@ -522,6 +628,27 @@ impl ProtoExpression {
                 select,
                 ..
             } => {
+                if let Some(ds) = dynamic_select
+                    && ds.window > 64
+                {
+                    if !wide_dynsel_enabled() || select.is_some() {
+                        return None;
+                    }
+                    let base = if var_offset.is_ff() {
+                        context.ff_values
+                    } else {
+                        context.comb_values
+                    };
+                    let ptr = builder.ins().iadd_imm_s(base, var_offset.raw() as i64);
+                    return emit_wide_dynsel_read_multi(
+                        context,
+                        builder,
+                        ptr,
+                        calc_native_bytes(*var_full_width),
+                        ds,
+                        None,
+                    );
+                }
                 // Wide path: >128-bit variable → return memory pointer
                 if is_wide_ptr(*var_full_width) {
                     let nb = calc_native_bytes(*var_full_width);
@@ -564,22 +691,14 @@ impl ProtoExpression {
                     if let Some(dyn_sel) = dynamic_select {
                         // Dynamic element read from a wide variable: funnel
                         // load of two limbs at the runtime bit offset.  The
-                        // window is ≤ 64 (gated by `can_build_binary`), so
+                        // window is ≤ 64 after multi-word dispatch, so
                         // the result is a narrow register — this keeps the
                         // packed-lane muxes (`bus[idx*w +: w]` on a >128-bit
                         // bus) out of the interpreter.
-                        if dyn_sel.elem_width * dyn_sel.num_elements > nb * 8 {
+                        if dyn_sel.storage_width() > nb * 8 {
                             return None;
                         }
-                        if dyn_sel.window > 64 {
-                            // A span ≤ 128 gets here through `ok_narrow`
-                            // without consulting the kill switch.
-                            if !wide_dynsel_enabled() {
-                                return None;
-                            }
-                            return emit_wide_dynsel_read_multi(context, builder, ptr, nb, dyn_sel);
-                        }
-                        let (shift, in_range) =
+                        let (shift, in_range, padding) =
                             build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
                         let n_limbs = (nb / 8) as i64;
                         let word_idx = builder.ins().ushr_imm_s(shift, 6);
@@ -623,13 +742,19 @@ impl ProtoExpression {
                         } else {
                             None
                         };
-                        return Some(guard_out_of_range(
+                        return Some(finish_packed_read(
                             context,
                             builder,
-                            in_range,
+                            (payload, mask_xz),
+                            (
+                                shift,
+                                in_range,
+                                (dyn_sel.low_adjust != 0 || dyn_sel.window > dyn_sel.elem_width)
+                                    .then_some(padding),
+                            ),
+                            *var_full_width,
                             dyn_sel.window,
-                            payload,
-                            mask_xz,
+                            false,
                         ));
                     }
 
@@ -645,7 +770,7 @@ impl ProtoExpression {
                 // See `var_full_width` doc: `nb` must match the variable's
                 // true storage size, not the select range.
                 let read_width = if let Some(dyn_sel) = dynamic_select {
-                    std::cmp::max(*var_full_width, dyn_sel.elem_width * dyn_sel.num_elements)
+                    std::cmp::max(*var_full_width, dyn_sel.storage_width())
                 } else {
                     match select {
                         Some((beg, _)) => {
@@ -748,33 +873,24 @@ impl ProtoExpression {
                 };
 
                 if let Some(dyn_sel) = dynamic_select {
-                    let (shift, in_range) =
+                    let (shift, in_range, padding) =
                         build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
-                    let mask = gen_mask_for_width(dyn_sel.window);
                     payload = builder.ins().ushr(payload, shift);
-                    payload = band_const(builder, payload, mask, wide);
-                    if context.use_4state {
-                        let mxz = mask_xz.unwrap();
-                        let mxz = builder.ins().ushr(mxz, shift);
-                        mask_xz = Some(band_const(builder, mxz, mask, wide));
-                    }
-                    // Match the cranelift value type to the reported
-                    // expression width so downstream ops don't uextend an
-                    // I128 again.
-                    if wide && dyn_sel.window <= 64 {
-                        payload = builder.ins().ireduce(I64, payload);
-                        if let Some(mxz) = mask_xz {
-                            mask_xz = Some(builder.ins().ireduce(I64, mxz));
-                        }
-                    }
-                    (payload, mask_xz) = guard_out_of_range(
+                    mask_xz = mask_xz.map(|m| builder.ins().ushr(m, shift));
+                    return Some(finish_packed_read(
                         context,
                         builder,
-                        in_range,
+                        (payload, mask_xz),
+                        (
+                            shift,
+                            in_range,
+                            (dyn_sel.low_adjust != 0 || dyn_sel.window > dyn_sel.elem_width)
+                                .then_some(padding),
+                        ),
+                        *var_full_width,
                         dyn_sel.window,
-                        payload,
-                        mask_xz,
-                    );
+                        false,
+                    ));
                 } else if let Some((beg, end)) = select {
                     let select_width = beg - end + 1;
 
@@ -2504,7 +2620,7 @@ impl ProtoExpression {
                 ..
             } => {
                 let nb = *element_native_bytes;
-                let (idx_payload, _idx_mask_xz) = index_expr.build_binary(context, builder)?;
+                let (idx_payload, idx_mask_xz) = index_expr.build_binary(context, builder)?;
 
                 // An index that can leave the array reads the element type's
                 // default (IEEE 1800-2023 7.4.6), not the clamped neighbour.
@@ -2514,6 +2630,24 @@ impl ProtoExpression {
                     let n = builder.ins().iconst(I64, *num_elements as i64);
                     builder.ins().icmp(IntCC::UnsignedLessThan, idx_payload, n)
                 });
+                let in_range = if let Some(unknown) = wide_any_xz(
+                    context,
+                    builder,
+                    idx_mask_xz,
+                    None,
+                    returns_wide_pointer(index_expr),
+                    false,
+                    index_expr.width(),
+                    0,
+                ) {
+                    let known = builder.ins().icmp_imm_s(IntCC::Equal, unknown, 0);
+                    Some(match in_range {
+                        Some(bounds) => builder.ins().band(bounds, known),
+                        None => known,
+                    })
+                } else {
+                    in_range
+                };
 
                 // Clamp index to [0, num_elements - 1]
                 let max_idx = builder
@@ -2596,6 +2730,14 @@ impl ProtoExpression {
                             _ => unreachable!("DynamicVariable load: nb={nb}"),
                         }
                     };
+                if let Some(ds) = dynamic_select
+                    && ds.window > 64
+                {
+                    if !wide_dynsel_enabled() {
+                        return None;
+                    }
+                    return emit_wide_dynsel_read_multi(context, builder, addr, nb, ds, in_range);
+                }
                 let mut payload = load_native_to_i64(builder, addr, 0);
                 let mut mask_xz = if context.use_4state {
                     Some(load_native_to_i64(builder, addr, nb as i32))
@@ -2612,7 +2754,7 @@ impl ProtoExpression {
                 let payload_wide = nb == 16;
                 let mut in_range = in_range;
                 if let Some(dyn_sel) = dynamic_select {
-                    let (shift, sel_in_range) =
+                    let (shift, sel_in_range, padding) =
                         build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
                     // Either index leaving its range makes the whole read the
                     // element default, so the two tests combine into one.
@@ -2620,20 +2762,22 @@ impl ProtoExpression {
                         (Some(a), Some(b)) => Some(builder.ins().band(a, b)),
                         (a, b) => a.or(b),
                     };
-                    let mask = gen_mask_for_width(dyn_sel.window);
                     payload = builder.ins().ushr(payload, shift);
-                    payload = band_const(builder, payload, mask, payload_wide);
-                    if context.use_4state {
-                        let mxz = mask_xz.unwrap();
-                        let mxz = builder.ins().ushr(mxz, shift);
-                        mask_xz = Some(band_const(builder, mxz, mask, payload_wide));
-                    }
-                    if payload_wide && *width <= 64 {
-                        payload = builder.ins().ireduce(I64, payload);
-                        if let Some(mxz) = mask_xz {
-                            mask_xz = Some(builder.ins().ireduce(I64, mxz));
-                        }
-                    }
+                    mask_xz = mask_xz.map(|m| builder.ins().ushr(m, shift));
+                    return Some(finish_packed_read(
+                        context,
+                        builder,
+                        (payload, mask_xz),
+                        (
+                            shift,
+                            in_range,
+                            (dyn_sel.low_adjust != 0 || dyn_sel.window > dyn_sel.elem_width)
+                                .then_some(padding),
+                        ),
+                        dyn_sel.storage_width(),
+                        dyn_sel.window,
+                        payload_wide && *width > 64,
+                    ));
                 } else if let Some((beg, end)) = select {
                     let select_width = beg - end + 1;
                     if payload_wide {
@@ -2841,13 +2985,13 @@ impl ProtoExpression {
             );
 
             let mask_xz = match op {
-                Op::Add => {
+                Op::Add | Op::BitNot => {
                     let dst =
                         emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_mask_ptr, nb);
                     emit_wide_apply_mask(context, builder, dst, nb, width);
                     dst
                 }
-                Op::Sub | Op::BitNot => {
+                Op::Sub => {
                     // If any X/Z, set result mask to all-ones for the width
                     let is_xz = emit_wide_is_nonzero(context, builder, x_mask_ptr, nb);
                     let full_mask = emit_wide_fill_ones(context, builder, nb, width);
@@ -2855,6 +2999,18 @@ impl ProtoExpression {
                     emit_wide_select(builder, is_xz, full_mask, zero, nb)
                 }
                 _ => return None,
+            };
+            let payload = if matches!(op, Op::Sub | Op::BitNot) {
+                emit_wide_binary_op(
+                    context,
+                    builder,
+                    wide_fn_addrs::band_not(),
+                    payload,
+                    mask_xz,
+                    nb,
+                )
+            } else {
+                payload
             };
             Some((payload, Some(mask_xz)))
         } else {
@@ -3286,7 +3442,7 @@ impl ProtoExpression {
                 signed,
             },
         );
-        let payload = if matches!(op, Op::BitAnd | Op::BitOr)
+        let payload = if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
             && let Some(mask) = mask_xz
         {
             // Bitwise unknown results are X (payload=0), never input Z (payload=1).

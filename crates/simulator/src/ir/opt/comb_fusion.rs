@@ -3087,6 +3087,8 @@ mod tests {
         let mut arr = dyn_read(0x110, 3);
         if let ProtoExpression::DynamicVariable { dynamic_select, .. } = &mut arr {
             *dynamic_select = Some(crate::ir::expression::ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(var_sel(0x0, 3, 0, 4, false)),
                 elem_width: 1,
                 window: 1,
