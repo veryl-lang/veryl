@@ -1,7 +1,15 @@
 package async_fifo_pkg {
+    /// Default depth that keeps the FIFO streaming at full rate for any ratio of the two clocks.
+    /// A push becomes visible to the read side after 2 source cycles (pointer and gray code registers)
+    /// plus `stages` + 1 destination cycles (synchronizer and empty register), and a pop frees the entry
+    /// for the write side after 2 destination cycles plus `stages` + 1 source cycles in the same way.
+    /// Each crossing can take one more cycle because of the clock phase, so the round trip is at most
+    /// (`stages` + 4) * (Ts + Td).  The FIFO has to hold the entries pushed during the round trip at the
+    /// rate of the slower clock, which is (`stages` + 4) * (Ts + Td) / max(Ts, Td) <= 2 * (`stages` + 4),
+    /// with the maximum when both clocks run at the same frequency.
     function calc_default_depth (
         stages: input u32,
     ) -> u32 {
-        return 2 ** ($clog2(2 * stages) + 1);
+        return 2 ** $clog2(2 * (stages + 4));
     }
 }
