@@ -1,5 +1,4 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::conv::statement::check_true_false;
 use crate::conv::utils::{
     TypePosition, case_condition, eval_case_target, eval_expr, eval_factor_path,
     eval_function_call, eval_size, eval_struct_constructor, eval_type, range_list,
@@ -71,10 +70,14 @@ impl Conv<&IfExpression> for ir::Expression {
             let token = TokenRange::from_range(&y.token_range(), &ret.token_range());
             let comptime = Box::new(Comptime::create_unknown(token));
 
-            // A constant condition makes one arm unreachable -- the same
-            // folding a constant `if` STATEMENT already gets.  Only with
-            // SAME-TYPE arms, so the result's width and sign cannot move.
-            let (true_only, false_only) = check_true_false(&y_comptime);
+            // Unlike a statement, an ambiguous expression condition needs both arms.
+            // Drop the unselected arm only for a definite condition and identical types.
+            let truth = if y_comptime.is_const {
+                y_comptime.get_value().ok().and_then(Value::truth)
+            } else {
+                None
+            };
+            let (true_only, false_only) = (truth == Some(true), truth == Some(false));
             let same_type = matches!(
                 (arm_type(context, &z), arm_type(context, &ret)),
                 (Some(z), Some(r)) if z == r

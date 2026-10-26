@@ -24106,3 +24106,9 @@ fn package_const_depth_limit_does_not_depend_on_reference_order() {
         "{errors:?}"
     );
 }
+
+mod value_regressions;
+
+mod layout_regressions;
+
+mod member_prefix_regressions;
