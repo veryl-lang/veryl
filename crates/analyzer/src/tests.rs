@@ -17437,6 +17437,99 @@ fn type_inference_var_chain_in_overridden_instance() {
 }
 
 #[test]
+fn generic_arg_forwarded_to_other_project() {
+    let inputs = [
+        (
+            "libx",
+            r#"
+    pub module ModuleA::<V: u32> (
+        o: output logic<32>,
+    ) {
+        assign o = V;
+    }
+    "#,
+        ),
+        (
+            "prj",
+            r#"
+    package PackageA {
+        const C1: u32 = 1;
+        const C2: u32 = 2;
+    }
+    "#,
+        ),
+        (
+            "prj",
+            r#"
+    module ModuleB::<V: u32> (
+        o: output logic<32>,
+    ) {
+        inst u: libx::ModuleA::<V> (o);
+    }
+
+    module ModuleC (
+        o1: output logic<32>,
+        o2: output logic<32>,
+    ) {
+        inst a: ModuleB::<PackageA::C1> (o: o1);
+        inst b: ModuleB::<PackageA::C2> (o: o2);
+    }
+    "#,
+        ),
+    ];
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let mut parsed = vec![];
+    for (i, (prj, code)) in inputs.iter().enumerate() {
+        let metadata = Metadata::create_default(prj).unwrap();
+        let parser = Parser::parse(code, &format!("test_{i}.veryl")).unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        analyzer.analyze_pass1(prj, &parser.veryl);
+        parsed.push((parser, analyzer));
+    }
+    Analyzer::analyze_post_pass1();
+
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    for (parser, analyzer) in &parsed {
+        let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    let inst_components =
+        |module: &crate::ir::Module| -> Vec<std::sync::Arc<crate::ir::Component>> {
+            module
+                .declarations
+                .iter()
+                .filter_map(|x| match x {
+                    crate::ir::Declaration::Inst(x) => Some(x.component.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+    let as_module = |x: &crate::ir::Component| match x {
+        crate::ir::Component::Module(x) => x.clone(),
+        _ => unreachable!(),
+    };
+    let top = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Component::Module(x) if x.name.to_string() == "ModuleC" => Some(x),
+            _ => None,
+        })
+        .unwrap();
+    let leaves: Vec<_> = inst_components(top)
+        .iter()
+        .map(|x| as_module(&inst_components(&as_module(x))[0]).signature)
+        .collect();
+    assert_ne!(leaves[0], leaves[1]);
+}
+
+#[test]
 fn type_inference_not_supported() {
     // Binary arithmetic is not an inferable expression shape.
     let code = r#"

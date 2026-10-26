@@ -494,10 +494,14 @@ impl Context {
             return path;
         };
         path.resolve_imported(scope, &define_context, None);
+        self.apply_generic_maps(&mut path);
+        path
+    }
+
+    pub fn apply_generic_maps(&self, path: &mut GenericSymbolPath) {
         for map in self.generic_maps.iter().rev() {
             path.apply_map(map);
         }
-        path
     }
 
     pub fn insert_var_path(&mut self, path: VarPath, value: Comptime) -> VarId {
