@@ -37,10 +37,10 @@ veryl-component-sys = {version = "0.1.2", path = "../component/sys"}
 veryl-metadata      = {version = "0.22.0", path = "../metadata"}
 veryl-parser        = {version = "0.22.0", path = "../parser"}
 
-[target.'cfg(target_family = "wasm")'.dependencies]
+[target.'cfg(any(target_family = "wasm", kani))'.dependencies]
 miette          = {workspace = true, features = ["fancy-no-syscall"]}
 
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
+[target.'cfg(all(not(target_family = "wasm"), not(kani)))'.dependencies]
 miette          = {workspace = true, features = ["fancy"]}
 
 [dev-dependencies]
