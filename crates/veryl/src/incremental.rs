@@ -220,8 +220,24 @@ impl Incremental {
             self.miss.insert(path.src.clone());
             return false;
         };
-        // Loaded now while `entry` is borrowed; replayed only on success.
-        let diag_bytes = self.store.load_diagnostics(entry);
+        // Diagnostics need no ID codec, so validate before restoring analyzer state.
+        let diagnostics = if entry.diagnostics.is_some() {
+            let Some(bytes) = self.store.load_diagnostics(entry) else {
+                debug!("Failed to load diagnostics ({src})");
+                self.miss.insert(path.src.clone());
+                return false;
+            };
+            match fragment_cache::restore_diagnostics(&bytes) {
+                Ok(diagnostics) => diagnostics,
+                Err(x) => {
+                    debug!("Failed to decode diagnostics ({src}): {x}");
+                    self.miss.insert(path.src.clone());
+                    return false;
+                }
+            }
+        } else {
+            Vec::new()
+        };
         let Ok(fragment) = Fragment::from_bytes(&bytes) else {
             debug!("Failed to decode fragment ({src})");
             self.miss.insert(path.src.clone());
@@ -239,12 +255,7 @@ impl Incremental {
                 self.restored += 1;
                 self.restored_paths.insert(path.src.clone());
                 self.inputs.remove(&path.src);
-                if let Some(diag_bytes) = diag_bytes {
-                    match fragment_cache::restore_diagnostics(&diag_bytes) {
-                        Ok(diags) => self.restored_diagnostics.extend(diags),
-                        Err(x) => debug!("Failed to restore diagnostics ({src}): {x}"),
-                    }
-                }
+                self.restored_diagnostics.extend(diagnostics);
                 true
             }
             Err(x) => {
@@ -428,3 +439,6 @@ fn global_key(metadata: &Metadata, defines: &[String]) -> Option<String> {
         &defines,
     ]))
 }
+
+#[cfg(test)]
+mod tests;
