@@ -195,6 +195,7 @@ pub struct Context {
 
 /// Namespace-tagged so a same-named parameter of another component is not
 /// answered from this frame.
+#[derive(Clone)]
 struct ParameterOverride {
     namespace: Namespace,
     values: HashMap<VarPath, (Comptime, Expression)>,
@@ -306,6 +307,60 @@ impl Context {
         self.config = tgt.config.clone();
         self.profiler = tgt.profiler.clone();
         self.project_name = tgt.project_name.clone();
+    }
+
+    /// Runs `f` on a context carrying only the inputs a component conversion
+    /// may depend on: the frames pushed for `namespace` and the shared caches.
+    /// Its diagnostics are merged back as raised, keeping their instance notes.
+    pub fn in_unit<T>(
+        &mut self,
+        namespace: &Namespace,
+        instantiated: bool,
+        f: impl FnOnce(&mut Context) -> T,
+    ) -> T {
+        let mut unit = Context {
+            config: self.config.clone(),
+            profiler: self.profiler.clone(),
+            project_name: self.project_name.clone(),
+            in_generic: self.in_generic,
+            ..Default::default()
+        };
+        if let Some(x) = self
+            .overrides
+            .iter()
+            .rev()
+            .find(|x| x.namespace == *namespace)
+        {
+            unit.overrides.push(x.clone());
+        }
+        if let Some(x) = self.generic_maps.last() {
+            unit.generic_maps.push(x.clone());
+        }
+        if instantiated && let Some(x) = self.modport_signatures.last() {
+            unit.modport_signatures.push(x.clone());
+        }
+        self.swap_unit_caches(&mut unit);
+
+        let ret = f(&mut unit);
+
+        self.swap_unit_caches(&mut unit);
+        if self.function_eval_overflow.is_none() {
+            self.function_eval_overflow = unit.function_eval_overflow;
+        }
+        if self.comptime_for_overflow.is_none() {
+            self.comptime_for_overflow = unit.comptime_for_overflow;
+        }
+        for mut error in unit.errors {
+            let note = error.instance_mut().take();
+            self.insert_error_with_note(error, note);
+        }
+        ret
+    }
+
+    fn swap_unit_caches(&mut self, unit: &mut Context) {
+        std::mem::swap(&mut self.instance_history, &mut unit.instance_history);
+        std::mem::swap(&mut self.package_const_cache, &mut unit.package_const_cache);
+        std::mem::swap(&mut self.function_effects, &mut unit.function_effects);
     }
 
     pub fn set_project_name(&mut self, project_name: &str) {
@@ -568,7 +623,12 @@ impl Context {
         }
     }
 
-    pub fn insert_error(&mut self, mut error: AnalyzerError) {
+    pub fn insert_error(&mut self, error: AnalyzerError) {
+        let note = self.instance_note();
+        self.insert_error_with_note(error, note);
+    }
+
+    fn insert_error_with_note(&mut self, mut error: AnalyzerError, note: Option<InstanceNote>) {
         let mut replaced = false;
 
         // merge MultipleAssignment which have same identifier
@@ -596,7 +656,6 @@ impl Context {
         }
 
         if !replaced {
-            let note = self.instance_note();
             let existing = self
                 .errors
                 .iter_mut()

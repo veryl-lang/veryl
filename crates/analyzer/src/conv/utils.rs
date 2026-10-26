@@ -4037,7 +4037,8 @@ fn get_component_at(
 
         context.push_generic_map(sig.to_generic_map());
 
-        let ret = context.block(|c| match &symbol.kind {
+        let namespace = symbol.inner_namespace();
+        let ret = context.in_unit(&namespace, site.is_some(), |c| match &symbol.kind {
             SymbolKind::Module(x) if !x.is_proto => {
                 let definition =
                     definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
