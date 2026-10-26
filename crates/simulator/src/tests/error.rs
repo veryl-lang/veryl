@@ -500,8 +500,8 @@ fn dynamic_index_leaving_a_sub_array() {
 }
 
 /// A port connection whose unpacked dimensions disagree with the port's is
-/// illegal SystemVerilog (IEEE 1800-2023 7.6) and the analyzer reports it at
-/// Warning severity, so `build` and `test` still reach the simulator. The two
+/// illegal SystemVerilog (IEEE 1800-2023 7.6). Bypass its analyzer error so the
+/// simulator's own defenses are exercised. The two
 /// directions fail differently, so they are checked apart: one is caught by
 /// the assertion, the other only by the value it never computes.
 #[track_caller]
@@ -533,7 +533,7 @@ fn port_dimension_mismatch(child_port: &str, child_drive: &str, parent_var: &str
     "#
     );
 
-    let result = analyze_top_allowing_mismatch_assignment(&code, &Config::default(), "Top");
+    let result = analyze_top_allowing_incompatible_assignment(&code, &Config::default(), "Top");
     assert!(
         matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
         "{child_port} <- {parent_var}"

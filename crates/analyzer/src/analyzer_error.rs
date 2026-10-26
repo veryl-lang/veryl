@@ -1237,14 +1237,35 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Warning),
         code(mismatch_assignment),
+        help("make the conversion explicit if intended"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("assignment from \"{src}\" to \"{dst}\" performs an implicit conversion")]
+    MismatchAssignment {
+        src: String,
+        dst: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label(collection, "instantiated at")]
+        inst_context: Vec<SourceSpan>,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(incompatible_assignment),
         help("{kind}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{src}\" can't be assigned to \"{dst}\"")]
-    MismatchAssignment {
+    IncompatibleAssignment {
         src: String,
         dst: String,
-        kind: MismatchAssignmentKind,
+        kind: IncompatibleAssignmentKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2765,6 +2786,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefineInModport { input, .. } => input,
             AnalyzerError::MemberAccessOnArray { input, .. } => input,
             AnalyzerError::MismatchAssignment { input, .. } => input,
+            AnalyzerError::IncompatibleAssignment { input, .. } => input,
             AnalyzerError::MismatchAttributeArgs { input, .. } => input,
             AnalyzerError::MismatchCaseLabel { input, .. } => input,
             AnalyzerError::MismatchClockDomain { input, .. } => input,
@@ -2908,6 +2930,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefineInModport { instance, .. } => instance,
             AnalyzerError::MemberAccessOnArray { instance, .. } => instance,
             AnalyzerError::MismatchAssignment { instance, .. } => instance,
+            AnalyzerError::IncompatibleAssignment { instance, .. } => instance,
             AnalyzerError::ImplicitClockConversion { instance, .. } => instance,
             AnalyzerError::InvalidClockAssignment { instance, .. } => instance,
             AnalyzerError::NonPositiveValue { instance, .. } => instance,
@@ -3039,6 +3062,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefineInModport { instance, .. } => instance.as_ref(),
             AnalyzerError::MemberAccessOnArray { instance, .. } => instance.as_ref(),
             AnalyzerError::MismatchAssignment { instance, .. } => instance.as_ref(),
+            AnalyzerError::IncompatibleAssignment { instance, .. } => instance.as_ref(),
             AnalyzerError::ImplicitClockConversion { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidClockAssignment { instance, .. } => instance.as_ref(),
             AnalyzerError::NonPositiveValue { instance, .. } => instance.as_ref(),
@@ -3170,6 +3194,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefineInModport { token_source, .. } => *token_source,
             AnalyzerError::MemberAccessOnArray { token_source, .. } => *token_source,
             AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
+            AnalyzerError::IncompatibleAssignment { token_source, .. } => *token_source,
             AnalyzerError::ImplicitClockConversion { token_source, .. } => *token_source,
             AnalyzerError::InvalidClockAssignment { token_source, .. } => *token_source,
             AnalyzerError::NonPositiveValue { token_source, .. } => *token_source,
@@ -3933,12 +3958,29 @@ impl AnalyzerError {
     pub fn mismatch_assignment(
         src: &str,
         dst: &str,
-        kind: MismatchAssignmentKind,
         token: &TokenRange,
         inst_context: &[TokenRange],
     ) -> Self {
         let (input, inst_context) = source_with_context(token, inst_context);
         AnalyzerError::MismatchAssignment {
+            src: src.to_string(),
+            dst: dst.to_string(),
+            input,
+            error_location: token.into(),
+            inst_context,
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn incompatible_assignment(
+        src: &str,
+        dst: &str,
+        kind: IncompatibleAssignmentKind,
+        token: &TokenRange,
+        inst_context: &[TokenRange],
+    ) -> Self {
+        let (input, inst_context) = source_with_context(token, inst_context);
+        AnalyzerError::IncompatibleAssignment {
             src: src.to_string(),
             dst: dst.to_string(),
             kind,
@@ -5101,22 +5143,23 @@ impl fmt::Display for MultipleDefaultKind {
     }
 }
 
-/// Refines the `mismatch_assignment` help. The severity stays a warning: the
-/// check is conservative and a false positive must not stop a build.
+/// Explains an assignment rejected by the language's type compatibility rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MismatchAssignmentKind {
+pub enum IncompatibleAssignmentKind {
     Normal,
-    /// The unpacked dimensions disagree, which no SystemVerilog tool accepts
-    /// and which the simulator reports for itself when it reaches one.
     ArrayShape,
+    EnumValue,
 }
 
-impl fmt::Display for MismatchAssignmentKind {
+impl fmt::Display for IncompatibleAssignmentKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MismatchAssignmentKind::Normal => "".fmt(f),
-            MismatchAssignmentKind::ArrayShape => {
+            Self::Normal => "use assignment-compatible types or an explicit conversion".fmt(f),
+            Self::ArrayShape => {
                 "the unpacked dimensions disagree; give both sides the same ones".fmt(f)
+            }
+            Self::EnumValue => {
+                "X/Z enumeration values require an explicit 4-state base type".fmt(f)
             }
         }
     }

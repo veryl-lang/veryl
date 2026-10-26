@@ -88,6 +88,7 @@ enum Allowed {
     Nothing,
     CombLoop,
     MismatchAssignment,
+    IncompatibleAssignment,
 }
 
 impl Allowed {
@@ -95,9 +96,12 @@ impl Allowed {
         match self {
             Allowed::Nothing => false,
             Allowed::CombLoop => matches!(error, AnalyzerError::CombinationalLoop { .. }),
-            // The unpacked-dimension mismatch is one kind of this warning.
             Allowed::MismatchAssignment => {
                 matches!(error, AnalyzerError::MismatchAssignment { .. })
+            }
+            // Defensive backend tests deliberately bypass the analyzer error.
+            Allowed::IncompatibleAssignment => {
+                matches!(error, AnalyzerError::IncompatibleAssignment { .. })
             }
         }
     }
@@ -143,15 +147,14 @@ fn analyze_top_allowing_comb_loop(
     analyze_top_inner(code, config, top, Allowed::CombLoop)
 }
 
-/// For the tests targeting a port connection the analyzer already reports, at
-/// Warning severity, so `build` and `test` still reach the simulator with it.
+/// Bypass assignment errors to exercise the simulator's defensive checks.
 #[track_caller]
-fn analyze_top_allowing_mismatch_assignment(
+fn analyze_top_allowing_incompatible_assignment(
     code: &str,
     config: &Config,
     top: &str,
 ) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, Allowed::MismatchAssignment)
+    analyze_top_inner(code, config, top, Allowed::IncompatibleAssignment)
 }
 
 #[track_caller]

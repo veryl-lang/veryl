@@ -1,6 +1,6 @@
 use crate::analyzer_error::{
     AnalyzerError, CaseLabelMismatch, ComponentInterfaceMismatchKind, ExceedLimitKind,
-    InvalidForRangeKind, InvalidForStepKind, MismatchAssignmentKind, MismatchTypeKind,
+    IncompatibleAssignmentKind, InvalidForRangeKind, InvalidForStepKind, MismatchTypeKind,
     MultipleDefaultKind, UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
@@ -185,6 +185,7 @@ pub fn eval_expr(
     allow_anonymous: bool,
 ) -> IrResult<(Comptime, ir::Expression)> {
     let token: TokenRange = expr.into();
+    let string_literal = is_string_literal(expr);
     let expr: IrResult<ir::Expression> = Conv::conv(context, expr);
 
     if let Ok(mut expr) = expr {
@@ -193,7 +194,7 @@ pub fn eval_expr(
         let mut comptime = if let Some(dst_type) = dst_type {
             let mut comptime = expr.eval_comptime(context, dst_type.total_width()).clone();
 
-            check_compatibility(context, &dst_type, &comptime, &token);
+            check_compatibility_inner(context, &dst_type, &comptime, &token, string_literal);
 
             comptime.r#type = dst_type;
             comptime
@@ -4377,6 +4378,21 @@ pub fn get_port_connects(
 ) -> IrResult<PortConnects> {
     let mut ret = vec![];
     let mut interface_binding = None;
+    let is_output = component
+        .ports
+        .get(port_path)
+        .and_then(|id| component.variables.get(id))
+        .is_some_and(|variable| variable.kind == VarKind::Output);
+    let check_connection = |context: &mut Context, actual: &Comptime| {
+        if is_output {
+            // An output continuously assigns the child port to the actual
+            // destination, not the other way around (IEEE 1800-2023 23.3.3).
+            let source = Comptime::from_type(port_type.clone(), ClockDomain::None, token);
+            check_compatibility(context, &actual.r#type, &source, &token);
+        } else {
+            check_compatibility(context, port_type, actual, &token);
+        }
+    };
 
     if matches!(
         port_type.kind,
@@ -4461,18 +4477,26 @@ pub fn get_port_connects(
 
         let (comptime, expr) = eval_expr(
             context,
-            Some(port_type.clone()),
+            if is_output {
+                None
+            } else {
+                Some(port_type.clone())
+            },
             &x.expression,
             allow_anonymous,
         )?;
 
-        check_compatibility(context, port_type, &comptime, &token);
+        // Invalid output expressions are diagnosed as UnassignableOutput;
+        // they have no destination type to check for an implicit conversion.
+        if !is_output || expr.is_assignable() {
+            check_connection(context, &comptime);
+        }
 
         let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
 
         ret.push((port_path.clone(), dst, expr));
     } else if let Some((var_id, mut comptime)) = context.find_path(port_path) {
-        check_compatibility(context, port_type, &comptime, &token);
+        check_connection(context, &comptime);
 
         comptime.token = token;
         let expr = ir::Expression::Term(Box::new(ir::Factor::Variable(
@@ -4923,6 +4947,26 @@ pub fn check_compatibility(
     src: &ir::Comptime,
     token: &TokenRange,
 ) {
+    check_compatibility_inner(context, dst, src, token, false);
+}
+
+// A string literal is an integral value in SV, unlike a string-typed object
+// (IEEE 1800-2023 6.16). Keep that distinction before evaluation folds values.
+fn is_string_literal(expr: &Expression) -> bool {
+    match expr.unwrap_factor() {
+        Some(Factor::StringLiteral(_)) => true,
+        Some(Factor::LParenExpressionRParen(x)) => is_string_literal(&x.expression),
+        _ => false,
+    }
+}
+
+fn check_compatibility_inner(
+    context: &mut Context,
+    dst: &ir::Type,
+    src: &ir::Comptime,
+    token: &TokenRange,
+    string_literal: bool,
+) {
     if dst.is_positive
         && let Ok(value) = src.get_value()
         && !(src.r#type.is_positive && value.is_xz())
@@ -4944,23 +4988,40 @@ pub fn check_compatibility(
     }
     // The unpacked dimensions are asked on their own axis rather than inside
     // `compatible`, which answers from the element kind for a 2-state, clock or
-    // reset destination and never reaches its array branch for one. The answer
-    // only refines the help: the severity is the same conservative warning.
-    let kind = if dst.array_shape_mismatch(src) {
-        Some(MismatchAssignmentKind::ArrayShape)
-    } else if !dst.compatible(src, context.in_generic) {
-        Some(MismatchAssignmentKind::Normal)
-    } else {
-        None
-    };
-    if let Some(kind) = kind {
-        context.insert_error(AnalyzerError::mismatch_assignment(
+    // reset destination and never reaches its array branch for one. A known
+    // shape mismatch is illegal under IEEE 1800-2023 7.6 and must stop emission.
+    if dst.array_shape_mismatch(src) {
+        context.insert_error(AnalyzerError::incompatible_assignment(
             &src.r#type.to_string(),
             &dst.to_string(),
-            kind,
+            IncompatibleAssignmentKind::ArrayShape,
             token,
             &[],
         ));
+    } else if !dst.compatible(src, context.in_generic) {
+        // Integral/real scalar conversions are legal, even when they lose X/Z
+        // or change the meaning of a clock/reset binding (6.12.1, 6.22.3,
+        // 11.3.4). Enum destinations and unpacked arrays have stricter rules
+        // (6.19.3, 7.6); interface and type/value mismatches are errors too.
+        let scalar_conversion = !dst.is_array()
+            && !src.r#type.is_array()
+            && !dst.is_enum()
+            && (dst.is_2state() || dst.is_clock() || dst.is_reset())
+            && (src.r#type.kind.is_bit_sized() || src.r#type.kind.is_float() || string_literal);
+        let src_type = src.r#type.to_string();
+        let dst_type = dst.to_string();
+        let error = if scalar_conversion {
+            AnalyzerError::mismatch_assignment(&src_type, &dst_type, token, &[])
+        } else {
+            AnalyzerError::incompatible_assignment(
+                &src_type,
+                &dst_type,
+                IncompatibleAssignmentKind::Normal,
+                token,
+                &[],
+            )
+        };
+        context.insert_error(error);
     }
 }
 

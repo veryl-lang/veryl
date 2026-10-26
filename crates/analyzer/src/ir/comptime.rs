@@ -960,10 +960,9 @@ impl Type {
     }
 
     /// Whether an incompatibility is a mismatch of the UNPACKED dimensions.
-    /// That one is illegal SystemVerilog (IEEE 1800-2023 7.6 at a port, an
-    /// unmatched array assignment elsewhere) and it miscompiles in silence,
-    /// so the diagnostic names it rather than reporting a bare
-    /// incompatibility.
+    /// Incompatible unpacked shapes are illegal SystemVerilog (IEEE 1800-2023
+    /// 7.6 and 23.3.3.5), so they have a separate error diagnostic rather than
+    /// the implicit scalar conversion warning.
     pub fn array_shape_mismatch(&self, src: &Comptime) -> bool {
         if self.is_unknown()
             || self.is_systemverilog()
@@ -972,10 +971,9 @@ impl Type {
         {
             return false;
         }
-        // An UNSIZED fill (`'0` / `'1`) has no width of its own -- the
-        // sentinel is `bit<0>` -- and SystemVerilog lets it fill any target,
-        // an unpacked array included. It is not a shape mismatch, and calling
-        // it one rejects `mem = '0;`, which every port writes.
+        // Unsized fills (`'0` / `'1`) use a width-0 sentinel. Leave them to the
+        // element-kind compatibility check rather than inferring an unpacked
+        // shape from that sentinel.
         if src.r#type.array.is_empty()
             && let ValueVariant::Numeric(x) = &src.value
             && x.width() == 0
