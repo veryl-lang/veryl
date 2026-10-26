@@ -5,6 +5,38 @@ use veryl_parser::{Parser, resource_table};
 #[test]
 fn later_ff_reads_observe_pre_edge_state() {
     let source = "module Top(clk:input clock,rst:input reset,q:output logic<2>,previous:output logic<2>){var state:logic<2>;var prev:logic<2>;always_ff{if_reset{state=1;prev=0;}else{state=state+1;prev=state;}}assign q=state;assign previous=prev;}";
+    assert_previous(source, 1);
+}
+
+#[test]
+fn block_local_reads_observe_immediate_updates() {
+    let source = r#"
+        module Top (
+            clk: input clock, rst: input reset,
+            q: output logic<2>, previous: output logic<2>,
+        ) {
+            var state: logic<2>;
+            var prev: logic<2>;
+            always_ff {
+                if_reset {
+                    state = 1;
+                    prev = 0;
+                } else {
+                    var next: logic<2>;
+                    state = state + 1;
+                    next = state + 1;
+                    next = next + 1;
+                    prev = next;
+                }
+            }
+            assign q = state;
+            assign previous = prev;
+        }
+    "#;
+    assert_previous(source, 3);
+}
+
+fn assert_previous(source: &str, expected: u8) {
     let metadata = veryl_metadata::Metadata::create_default("prj").unwrap();
     let analyzer = Analyzer::new(&metadata);
     analyzer.clear();
@@ -31,6 +63,7 @@ fn later_ff_reads_observe_pre_edge_state() {
     for f in &gate.ffs {
         inputs.insert(f.q, f.reset_value);
     }
+    let mut checked = 0;
     for f in &gate.ffs {
         let d = eval(&gate, f.d, &inputs, &mut vec![None; gate.nets.len()], 0);
         let output = gate
@@ -40,7 +73,9 @@ fn later_ff_reads_observe_pre_edge_state() {
             .unwrap();
         if output.nets.contains(&f.q) {
             let i = output.nets.iter().position(|n| *n == f.q).unwrap();
-            assert_eq!(d, i == 0);
+            assert_eq!(d, expected & (1 << i) != 0);
+            checked += 1;
         }
     }
+    assert_eq!(checked, 2);
 }

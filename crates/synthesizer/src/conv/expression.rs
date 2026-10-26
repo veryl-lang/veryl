@@ -427,9 +427,10 @@ fn synth_factor(
             let element_nets: Vec<NetId> = if ctx.ram_vars.contains_key(id) {
                 read_ram(ctx, id, index, current)?
             } else {
-                // FF right-hand sides read the pre-edge state; `current` retains
-                // pending writes for the last-assignment and branch merges.
-                let pending = if ctx.ff_snapshot_reads && ctx.ff_allocation.contains_key(id) {
+                // Block-local variables use blocking assignments even in always_ff.
+                let pending = if ctx.ff_snapshot_reads
+                    && ctx.ff_allocation.get(id).is_some_and(|ff| ff.nonblocking)
+                {
                     None
                 } else {
                     current.get(id)

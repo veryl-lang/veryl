@@ -213,6 +213,7 @@ pub(crate) struct VarSlot {
 
 pub(crate) struct PreFf {
     pub ff_indices: Vec<usize>,
+    pub nonblocking: bool,
 }
 
 /// Accumulates a RAM block's ports as the converter walks the writes/reads of
@@ -644,7 +645,19 @@ impl ConvContext {
                         self.nets[q as usize].driver = NetDriver::FfQ(ff_idx);
                         ff_indices.push(ff_idx);
                     }
-                    self.ff_allocation.insert(vid, PreFf { ff_indices });
+                    let nonblocking = !matches!(
+                        module.variables[&vid].affiliation,
+                        veryl_analyzer::symbol::Affiliation::AlwaysFf
+                            | veryl_analyzer::symbol::Affiliation::StatementBlock
+                            | veryl_analyzer::symbol::Affiliation::Function
+                    );
+                    self.ff_allocation.insert(
+                        vid,
+                        PreFf {
+                            ff_indices,
+                            nonblocking,
+                        },
+                    );
                 }
             }
         }
