@@ -17331,6 +17331,34 @@ fn type_inference_var_conflict() {
 }
 
 #[test]
+fn type_inference_var_chain_in_overridden_instance() {
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 8,
+    ) (
+        i: input  logic<W>,
+        o: output logic<W>,
+    ) {
+        var _a;
+        assign _a = i;
+        var _b;
+        assign _b = _a;
+        assign o  = _b;
+    }
+
+    module ModuleB (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        inst u: ModuleA #(W: 8) (i, o);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn type_inference_not_supported() {
     // Binary arithmetic is not an inferable expression shape.
     let code = r#"
