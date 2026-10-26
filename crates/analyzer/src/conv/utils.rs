@@ -105,13 +105,14 @@ pub fn try_infer_var_assign(
         }
     } else {
         crate::resolved_type_table::insert(dst_symbol.token.id, inferred.clone());
-        // Replace the placeholder Comptime so subsequent lookups see
-        // the inferred type, not `Unknown`.
-        let path = VarPath::new(dst_symbol.token.text);
-        if let Some((id, mut ct)) = context.find_path(&path) {
-            ct.r#type = inferred.clone();
-            context.insert_var_path_with_id(path, id, ct);
-        }
+    }
+    // The table outlives a conversion; the placeholder does not.
+    let path = VarPath::new(dst_symbol.token.text);
+    if let Some((id, mut ct)) = context.find_path(&path)
+        && ct.r#type != inferred
+    {
+        ct.r#type = inferred.clone();
+        context.insert_var_path_with_id(path, id, ct);
     }
     Ok(Some((comptime, ir_expr)))
 }
