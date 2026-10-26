@@ -343,7 +343,7 @@ impl Lockfile {
         Ok(ret)
     }
 
-    /// Resolves SystemVerilog files and include directories of active
+    /// Resolves SystemVerilog files and include directories of enabled
     /// `[[sv.filesets]]` declared by dependencies. Those of git dependencies
     /// are copied into `base_dst`, and those of path dependencies (including
     /// git dependencies overridden by `path`) are referred at their location.

@@ -517,7 +517,7 @@ impl Metadata {
         Ok(ret)
     }
 
-    /// Resolves SystemVerilog files and include directories of active
+    /// Resolves SystemVerilog files and include directories of enabled
     /// `[[sv.filesets]]`. Those of dependencies are placed before this
     /// project's own ones. Paths written as absolute paths are returned as
     /// absolute paths, and the others are relative to the output directory.

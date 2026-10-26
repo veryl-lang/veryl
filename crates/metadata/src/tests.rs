@@ -1368,7 +1368,7 @@ files = ["ip/a.sv"]
 
 [[sv.filesets]]
 root         = "ip/foo"
-active       = { for_asic = false, width = 32 }
+enable_if    = "!for_asic && width == 32"
 files        = ["rtl/foo_pkg.sv", "rtl/foo.sv"]
 include_dirs = ["include"]
 "#;
@@ -1379,7 +1379,7 @@ include_dirs = ["include"]
     assert_eq!(filesets[0].root, None);
     assert_eq!(filesets[0].files, vec![PathBuf::from("ip/a.sv")]);
     assert!(filesets[0].include_dirs.is_empty());
-    assert!(filesets[0].active.is_empty());
+    assert!(filesets[0].enable_if.is_none());
 
     assert_eq!(filesets[1].root, Some(PathBuf::from("ip/foo")));
     assert_eq!(
@@ -1387,8 +1387,10 @@ include_dirs = ["include"]
         vec![PathBuf::from("rtl/foo_pkg.sv"), PathBuf::from("rtl/foo.sv")]
     );
     assert_eq!(filesets[1].include_dirs, vec![PathBuf::from("include")]);
-    assert_eq!(filesets[1].active["for_asic"], ProjectProperty::Bool(false));
-    assert_eq!(filesets[1].active["width"], ProjectProperty::Int(32));
+    assert_eq!(
+        filesets[1].enable_if.as_ref().unwrap().to_string(),
+        "!for_asic && width == 32"
+    );
 }
 
 #[test]
@@ -1509,7 +1511,7 @@ include_dirs = ["{}"]
 }
 
 #[test]
-fn sv_sources_active() {
+fn sv_sources_enable_if() {
     let toml = r#"
 [project]
 name = "main"
@@ -1523,22 +1525,22 @@ width = 32
 files = ["ip/always.sv"]
 
 [[sv.filesets]]
-active       = { for_asic = false }
+enable_if    = "!for_asic"
 files        = ["ip/fpga.sv"]
 include_dirs = ["ip/fpga_include"]
 
 [[sv.filesets]]
-active       = { for_asic = true }
+enable_if    = "for_asic"
 files        = ["ip/asic.sv"]
 include_dirs = ["ip/asic_include"]
 
 [[sv.filesets]]
-active = { for_asic = false, width = 32 }
-files  = ["ip/fpga_32.sv"]
+enable_if = "!for_asic && width == 32"
+files     = ["ip/fpga_32.sv"]
 
 [[sv.filesets]]
-active = { for_asic = false, width = 64 }
-files  = ["ip/fpga_64.sv"]
+enable_if = "!for_asic && width == 64"
+files     = ["ip/fpga_64.sv"]
 "#;
     let tempdir = tempfile::tempdir().unwrap();
     let mut metadata = create_project(tempdir.path(), "main", toml, false);
@@ -1564,7 +1566,7 @@ files  = ["ip/fpga_64.sv"]
 }
 
 #[test]
-fn sv_sources_active_unknown_property() {
+fn sv_sources_enable_if_unknown_property() {
     let toml = r#"
 [project]
 name = "main"
@@ -1574,8 +1576,8 @@ version = "0.1.0"
 for_asic = false
 
 [[sv.filesets]]
-active = { for_fpga = true }
-files  = ["ip/a.sv"]
+enable_if = "for_fpga"
+files     = ["ip/a.sv"]
 "#;
     let tempdir = tempfile::tempdir().unwrap();
     let mut metadata = create_project(tempdir.path(), "main", toml, false);
@@ -1586,7 +1588,7 @@ files  = ["ip/a.sv"]
 }
 
 #[test]
-fn sv_sources_active_type_mismatch() {
+fn sv_sources_enable_if_type_mismatch() {
     let toml = r#"
 [project]
 name = "main"
@@ -1596,8 +1598,8 @@ version = "0.1.0"
 for_asic = false
 
 [[sv.filesets]]
-active = { for_asic = 1 }
-files  = ["ip/a.sv"]
+enable_if = "for_asic == 1"
+files     = ["ip/a.sv"]
 "#;
     let tempdir = tempfile::tempdir().unwrap();
     let mut metadata = create_project(tempdir.path(), "main", toml, false);
@@ -1605,6 +1607,135 @@ files  = ["ip/a.sv"]
 
     let err = metadata.sv_sources(false).unwrap_err();
     assert!(matches!(err, MetadataError::MismatchType { .. }));
+}
+
+fn condition_properties() -> std::collections::BTreeMap<String, ProjectProperty> {
+    [
+        ("for_asic", ProjectProperty::Bool(false)),
+        ("use_ecc", ProjectProperty::Bool(true)),
+        ("width", ProjectProperty::Int(32)),
+        ("depth", ProjectProperty::Int(-8)),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_string(), value))
+    .collect()
+}
+
+#[test]
+fn condition_eval() {
+    let properties = condition_properties();
+    let cases = [
+        ("for_asic", false),
+        ("use_ecc", true),
+        ("!for_asic", true),
+        ("!!for_asic", false),
+        ("! for_asic", true),
+        ("width == 32", true),
+        ("width==32", true),
+        ("width != 32", false),
+        ("width == 'h20", true),
+        ("width == 'b10_0000", true),
+        ("width == 0_32", true),
+        ("width <: 64", true),
+        ("width >: 64", false),
+        ("width <= 32", true),
+        ("width >= 33", false),
+        ("depth <: 0", true),
+        ("for_asic == use_ecc", false),
+        ("for_asic != use_ecc", true),
+        ("for_asic || use_ecc", true),
+        ("for_asic && use_ecc", false),
+        // `&&` has higher precedence than `||`
+        ("use_ecc || use_ecc && for_asic", true),
+        ("(use_ecc || use_ecc) && for_asic", false),
+        // `!` has higher precedence than `==`
+        ("!for_asic == use_ecc", true),
+        // relational operators have higher precedence than equality operators
+        ("width <: 64 == use_ecc", true),
+        // equality operators are left-associative
+        ("width == 32 == use_ecc", true),
+        ("width == 32 == for_asic", false),
+        ("!for_asic &&\n  (width == 32 || width == 64)", true),
+    ];
+    for (text, expected) in cases {
+        let condition = Condition::from_str(text).unwrap();
+        assert_eq!(
+            condition.eval(&properties, "test").unwrap(),
+            expected,
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn condition_syntax_error() {
+    let cases = [
+        "",
+        "   ",
+        "width ==",
+        "== 32",
+        "width = 32",
+        "width < 32",
+        "width > 32",
+        "for_asic & use_ecc",
+        "for_asic | use_ecc",
+        "(for_asic",
+        "for_asic)",
+        "for_asic use_ecc",
+        "width == 32'h20",
+        "width == 'd32",
+        "width == 'b102",
+        "width == 'h",
+        "width == 1__0",
+        "width == 10_",
+        "width == 32abc",
+        "width == 'hffff_ffff_ffff_ffff",
+        "$prop::width == 32",
+        "幅 == 32",
+    ];
+    for text in cases {
+        assert!(Condition::from_str(text).is_err(), "{text}");
+    }
+
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[[sv.filesets]]
+enable_if = "width = 32"
+files     = ["ip/a.sv"]
+"#;
+    let err = Metadata::from_str(toml).unwrap_err();
+    assert!(matches!(err, MetadataError::Deserialize(_)));
+}
+
+#[test]
+fn condition_eval_error() {
+    let properties = condition_properties();
+    let cases = [
+        "width",
+        "!width",
+        "width && use_ecc",
+        "use_ecc || width",
+        "for_asic == 0",
+        "width != use_ecc",
+        "for_asic <: 1",
+        "width >= use_ecc",
+        "width <: 64 <: 128",
+        // both operands are evaluated even if the result is determined by `lhs`
+        "for_asic && width",
+        "use_ecc || depth",
+    ];
+    for text in cases {
+        let condition = Condition::from_str(text).unwrap();
+        let err = condition.eval(&properties, "test").unwrap_err();
+        assert!(matches!(err, MetadataError::MismatchType { .. }), "{text}");
+    }
+
+    let condition = Condition::from_str("for_asic && for_fpga").unwrap();
+    let err = condition.eval(&properties, "test").unwrap_err();
+    assert!(matches!(err, MetadataError::UnknownProperty { .. }));
 }
 
 #[test]
@@ -1644,7 +1775,7 @@ include_dirs = ["ip/missing"]
 }
 
 #[test]
-fn sv_sources_inactive_missing_file_is_ignored() {
+fn sv_sources_disabled_missing_file_is_ignored() {
     let toml = r#"
 [project]
 name = "main"
@@ -1654,8 +1785,8 @@ version = "0.1.0"
 for_asic = false
 
 [[sv.filesets]]
-active = { for_asic = true }
-files  = ["ip/missing.sv"]
+enable_if = "for_asic"
+files     = ["ip/missing.sv"]
 "#;
     let tempdir = tempfile::tempdir().unwrap();
     let mut metadata = create_project(tempdir.path(), "main", toml, false);
@@ -1708,12 +1839,12 @@ files        = ["common.sv"]
 include_dirs = ["include"]
 
 [[sv.filesets]]
-active = { for_asic = false }
-files  = ["ip/fpga.sv"]
+enable_if = "!for_asic"
+files     = ["ip/fpga.sv"]
 
 [[sv.filesets]]
-active = { for_asic = true }
-files  = ["ip/asic.sv"]
+enable_if = "for_asic"
+files     = ["ip/asic.sv"]
 "#;
 
 const SV_DEP_FILES: &[&str] = &[
@@ -1790,7 +1921,7 @@ dep = {git = "file://{}/dep", version = "0.1.0"}
     // Include directories are copied recursively
     assert!(base.join("ip/include/common.svh").is_file());
     assert!(base.join("ip/include/sub/sub.svh").is_file());
-    // Inactive files are not copied
+    // Disabled files are not copied
     assert!(!base.join("ip/asic.sv").exists());
 
     let _ = metadata.lockfile.clear_cache();
@@ -1907,8 +2038,8 @@ fn publish_rejects_invalid_sv_root() {
 }
 
 #[test]
-fn publish_checks_inactive_sv_filesets() {
-    let err = publish_sv_project("active = { for_asic = true }\nfiles = [\"<outside>/a.sv\"]")
-        .unwrap_err();
+fn publish_checks_disabled_sv_filesets() {
+    let err =
+        publish_sv_project("enable_if = \"for_asic\"\nfiles = [\"<outside>/a.sv\"]").unwrap_err();
     assert!(matches!(err, MetadataError::InvalidSvPath(_)));
 }

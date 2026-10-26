@@ -2,6 +2,7 @@ mod build;
 mod build_info;
 mod component;
 pub mod component_manifest;
+mod condition;
 mod doc;
 mod format;
 mod git;
@@ -29,6 +30,7 @@ pub use component_manifest::{
     COMMITTED_MANIFEST_FILE, ComponentManifest, WidthExpr, eval_width_expr, parse_library_manifest,
     parse_width_expr,
 };
+pub use condition::Condition;
 pub use doc::Doc;
 pub use format::{Format, NewlineStyle};
 pub use git::Git;

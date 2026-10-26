@@ -1,4 +1,4 @@
-use crate::{MetadataError, ProjectProperty};
+use crate::{Condition, MetadataError, ProjectProperty};
 use pathdiff::diff_paths;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -21,7 +21,7 @@ pub struct Fileset {
     #[serde(default)]
     pub include_dirs: Vec<PathBuf>,
     #[serde(default)]
-    pub active: BTreeMap<String, ProjectProperty>,
+    pub enable_if: Option<Condition>,
 }
 
 /// Resolved SystemVerilog files and include directories.
@@ -53,31 +53,15 @@ fn push_unique(list: &mut Vec<PathBuf>, path: PathBuf) {
 }
 
 impl Fileset {
-    pub fn is_active(
+    pub fn is_enabled(
         &self,
         properties: &BTreeMap<String, ProjectProperty>,
         project: &str,
     ) -> Result<bool, MetadataError> {
-        let mut ret = true;
-        for (name, value) in &self.active {
-            let Some(property) = properties.get(name) else {
-                return Err(MetadataError::UnknownProperty {
-                    property: name.clone(),
-                    project: project.to_string(),
-                });
-            };
-
-            if !property.is_compatible(value) {
-                return Err(MetadataError::MismatchType {
-                    name: name.clone(),
-                    expected: property.type_name(),
-                    actual: value.type_name(),
-                });
-            }
-
-            ret &= property == value;
+        match &self.enable_if {
+            Some(x) => x.eval(properties, project),
+            None => Ok(true),
         }
-        Ok(ret)
     }
 
     /// Returns (path written in Veryl.toml with `root` applied, directory flag)
@@ -92,7 +76,7 @@ impl Fileset {
 }
 
 impl SV {
-    /// Resolves active filesets of the project placed at `base`.
+    /// Resolves enabled filesets of the project placed at `base`.
     /// Relative paths are returned as paths relative to `out_base`.
     /// If `copy_to` is specified, files and include directories are copied
     /// into it keeping the structure relative to `base`, and the copied paths
@@ -109,7 +93,7 @@ impl SV {
         let mut ret = Sources::default();
 
         for fileset in &self.filesets {
-            if !fileset.is_active(properties, project)? {
+            if !fileset.is_enabled(properties, project)? {
                 continue;
             }
 
@@ -155,7 +139,7 @@ impl SV {
         Ok(ret)
     }
 
-    /// Checks that all filesets (regardless of `active`) can be published.
+    /// Checks that all filesets (regardless of `enable_if`) can be published.
     pub fn check_publish(&self) -> Result<(), MetadataError> {
         for fileset in &self.filesets {
             if let Some(root) = &fileset.root

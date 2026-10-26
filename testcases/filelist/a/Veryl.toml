@@ -19,6 +19,6 @@ files        = ["rtl/a_ip.sv"]
 include_dirs = ["include"]
 
 [[sv.filesets]]
-root   = "ip"
-active = { for_asic = true }
-files  = ["asic/a_ip_asic.sv"]
+root      = "ip"
+enable_if = "for_asic"
+files     = ["asic/a_ip_asic.sv"]
