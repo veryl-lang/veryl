@@ -6,10 +6,13 @@ pub mod expression;
 mod function_return;
 pub mod instance;
 pub mod ir;
+mod package_const;
 pub mod statement;
 pub mod utils;
 pub mod var;
 pub use context::Context;
+#[cfg(test)]
+pub(crate) use context::PACKAGE_CONST_EVALUATIONS;
 
 use crate::ir::IrResult;
 use crate::symbol::Affiliation;
