@@ -3026,6 +3026,7 @@ impl AssignStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
         let value = self.expr.eval(mask_cache);
         let value = if let Some((beg, end)) = self.rhs_select {
+            let value = value.expand(value.width().max(beg + 1), false);
             value.select(beg, end)
         } else {
             value
@@ -3164,6 +3165,7 @@ impl AssignDynamicStatement {
 
         let value = self.expr.eval(mask_cache);
         let value = if let Some((beg, end)) = self.rhs_select {
+            let value = value.expand(value.width().max(beg + 1), false);
             value.select(beg, end)
         } else {
             value

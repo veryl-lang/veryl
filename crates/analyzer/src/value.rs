@@ -302,9 +302,8 @@ impl ValueU64 {
             let width = beg - end + 1;
             let mask = Self::gen_mask(width);
 
-            // A select at/after bit 64 is outside a <=64-bit value; the native
-            // `>>= end` would overflow. Out-of-range bits read as x in SV.
-            if end >= 64 {
+            // Test the declared width before shifting, including very large indices.
+            if end >= self.width as usize {
                 return Self {
                     payload: 0,
                     mask_xz: mask,
@@ -313,12 +312,14 @@ impl ValueU64 {
                 };
             }
 
+            let valid_width = (self.width as usize - end).min(width);
+            let valid_mask = Self::gen_mask(valid_width);
             let mut ret = self.clone();
 
             ret.payload >>= end;
             ret.mask_xz >>= end;
-            ret.payload &= mask;
-            ret.mask_xz &= mask;
+            ret.payload &= valid_mask;
+            ret.mask_xz = (ret.mask_xz & valid_mask) | (mask ^ valid_mask);
             ret.width = width as u32;
             ret.signed = false;
 
@@ -327,11 +328,13 @@ impl ValueU64 {
     }
 
     pub fn assign(&mut self, mut value: Self, beg: usize, end: usize) {
-        // A write at/after bit 64 is outside a <=64-bit value; the native
-        // `<<= end` would overflow. Out-of-range writes are dropped (cf. select()).
-        if end >= 64 {
+        // Dynamic selects can reach here outside the declared width. Ignore
+        // fully out-of-range writes and clip partially overlapping fields.
+        // Clamp before gen_mask_range so even usize::MAX cannot overflow beg+1.
+        if beg < end || end >= self.width as usize || end >= 64 {
             return;
         }
+        let beg = beg.min(self.width as usize - 1);
         value.payload <<= end;
         value.mask_xz <<= end;
 
@@ -344,6 +347,361 @@ impl ValueU64 {
         // extra bits would else leak into neighbouring fields.
         self.payload = (self.payload & inv_mask) | (value.payload & mask_range);
         self.mask_xz = (self.mask_xz & inv_mask) | (value.mask_xz & mask_range);
+    }
+
+    /// Extend a normalized value with source and target widths in 1..=64.
+    pub fn expand(&self, width: usize, use_sign: bool) -> Self {
+        if self.width as usize >= width {
+            return self.clone();
+        }
+        let mut payload = self.payload;
+        let mut mask_xz = self.mask_xz;
+
+        if self.signed && use_sign {
+            let msb = ((payload >> (self.width - 1)) & 1) == 1;
+            let msb_xz = ((mask_xz >> (self.width - 1)) & 1) == 1;
+            if msb | msb_xz {
+                let mask0 = ValueU64::gen_mask(width);
+                let mask1 = ValueU64::gen_mask(self.width as usize);
+                let mask = mask0 ^ mask1;
+
+                if msb {
+                    payload |= mask;
+                }
+                if msb_xz {
+                    mask_xz |= mask;
+                }
+            }
+        }
+
+        let signed = if use_sign { self.signed } else { false };
+
+        Self {
+            payload,
+            mask_xz,
+            width: width as u32,
+            signed,
+        }
+    }
+
+    /// Shift already-sized native bit planes, retaining four-state bits.
+    pub fn shift_left(&self, amount: Option<usize>, width: usize, arithmetic: bool) -> Self {
+        let Some(amount) = amount else {
+            return Self::new_x(width, false);
+        };
+        let mask = Self::gen_mask(width);
+        let mut ret = self.clone();
+        if !arithmetic {
+            ret.signed = false;
+        }
+        let s = amount.min(64) as u32;
+        ret.payload = ret.payload.unbounded_shl(s);
+        ret.mask_xz = ret.mask_xz.unbounded_shl(s);
+        ret.payload &= mask;
+        ret.mask_xz &= mask;
+        ret
+    }
+
+    /// Arithmetic right shifts use the resolved expression signedness.
+    pub fn shift_right(
+        &self,
+        amount: Option<usize>,
+        width: usize,
+        signed: bool,
+        arithmetic: bool,
+    ) -> Self {
+        let Some(amount) = amount else {
+            return Self::new_x(width, false);
+        };
+        let mut ret = self.clone();
+        if !arithmetic {
+            ret.signed = false;
+        }
+        let (ext_payload, ext_mask_xz) = if arithmetic && signed {
+            let ext_mask = Self::gen_mask(width.saturating_sub(amount)) ^ Self::gen_mask(width);
+            let payload_msb = ((self.payload >> (self.width - 1)) & 1) == 1;
+            let mask_xz_msb = ((self.mask_xz >> (self.width - 1)) & 1) == 1;
+            (
+                if payload_msb { ext_mask } else { 0 },
+                if mask_xz_msb { ext_mask } else { 0 },
+            )
+        } else {
+            (0, 0)
+        };
+        let s = amount.min(64) as u32;
+        ret.payload = ret.payload.unbounded_shr(s);
+        ret.mask_xz = ret.mask_xz.unbounded_shr(s);
+        ret.payload |= ext_payload;
+        ret.mask_xz |= ext_mask_xz;
+        ret
+    }
+
+    /// Compare normalized operands after sizing them to a common native width.
+    pub fn equal(&self, rhs: &Self, wildcard: bool, negated: bool) -> Self {
+        let compare_mask = if wildcard { !rhs.mask_xz } else { u64::MAX };
+        let known_mask = compare_mask & !self.mask_xz & !rhs.mask_xz;
+        let mismatch = (self.payload ^ rhs.payload) & known_mask != 0;
+        let unknown = (self.mask_xz | rhs.mask_xz) & compare_mask != 0;
+        if negated {
+            Self::new_bit_1x(mismatch, unknown)
+        } else {
+            Self::new_bit_0x(mismatch, unknown)
+        }
+    }
+
+    /// Order already-sized native operands using the resolved signedness.
+    pub fn compare(&self, rhs: &Self, signed: bool, greater: bool, inclusive: bool) -> Self {
+        let order = if signed {
+            let sh = 64 - (self.width as usize).max(1);
+            let lhs = ((self.payload << sh) as i64) >> sh;
+            let rhs = ((rhs.payload << sh) as i64) >> sh;
+            lhs.cmp(&rhs)
+        } else {
+            self.payload.cmp(&rhs.payload)
+        };
+        let relation = (if greater {
+            order.is_gt()
+        } else {
+            order.is_lt()
+        }) || (inclusive && order.is_eq());
+        Self::new_bit_x1(self.is_xz() || rhs.is_xz(), relation)
+    }
+
+    pub fn bit_and(&self, rhs: &Self, width: usize) -> Self {
+        let mut ret = Self::new(self.payload & rhs.payload, width, false);
+        ret.mask_xz = (self.mask_xz & rhs.mask_xz)
+            | (self.mask_xz & !rhs.mask_xz & rhs.payload)
+            | (rhs.mask_xz & !self.mask_xz & self.payload);
+        ret.payload &= !ret.mask_xz;
+        ret
+    }
+
+    pub fn bit_or(&self, rhs: &Self, width: usize) -> Self {
+        let mut ret = Self::new(self.payload | rhs.payload, width, false);
+        ret.mask_xz = (self.mask_xz & rhs.mask_xz)
+            | (self.mask_xz & !rhs.mask_xz & !rhs.payload)
+            | (rhs.mask_xz & !self.mask_xz & !self.payload);
+        ret.payload &= !ret.mask_xz;
+        ret
+    }
+
+    pub fn bit_xor(&self, rhs: &Self, width: usize) -> Self {
+        let mut ret = Self::new(self.payload ^ rhs.payload, width, false);
+        ret.mask_xz = self.mask_xz | rhs.mask_xz;
+        ret.payload &= !ret.mask_xz;
+        ret
+    }
+
+    pub fn bit_xnor(&self, rhs: &Self, width: usize) -> Self {
+        let mut ret = Self::new(
+            self.payload ^ rhs.payload ^ Self::gen_mask(width),
+            width,
+            false,
+        );
+        ret.mask_xz = self.mask_xz | rhs.mask_xz;
+        ret.payload &= !ret.mask_xz;
+        ret
+    }
+
+    pub fn bit_not(&self, width: usize) -> Self {
+        let mut ret = self.clone();
+        let mask = Self::gen_mask(width);
+        ret.payload ^= mask;
+        ret.payload &= ret.mask_xz ^ mask;
+        ret
+    }
+
+    pub fn reduce_and(&self, negated: bool) -> Self {
+        let mask = Self::gen_mask(self.width as usize);
+        let known_zero = self.payload | self.mask_xz != mask;
+        if negated {
+            Self::new_bit_1x(known_zero, self.is_xz())
+        } else {
+            Self::new_bit_0x(known_zero, self.is_xz())
+        }
+    }
+
+    pub fn reduce_or(&self, negated: bool) -> Self {
+        let mask = Self::gen_mask(self.width as usize);
+        let known_one = self.payload & (self.mask_xz ^ mask) != 0;
+        if negated {
+            Self::new_bit_0x(known_one, self.is_xz())
+        } else {
+            Self::new_bit_1x(known_one, self.is_xz())
+        }
+    }
+
+    pub fn reduce_xor(&self, negated: bool) -> Self {
+        if self.is_xz() {
+            Self::new_x(1, false)
+        } else {
+            let odd = self.payload.count_ones() % 2 == 1;
+            Self::new(u64::from(odd != negated), 1, false)
+        }
+    }
+
+    pub fn logical_binary(&self, rhs: &Self, conjunction: bool) -> Self {
+        let lhs_one = self.payload & !self.mask_xz != 0;
+        let rhs_one = rhs.payload & !rhs.mask_xz != 0;
+        let unknown = self.is_xz() || rhs.is_xz();
+        if conjunction {
+            let known_zero =
+                (self.payload == 0 && self.mask_xz == 0) || (rhs.payload == 0 && rhs.mask_xz == 0);
+            Self::new_bit_1x(lhs_one && rhs_one, !known_zero && unknown)
+        } else {
+            Self::new_bit_1x(lhs_one || rhs_one, unknown)
+        }
+    }
+
+    /// Evaluate prepared native operands modulo the operation width.
+    pub fn add_sub(&self, rhs: &Self, width: usize, signed: bool, subtract: bool) -> Self {
+        if self.is_xz() | rhs.is_xz() {
+            Self::new_x(width, signed)
+        } else {
+            let payload = if subtract {
+                self.payload.wrapping_sub(rhs.payload)
+            } else {
+                self.payload.wrapping_add(rhs.payload)
+            };
+            Self::new(payload & Self::gen_mask(width), width, signed)
+        }
+    }
+
+    pub fn negate(&self, width: usize) -> Self {
+        if self.is_xz() {
+            Self::new_x(width, self.signed)
+        } else {
+            let mask = Self::gen_mask(width);
+            let mut ret = self.clone();
+            ret.payload ^= mask;
+            // The final carry is discarded, including negation of zero at width 64.
+            ret.payload = ret.payload.wrapping_add(1);
+            ret.payload &= mask;
+            ret
+        }
+    }
+
+    pub fn multiply(&self, rhs: &Self, width: usize, signed: bool) -> Self {
+        if self.is_xz() || rhs.is_xz() {
+            Self::new_x(width, signed)
+        } else {
+            Self::new(
+                self.payload.wrapping_mul(rhs.payload) & Self::gen_mask(width),
+                width,
+                signed,
+            )
+        }
+    }
+
+    pub fn divide_remainder(
+        &self,
+        rhs: &Self,
+        width: usize,
+        signed: bool,
+        remainder: bool,
+    ) -> Self {
+        let mask = Self::gen_mask(width);
+        if self.is_xz() || rhs.is_xz() || rhs.payload & mask == 0 {
+            Self::new_x(width, signed)
+        } else {
+            let payload = if signed {
+                let shift = 64 - width;
+                let lhs = ((self.payload << shift) as i64) >> shift;
+                let rhs = ((rhs.payload << shift) as i64) >> shift;
+                // Minimum / -1 wraps to minimum; the corresponding remainder is zero.
+                if remainder {
+                    lhs.checked_rem(rhs).unwrap_or(0) as u64
+                } else {
+                    lhs.checked_div(rhs).unwrap_or(lhs) as u64
+                }
+            } else if remainder {
+                self.payload % rhs.payload
+            } else {
+                self.payload / rhs.payload
+            };
+            Self::new(payload & mask, width, signed)
+        }
+    }
+
+    pub fn power(&self, exponent: &Self, width: usize) -> Self {
+        let mask = Self::gen_mask(width);
+        if exponent.is_xz() {
+            return Self::new_x(width, false);
+        }
+        if self.is_xz() {
+            return Self::new_x(width, self.signed);
+        }
+        let negative = exponent.signed
+            && exponent.width > 0
+            && exponent.payload >> (exponent.width - 1) & 1 != 0;
+        let payload = if negative {
+            if self.payload == 0 {
+                return Self::new_x(width, self.signed);
+            }
+            if self.payload == 1 {
+                1
+            } else if self.signed && self.payload == mask {
+                if exponent.payload & 1 != 0 { mask } else { 1 }
+            } else {
+                0
+            }
+        } else {
+            let mut base = self.payload;
+            let mut exponent = exponent.payload;
+            let mut result = 1u64;
+            while exponent != 0 {
+                if exponent & 1 != 0 {
+                    result = result.wrapping_mul(base);
+                }
+                exponent >>= 1;
+                base = base.wrapping_mul(base);
+            }
+            result & mask
+        };
+        Self::new(payload, width, self.signed)
+    }
+
+    pub fn truth(&self) -> Option<bool> {
+        if self.payload & !self.mask_xz != 0 {
+            Some(true)
+        } else if self.mask_xz != 0 {
+            None
+        } else {
+            Some(false)
+        }
+    }
+
+    /// Size and select or merge normalized native branch values.
+    pub fn conditional(
+        &self,
+        otherwise: &Self,
+        condition: Option<bool>,
+        context_width: usize,
+        signed: bool,
+    ) -> Self {
+        let width = context_width
+            .max(self.width as usize)
+            .max(otherwise.width as usize);
+        let on_true = self.expand(width, signed);
+        let on_false = otherwise.expand(width, signed);
+        let mut ret = match condition {
+            Some(true) => on_true,
+            Some(false) => on_false,
+            None => {
+                let mask = Self::gen_mask(width);
+                let same = !((on_true.payload ^ on_false.payload)
+                    | (on_true.mask_xz ^ on_false.mask_xz))
+                    & mask;
+                Self {
+                    payload: on_true.payload & same,
+                    mask_xz: (on_true.mask_xz & same) | (mask ^ same),
+                    width: width as u32,
+                    signed,
+                }
+            }
+        };
+        ret.signed = signed;
+        ret
     }
 
     pub fn to_usize(&self) -> Option<usize> {
@@ -702,12 +1060,17 @@ impl ValueBigUint {
         } else {
             let width = beg - end + 1;
             let mask = Self::gen_mask(width);
+            if end >= self.width as usize {
+                return Self::new_x(width, false);
+            }
+            let valid_width = (self.width as usize - end).min(width);
+            let valid_mask = Self::gen_mask(valid_width);
             let mut ret = self.clone();
 
             *ret.payload >>= end;
             *ret.mask_xz >>= end;
-            *ret.payload &= &mask;
-            *ret.mask_xz &= &mask;
+            *ret.payload &= &valid_mask;
+            *ret.mask_xz = (&*ret.mask_xz & &valid_mask) | (&mask ^ &valid_mask);
             ret.width = width as u32;
             ret.signed = false;
 
@@ -716,6 +1079,12 @@ impl ValueBigUint {
     }
 
     pub fn assign(&mut self, mut value: Self, beg: usize, end: usize) {
+        // Match the native path: an out-of-range dynamic write has no effect,
+        // and a partially overlapping field only updates the declared bits.
+        if beg < end || end >= self.width as usize {
+            return;
+        }
+        let beg = beg.min(self.width as usize - 1);
         *value.payload <<= end;
         *value.mask_xz <<= end;
 
@@ -1251,36 +1620,48 @@ impl Value {
             };
             Cow::Owned(Value::BigUint(ret))
         } else if let Self::U64(x) = self {
-            let mut payload = x.payload;
-            let mut mask_xz = x.mask_xz;
-
-            if x.signed && use_sign {
-                let msb = ((payload >> (x.width - 1)) & 1) == 1;
-                let msb_xz = ((mask_xz >> (x.width - 1)) & 1) == 1;
-                if msb | msb_xz {
-                    let mask0 = ValueU64::gen_mask(width);
-                    let mask1 = ValueU64::gen_mask(x.width as usize);
-                    let mask = mask0 ^ mask1;
-
-                    if msb {
-                        payload |= mask;
-                    }
-                    if msb_xz {
-                        mask_xz |= mask;
-                    }
-                }
-            }
-
-            let signed = if use_sign { x.signed } else { false };
-
-            Cow::Owned(Value::U64(ValueU64 {
-                payload,
-                mask_xz,
-                width: width as u32,
-                signed,
-            }))
+            Cow::Owned(Value::U64(x.expand(width, use_sign)))
         } else {
             unreachable!();
+        }
+    }
+
+    pub fn conditional(&self, on_true: &Self, on_false: &Self, width: usize, signed: bool) -> Self {
+        let context_width = width;
+        let width = context_width.max(on_true.width()).max(on_false.width());
+        let condition = self.truth();
+        // Width-zero all-bit literals need Value::expand materialization first.
+        if width <= 64
+            && let (Self::U64(a), Self::U64(b)) = (on_true, on_false)
+            && a.width != 0
+            && b.width != 0
+        {
+            return Self::U64(a.conditional(b, condition, context_width, signed));
+        }
+        let on_true = on_true.expand(width, signed);
+        let on_false = on_false.expand(width, signed);
+        match (on_true.as_ref(), on_false.as_ref()) {
+            (Self::U64(a), Self::U64(b)) => Self::U64(a.conditional(b, condition, width, signed)),
+            (Self::BigUint(a), Self::BigUint(b)) => {
+                let mut ret = match condition {
+                    Some(true) => a.clone(),
+                    Some(false) => b.clone(),
+                    None => {
+                        let mask = ValueBigUint::gen_mask(width);
+                        let different = (a.payload() ^ b.payload()) | (a.mask_xz() ^ b.mask_xz());
+                        let same = &mask ^ different;
+                        ValueBigUint {
+                            payload: Box::new(a.payload() & &same),
+                            mask_xz: Box::new((a.mask_xz() & &same) | (&mask ^ same)),
+                            width: width as u32,
+                            signed,
+                        }
+                    }
+                };
+                ret.signed = signed;
+                Self::BigUint(ret)
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -1399,7 +1780,7 @@ impl Value {
     /// when it is ambiguous (no known 1, some x/z).
     pub fn truth(&self) -> Option<bool> {
         let (known_one, xz) = match self {
-            Self::U64(x) => (x.payload & !x.mask_xz != 0, x.mask_xz != 0),
+            Self::U64(x) => return x.truth(),
             Self::BigUint(x) => {
                 let known = x.payload.as_ref() ^ (x.payload.as_ref() & x.mask_xz.as_ref());
                 (!known.is_zero(), !x.mask_xz.is_zero())
