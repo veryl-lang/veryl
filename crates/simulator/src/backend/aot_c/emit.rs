@@ -2158,19 +2158,29 @@ fn emit_ff_elem_log(
     span: Option<(u32, u32)>,
 ) -> String {
     let from = format!("(({elem_ptr}) + {blo}u)");
-    let at = format!("(({elem_off}) + {blo}u)");
+    let at = offset_plus(elem_off, blo);
     if ff_nb > 16 {
         return emit_wide_log_chunks(&from, &at, blen, span);
     }
     let mut out = df_ff_wide_push_mark(&at, &from, blen, span);
     for w in blo / 8..(blo + blen).div_ceil(8) {
         out.push_str(&emit_log_entry(
-            &format!("(({elem_off}) + {}u)", w * 8),
+            &offset_plus(elem_off, w * 8),
             &format!("*(const veryl_u64_ua *)(({elem_ptr}) + {}u)", w * 8),
             8,
         ));
     }
     out
+}
+
+/// `base + k` as a C offset, folded when `base` is a constant so that
+/// `df_ff_push_target` can place the push instead of marking every reader.
+fn offset_plus(base: &str, k: usize) -> String {
+    match parse_offset(base) {
+        Some(b) => format!("{:#x}", b as usize + k),
+        None if k == 0 => base.to_string(),
+        None => format!("(({base}) + {k}u)"),
+    }
 }
 
 /// Lazily-published compiled `.so`.  `None` while the background
@@ -15599,6 +15609,33 @@ mod tests {
         assert!(!emit(wide(), false).contains("? 1u : 0u"));
         assert!(!emit(narrow(), true).contains("? 1u : 0u"));
         assert!(emit(narrow(), true).contains("_lc + 1u"));
+    }
+
+    #[test]
+    fn emit_event_wide_field_writes_mark_their_readers() {
+        // A field write logs from a constant offset inside its register; the
+        // push must still be placed so it marks the readers it reaches.
+        for (width, (hi, lo)) in [(100, (63, 32)), (200, (95, 64))] {
+            let a = ProtoAssignStatement {
+                dst: VarOffset::Ff(0x40),
+                dst_width: width,
+                select: Some((hi, lo)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr: const_expr(0x1234, hi - lo + 1),
+                dst_ff_current_offset: 0x40,
+                comb_direct: false,
+                token: dummy_token(),
+            };
+            set_dataflow_ff_marks(Some(std::sync::Arc::new(vec![(0x40, 0x60, vec![(0, 1)])])));
+            DF_FF_UNCOVERED.with(|c| c.set(false));
+            let src = emit_event_function(&[ProtoStatement::Assign(a)], true, &[]);
+            let uncovered = DF_FF_UNCOVERED.with(|c| c.replace(false));
+            set_dataflow_ff_marks(None);
+            let src = src.expect("must emit");
+            assert!(!uncovered, "width {width}: the push was left unplaced");
+            assert!(src.contains("_dfm[0] |= 0x1ULL"), "width {width}: {src}");
+        }
     }
 
     #[test]
