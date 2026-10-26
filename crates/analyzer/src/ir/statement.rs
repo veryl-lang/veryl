@@ -973,6 +973,21 @@ pub struct AssignStatement {
 impl AssignStatement {
     pub fn eval_value(&self, context: &mut Context) {
         if let Some(dst) = self.dst.first()
+            && let Some(variable) = context.variables.get(&dst.id)
+            && let Some(count) = variable.r#type.total_array()
+            && count > 1
+            && count <= context.config.evaluate_array_limit
+            && variable.value.len() == 1
+        {
+            // Declarations retain one template; constant execution needs element storage.
+            let template = variable.value[0].clone();
+            context
+                .variable_mut(&dst.id)
+                .unwrap()
+                .value
+                .resize(count, template);
+        }
+        if let Some(dst) = self.dst.first()
             && self.expr.comptime().r#type.is_array()
             && let Some(count) = self.expr.comptime().r#type.total_array()
             && let Some(values) = super::function::array_arg_values(context, &self.expr, count)

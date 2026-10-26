@@ -427,10 +427,15 @@ fn synth_factor(
             let element_nets: Vec<NetId> = if ctx.ram_vars.contains_key(id) {
                 read_ram(ctx, id, index, current)?
             } else {
-                // The `current` map shadows the persistent nets within a block
-                // so that `a = a + 1`-style reads pick up the previous value.
-                let src_nets = current
-                    .get(id)
+                // Block-local variables use blocking assignments even in always_ff.
+                let pending = if ctx.ff_snapshot_reads
+                    && ctx.ff_allocation.get(id).is_some_and(|ff| ff.nonblocking)
+                {
+                    None
+                } else {
+                    current.get(id)
+                };
+                let src_nets = pending
                     .cloned()
                     .or_else(|| ctx.variables.get(id).map(|s| s.nets.clone()))
                     .ok_or_else(|| {

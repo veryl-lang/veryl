@@ -27,10 +27,10 @@ thiserror     = {workspace = true}
 [dev-dependencies]
 postcard      = {workspace = true}
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(any(target_arch = "wasm32", kani))'.dependencies]
 miette        = {workspace = true, features = ["fancy-no-syscall"]}
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(all(not(target_arch = "wasm32"), not(kani)))'.dependencies]
 miette        = {workspace = true, features = ["fancy"]}
 
 [build-dependencies]

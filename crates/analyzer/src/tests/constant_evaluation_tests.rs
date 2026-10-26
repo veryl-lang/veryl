@@ -533,8 +533,8 @@ fn wide_constant_as_truth_value_index_and_bound() {
 
 #[test]
 fn logical_value_of_a_partly_unknown_condition() {
-    // A known 1 decides the condition whatever the x/z bits; with none, an
-    // `if` and a ternary both take the false side, as in the 2-state simulator.
+    // A known 1 decides truth despite X/Z; an ambiguous statement condition
+    // takes the false side.
     let code = r#"
     module Top (o0: output logic<4>, o1: output logic<4>, o2: output logic<4>) {
         function f (c: input logic<2>) -> logic<4> {

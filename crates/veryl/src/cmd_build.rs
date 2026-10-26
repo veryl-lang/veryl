@@ -857,6 +857,380 @@ exclude_std = true
         assert!(b.contains("WIDTH"));
     }
 
+    /// All emitted `.sv` files under `root` (outside `.build`), keyed by the
+    /// path relative to `root`.
+    fn collect_sv_outputs(root: &Path) -> std::collections::BTreeMap<PathBuf, String> {
+        fn walk(root: &Path, dir: &Path, ret: &mut std::collections::BTreeMap<PathBuf, String>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|x| x == ".build") {
+                        continue;
+                    }
+                    walk(root, &path, ret);
+                } else if path.extension().is_some_and(|x| x == "sv") {
+                    let relative = path.strip_prefix(root).unwrap().to_path_buf();
+                    ret.insert(relative, fs::read_to_string(&path).unwrap());
+                }
+            }
+        }
+
+        let mut ret = std::collections::BTreeMap::new();
+        walk(root, root, &mut ret);
+        ret
+    }
+
+    /// Builds `initial`, applies `edits` (`None` removes the file), builds
+    /// again incrementally, and asserts every output of the warm build matches
+    /// a from-scratch build of the edited sources. Returns the warm outputs.
+    fn assert_incremental_edit_matches_cold(
+        name: &str,
+        initial: &[(&str, &str)],
+        edits: &[(&str, Option<&str>)],
+    ) -> std::collections::BTreeMap<PathBuf, String> {
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) = write_incremental_project(tempdir.path(), name, initial);
+        run_build(&mut metadata, None);
+
+        let mut files: Vec<(String, String)> = initial
+            .iter()
+            .map(|(x, y)| (x.to_string(), y.to_string()))
+            .collect();
+        for (file_name, content) in edits {
+            let path = project_path.join("src").join(file_name);
+            files.retain(|(x, _)| x != file_name);
+            if let Some(content) = content {
+                fs::write(path, content).unwrap();
+                files.push((file_name.to_string(), content.to_string()));
+            } else {
+                fs::remove_file(path).unwrap();
+            }
+        }
+        run_build(&mut metadata, None);
+        let warm = collect_sv_outputs(&project_path);
+
+        let cold_tempdir = tempfile::tempdir().unwrap();
+        let files: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(x, y)| (x.as_str(), y.as_str()))
+            .collect();
+        let (mut cold_metadata, cold_path) =
+            write_incremental_project(cold_tempdir.path(), name, &files);
+        run_build(&mut cold_metadata, None);
+        let cold = collect_sv_outputs(&cold_path);
+
+        // Outputs of removed sources may linger in the warm tree; only the
+        // files a cold build produces are compared.
+        for (path, cold_text) in &cold {
+            assert_eq!(
+                warm.get(path),
+                Some(cold_text),
+                "{} differs from the cold build",
+                path.display()
+            );
+        }
+        warm
+    }
+
+    const GEN_PKG: &str = r#"
+    package GenPkg::<W: u32> {
+        const X: u32 = W;
+    }
+    "#;
+
+    const GEN_PKG_USER_8: &str = r#"
+    module GenPkgUser (
+        o_d: output logic<32>,
+    ) {
+        assign o_d = GenPkg::<8>::X;
+    }
+    "#;
+
+    const GEN_PKG_USER_16: &str = r#"
+    module GenPkgUser (
+        o_d: output logic<32>,
+    ) {
+        assign o_d = GenPkg::<16>::X;
+    }
+    "#;
+
+    const GEN_PKG_USER_8_16: &str = r#"
+    module GenPkgUser (
+        o_d: output logic<32>,
+        o_e: output logic<32>,
+    ) {
+        assign o_d = GenPkg::<8>::X;
+        assign o_e = GenPkg::<16>::X;
+    }
+    "#;
+
+    const GEN_PKG_USER_NONE: &str = r#"
+    module GenPkgUser (
+        o_d: output logic<32>,
+    ) {
+        assign o_d = 0;
+    }
+    "#;
+
+    const GEN_PKG_OTHER_USER_32: &str = r#"
+    module GenPkgOtherUser (
+        o_d: output logic<32>,
+    ) {
+        assign o_d = GenPkg::<32>::X;
+    }
+    "#;
+
+    // Regression for #3567: changing a generic argument at the reference
+    // site must emit the new instance in the (unchanged) defining file.
+    #[test]
+    fn incremental_generic_package_arg_change() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let warm = assert_incremental_edit_matches_cold(
+            "inc_gen_pkg",
+            &[("a.veryl", GEN_PKG), ("b.veryl", GEN_PKG_USER_8)],
+            &[("b.veryl", Some(GEN_PKG_USER_16))],
+        );
+        assert!(warm[Path::new("target/a.sv")].contains("__GenPkg__16"));
+    }
+
+    #[test]
+    fn incremental_generic_package_arg_added() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let warm = assert_incremental_edit_matches_cold(
+            "inc_gen_pkg_add",
+            &[("a.veryl", GEN_PKG), ("b.veryl", GEN_PKG_USER_8)],
+            &[("b.veryl", Some(GEN_PKG_USER_8_16))],
+        );
+        let a = &warm[Path::new("target/a.sv")];
+        assert!(a.contains("__GenPkg__8"));
+        assert!(a.contains("__GenPkg__16"));
+    }
+
+    #[test]
+    fn incremental_generic_package_arg_from_new_file() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let warm = assert_incremental_edit_matches_cold(
+            "inc_gen_pkg_new",
+            &[("a.veryl", GEN_PKG), ("b.veryl", GEN_PKG_USER_8)],
+            &[("c.veryl", Some(GEN_PKG_OTHER_USER_32))],
+        );
+        let a = &warm[Path::new("target/a.sv")];
+        assert!(a.contains("__GenPkg__8"));
+        assert!(a.contains("__GenPkg__32"));
+    }
+
+    #[test]
+    fn incremental_generic_package_arg_removed() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let warm = assert_incremental_edit_matches_cold(
+            "inc_gen_pkg_rm",
+            &[("a.veryl", GEN_PKG), ("b.veryl", GEN_PKG_USER_8_16)],
+            &[("b.veryl", Some(GEN_PKG_USER_NONE))],
+        );
+        assert!(!warm[Path::new("target/a.sv")].contains("__GenPkg__8"));
+    }
+
+    #[test]
+    fn incremental_generic_package_arg_of_removed_file() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let warm = assert_incremental_edit_matches_cold(
+            "inc_gen_pkg_rm_file",
+            &[
+                ("a.veryl", GEN_PKG),
+                ("b.veryl", GEN_PKG_USER_8),
+                ("c.veryl", GEN_PKG_OTHER_USER_32),
+            ],
+            &[("c.veryl", None)],
+        );
+        assert!(!warm[Path::new("target/a.sv")].contains("__GenPkg__32"));
+    }
+
+    #[test]
+    fn incremental_generic_package_unchanged_restores_all() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_gen_pkg_keep",
+            &[("a.veryl", GEN_PKG), ("b.veryl", GEN_PKG_USER_8)],
+        );
+
+        run_build(&mut metadata, None);
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+    }
+
+    // A check in between restores a.veryl without emitting it, so the
+    // following build must still notice its instances changed.
+    #[test]
+    fn incremental_generic_package_arg_change_across_check() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_gen_pkg_check",
+            &[("a.veryl", GEN_PKG), ("b.veryl", GEN_PKG_USER_8)],
+        );
+
+        run_build(&mut metadata, None);
+        fs::write(project_path.join("src/b.veryl"), GEN_PKG_USER_16).unwrap();
+        run_check(&mut metadata).expect("clean check passes");
+        run_build(&mut metadata, None);
+
+        let a = fs::read_to_string(project_path.join("target/a.sv")).unwrap();
+        assert!(a.contains("__GenPkg__16"));
+        assert!(!a.contains("__GenPkg__8"));
+    }
+
+    // A check re-analyzes a file whose generic instances changed, but only
+    // once: the next check finds them unchanged.
+    #[test]
+    fn incremental_check_reanalyzes_generic_instance_change_once() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_gen_pkg_check_twice",
+            &[("a.veryl", GEN_PKG), ("b.veryl", GEN_PKG_USER_8)],
+        );
+
+        run_build(&mut metadata, None);
+        fs::write(project_path.join("src/b.veryl"), GEN_PKG_USER_16).unwrap();
+
+        // b.veryl is edited and a.veryl gains an instance: both are analyzed.
+        run_check(&mut metadata).expect("clean check passes");
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+
+        // Nothing changed since the last check: both are restored.
+        run_check(&mut metadata).expect("clean check passes");
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+    }
+
+    const GEN_MOD_USING_PKG: &str = r#"
+    module GenModUsingPkg::<W: u32> (
+        o_d: output logic<32>,
+    ) {
+        assign o_d = GenPkg::<W>::X;
+    }
+    "#;
+
+    const GEN_MOD_USING_PKG_USER_8: &str = r#"
+    module Top {
+        inst u: GenModUsingPkg::<8>;
+    }
+    "#;
+
+    const GEN_MOD_USING_PKG_USER_16: &str = r#"
+    module Top {
+        inst u: GenModUsingPkg::<16>;
+    }
+    "#;
+
+    // The new argument reaches a.veryl only through the instance emitted in
+    // b.veryl, neither of which is edited.
+    #[test]
+    fn incremental_generic_arg_change_propagates_transitively() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let warm = assert_incremental_edit_matches_cold(
+            "inc_gen_trans",
+            &[
+                ("a.veryl", GEN_PKG),
+                ("b.veryl", GEN_MOD_USING_PKG),
+                ("c.veryl", GEN_MOD_USING_PKG_USER_8),
+            ],
+            &[("c.veryl", Some(GEN_MOD_USING_PKG_USER_16))],
+        );
+        assert!(warm[Path::new("target/a.sv")].contains("__GenPkg__16"));
+        assert!(warm[Path::new("target/b.sv")].contains("__GenModUsingPkg__16"));
+    }
+
+    const DEP_GEN_PKG: &str = r#"
+    pub package GenPkg::<W: u32> {
+        const X: u32 = W;
+    }
+    "#;
+
+    // Same as #3567: the generic package lives in a dependency, whose output
+    // goes under `dependencies/`.
+    #[test]
+    fn incremental_generic_arg_change_in_dependency() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+
+        let create = |root: &Path, top: &str| -> (Metadata, PathBuf) {
+            let dep_path = root.join("dep");
+            fs::create_dir_all(dep_path.join("src")).unwrap();
+            fs::write(
+                dep_path.join("Veryl.toml"),
+                r#"[project]
+name = "dep"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {type = "directory", path = "target"}
+exclude_std = true
+"#,
+            )
+            .unwrap();
+            fs::write(dep_path.join("src/gen_pkg.veryl"), DEP_GEN_PKG).unwrap();
+
+            let main_path = root.join("main");
+            fs::create_dir_all(main_path.join("src")).unwrap();
+            fs::write(
+                main_path.join("Veryl.toml"),
+                r#"[project]
+name = "main"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {type = "directory", path = "target"}
+sourcemap_target = {type = "none"}
+exclude_std = true
+incremental = true
+
+[dependencies]
+dep = {path = "../dep"}
+"#,
+            )
+            .unwrap();
+            fs::write(main_path.join("src/top.veryl"), top).unwrap();
+
+            let metadata = Metadata::load(main_path.join("Veryl.toml")).unwrap();
+            (metadata, main_path)
+        };
+
+        let top = |width: u32| {
+            format!(
+                r#"
+    module Top (
+        o_d: output logic<32>,
+    ) {{
+        assign o_d = dep::GenPkg::<{width}>::X;
+    }}
+    "#
+            )
+        };
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, main_path) = create(tempdir.path(), &top(8));
+        run_build(&mut metadata, None);
+        fs::write(main_path.join("src/top.veryl"), top(16)).unwrap();
+        run_build(&mut metadata, None);
+        let warm = collect_sv_outputs(&main_path);
+
+        let cold_tempdir = tempfile::tempdir().unwrap();
+        let (mut cold_metadata, cold_path) = create(cold_tempdir.path(), &top(16));
+        run_build(&mut cold_metadata, None);
+        let cold = collect_sv_outputs(&cold_path);
+
+        assert!(
+            cold.values().any(|x| x.contains("__GenPkg__16")),
+            "the cold build must emit the new instance for this to test anything"
+        );
+        assert_eq!(warm, cold);
+    }
+
     const SV_USER_A: &str = r#"
     module SvUserA {
         inst u_if: $sv::foo_if;

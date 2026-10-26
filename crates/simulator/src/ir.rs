@@ -53,6 +53,7 @@ pub use variable::{
 };
 pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
+pub use write_log::{WriteLogBuffer, ff_commit_from_log, ff_commit_from_log_marking};
 
 use crate::backend::CompiledWhole;
 use crate::residency;
@@ -137,9 +138,11 @@ pub struct Ir {
     /// Bits of the cells dirty at every settle.
     pub(crate) dataflow_always_mask: std::cell::OnceCell<Vec<u64>>,
     /// The whole-settle entry is running the settles, so nothing reads the
-    /// cells' bits: events and commits skip their marks and only say that
-    /// something happened, in `dataflow_any`.
+    /// cells' bits: events and commits skip their marks.
     pub(crate) dataflow_unmarked: std::cell::Cell<bool>,
+    /// An event wrote or a commit ran since the last settle, which makes the
+    /// whole-settle entry run.  Set in either mode, so the mode probe sees
+    /// the settles that entry would skip.
     pub(crate) dataflow_any: std::cell::Cell<bool>,
     /// Compare every Nth dataflow settle against a full rerun (0: never);
     /// from `VERYL_DATAFLOW_CHECK`.
@@ -786,6 +789,9 @@ impl Ir {
         let count_jit = probing && aot.is_none();
         // Through the log argument, which the per-cell entries leave unused.
         let mut counts = [0u64; 2];
+        // A settle the whole-settle entry would skip costs the same in either
+        // mode, so the probe counts neither it nor its work.
+        let mut idle = false;
         // SAFETY: the dataflow entry has the `FuncPtr` ABI, reading and
         // writing the same buffers; `ff_delta` carries the dirty words,
         // which it clears as it runs.
@@ -799,8 +805,8 @@ impl Ir {
                 v
             });
             let any = self.dataflow_any.replace(false);
-            let whole =
-                coarse && (any || dirty[..nw].iter().zip(always).any(|(&d, &a)| d & !a != 0));
+            idle = !any && dirty[..nw].iter().zip(always).all(|(&d, &a)| d & !a == 0);
+            let whole = coarse && !idle;
             match coarse_fn {
                 Some(f) if whole => {
                     unsafe {
@@ -845,7 +851,7 @@ impl Ir {
                 }
             }
         }
-        if counted.is_some() || count_jit {
+        if (counted.is_some() && !idle) || count_jit {
             self.dataflow_mode.record(counts[0], counts[1]);
         }
         drop(dirty);

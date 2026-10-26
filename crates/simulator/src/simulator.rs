@@ -571,6 +571,12 @@ impl Simulator {
         }
 
         if env::var("VERYL_DERIVED_CLOCK_DUMP").as_deref() == Ok("1") {
+            let resets = &ret.ir.derived_clock_schedule.resets;
+            eprintln!(
+                "[derived_reset] {} resets on {} nets",
+                resets.iter().map(|r| r.members.len()).sum::<usize>(),
+                resets.len()
+            );
             fn find_var_by_ptr(
                 module: &ModuleVariables,
                 ptr: *const u8,
@@ -698,6 +704,18 @@ impl Simulator {
         if rst.active_low { 1 - bit } else { bit }
     }
 
+    fn derived_reset_members(&self, indices: &[usize]) -> SmallVec<[VarId; 4]> {
+        indices
+            .iter()
+            .flat_map(|&i| {
+                self.ir.derived_clock_schedule.resets[i]
+                    .members
+                    .iter()
+                    .copied()
+            })
+            .collect()
+    }
+
     /// Re-arm every derived reset against the state as it now reads.
     fn snapshot_derived_reset_levels(&mut self) {
         for i in 0..self.ir.derived_clock_schedule.resets.len() {
@@ -807,19 +825,17 @@ impl Simulator {
                 return;
             }
             let has_components = !self.components.is_empty();
+            let fired = self.derived_reset_members(&fired);
             if has_components {
-                for &i in &fired {
-                    let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                for &vid in &fired {
                     self.stage_components(&Event::reset(vid));
                 }
             }
-            for &i in &fired {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &fired {
                 self.eval_event_stmts(&Event::reset(vid));
             }
             self.commit_event_log();
-            for &i in &fired {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &fired {
                 if has_components {
                     self.fire_components(&Event::reset(vid));
                 }
@@ -1615,10 +1631,11 @@ impl Simulator {
         if dataflow && !ff_covered && !unmarked && wrote {
             self.df_unmarked_push = true;
         }
+        if dataflow && wrote {
+            self.ir.dataflow_any.set(true);
+        }
         if unmarked {
-            if wrote {
-                self.ir.dataflow_any.set(true);
-            }
+            // Nothing reads the cells' bits.
         } else if df_marked && !whole_ran && !jit_marked {
             // The marked function did not run and nothing was snapshotted.
             self.ir.dataflow_mark_all();
@@ -1688,6 +1705,8 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let ff_start = Instant::now();
 
+        self.ir.dataflow_any.set(true);
+
         if let Some(dump) = self.dump.as_mut() {
             // Every changed byte is reported so the dump's gate hears about it.
             ff_commit_from_log_marking(
@@ -1698,7 +1717,6 @@ impl Simulator {
             self.ir.dataflow_mark_all();
         } else if self.ir.dataflow.is_some() && self.ir.dataflow_unmarked.get() {
             ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
-            self.ir.dataflow_any.set(true);
         } else if self.ir.dataflow.is_some() && !std::mem::take(&mut self.df_unmarked_push) {
             // Every push since the last commit marked its own readers.
             ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
@@ -1961,9 +1979,9 @@ impl Simulator {
                     self.stage_components(&Event::clock(vid));
                 }
             }
+            let rst_batch = self.derived_reset_members(&rst_batch);
             if has_components {
-                for &i in &rst_batch {
-                    let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                for &vid in &rst_batch {
                     self.stage_components(&Event::reset(vid));
                 }
             }
@@ -1976,13 +1994,11 @@ impl Simulator {
             }
             // Resets last, so a net that both clocks and resets this
             // instant takes the reset value SV gives it.
-            for &i in &rst_batch {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &rst_batch {
                 self.eval_event_stmts(&Event::reset(vid));
             }
             self.commit_event_log();
-            for &i in &rst_batch {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &rst_batch {
                 if has_components {
                     self.fire_components(&Event::reset(vid));
                 }

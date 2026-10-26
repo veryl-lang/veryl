@@ -1687,6 +1687,14 @@ impl SymbolTable {
         ret
     }
 
+    pub fn get_generic_instance_owners(&self) -> Vec<Symbol> {
+        self.symbol_table
+            .values()
+            .filter(|x| !x.generic_instances.is_empty())
+            .map(|x| (**x).clone())
+            .collect()
+    }
+
     pub fn get_all(&self) -> Vec<Symbol> {
         let mut ret = Vec::new();
         for symbol in self.symbol_table.values() {
@@ -3474,6 +3482,10 @@ pub fn get_namespace_symbol(namespace: &Namespace) -> Option<Symbol> {
     } else {
         None
     }
+}
+
+pub fn get_generic_instance_owners() -> Vec<Symbol> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_generic_instance_owners())
 }
 
 pub fn get_all() -> Vec<Symbol> {

@@ -2,6 +2,7 @@ module veryl_testcase_Module20;
     logic a;
     logic b;
     logic c;
+    logic d;
     logic x; always_comb x = 1;
     logic y; always_comb y = 1;
 
@@ -21,7 +22,19 @@ module veryl_testcase_Module20;
         4
     ));
 
-    always_comb c = (((a == 1) == 1'b1) ? (
+    always_comb c = (((a) == (1)) ? (
+        0
+    ) : ((a) == (2)) ? (
+        1
+    ) : ((a) == (3)) ? (
+        2
+    ) : ((a) == (4)) ? (
+        2
+    ) : (
+        3
+    ));
+
+    always_comb d = (((a == 1) == 1'b1) ? (
         0
     ) : ((a == 2) == 1'b1) ? (
         1

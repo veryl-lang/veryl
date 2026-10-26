@@ -19,10 +19,15 @@ def build_h_columuns(data_width, check_width)
     min_weight = candidates.map { |(_, weight)| weight }.min
     pool = candidates.select { |(_, weight)| weight == min_weight }
 
+    # Pick the column that puts its 1s on the rows with the fewest 1s so far.
+    # Evaluation criteria (smaller is better, in this order):
+    #   1. cost: the sum of the current 1 counts of the rows the column sets
+    #   2. v   : the column value, to make the choice deterministic
+    # This keeps the row counts (the XOR tree sizes) close to each other for any
+    # data width cut from the low side.
     best, _ = pool.min_by do |(v, _)|
-      after = row_bits.dup
-      check_width.times { |i| after[i] += v[i] }
-      [after.max, after.sum, v]
+      cost = row_bits.map.with_index { |count, i| v[i] == 1 ? count : 0 }.sum
+      [cost, v]
     end
 
     selected << best
@@ -92,8 +97,9 @@ def emit_encode_matrix(h_matrix, data_width, check_width)
   lines = []
   lines << "    // Coefficient matrix for check-bit generation."
   h_matrix.each_with_index do |row, i|
-    value = hex_literal(row >> check_width, data_width)
-    lines << "    const ENCODE_MATRIX_ROW_#{i}: bit<DATA_WIDTH> = #{value}; // check[#{i}]"
+    data_bits = row >> check_width
+    value = hex_literal(data_bits, data_width)
+    lines << "    const ENCODE_MATRIX_ROW_#{i}: bit<DATA_WIDTH> = #{value}; // check[#{i}] (#{popcount(data_bits)} ones)"
   end
   lines.join("\n")
 end

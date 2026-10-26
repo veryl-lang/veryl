@@ -364,6 +364,77 @@ fn whole_settle_entry_runs_after_an_unmarked_commit() {
 }
 
 #[test]
+fn idle_settles_do_not_dilute_the_mode_probe() {
+    // Every settle that dirties a cell runs all of them, which the
+    // whole-settle entry does more cheaply; the many settles between them
+    // dirty nothing and cost the same in either mode.
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        u: input  logic<8>,
+        o: output logic<8>,
+        q: output logic<8>,
+    ) {
+        var x: logic<8>;
+        assign x = a & 8'h0f;
+        assign o = x + 1;
+        assign q = a ^ 8'h55;
+    }
+    "#;
+    let ir = analyze(code, &aot_config(false));
+    let mut sim = Simulator::new(ir, None);
+    let v = |x: u64| Value::new(x, 8, false);
+    for tick in 0..4096u64 {
+        if tick % 64 == 0 {
+            sim.set("a", v(tick / 64));
+        } else {
+            sim.set("u", v(tick & 0xff));
+        }
+        sim.get("q").unwrap();
+    }
+    assert!(sim.ir.dataflow_mode.was_coarse.get());
+}
+
+#[test]
+fn settles_after_a_quiet_commit_stay_in_the_mode_probe() {
+    // The whole-settle entry runs after every commit, even one that changed
+    // nothing a cell reads, so those settles count against it.
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+        q  : output logic<8>,
+    ) {
+        var r: logic<8>;
+        always_ff (clk) { r = a; }
+        var x: logic<8>;
+        assign x = r & 8'h0f;
+        assign o = x + 1;
+        assign q = r ^ 8'h55;
+    }
+    "#;
+    let ir = analyze(code, &aot_config(false));
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let v = |x: u64| Value::new(x, 8, false);
+    for tick in 0..4096u64 {
+        if tick % 64 == 0 {
+            sim.set("a", v(tick / 64));
+        }
+        sim.step(&clk);
+        sim.get("q").unwrap();
+    }
+    assert!(!sim.ir.dataflow_mode.was_coarse.get());
+}
+
+#[test]
 fn whole_settle_entry_leaves_cell_boundaries_in_the_buffer() {
     // A settle with only the side-effect cells dirty runs the per-cell
     // dispatch even in whole-settle mode, so those cells must find what the

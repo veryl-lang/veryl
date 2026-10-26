@@ -13,12 +13,12 @@ pub package hamming_26_6_pkg {
     const CODE_WIDTH : u32 = DATA_WIDTH + CHECK_WIDTH;
 
     // Coefficient matrix for check-bit generation.
-    const ENCODE_MATRIX_ROW_0: bit<DATA_WIDTH> = 26'h1fa6595; // check[0]
-    const ENCODE_MATRIX_ROW_1: bit<DATA_WIDTH> = 26'h2f99965; // check[1]
-    const ENCODE_MATRIX_ROW_2: bit<DATA_WIDTH> = 26'h3769659; // check[2]
-    const ENCODE_MATRIX_ROW_3: bit<DATA_WIDTH> = 26'h3b56a56; // check[3]
-    const ENCODE_MATRIX_ROW_4: bit<DATA_WIDTH> = 26'h3d555aa; // check[4]
-    const ENCODE_MATRIX_ROW_5: bit<DATA_WIDTH> = 26'h3eaaaaa; // check[5]
+    const ENCODE_MATRIX_ROW_0: bit<DATA_WIDTH> = 26'h1fa6595; // check[0] (15 ones)
+    const ENCODE_MATRIX_ROW_1: bit<DATA_WIDTH> = 26'h2f99965; // check[1] (15 ones)
+    const ENCODE_MATRIX_ROW_2: bit<DATA_WIDTH> = 26'h3769659; // check[2] (15 ones)
+    const ENCODE_MATRIX_ROW_3: bit<DATA_WIDTH> = 26'h3b56a56; // check[3] (15 ones)
+    const ENCODE_MATRIX_ROW_4: bit<DATA_WIDTH> = 26'h3d555aa; // check[4] (15 ones)
+    const ENCODE_MATRIX_ROW_5: bit<DATA_WIDTH> = 26'h3eaaaaa; // check[5] (15 ones)
 
     struct decode_result {
         error_pos: logic<CODE_WIDTH>, // error position (one-hot, [CHECK_WIDTH-1:0]=check, upper=data)

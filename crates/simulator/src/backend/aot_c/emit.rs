@@ -7,6 +7,9 @@
 //! Uncovered constructs return `None` from the emitters and fall back
 //! to Cranelift (per-module for comb, per-event for events).
 
+#[path = "selection.rs"]
+mod selection;
+
 use crate::FuncPtr;
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
 use crate::ir::opt::event_gate::{
@@ -814,6 +817,10 @@ fn emit_wide_const(
 /// reduction, which produce a narrow register handled in `emit_expr_inner`).
 /// Returns `None` (→ module bails to Cranelift) for any uncovered shape.
 fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
+    if selection::handles(expr) {
+        return selection::read(expr, pre);
+    }
+
     match expr {
         ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
@@ -2099,16 +2106,11 @@ fn extend_scalar_operand(s: &str, src_width: usize, width: usize, signed: bool) 
 
 /// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
 /// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`
-/// (a C expression).  Each entry holds ≤56 bytes; larger values chunk.
+/// (a C expression), known to lie in FF bytes `span` (see
+/// `emit_log_push_in`).  Each entry holds ≤56 bytes; larger values chunk.
 /// Unchecked: the event prologue's bulk reserve guarantees room.
-/// Mirrors `event_write_log_push_wide` / `emit_wide_log_chunks`.
-fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
-    emit_wide_log_chunks_in(src_ptr, base_off, nb, None)
-}
-
-/// `emit_wide_log_chunks` for a runtime `base_off` known to lie in FF bytes
-/// `span` (see `emit_log_push_in`).
-fn emit_wide_log_chunks_in(
+/// Mirrors `event_write_log_push_wide` and Cranelift's `emit_wide_log_chunks`.
+fn emit_wide_log_chunks(
     src_ptr: &str,
     base_off: &str,
     nb: usize,
@@ -2149,6 +2151,45 @@ fn emit_wide_log_chunks_in(
     out
 }
 
+/// Log bytes `[blo, blo + blen)` of an FF element of `ff_nb` bytes, read from
+/// `elem_ptr` and placed from FF byte `elem_off`.  An element up to 16 bytes
+/// goes to the narrow pool, as the interpreter and Cranelift log it: events of
+/// different backends can share a commit, and the commit applies the narrow
+/// pool before the wide one.  The narrow entries are the 8-byte words around
+/// the range, so `elem_ptr` must hold the pending value over those words.
+fn emit_ff_elem_log(
+    elem_ptr: &str,
+    elem_off: &str,
+    ff_nb: usize,
+    (blo, blen): (usize, usize),
+    span: Option<(u32, u32)>,
+) -> String {
+    let from = format!("(({elem_ptr}) + {blo}u)");
+    let at = offset_plus(elem_off, blo);
+    if ff_nb > 16 {
+        return emit_wide_log_chunks(&from, &at, blen, span);
+    }
+    let mut out = df_ff_wide_push_mark(&at, &from, blen, span);
+    for w in blo / 8..(blo + blen).div_ceil(8) {
+        out.push_str(&emit_log_entry(
+            &offset_plus(elem_off, w * 8),
+            &format!("*(const veryl_u64_ua *)(({elem_ptr}) + {}u)", w * 8),
+            8,
+        ));
+    }
+    out
+}
+
+/// `base + k` as a C offset, folded when `base` is a constant so that
+/// `df_ff_push_target` can place the push instead of marking every reader.
+fn offset_plus(base: &str, k: usize) -> String {
+    match parse_offset(base) {
+        Some(b) => format!("{:#x}", b as usize + k),
+        None if k == 0 => base.to_string(),
+        None => format!("(({base}) + {k}u)"),
+    }
+}
+
 /// Lazily-published compiled `.so`.  `None` while the background
 /// compile runs; callers fall back to Cranelift until then.  Shared
 /// via `Arc` across `Ir`s built from one `ProtoModule`.
@@ -2176,10 +2217,10 @@ fn set_event_mode(on: bool) {
     EVENT_MODE.with(|c| c.set(on));
 }
 
-/// Whether a wide FF write may leave the log unadvanced when the value it
-/// deposits is what its write slot already holds.  Wide only: a wide entry
-/// costs 64 bytes to push and to commit, a narrow one too little to be worth
-/// a compare at every write site.  Sound because the write slot carries the
+/// Whether a write to an FF wider than 8 bytes may leave the log unadvanced
+/// when the value it deposits is what its write slot already holds.  Not
+/// narrower FFs: their single entry costs too little to be worth a compare at
+/// every write site.  Sound because the write slot carries the
 /// pending value: a dual-slot FF's next slot accumulates the step's writes,
 /// and a packed FF's current slot is written once per event and changed only
 /// by the commit.  Off for reset events: they fire after the clock events of
@@ -2228,6 +2269,12 @@ fn emit_log_push_in(
     wc: usize,
     span: Option<(u32, u32)>,
 ) -> String {
+    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
+    format!("{mark}{}", emit_log_entry(offset_expr, payload_expr, wc))
+}
+
+/// The narrow entry push of `emit_log_push_in`, without its dataflow mark.
+fn emit_log_entry(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
     // Offsets shared with the Cranelift push via write_log.rs consts,
     // so a layout change can't silently desync this emitted C.
     use crate::ir::write_log::{
@@ -2236,9 +2283,8 @@ fn emit_log_push_in(
         WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
     };
     EVENT_NARROW_PUSHES.with(|c| c.set(c.get() + 1));
-    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
     format!(
-        "{mark}{{ unsigned char* _lb = (unsigned char*)write_log; \
+        "{{ unsigned char* _lb = (unsigned char*)write_log; \
             unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
             unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
             *(unsigned int*)(_ls + {o_off}) = (unsigned int)({off}); \
@@ -2915,14 +2961,14 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 }
 
 /// Event-path WIDE FF write (static dst, `dst_width > 64`): materialize the
-/// masked RHS into a scratch and push it through the 64-byte WriteLogWideEntry
-/// pool (≤56-byte payload chunks).  Covers 65-128 bit (scalar promoted) and
-/// `>128` bit (helper-table value).  A static slice covering whole words
-/// reduces to the full-width form at a shifted offset: the commit is a plain
-/// byte-range copy, so a byte-exact subrange needs no read-modify-write
-/// against uncommitted state.  A slice that covers neither (`ff4232[1287:1196]`
-/// — 92-bit fields never land on a word boundary) goes through the general
-/// read-modify-write in `emit_event_ff_assign_wide_select`; a runtime index
+/// masked RHS into a scratch and log it (`emit_ff_elem_log`).  Covers 65-128
+/// bit (scalar promoted) and `>128` bit (helper-table value).  A static slice
+/// covering whole words reduces to the full-width form at a shifted offset:
+/// the commit is a plain byte-range copy, so a byte-exact subrange needs no
+/// read-modify-write against uncommitted state.  A slice that covers neither
+/// (`ff4232[1287:1196]`: 92-bit fields never land on a word boundary) goes
+/// through the general read-modify-write in
+/// `emit_event_ff_assign_wide_select`; a runtime index
 /// goes to the `_dynsel*` siblings.  rhs_select bails.  2-state only.
 fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
     // A sign-extended RHS is only expressible on the static-select path below;
@@ -3032,7 +3078,13 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -
     );
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb),
+        &emit_ff_elem_log(
+            &format!("(uint8_t*)_w{d}"),
+            &format!("{cur_off:#x}"),
+            native_bytes(a.dst_width),
+            (0, nb),
+            None,
+        ),
     );
     Some(format!("{{ {pre}{flag}{store}{push} }}"))
 }
@@ -3066,7 +3118,7 @@ fn emit_wide_ff_rmw_prologue(
 /// Shared tail for the wide-FF read-modify-write paths.  `span` is the byte
 /// range the write changed, `None` for the whole register; a narrowed span
 /// still composes, since entries apply in push order, last-write-wins per
-/// byte, and one FF's entries all share the wide pool.
+/// byte, and one FF's entries all share a pool.
 fn emit_wide_ff_rmw_tail(
     reg: &str,
     nb: usize,
@@ -3091,10 +3143,12 @@ fn emit_wide_ff_rmw_tail(
     }
     out.push_str(&guard_push(
         &flag,
-        &emit_wide_log_chunks(
-            &format!("((uint8_t*){reg} + {blo}u)"),
-            &format!("{:#x}", cur_off + blo as isize),
-            blen,
+        &emit_ff_elem_log(
+            &format!("(uint8_t*){reg}"),
+            &format!("{cur_off:#x}"),
+            nb,
+            (blo, blen),
+            None,
         ),
     ));
     out
@@ -3138,10 +3192,12 @@ fn emit_event_ff_assign_wide_field(
     // `emit_event_ff_assign_wide_select`.
     if !packed && hi < a.dst_width {
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
-        let log = emit_wide_log_chunks(
-            &format!("((uint8_t*)(ff_values + {dst_raw:#x}) + {blo}u)"),
-            &format!("{:#x}", cur_off + blo as isize),
-            blen,
+        let log = emit_ff_elem_log(
+            &format!("(uint8_t*)(ff_values + {dst_raw:#x})"),
+            &format!("{cur_off:#x}"),
+            nb,
+            (blo, blen),
+            None,
         );
         if let Some(store) =
             emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, Some(&log), |k| {
@@ -3283,11 +3339,7 @@ fn emit_event_ff_assign_wide_select(
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
         body.push_str(&guard_push(
             &flag,
-            &emit_wide_log_chunks(
-                &format!("({dst} + {blo}u)"),
-                &format!("{:#x}", cur_off + blo as isize),
-                blen,
-            ),
+            &emit_ff_elem_log(&dst, &format!("{cur_off:#x}"), nb, (blo, blen), None),
         ));
         return Some(format!("{{ {body} }}"));
     }
@@ -3548,10 +3600,11 @@ fn emit_event_ff_assign_wide_dynsel(
     );
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks_in(
+        &emit_ff_elem_log(
             &format!("(uint8_t*)_w{d}"),
             &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
-            nb,
+            native_bytes(a.dst_width),
+            (0, nb),
             u32::try_from(cur_off)
                 .ok()
                 .and_then(|lo| Some((lo, lo.checked_add(u32::try_from(ne * nb).ok()?)?))),
@@ -3566,6 +3619,9 @@ fn emit_event_ff_assign_wide_dynsel(
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
 /// canonical current offset.  2-state narrow packed FFs only.
 fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
+    if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+        return selection::assign(a);
+    }
     if a.dst_width == 0 {
         ev_diag("static FF: width=0");
         return None;
@@ -3710,6 +3766,9 @@ fn dyn_ff_span(a: &ProtoAssignDynamicStatement, cur_base: isize, nb: usize) -> O
 /// AssignDynamicStatement::eval_step: merge into the NEXT slot, since
 /// same-event prior writes must be visible, and push the merged element.
 fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<String> {
+    if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+        return selection::assign_dynamic(a);
+    }
     if let Some(ds) = &a.dynamic_select
         && (ds.elem_width == 0 || ds.window == 0 || ds.index_expr.width() > 64)
     {
@@ -3953,7 +4012,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
     let span = dyn_ff_span(a, cur_base, nb);
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks_in(&format!("(uint8_t*)_w{d}"), "_woff", nb, span),
+        &emit_ff_elem_log(&format!("(uint8_t*)_w{d}"), "_woff", nb, (0, nb), span),
     );
     let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
@@ -4565,6 +4624,7 @@ fn emit_event_function(
     );
     src.push_str(WIDEOPS_C_DECLS);
     src.push_str(WIDEOPS_C_INLINE);
+    src.push_str(selection::INLINE);
     src.push('\n');
     src.push_str(&gate_fns);
     // The bulk reserve is the ENTRY PREAMBLE, not body text: split or not it
@@ -6453,6 +6513,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     }
     match stmt {
         ProtoStatement::Assign(a) => {
+            if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+                return selection::assign(a);
+            }
             // A rhs_select on a plain variable is a bit-select on that variable
             // (value.select(hi, lo)); fold it into the variable's own select so
             // the wide-var select paths (emit_expr / emit_wide_expr) handle a
@@ -7211,6 +7274,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             Some(format!("{{ {} }}", inner))
         }
         ProtoStatement::AssignDynamic(a) => {
+            if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+                return selection::assign_dynamic(a);
+            }
             // Narrow signed bare RHS sign-extends at the store; bail to the
             // Cranelift/interpreter path (see the Assign arm above).
             if a.rhs_select.is_none() && a.expr.store_sign_extend_from(a.dst_width).is_some() {
@@ -8207,6 +8273,24 @@ pub fn emit_expr_root(expr: &ProtoExpression) -> Option<String> {
 }
 
 fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> {
+    if selection::handles(expr) {
+        let mut pre = String::new();
+        let value = selection::read(expr, &mut pre)?;
+        if value.width > 128 {
+            return None;
+        }
+        let ty = if value.width > 64 {
+            "__uint128_t"
+        } else {
+            "uint64_t"
+        };
+        return Some(format!(
+            "({{ {pre} {ty} _selected = 0; __builtin_memcpy(&_selected, {}, {}u); _selected; }})",
+            value.addr,
+            native_bytes(value.width)
+        ));
+    }
+
     match expr {
         ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
@@ -10242,6 +10326,7 @@ pub fn emit_dataflow_function(
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
+    body.push_str(selection::INLINE);
     body.push('\n');
     // Each cell's code, indented for a function body.
     let mut cell_code: Vec<String> = Vec::with_capacity(cells.len());
@@ -10471,11 +10556,406 @@ mod tests {
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(selection::INLINE);
         src.push_str(&format!(
             "\n{ENTRY_ATTR}\nvoid veryl_aot_eval{ENTRY_SIG} {{\n    (void)write_log;\n{}{body}}}\n",
             emit_reserve_prologue(narrow, wide)
         ));
         Some(src)
+    }
+
+    #[test]
+    fn adjusted_selections_compile_and_preserve_aliasing() {
+        if !cc_available() {
+            return;
+        }
+        for (width, window, rows) in [(64, 8, false), (129, 65, false), (8192, 8, true)] {
+            let ds = ProtoDynamicBitSelect {
+                low_adjust: 7,
+                row_elements: rows.then_some(4096),
+                index_expr: Box::new(var_expr(VarOffset::Comb(2048), 64)),
+                elem_width: 1,
+                window,
+                num_elements: if rows { 2 * 8192 } else { width },
+            };
+            let write = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0),
+                dst_width: width,
+                select: None,
+                dynamic_select: Some(ds.clone()),
+                rhs_select: None,
+                expr: var_expr(VarOffset::Comb(0), width),
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            });
+            let read = ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0),
+                select: None,
+                dynamic_select: Some(ds),
+                width: window,
+                var_full_width: width,
+                expr_context: ctx(window, false),
+            };
+            let output = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(2064),
+                dst_width: window,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: read,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            });
+            assert!(write.can_build_binary() && output.can_build_binary());
+            let statements = vec![write, output];
+            let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                &crate::ir::Config::default(),
+                statements.clone(),
+                false,
+                None,
+            )
+            .expect("adjusted field must stay in JIT");
+            let src = emit_test_function(&statements).expect("adjusted field must stay in C");
+            let tmp = std::env::temp_dir().join(format!(
+                "veryl_adjusted_{}_{}",
+                std::process::id(),
+                width
+            ));
+            let module = compile_for_test(&tmp, &src, "adjusted C");
+            for func in module.iter().map(|m| m.func).chain([jit]) {
+                let mut ff = [0; 8];
+                let mut comb = vec![0u8; 2112];
+                let nb = native_bytes(width);
+                for (i, byte) in comb[..nb].iter_mut().enumerate() {
+                    *byte = (i as u8).wrapping_mul(73).wrapping_add(11);
+                }
+                for index in [0usize, 3, 8, 71, if rows { 8192 + 9 } else { width + 6 }] {
+                    let old = comb.clone();
+                    comb[2048..2056].copy_from_slice(&(index as u64).to_le_bytes());
+                    let mut expected = old[..nb].to_vec();
+                    let (row, local, elements) = if rows {
+                        (index / 8192, index % 8192, 4096)
+                    } else {
+                        (0, index, width)
+                    };
+                    let start = local as i128 - 7;
+                    for bit in 0..window {
+                        let dst = start + bit as i128;
+                        if dst >= 0 && dst < elements as i128 {
+                            let dst = row * elements + dst as usize;
+                            let value = (old[bit / 8] >> (bit % 8)) & 1;
+                            expected[dst / 8] =
+                                (expected[dst / 8] & !(1 << (dst % 8))) | (value << (dst % 8));
+                        }
+                    }
+                    let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                    unsafe {
+                        (func)(
+                            ff.as_mut_ptr(),
+                            comb.as_mut_ptr(),
+                            &mut log as *mut _ as *mut u8,
+                            0,
+                        );
+                    }
+                    assert_eq!(&comb[..nb], expected, "width={width} index={index}");
+                    for bit in 0..window {
+                        let src = start + bit as i128;
+                        let expected = if src >= 0 && src < elements as i128 {
+                            let src = row * elements + src as usize;
+                            (comb[src / 8] >> (src % 8)) & 1
+                        } else {
+                            0
+                        };
+                        assert_eq!(
+                            (comb[2064 + bit / 8] >> (bit % 8)) & 1,
+                            expected,
+                            "read width={width} index={index} bit={bit}"
+                        );
+                    }
+                }
+            }
+            let _ = fs::remove_dir_all(&tmp);
+        }
+    }
+
+    #[test]
+    fn adjusted_ff_selections_stay_compiled_and_commit_after_the_edge() {
+        if !cc_available() {
+            return;
+        }
+        for width in [8, 64, 129] {
+            for packed in [false, true] {
+                for dynamic in [false, true] {
+                    let nb = native_bytes(width);
+                    let next = if packed { 0 } else { 2 * nb };
+                    let ds = ProtoDynamicBitSelect {
+                        low_adjust: 7,
+                        row_elements: None,
+                        index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                        elem_width: 1,
+                        window: 8,
+                        num_elements: width,
+                    };
+                    let stmt = if dynamic {
+                        ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+                            dst_base: VarOffset::Ff(next as isize),
+                            dst_stride: nb as isize,
+                            dst_num_elements: 2,
+                            dst_index_expr: const_expr(1, 1),
+                            dst_width: width,
+                            select: None,
+                            dynamic_select: Some(ds),
+                            rhs_select: None,
+                            expr: const_expr(0xa5, 8),
+                            dst_ff_current_base_offset: 0,
+                            comb_direct: false,
+                        })
+                    } else {
+                        ProtoStatement::Assign(ProtoAssignStatement {
+                            dst: VarOffset::Ff(next as isize),
+                            dst_width: width,
+                            select: None,
+                            dynamic_select: Some(ds),
+                            rhs_select: None,
+                            expr: const_expr(0xa5, 8),
+                            dst_ff_current_offset: 0,
+                            comb_direct: false,
+                            token: dummy_token(),
+                        })
+                    };
+                    assert!(stmt.can_build_binary());
+                    let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                        &crate::ir::Config::default(),
+                        vec![stmt.clone()],
+                        false,
+                        None,
+                    )
+                    .expect("adjusted FF must stay in JIT");
+                    let src = emit_test_function(&[stmt]).expect("adjusted FF must stay in C");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "veryl_adjusted_ff_{}_{width}_{packed}_{dynamic}",
+                        std::process::id()
+                    ));
+                    let module = compile_for_test(&tmp, &src, "adjusted FF C");
+                    for func in module.iter().map(|m| m.func).chain([jit]) {
+                        for index in [0usize, 15.min(width - 1), width + 6, width + 7] {
+                            let mut ff = vec![0; 4 * nb];
+                            for element in 0..4 {
+                                for bit in 0..width {
+                                    if bit % 3 != 0 {
+                                        ff[element * nb + bit / 8] |= 1 << (bit % 8);
+                                    }
+                                }
+                            }
+                            let current = if dynamic { nb } else { 0 };
+                            let old = ff[current..current + nb].to_vec();
+                            let mut expected = old.clone();
+                            for bit in 0..8 {
+                                let dst = index as i128 - 7 + bit as i128;
+                                if dst >= 0 && dst < width as i128 {
+                                    let dst = dst as usize;
+                                    expected[dst / 8] = (expected[dst / 8] & !(1 << (dst % 8)))
+                                        | (((0xa5 >> bit) & 1) << (dst % 8));
+                                }
+                            }
+                            let mut comb = index.to_le_bytes();
+                            let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                            unsafe {
+                                (func)(
+                                    ff.as_mut_ptr(),
+                                    comb.as_mut_ptr(),
+                                    &mut log as *mut _ as *mut u8,
+                                    0,
+                                );
+                            }
+                            assert_eq!(
+                                &ff[current..current + nb],
+                                old,
+                                "premature FF write width={width} packed={packed} dynamic={dynamic}"
+                            );
+                            crate::ir::write_log::ff_commit_from_log(&mut ff, &log);
+                            assert_eq!(
+                                &ff[current..current + nb],
+                                expected,
+                                "width={width} packed={packed} dynamic={dynamic} index={index}"
+                            );
+                        }
+                    }
+                    let _ = fs::remove_dir_all(tmp);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjusted_ff_selections_preserve_mixed_write_order() {
+        if !cc_available() {
+            return;
+        }
+        for width in [65, 100, 128, 129, 200] {
+            let nb = native_bytes(width);
+            for dynamic in [false, true] {
+                let selected = if dynamic {
+                    ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+                        dst_base: VarOffset::Ff((2 * nb) as isize),
+                        dst_stride: nb as isize,
+                        dst_num_elements: 2,
+                        dst_index_expr: const_expr(1, 1),
+                        dst_width: width,
+                        select: None,
+                        dynamic_select: Some(ProtoDynamicBitSelect {
+                            low_adjust: 7,
+                            row_elements: None,
+                            index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                            elem_width: 1,
+                            window: 8,
+                            num_elements: width,
+                        }),
+                        rhs_select: None,
+                        expr: const_expr(0, 8),
+                        dst_ff_current_base_offset: 0,
+                        comb_direct: false,
+                    })
+                } else {
+                    ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: VarOffset::Ff((2 * nb) as isize),
+                        dst_width: width,
+                        select: None,
+                        dynamic_select: Some(ProtoDynamicBitSelect {
+                            low_adjust: 7,
+                            row_elements: None,
+                            index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                            elem_width: 1,
+                            window: 8,
+                            num_elements: width,
+                        }),
+                        rhs_select: None,
+                        expr: const_expr(0, 8),
+                        dst_ff_current_offset: 0,
+                        comb_direct: false,
+                        token: dummy_token(),
+                    })
+                };
+                let mut whole = selected.clone();
+                match &mut whole {
+                    ProtoStatement::Assign(a) => {
+                        a.dynamic_select = None;
+                        a.expr = var_expr(VarOffset::Comb(32), width);
+                    }
+                    ProtoStatement::AssignDynamic(a) => {
+                        a.dynamic_select = None;
+                        a.expr = var_expr(VarOffset::Comb(32), width);
+                    }
+                    _ => unreachable!(),
+                }
+                for reverse in [false, true] {
+                    let stmts = if reverse {
+                        vec![selected.clone(), whole.clone()]
+                    } else {
+                        vec![whole.clone(), selected.clone()]
+                    };
+                    let src = emit_event_function(&stmts, false, &[]).expect("C event must emit");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "veryl_adjusted_order_{}_{width}_{dynamic}_{reverse}",
+                        std::process::id()
+                    ));
+                    let module = compile_for_test(&tmp, &src, "adjusted C event");
+                    let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                        &crate::ir::Config::default(),
+                        stmts,
+                        false,
+                        None,
+                    )
+                    .expect("JIT event must compile");
+                    for func in module.iter().map(|m| m.func).chain([jit]) {
+                        let mut ff = vec![0; 4 * nb];
+                        let mut comb = vec![0; 32 + nb];
+                        comb[..8].copy_from_slice(&7u64.to_le_bytes());
+                        for bit in 0..width {
+                            comb[32 + bit / 8] |= 1 << (bit % 8);
+                        }
+                        let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                        unsafe {
+                            func(
+                                ff.as_mut_ptr(),
+                                comb.as_mut_ptr(),
+                                &mut log as *mut _ as *mut u8,
+                                0,
+                            );
+                        }
+                        assert!(ff[..2 * nb].iter().all(|&b| b == 0));
+                        crate::ir::write_log::ff_commit_from_log(&mut ff, &log);
+                        let current = if dynamic { nb } else { 0 };
+                        let mut expected = comb[32..].to_vec();
+                        if !reverse {
+                            expected[0] = 0;
+                        }
+                        assert_eq!(
+                            &ff[current..current + nb],
+                            expected,
+                            "width={width} dynamic={dynamic} reverse={reverse}"
+                        );
+                        let other = if dynamic { 0 } else { nb };
+                        assert!(ff[other..other + nb].iter().all(|&b| b == 0));
+                        if nb <= 16 {
+                            assert_eq!(log.wide_count(), 0);
+                        } else {
+                            assert_eq!(log.narrow_count(), 0);
+                        }
+                    }
+                    let _ = fs::remove_dir_all(tmp);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjusted_selection_store_clips_a_wide_rhs() {
+        if !cc_available() {
+            return;
+        }
+        let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 7,
+                row_elements: None,
+                index_expr: Box::new(var_expr(VarOffset::Comb(16), 64)),
+                elem_width: 1,
+                window: 8,
+                num_elements: 64,
+            }),
+            rhs_select: None,
+            expr: var_expr(VarOffset::Comb(32), 128),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        });
+        let src = emit_test_function(&[stmt]).expect("C store must emit");
+        let tmp = std::env::temp_dir().join(format!("veryl_adjusted_rhs_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "adjusted C store") else {
+            let _ = fs::remove_dir_all(tmp);
+            return;
+        };
+        for index in 0..8u64 {
+            let mut comb = [0; 48];
+            comb[16..24].copy_from_slice(&index.to_le_bytes());
+            comb[32..].fill(0xff);
+            unsafe {
+                (module.func)(
+                    std::ptr::null_mut(),
+                    comb.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                );
+            }
+            let got = u64::from_le_bytes(comb[..8].try_into().unwrap());
+            assert_eq!(got, (1 << (index + 1)) - 1);
+        }
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -10717,6 +11197,8 @@ mod tests {
             dst_width: 40,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(var_expr(VarOffset::Comb(0x8), 8)),
                 elem_width: 4,
                 window: 4,
@@ -10958,7 +11440,8 @@ mod tests {
     }
 
     /// Run an emitted event function over a hand-built `WriteLogBuffer` and
-    /// return the wide entries it pushed, as `(offset, payload_bytes)`.
+    /// return the entries it pushed, wide then narrow, as
+    /// `(offset, payload_bytes)`.
     fn run_wide_ff_event(src: &str, what: &str, ff: &mut [u8]) -> Option<Vec<(u32, Vec<u8>)>> {
         let mut comb = vec![0u8; 256];
         run_wide_ff_event_in(src, what, ff, &mut comb)
@@ -11024,9 +11507,46 @@ mod tests {
                 let p = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD as usize;
                 (off, e[p..p + nb].to_vec())
             })
-            .collect();
+            .collect::<Vec<_>>();
         let _ = fs::remove_dir_all(&tmp);
-        Some(out)
+        Some(
+            out.into_iter()
+                .chain(narrow_log_entries(&log, &narrow))
+                .collect(),
+        )
+    }
+
+    /// The narrow entries `run_wide_ff_event_in` left in `log`, as
+    /// `(offset, payload bytes)`.
+    fn narrow_log_entries(log: &[u8], narrow: &[u8]) -> Vec<(u32, Vec<u8>)> {
+        use crate::ir::write_log::{
+            WRITE_LOG_ENTRY_OFFSET_OFFSET, WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
+            WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
+            WRITE_LOG_NARROW_OFFSET_COUNT,
+        };
+        let field = |b: &[u8], at: i32, n: usize| b[at as usize..at as usize + n].to_vec();
+        let count = u32::from_le_bytes(
+            field(log, WRITE_LOG_NARROW_OFFSET_COUNT, 4)
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let esz = WRITE_LOG_ENTRY_SIZE as usize;
+        (0..count)
+            .map(|i| {
+                let e = &narrow[i * esz..(i + 1) * esz];
+                let off = u32::from_le_bytes(
+                    field(e, WRITE_LOG_ENTRY_OFFSET_OFFSET, 4)
+                        .try_into()
+                        .unwrap(),
+                );
+                let wc = u16::from_le_bytes(
+                    field(e, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, 2)
+                        .try_into()
+                        .unwrap(),
+                ) as usize;
+                (off, field(e, WRITE_LOG_ENTRY_OFFSET_PAYLOAD, wc))
+            })
+            .collect()
     }
 
     #[test]
@@ -11172,6 +11692,20 @@ mod tests {
         );
     }
 
+    /// A 16-byte element reassembled from its two narrow words.
+    fn element_from_words(entries: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut words: Vec<_> = entries.to_vec();
+        words.sort_by_key(|(off, _)| *off);
+        assert_eq!(
+            words
+                .iter()
+                .map(|(off, p)| (*off, p.len()))
+                .collect::<Vec<_>>(),
+            [(0, 8), (8, 8)]
+        );
+        words.into_iter().flat_map(|(_, p)| p).collect()
+    }
+
     #[test]
     fn emit_event_ff_wide_dynamic_bit_merges_at_the_runtime_index() {
         // `ff72[idx] <= bit`: a one-bit field at a runtime offset inside a
@@ -11186,6 +11720,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(70, 8)),
                 elem_width: 1,
                 window: 1,
@@ -11203,10 +11739,7 @@ mod tests {
         let Some(entries) = run_wide_ff_event(&src, "wff_dyn", &mut ff) else {
             return;
         };
-        assert_eq!(entries.len(), 1);
-        let (off, payload) = &entries[0];
-        assert_eq!(*off, 0);
-        assert_eq!(payload.len(), 16, "72 bits sits in the 128-bit size class");
+        let payload = element_from_words(&entries);
         let hi = u64::from_le_bytes(payload[8..16].try_into().unwrap());
         assert_eq!(hi, 1u64 << (70 - 64), "bit 70 set, nothing else");
         assert_eq!(
@@ -11230,6 +11763,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(71, 8)),
                 elem_width: 1,
                 window: 8,
@@ -11247,8 +11782,7 @@ mod tests {
         let Some(entries) = run_wide_ff_event(&src, "wff_spill", &mut ff) else {
             return;
         };
-        assert_eq!(entries.len(), 1);
-        let hi = u64::from_le_bytes(entries[0].1[8..16].try_into().unwrap());
+        let hi = u64::from_le_bytes(element_from_words(&entries)[8..16].try_into().unwrap());
         assert_eq!(
             hi,
             1u64 << (71 - 64),
@@ -11312,6 +11846,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(16, 8)), // 16 * 8 = 128 >= 72
                 elem_width: 8,
                 window: 8,
@@ -12801,6 +13337,8 @@ mod tests {
                 var_offset: VarOffset::Comb(base),
                 select: None,
                 dynamic_select: Some(ProtoDynamicBitSelect {
+                    low_adjust: 0,
+                    row_elements: None,
                     index_expr: Box::new(var_expr(VarOffset::Comb(idx_off), 32)),
                     elem_width: ew,
                     window: ew,
@@ -12937,6 +13475,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(var_expr(VarOffset::Comb(72), 32)),
                 elem_width: 192,
                 window: 192,
@@ -13101,6 +13641,8 @@ mod tests {
             var_offset: VarOffset::Comb(0x80),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 4,
                 window: 4,
@@ -13128,6 +13670,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 4,
                 window: 4,
@@ -13153,6 +13697,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 8,
                 window: 8,
@@ -13206,6 +13752,8 @@ mod tests {
             num_elements: 8,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(5, 8)),
                 elem_width: 1,
                 window: 1,
@@ -13235,6 +13783,8 @@ mod tests {
             num_elements: 4,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(0, 8)),
                 elem_width: 1,
                 window: 1,
@@ -14285,6 +14835,7 @@ mod tests {
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(selection::INLINE);
         src.push_str(
             "\n__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *ff_values, uint8_t *comb_values, uint64_t *write_log, intptr_t ff_delta) {\n\
@@ -15515,6 +16066,33 @@ mod tests {
         assert!(!emit(wide(), false).contains("? 1u : 0u"));
         assert!(!emit(narrow(), true).contains("? 1u : 0u"));
         assert!(emit(narrow(), true).contains("_lc + 1u"));
+    }
+
+    #[test]
+    fn emit_event_wide_field_writes_mark_their_readers() {
+        // A field write logs from a constant offset inside its register; the
+        // push must still be placed so it marks the readers it reaches.
+        for (width, (hi, lo)) in [(100, (63, 32)), (200, (95, 64))] {
+            let a = ProtoAssignStatement {
+                dst: VarOffset::Ff(0x40),
+                dst_width: width,
+                select: Some((hi, lo)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr: const_expr(0x1234, hi - lo + 1),
+                dst_ff_current_offset: 0x40,
+                comb_direct: false,
+                token: dummy_token(),
+            };
+            set_dataflow_ff_marks(Some(std::sync::Arc::new(vec![(0x40, 0x60, vec![(0, 1)])])));
+            DF_FF_UNCOVERED.with(|c| c.set(false));
+            let src = emit_event_function(&[ProtoStatement::Assign(a)], true, &[]);
+            let uncovered = DF_FF_UNCOVERED.with(|c| c.replace(false));
+            set_dataflow_ff_marks(None);
+            let src = src.expect("must emit");
+            assert!(!uncovered, "width {width}: the push was left unplaced");
+            assert!(src.contains("_dfm[0] |= 0x1ULL"), "width {width}: {src}");
+        }
     }
 
     #[test]

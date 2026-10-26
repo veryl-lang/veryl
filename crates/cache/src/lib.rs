@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 const MANIFEST: &str = "manifest.toml";
 const FRAGMENT_DIR: &str = "fragments";
 const FRAGMENT_EXT: &str = "frag";
 /// Bump on any incompatible change to the blob or manifest layout.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 const BLOB_MAGIC: &[u8; 4] = b"VFRG";
 
 /// Returns the BLAKE3 hash of `data` as a hex string.
@@ -47,7 +48,7 @@ pub fn binary_fingerprint() -> Option<String> {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileEntry {
     /// BLAKE3 hex hash of the source file contents.
-    pub hash: String,
+    pub file_hash: String,
     /// Blob path relative to the store root; `None` if the file was
     /// analyzed but is not cacheable (e.g. it produced diagnostics).
     pub fragment: Option<String>,
@@ -68,6 +69,16 @@ pub struct FileEntry {
     /// `None` if it produced none.
     #[serde(default)]
     pub diagnostics: Option<String>,
+    /// Hash of the generic instances of the declarations in this file, from
+    /// the last successful build. They are registered by the referencing
+    /// files, so they can change while this file does not.
+    #[serde(default)]
+    pub generic_instance_hash: String,
+    /// When something the output depends on besides the source (currently the
+    /// generic instances) last changed. An output generated before it is stale,
+    /// like one generated before the source was modified.
+    #[serde(default)]
+    pub updated_time: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -172,7 +183,7 @@ impl Store {
         let name = content_hash(&data);
         let rel = format!("{FRAGMENT_DIR}/{}/{}.{FRAGMENT_EXT}", &name[..2], name);
         let path = self.root.join(&rel);
-        if !path.exists() {
+        if fs::read(&path).ok().as_deref() != Some(data.as_slice()) {
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
@@ -187,6 +198,9 @@ impl Store {
     /// Reads and verifies a content-addressed blob, returning its payload.
     fn read_blob(&self, rel: &str) -> Option<Vec<u8>> {
         let data = fs::read(self.root.join(rel)).ok()?;
+        if content_hash(&data) != Path::new(rel).file_stem()?.to_str()? {
+            return None;
+        }
         let payload = data.strip_prefix(BLOB_MAGIC.as_slice())?;
         let (version, payload) = payload.split_first_chunk::<4>()?;
         if u32::from_le_bytes(*version) != SCHEMA_VERSION {
@@ -197,18 +211,20 @@ impl Store {
 
     /// Records an entry for the build in progress. When `blob` is given it
     /// is written content-addressed; an identical existing blob is reused.
-    pub fn put(&mut self, src: String, hash: String, blob: Option<&[u8]>) {
+    pub fn put(&mut self, src: String, file_hash: String, blob: Option<&[u8]>) {
         let fragment = blob.and_then(|payload| self.write_blob(payload));
 
         self.next_files.insert(
             src,
             FileEntry {
-                hash,
+                file_hash,
                 fragment,
                 dependents: Vec::new(),
                 tests: Vec::new(),
                 has_non_native_test: false,
                 diagnostics: None,
+                generic_instance_hash: String::new(),
+                updated_time: None,
             },
         );
     }
@@ -265,6 +281,20 @@ impl Store {
         if let Some(entry) = self.next_files.get_mut(src) {
             entry.tests = tests;
             entry.has_non_native_test = has_non_native_test;
+        }
+    }
+
+    /// Sets the generic instances hash of a file for the build in progress.
+    pub fn set_generic_instance_hash(&mut self, src: &str, hash: String) {
+        if let Some(entry) = self.next_files.get_mut(src) {
+            entry.generic_instance_hash = hash;
+        }
+    }
+
+    /// Sets the updated time of a file for the build in progress.
+    pub fn set_updated_time(&mut self, src: &str, updated_time: Option<SystemTime>) {
+        if let Some(entry) = self.next_files.get_mut(src) {
+            entry.updated_time = updated_time;
         }
     }
 
@@ -367,7 +397,7 @@ mod tests {
 
         let store = Store::open(&root, "key1");
         let entry = store.entry("a.veryl").unwrap();
-        assert_eq!(entry.hash, "h1");
+        assert_eq!(entry.file_hash, "h1");
         assert_eq!(entry.dependents, vec!["b.veryl".to_string()]);
         assert_eq!(store.load(entry).unwrap(), b"blob-a");
         let entry = store.entry("b.veryl").unwrap();
@@ -430,7 +460,27 @@ mod tests {
         drop(store);
 
         let reopened = Store::open(&root, "key");
-        assert_eq!(reopened.entry("a.veryl").unwrap().hash, "h2");
+        assert_eq!(reopened.entry("a.veryl").unwrap().file_hash, "h2");
+    }
+
+    #[test]
+    fn payload_corruption_misses_and_rewriting_repairs_the_blob() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(directory.path(), "key");
+        store.put("source".into(), "hash".into(), Some(b"payload"));
+        store.save();
+        let entry = store.entry("source").unwrap().clone();
+        let path = directory.path().join(entry.fragment.as_ref().unwrap());
+        let mut corrupt = fs::read(&path).unwrap();
+        *corrupt.last_mut().unwrap() ^= 1;
+        fs::write(&path, corrupt).unwrap();
+        assert!(store.load(&entry).is_none());
+        store.put("source".into(), "hash".into(), Some(b"payload"));
+        store.save();
+        assert_eq!(
+            store.load(store.entry("source").unwrap()).as_deref(),
+            Some(b"payload".as_slice())
+        );
     }
 
     fn walk_blobs(root: &Path) -> Vec<PathBuf> {

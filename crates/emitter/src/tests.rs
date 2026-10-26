@@ -3445,6 +3445,105 @@ endmodule
 }
 
 #[test]
+fn case_expression() {
+    let code = r#"
+module ModuleA {
+    const A: bit   = 0;
+    const B: u32   = 1;
+    const C: logic = 2;
+
+    var x: logic<2>;
+
+    let _a: u32 = case x {
+        A      : 0,
+        B, 2   : 1,
+        A + 1  : 2,
+        default: 3,
+    };
+
+    let _b: u32 = case x {
+        A      : 0,
+        B, C   : 1,
+        3      : 2,
+        default: 3,
+    };
+
+    let _c: u32 = case x {
+        A      : 0,
+        2'b1x  : 1,
+        default: 2,
+    };
+
+    let _d: u32 = case x {
+        A      : 0,
+        B      : 1,
+        2..=3  : 2,
+        default: 3,
+    };
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    localparam bit          A = 0;
+    localparam int unsigned B = 1;
+    localparam logic        C = 2;
+
+    logic [2-1:0] x;
+
+    int unsigned _a; always_comb _a = (((x) == (A)) ? (
+        0
+    ) : ((x) == (B)) ? (
+        1
+    ) : ((x) == (2)) ? (
+        1
+    ) : ((x) == (A + 1)) ? (
+        2
+    ) : (
+        3
+    ));
+
+    int unsigned _b; always_comb _b = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (B)) ? (
+        1
+    ) : ((x) ==? (C)) ? (
+        1
+    ) : ((x) ==? (3)) ? (
+        2
+    ) : (
+        3
+    ));
+
+    int unsigned _c; always_comb _c = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (2'b1x)) ? (
+        1
+    ) : (
+        2
+    ));
+
+    int unsigned _d; always_comb _d = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (B)) ? (
+        1
+    ) : ((x) inside {[2:3]}) ? (
+        2
+    ) : (
+        3
+    ));
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn emit_global_function() {
     let code = r#"
 function func::<A: u32>() -> u32 {
