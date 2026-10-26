@@ -1,10 +1,11 @@
+use crate::coordinates::{byte_position, parser_column, utf16_column};
 use crate::incremental::LsIncrementalMap;
 use crate::keyword::KEYWORDS;
 use async_channel::{Receiver, Sender};
 use dashmap::DashMap;
 use futures::executor::block_on;
 use ropey::Rope;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use tower_lsp_server::Client;
 use tower_lsp_server::ls_types::ClientCapabilities;
@@ -20,7 +21,7 @@ use veryl_analyzer::{
 use veryl_formatter::Formatter;
 use veryl_metadata::{ComponentManifest, Metadata, MetadataError};
 use veryl_parser::resource_table;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::{Token, TokenSource};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{Finder, Parser, ParserError};
 use veryl_path::PathSet;
@@ -311,11 +312,22 @@ impl Server {
     fn get_line(&self, url: &Url, line: usize) -> Option<String> {
         if let Some(path) = url.to_file_path()
             && let Some(rope) = self.document_map.get(path.as_ref())
-            && let Some(text) = rope.line(line - 1).as_str()
+            && let Some(slice) = rope.get_line(line - 1)
+            && let Some(text) = slice.as_str()
         {
             return Some(text.to_string());
         }
         None
+    }
+
+    fn source_column(&self, url: &Url, line: usize, column: usize) -> usize {
+        url.to_file_path()
+            .and_then(|path| {
+                self.document_map
+                    .get(path.as_ref())
+                    .map(|text| parser_column(&text, line - 1, column - 1))
+            })
+            .unwrap_or(column)
     }
 
     fn completion(
@@ -325,6 +337,7 @@ impl Server {
         column: usize,
         context: &Option<CompletionContext>,
     ) {
+        let source_column = self.source_column(url, line, column);
         let ret = if let Some(context) = context {
             match context.trigger_kind {
                 CompletionTriggerKind::TRIGGER_CHARACTER => {
@@ -333,7 +346,7 @@ impl Server {
                         if let Some(text) = self.get_line(url, line) {
                             let text = text.split_whitespace().last().unwrap();
                             let text = text.trim_matches(|c| !char::is_alphanumeric(c));
-                            let items = completion_member(url, line, column, text);
+                            let items = completion_member(url, line, source_column, text);
                             Some(CompletionResponse::Array(items))
                         } else {
                             None
@@ -346,13 +359,13 @@ impl Server {
                 }
                 CompletionTriggerKind::INVOKED => {
                     let mut items = if let Ok(metadata) = self.get_metadata(url) {
-                        completion_symbol(&metadata, url, line, column)
+                        completion_symbol(&metadata, url, line, source_column)
                     } else {
                         vec![]
                     };
                     items.append(&mut completion_keyword());
                     if let Some(text) = self.get_line(url, line) {
-                        set_completion_edit_ranges(&mut items, &text, line, column);
+                        set_completion_edit_ranges(&mut items, &text, line, source_column);
                     }
                     Some(CompletionResponse::Array(items))
                 }
@@ -368,6 +381,8 @@ impl Server {
     }
 
     fn goto_definition(&mut self, url: &Url, line: usize, column: usize) {
+        let mut sources = HashMap::new();
+        let column = self.source_column(url, line, column);
         if let Some(path) = url.to_file_path()
             && let Some(parser) = self.parser_map.get(path.as_ref())
         {
@@ -389,7 +404,7 @@ impl Server {
                     scope,
                     define_context,
                 )) {
-                    let location = to_location(&symbol.found.token);
+                    let location = to_location(&symbol.found.token, &mut sources);
                     self.snd
                         .send_blocking(MsgFromServer::GotoDefinition(location))
                         .unwrap();
@@ -404,6 +419,7 @@ impl Server {
     }
 
     fn symbol(&mut self, query: &str) {
+        let mut sources = HashMap::new();
         let mut ret = Vec::new();
         for symbol in symbol_table::get_all() {
             let name = symbol.token.text.to_string();
@@ -446,7 +462,7 @@ impl Server {
                     VerylSymbolKind::ProjectProperty(_) => SymbolKind::CONSTANT,
                     VerylSymbolKind::PropNamespace => SymbolKind::NAMESPACE,
                 };
-                if let Some(location) = to_location(&symbol.token) {
+                if let Some(location) = to_location(&symbol.token, &mut sources) {
                     #[allow(deprecated)]
                     let symbol_info = SymbolInformation {
                         name,
@@ -464,6 +480,7 @@ impl Server {
     }
 
     fn hover(&mut self, url: &Url, line: usize, column: usize) {
+        let column = self.source_column(url, line, column);
         if let Some(path) = url.to_file_path()
             && let Some(parser) = self.parser_map.get(path.as_ref())
         {
@@ -500,6 +517,8 @@ impl Server {
     }
 
     fn references(&mut self, url: &Url, line: usize, column: usize) {
+        let mut sources = HashMap::new();
+        let column = self.source_column(url, line, column);
         let mut ret = Vec::new();
         if let Some(path) = url.to_file_path()
             && let Some(parser) = self.parser_map.get(path.as_ref())
@@ -523,7 +542,7 @@ impl Server {
                 )) {
                     let refs = symbol_table::get_references(symbol.found.id).unwrap_or_default();
                     for reference in &refs {
-                        if let Some(location) = to_location(reference) {
+                        if let Some(location) = to_location(reference, &mut sources) {
                             ret.push(location);
                         }
                     }
@@ -568,9 +587,14 @@ impl Server {
             let mut line = 0;
             let mut column = 0;
             let mut data = Vec::new();
+            let mut sources = HashMap::new();
             for (token, token_type) in tokens {
-                let token_line = token.line - 1;
-                let token_column = token.column - 1;
+                let text = sources
+                    .entry(token.source)
+                    .or_insert_with(|| Rope::from_str(&token.source.get_text()));
+                let range = byte_range(text, token.pos as usize, token.length as usize);
+                let token_line = range.start.line;
+                let token_column = range.start.character;
 
                 let delta_line = token_line - line;
                 let delta_start = if delta_line == 0 {
@@ -582,7 +606,7 @@ impl Server {
                 let semantic_token = SemanticToken {
                     delta_line,
                     delta_start,
-                    length: token.length,
+                    length: range.end.character - token_column,
                     token_type,
                     token_modifiers_bitset: 0,
                 };
@@ -879,19 +903,7 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
 
     let range = primary
         .as_ref()
-        .map(|label| {
-            if rope.len_bytes() <= label.offset() {
-                Range::default()
-            } else {
-                let line = rope.byte_to_line(label.offset());
-                let pos = label.offset() - rope.line_to_byte(line);
-                let len = label.len();
-                Range::new(
-                    Position::new(line as u32, pos as u32),
-                    Position::new(line as u32, (pos + len) as u32),
-                )
-            }
-        })
+        .map(|label| byte_range(rope, label.offset(), label.len()))
         .unwrap_or_default();
 
     // Non-primary labels and related diagnostics become navigable
@@ -969,32 +981,38 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
     )
 }
 
+fn byte_range(rope: &Rope, offset: usize, length: usize) -> Range {
+    let (line, column) = byte_position(rope, offset);
+    let (end_line, end_column) = byte_position(rope, offset.saturating_add(length));
+    Range::new(
+        Position::new(line, column),
+        Position::new(end_line, end_column),
+    )
+}
+
 fn label_to_related(
     label: &miette::LabeledSpan,
     source_code: &dyn miette::SourceCode,
 ) -> Option<DiagnosticRelatedInformation> {
-    let sc = source_code.read_span(label.inner(), 0, 0).ok()?;
-    let path = sc.name()?;
-    let uri = Url::from_file_path(path)?;
-    let line = sc.line() as u32;
-    let col = sc.column() as u32;
-    let len = label.len() as u32;
-    let range = Range::new(Position::new(line, col), Position::new(line, col + len));
+    let sc = source_code.read_span(label.inner(), 1, 0).ok()?;
+    let uri = Url::from_file_path(sc.name()?)?;
+    let text = std::str::from_utf8(sc.data()).ok()?;
+    let offset = label.offset().checked_sub(sc.span().offset())?;
+    let mut range = byte_range(&Rope::from_str(text), offset, label.len());
+    range.start.line += sc.line() as u32;
+    range.end.line += sc.line() as u32;
     Some(DiagnosticRelatedInformation {
         location: Location { uri, range },
         message: label.label().unwrap_or("").to_string(),
     })
 }
 
-fn to_location(token: &Token) -> Option<Location> {
-    let line = token.line - 1;
-    let column = token.column - 1;
-    let length = token.length;
+fn to_location(token: &Token, sources: &mut HashMap<TokenSource, Rope>) -> Option<Location> {
     let uri = Url::from_file_path(token.source.to_string())?;
-    let range = Range::new(
-        Position::new(line, column),
-        Position::new(line, column + length),
-    );
+    let text = sources
+        .entry(token.source)
+        .or_insert_with(|| Rope::from_str(&token.source.get_text()));
+    let range = byte_range(text, token.pos as usize, token.length as usize);
     Some(Location { uri, range })
 }
 
@@ -1556,7 +1574,7 @@ fn set_completion_edit_ranges(
     let path_len = before.iter().rev().take_while(|c| is_path(c)).count();
 
     let line = (line - 1) as u32;
-    let end = Position::new(line, (column - 1) as u32);
+    let end = Position::new(line, utf16_column(text, column));
     for item in items.iter_mut() {
         let Some(new_text) = item.insert_text.take() else {
             continue;
@@ -1568,7 +1586,7 @@ fn set_completion_edit_ranges(
                 new_text.starts_with(&typed)
             })
             .unwrap_or(word_len);
-        let start = Position::new(line, end.character - replace_len as u32);
+        let start = Position::new(line, utf16_column(text, column - replace_len));
         item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
             range: Range::new(start, end),
             new_text,

@@ -143,6 +143,9 @@ impl Token {
         // Columns count CHARACTERS (parol), while `length` is the byte
         // length — multi-byte UTF-8 text must not overshoot.
         let text = self.to_string();
+        if text.is_empty() {
+            return self.column.saturating_sub(1);
+        }
         if text.matches('\n').count() > 0 {
             text.split('\n')
                 .next_back()
@@ -313,14 +316,14 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         let length = (cap.end() - pos) as u32;
 
         let prev_text = &text[prev_pos..(pos)];
-        let n_lines = prev_text.matches('\n').count() as u32;
-        line += n_lines;
-
-        column = if n_lines == 0 {
-            column + prev_text.len() as u32
-        } else {
-            (prev_text.len() - prev_text.rfind('\n').unwrap_or(0)) as u32
-        };
+        for character in prev_text.chars() {
+            if character == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
 
         prev_pos = pos;
 
@@ -339,7 +342,7 @@ fn split_comment_token(token: Token) -> Vec<Token> {
             line,
             column,
             length,
-            pos: pos as u32 + length,
+            pos: token.pos + pos as u32,
             source: token.source,
         };
         ret.push(token);
@@ -601,3 +604,24 @@ token_with_comments!(DollarIdentifier);
 token_with_comments!(Identifier);
 
 token_without_comments!(Any);
+
+#[cfg(test)]
+mod coordinate_regressions {
+    use super::*;
+    #[test]
+    fn comment_offsets_are_absolute_and_columns_count_scalars() {
+        let text = "/*é*/ /*😀*/";
+        let token = Token {
+            text: crate::resource_table::insert_str(text),
+            line: 2,
+            column: 3,
+            length: text.len() as u32,
+            pos: 40,
+            ..Default::default()
+        };
+        let tokens = split_comment_token(token);
+        assert_eq!(tokens.len(), 2);
+        assert_eq!((tokens[0].pos, tokens[0].column), (40, 3));
+        assert_eq!((tokens[1].pos, tokens[1].column), (47, 9));
+    }
+}
