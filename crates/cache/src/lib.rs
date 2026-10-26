@@ -183,7 +183,7 @@ impl Store {
         let name = content_hash(&data);
         let rel = format!("{FRAGMENT_DIR}/{}/{}.{FRAGMENT_EXT}", &name[..2], name);
         let path = self.root.join(&rel);
-        if !path.exists() {
+        if fs::read(&path).ok().as_deref() != Some(data.as_slice()) {
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
@@ -198,6 +198,9 @@ impl Store {
     /// Reads and verifies a content-addressed blob, returning its payload.
     fn read_blob(&self, rel: &str) -> Option<Vec<u8>> {
         let data = fs::read(self.root.join(rel)).ok()?;
+        if content_hash(&data) != Path::new(rel).file_stem()?.to_str()? {
+            return None;
+        }
         let payload = data.strip_prefix(BLOB_MAGIC.as_slice())?;
         let (version, payload) = payload.split_first_chunk::<4>()?;
         if u32::from_le_bytes(*version) != SCHEMA_VERSION {
@@ -458,6 +461,26 @@ mod tests {
 
         let reopened = Store::open(&root, "key");
         assert_eq!(reopened.entry("a.veryl").unwrap().file_hash, "h2");
+    }
+
+    #[test]
+    fn payload_corruption_misses_and_rewriting_repairs_the_blob() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(directory.path(), "key");
+        store.put("source".into(), "hash".into(), Some(b"payload"));
+        store.save();
+        let entry = store.entry("source").unwrap().clone();
+        let path = directory.path().join(entry.fragment.as_ref().unwrap());
+        let mut corrupt = fs::read(&path).unwrap();
+        *corrupt.last_mut().unwrap() ^= 1;
+        fs::write(&path, corrupt).unwrap();
+        assert!(store.load(&entry).is_none());
+        store.put("source".into(), "hash".into(), Some(b"payload"));
+        store.save();
+        assert_eq!(
+            store.load(store.entry("source").unwrap()).as_deref(),
+            Some(b"payload".as_slice())
+        );
     }
 
     fn walk_blobs(root: &Path) -> Vec<PathBuf> {
