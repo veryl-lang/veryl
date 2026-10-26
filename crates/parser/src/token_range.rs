@@ -1615,3 +1615,31 @@ mod span_regressions {
         assert_eq!(span.len(), u32::MAX as usize + 2);
     }
 }
+
+#[cfg(test)]
+mod position_regressions {
+    use super::*;
+
+    #[test]
+    fn cursor_range_includes_the_final_tokens_unicode_characters() {
+        let path = PathId(7);
+        let source = TokenSource::File {
+            path,
+            text: Default::default(),
+        };
+        let beg = Token::new("a", 2, 1, 1, 0, source);
+        let end = Token::new("α😀z", 2, 4, 7, 3, source);
+        let range = TokenRange { beg, end };
+        for column in [1, 4, 5, 6] {
+            assert!(range.include(path, 2, column));
+        }
+        assert!(!range.include(path, 2, 7));
+        let range = TokenRange {
+            beg,
+            end: Token::new("x\n😀z", 2, 4, 7, 3, source),
+        };
+        assert!(range.include(path, 3, 1));
+        assert!(range.include(path, 3, 2));
+        assert!(!range.include(path, 3, 3));
+    }
+}
