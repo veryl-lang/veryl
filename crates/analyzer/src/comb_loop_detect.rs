@@ -104,7 +104,12 @@ pub(crate) fn analysis_size() -> (usize, usize, usize) {
 }
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
-    check_inner(ir).0
+    check_with_completeness(ir).0
+}
+
+/// Return diagnostics together with the detector's analysis-completeness flag.
+pub fn check_with_completeness(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
+    check_inner(ir)
 }
 
 #[cfg(test)]
