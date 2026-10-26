@@ -28,21 +28,9 @@ impl TokenRange {
     }
 
     pub fn include(&self, path: PathId, line: u32, column: u32) -> bool {
-        if self.beg.source == path {
-            if self.beg.line == line {
-                if self.end.line == line {
-                    self.beg.column <= column && column <= self.end.column
-                } else {
-                    self.beg.column <= column
-                }
-            } else if self.end.line == line {
-                column <= self.end.column
-            } else {
-                self.beg.line < line && line < self.end.line
-            }
-        } else {
-            false
-        }
+        self.beg.source == path
+            && (self.beg.line, self.beg.column) <= (line, column)
+            && (line, column) <= (self.end.end_line(), self.end.end_column())
     }
 
     pub fn offset(&mut self, value: u32) {
@@ -65,15 +53,14 @@ impl TokenRange {
 
 impl From<&TokenRange> for miette::SourceSpan {
     fn from(x: &TokenRange) -> Self {
-        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
+        let length = x.end.pos as usize - x.beg.pos as usize + x.end.length as usize;
         (x.beg.pos as usize, length).into()
     }
 }
 
 impl From<TokenRange> for miette::SourceSpan {
     fn from(x: TokenRange) -> Self {
-        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
-        (x.beg.pos as usize, length).into()
+        (&x).into()
     }
 }
 
@@ -1607,3 +1594,24 @@ impl From<&Veryl> for TokenRange {
     }
 }
 impl_token_ext!(Veryl);
+
+#[cfg(all(test, target_pointer_width = "64"))]
+mod span_regressions {
+    use super::*;
+    #[test]
+    fn span_addition_widens_before_adding_token_length() {
+        let range = TokenRange {
+            beg: Token {
+                pos: 0,
+                ..Default::default()
+            },
+            end: Token {
+                pos: u32::MAX,
+                length: 2,
+                ..Default::default()
+            },
+        };
+        let span: miette::SourceSpan = range.into();
+        assert_eq!(span.len(), u32::MAX as usize + 2);
+    }
+}
