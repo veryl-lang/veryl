@@ -59,6 +59,13 @@ pub enum MetadataError {
     ReservedProjectName(String),
 
     #[diagnostic(
+        code(MetadataError::InvalidPropertyName),
+        help("\"[a-zA-Z_][0-9a-zA-Z_]*\" can be used as property name")
+    )]
+    #[error("property name \"{0}\" is invalid")]
+    InvalidPropertyName(String),
+
+    #[diagnostic(
         code(MetadataError::InvalidLicense),
         help("license text should follow SPDX expression")
     )]
