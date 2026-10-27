@@ -4144,7 +4144,7 @@ impl VerylWalker for Emitter {
                 match item.array_literal_item_group.as_ref() {
                     ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
                         let repeat = if let Some(repeat) = &x.array_literal_item_opt {
-                            array_literal_repeat_count(&repeat.expression)
+                            array_literal_repeat_count(self.generic_map.last(), &repeat.expression)
                         } else {
                             Some(1)
                         };
@@ -6994,9 +6994,15 @@ fn array_literal_list_original(emitter: &mut Emitter, arg: &ArrayLiteralList) {
     }
 }
 
-fn array_literal_repeat_count(expr: &Expression) -> Option<usize> {
+fn array_literal_repeat_count(
+    generic_maps: Option<&Vec<GenericMap>>,
+    expr: &Expression,
+) -> Option<usize> {
     let token = expr.range();
     let mut context = Context::default();
+    if let Some(maps) = generic_maps {
+        context.push_generic_map(maps.clone());
+    }
     let mut repeat: ir::Expression = Conv::conv(&mut context, expr).ok()?;
     let repeat = veryl_analyzer::conv::utils::eval_repeat(&mut context, &mut repeat)?;
     context.check_size(repeat.to_usize_saturating()?, token)
