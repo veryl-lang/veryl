@@ -1,7 +1,8 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, InstanceNote};
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
-use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
+use crate::conv::instance::{InstanceHistory, InstanceHistoryError, Reach};
 use crate::conv::package_const::{PackageConstCache, PackageConstKey, PackageConstUse};
+use crate::conv::unit_cache::{self, ChildReach, UnitEvent};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
     IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
@@ -137,6 +138,11 @@ pub struct Context {
     component_sizing: usize,
     global_func_callers: Vec<Namespace>,
     pub in_test_module: bool,
+    /// In a test module and the components its hierarchical references may
+    /// reach: the identifiers of the test module, which name every instance
+    /// such a reference passes. A component instantiated under one of them is
+    /// read whole, so a replayed one is converted whole.
+    pub body_names: Option<Arc<HashSet<StrId>>>,
     pub in_dependency: bool,
     pub in_global_func: Option<Token>,
     pub in_if_reset: bool,
@@ -188,9 +194,22 @@ pub struct Context {
     /// `type A = B; type B = A` chains that `eval_type` would otherwise follow
     /// forever (type_dag reports the cycle, but `dump` evaluates anyway).
     typedef_visiting: Vec<SymbolId>,
-    errors: Vec<AnalyzerError>,
+    errors: ErrorSink,
     profiler: Option<Arc<Mutex<ConvProfile>>>,
     project_name: Option<String>,
+}
+
+/// The diagnostics of a conversion. Moves with them through `inherit`, so the
+/// recording and the suppression cover everything converted in a unit.
+#[derive(Default)]
+struct ErrorSink {
+    errors: Vec<AnalyzerError>,
+    /// What a recorded unit did to its own diagnostics.
+    events: Option<Vec<UnitEvent>>,
+    eval_overflow_recorded: bool,
+    for_overflow_recorded: bool,
+    /// Set while converting a component whose diagnostics were replayed.
+    suppressed: bool,
 }
 
 /// Namespace-tagged so a same-named parameter of another component is not
@@ -208,7 +227,7 @@ struct AnalysisTransaction {
     function_eval_depth: usize,
     function_eval_overflow: Option<(TokenRange, usize)>,
     function_call_stack: Vec<Signature>,
-    errors: Vec<AnalyzerError>,
+    errors: ErrorSink,
 }
 
 impl Context {
@@ -304,6 +323,7 @@ impl Context {
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
         self.component_sizing = tgt.component_sizing;
+        self.body_names = tgt.body_names.clone();
         self.config = tgt.config.clone();
         self.profiler = tgt.profiler.clone();
         self.project_name = tgt.project_name.clone();
@@ -312,17 +332,25 @@ impl Context {
     /// Runs `f` on a context carrying only the inputs a component conversion
     /// may depend on: the frames pushed for `namespace` and the shared caches.
     /// Its diagnostics are merged back as raised, keeping their instance notes.
+    ///
+    /// With `record`, what the unit does to its diagnostics is returned for
+    /// the unit cache. With `suppressed`, its diagnostics are dropped: they
+    /// were replayed from that cache.
     pub fn in_unit<T>(
         &mut self,
         namespace: &Namespace,
         instantiated: bool,
+        record: bool,
+        suppressed: bool,
+        body_names: Option<Arc<HashSet<StrId>>>,
         f: impl FnOnce(&mut Context) -> T,
-    ) -> T {
+    ) -> (T, Option<Vec<UnitEvent>>) {
         let mut unit = Context {
             config: self.config.clone(),
             profiler: self.profiler.clone(),
             project_name: self.project_name.clone(),
             in_generic: self.in_generic,
+            body_names,
             ..Default::default()
         };
         if let Some(x) = self
@@ -339,22 +367,139 @@ impl Context {
         if instantiated && let Some(x) = self.modport_signatures.last() {
             unit.modport_signatures.push(x.clone());
         }
+        let suppressed = suppressed || self.errors.suppressed;
+        unit.errors.suppressed = suppressed;
+        if record && !suppressed {
+            unit.errors.events = Some(Vec::new());
+        }
         self.swap_unit_caches(&mut unit);
 
         let ret = f(&mut unit);
 
         self.swap_unit_caches(&mut unit);
-        if self.function_eval_overflow.is_none() {
-            self.function_eval_overflow = unit.function_eval_overflow;
+        unit.record_overflow();
+        if !suppressed {
+            if self.function_eval_overflow.is_none() {
+                self.function_eval_overflow = unit.function_eval_overflow;
+            }
+            if self.comptime_for_overflow.is_none() {
+                self.comptime_for_overflow = unit.comptime_for_overflow;
+            }
+            for mut error in unit.errors.errors {
+                let note = error.instance_mut().take();
+                self.insert_error_with_note(error, note);
+            }
         }
-        if self.comptime_for_overflow.is_none() {
-            self.comptime_for_overflow = unit.comptime_for_overflow;
+        (ret, unit.errors.events)
+    }
+
+    /// Records the first overflow of a unit when it is first seen, which
+    /// places it before the children reached later.
+    fn record_overflow(&mut self) {
+        let sink = &mut self.errors;
+        let Some(events) = &mut sink.events else {
+            return;
+        };
+        if let Some((token, depth)) = self.function_eval_overflow
+            && !sink.eval_overflow_recorded
+        {
+            events.push(UnitEvent::EvalOverflow(token, depth));
+            sink.eval_overflow_recorded = true;
         }
-        for mut error in unit.errors {
-            let note = error.instance_mut().take();
-            self.insert_error_with_note(error, note);
+        if let Some(token) = self.comptime_for_overflow
+            && !sink.for_overflow_recorded
+        {
+            events.push(UnitEvent::ForOverflow(token));
+            sink.for_overflow_recorded = true;
         }
-        ret
+    }
+
+    pub fn record_child_reach(&mut self, reach: ChildReach) {
+        self.record_overflow();
+        if let Some(events) = &mut self.errors.events {
+            events.push(UnitEvent::Child(reach));
+        }
+    }
+
+    /// The `body_names` of the component instantiated at `site`, when a
+    /// hierarchical reference may read its body.
+    pub fn body_names_at(&self, site: Option<TokenRange>) -> Option<Arc<HashSet<StrId>>> {
+        let names = self.body_names.as_ref()?;
+        names.contains(&site?.beg.text).then(|| Arc::clone(names))
+    }
+
+    /// Applies a replayed event of a unit whose conversion was skipped. The
+    /// caller replays children itself.
+    pub fn replay_event(&mut self, event: &UnitEvent) {
+        // A reference is not a diagnostic: it stands whether or not they are
+        // suppressed.
+        if let UnitEvent::Reference(target, token) = event {
+            let path = crate::symbol_path::SymbolPath::new(&[target.text]);
+            if let Some((scope, define_context)) = scope::token_scope(target.id)
+                && let Ok(symbol) = crate::symbol_table::resolve(
+                    crate::symbol_path::SymbolPathNamespace::from_scope(
+                        path,
+                        scope,
+                        define_context,
+                    ),
+                )
+            {
+                crate::symbol_table::add_reference(symbol.found.id, token);
+            }
+        }
+        if self.errors.suppressed {
+            return;
+        }
+        match event {
+            UnitEvent::Error(x) => {
+                let note = self.instance_note();
+                self.insert_error_with_note(unit_cache::restore_file_text(x.clone()), note);
+            }
+            UnitEvent::EvalOverflow(token, depth) => {
+                if self.function_eval_overflow.is_none() {
+                    self.function_eval_overflow = Some((*token, *depth));
+                }
+            }
+            UnitEvent::ForOverflow(token) => {
+                if self.comptime_for_overflow.is_none() {
+                    self.comptime_for_overflow = Some(*token);
+                }
+            }
+            UnitEvent::ResolvedType(token, inferred) => {
+                // A conversion would check against the type entered already,
+                // and report a conflict: convert the units instead.
+                let chain = self.instance_history.keys();
+                match crate::resolved_type_table::get(token) {
+                    Some(existing) => {
+                        if crate::ir::stable_type(&existing) != *inferred {
+                            unit_cache::request_conversion(&chain);
+                        }
+                    }
+                    None => unit_cache::note_replayed_type(*token, inferred.clone(), chain),
+                }
+            }
+            UnitEvent::Reference(..) => (),
+            UnitEvent::Child(_) => (),
+        }
+    }
+
+    pub fn add_reference(&mut self, id: SymbolId, token: Token) {
+        crate::symbol_table::add_reference(id, &token);
+        if let Some(events) = &mut self.errors.events
+            && let Some(symbol) = crate::symbol_table::get(id)
+        {
+            events.push(UnitEvent::Reference(symbol.token, token));
+        }
+    }
+
+    pub fn record_resolved_type(
+        &mut self,
+        token: veryl_parser::resource_table::TokenId,
+        inferred: String,
+    ) {
+        if let Some(events) = &mut self.errors.events {
+            events.push(UnitEvent::ResolvedType(token, inferred));
+        }
     }
 
     fn swap_unit_caches(&mut self, unit: &mut Context) {
@@ -623,7 +768,21 @@ impl Context {
         }
     }
 
-    pub fn insert_error(&mut self, error: AnalyzerError) {
+    pub fn insert_error(&mut self, mut error: AnalyzerError) {
+        if self.errors.suppressed {
+            return;
+        }
+        if let Some(events) = &mut self.errors.events {
+            events.push(UnitEvent::Error(unit_cache::record_copy(&mut error)));
+        }
+        let note = self.instance_note();
+        self.insert_error_with_note(error, note);
+    }
+
+    pub fn insert_error_unrecorded(&mut self, error: AnalyzerError) {
+        if self.errors.suppressed {
+            return;
+        }
         let note = self.instance_note();
         self.insert_error_with_note(error, note);
     }
@@ -638,7 +797,7 @@ impl Context {
             ..
         } = error
         {
-            for e in &mut self.errors {
+            for e in &mut self.errors.errors {
                 if let AnalyzerError::MultipleAssignment {
                     identifier: org_ident,
                     error_locations: org_locations,
@@ -658,16 +817,17 @@ impl Context {
         if !replaced {
             let existing = self
                 .errors
+                .errors
                 .iter_mut()
                 .position(|x| x.same_report(&mut error));
             if let Some(existing) = existing {
                 // Raised without an override too, so no instance explains it.
                 if note.is_none() {
-                    *self.errors[existing].instance_mut() = None;
+                    *self.errors.errors[existing].instance_mut() = None;
                 }
             } else {
                 *error.instance_mut() = note;
-                self.errors.push(error);
+                self.errors.errors.push(error);
             }
         }
     }
@@ -712,12 +872,12 @@ impl Context {
         }
 
         if let (Some(key), Ok(value)) = (key, &ret)
-            && errors.is_empty()
+            && errors.errors.is_empty()
             && !overflowed
         {
             self.package_const_cache.insert(key, value.clone(), depth);
         }
-        for error in errors {
+        for error in errors.errors {
             self.insert_error(error);
         }
         ret
@@ -732,7 +892,7 @@ impl Context {
         let (_, outermost_site) = frames.first()?;
         let mut path: Vec<_> = frames
             .iter()
-            .map(|(sig, site)| format!("{}: {}", site.beg.text, sig.to_overridden_string()))
+            .map(|(sig, site)| format!("{}: {}", site.beg.text, sig))
             .collect();
         if path.len() > KEPT_AT_EACH_END * 2 + 1 {
             let elided = path.len() - KEPT_AT_EACH_END * 2;
@@ -1000,12 +1160,16 @@ impl Context {
         &mut self,
         x: Signature,
         site: Option<TokenRange>,
-    ) -> Result<bool, InstanceHistoryError> {
+    ) -> Result<Reach, InstanceHistoryError> {
         self.instance_history.push(x, site, &self.config)
     }
 
     pub fn pop_instance_history(&mut self) {
         self.instance_history.pop();
+    }
+
+    pub fn get_current_site(&self) -> Option<TokenRange> {
+        self.instance_history.get_current_site()
     }
 
     pub fn get_current_signature(&self) -> Option<&Signature> {
@@ -1205,7 +1369,7 @@ impl Context {
     }
 
     pub fn drain_errors(&mut self) -> Vec<AnalyzerError> {
-        std::mem::take(&mut self.errors)
+        std::mem::take(&mut self.errors.errors)
     }
 }
 

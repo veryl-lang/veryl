@@ -9,7 +9,6 @@ use super::region::{ArraySpan, NodeKey, PackedSpan};
 use super::ssa::PositionDomain;
 use super::steps::Steps;
 use crate::ir::{Component, Declaration, Module, Signature, VarId, VarPath, Variable};
-use crate::symbol::SymbolId;
 use crate::{AnalyzerError, HashMap, HashSet};
 use daggy::petgraph::Direction;
 use daggy::petgraph::graph::{EdgeIndex, NodeIndex};
@@ -84,8 +83,9 @@ pub(super) fn check_graph(
     steps: &mut Steps,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     replays: &mut DiagnosticReplayCache,
-    errors: &mut Vec<AnalyzerError>,
-    reported: &mut HashSet<(SymbolId, Vec<VarPath>)>,
+    found: &mut Vec<(Vec<VarPath>, AnalyzerError)>,
+    reported: &HashSet<(String, Vec<VarPath>)>,
+    record_all: bool,
 ) -> bool {
     let mut complete = true;
     debug_assert!(
@@ -153,9 +153,18 @@ pub(super) fn check_graph(
             .collect::<Vec<_>>();
         paths.sort_unstable();
         paths.dedup();
-        if !reported.insert((module.signature.symbol, paths)) {
+        let is_reported = found.iter().any(|(x, _)| *x == paths)
+            || reported.contains(&(super::unit::symbol_name(module), paths.clone()));
+        if is_reported && !record_all {
             continue;
         }
+        // Built only to be recorded: kept off the budget of what is reported.
+        let mut own_steps = Steps::new();
+        let steps = if is_reported {
+            &mut own_steps
+        } else {
+            &mut *steps
+        };
         let cycle = path.unwrap_or_else(|| dependency_cycle(graph, &scc, steps));
         let cycle_regions = cycle_nodes(graph, &cycle, steps);
         let cycle_keys = cycle_regions
@@ -181,12 +190,15 @@ pub(super) fn check_graph(
             .variables
             .get(&keys[0].0)
             .map(|var| var.path.to_string());
-        errors.push(AnalyzerError::combinational_loop(
-            identifier.as_deref().unwrap_or("?"),
-            &format_cycle(module, &cycle_regions),
-            &primary,
-            &tokens[1..],
-            &provenance,
+        found.push((
+            paths,
+            AnalyzerError::combinational_loop(
+                identifier.as_deref().unwrap_or("?"),
+                &format_cycle(module, &cycle_regions),
+                &primary,
+                &tokens[1..],
+                &provenance,
+            ),
         ));
     }
     complete
@@ -458,6 +470,12 @@ fn diagnostic_provenance(
         if child.signature != cause.child
             || !expanded.insert((cause.child, cause.child_source, cause.child_destination))
         {
+            continue;
+        }
+        // A replayed child holds its header alone; its statements are traced
+        // once it is converted again.
+        if let Some(key) = crate::conv::unit_cache::header_only_key(&inst.component) {
+            crate::conv::unit_cache::request_conversion(&[key]);
             continue;
         }
         let Some(graph) = replay(child, summaries, cache, TraceKind::Sources) else {

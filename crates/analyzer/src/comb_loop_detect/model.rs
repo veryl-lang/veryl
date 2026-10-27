@@ -5,14 +5,18 @@ use super::ssa::PathCondition;
 use super::ssa::PositionDomain;
 use crate::ir::VarId;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(super) struct SummaryRegion {
     pub(super) id: VarId,
     pub(super) array: ArraySpan,
     pub(super) packed: PackedSpan,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(super) struct BitDependency {
     /// `None` means that every source coordinate on this axis may affect the
     /// destination region. `Some(C)` preserves `source + C = destination`.
@@ -121,7 +125,7 @@ fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) enum SummaryNodeKind {
     Input,
     Output,
@@ -129,7 +133,7 @@ pub(super) enum SummaryNodeKind {
     Internal,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(super) struct SummaryNode {
     pub(super) region: SummaryRegion,
     pub(super) domains: Vec<PositionDomain>,
@@ -139,14 +143,14 @@ pub(super) struct SummaryNode {
 /// Finite dependency graph across a module boundary. Retaining graph structure
 /// is essential: taking the transitive closure of a positional cycle such as
 /// `x = x << 1` would otherwise enumerate one offset per declared bit.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct ModuleCombSummary {
     pub(super) nodes: Vec<SummaryNode>,
     pub(super) edges: Vec<SummaryDependency>,
     pub(super) complete: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(super) struct SummaryDependency {
     pub(super) source: usize,
     pub(super) destination: usize,

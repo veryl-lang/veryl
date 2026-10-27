@@ -99,7 +99,9 @@ enum Version<K> {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(super) struct BranchId {
     procedure: usize,
     local: usize,
@@ -120,13 +122,17 @@ impl BranchId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 struct BranchConstraint {
     branch: BranchId,
     allowed: ArmSet,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 struct ArmSet {
     ranges: Vec<(usize, usize)>,
 }
@@ -202,6 +208,21 @@ impl ArmSet {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct PathCondition {
     constraints: Rc<Vec<BranchConstraint>>,
+}
+
+impl serde::Serialize for PathCondition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.constraints.as_ref().serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PathCondition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let constraints = Vec::<BranchConstraint>::deserialize(deserializer)?;
+        Ok(Self {
+            constraints: Rc::new(constraints),
+        })
+    }
 }
 
 impl PathCondition {
@@ -488,7 +509,9 @@ pub(super) struct DependencyDag<K> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct RanOut;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(super) struct PositionDomain {
     pub(super) array_start: usize,
     pub(super) array_length: usize,
