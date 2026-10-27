@@ -38,6 +38,38 @@ module Top (
     assert!(ret.contains("c = '{x, x, 8'h01, 8'h02};"));
 }
 
+#[test]
+fn array_literal_repeat_uses_generic_argument() {
+    let code = r#"
+module Child::<N: u32> (
+    x: input  logic<8>,
+    o: output logic<8>,
+) {
+    var b: logic<8> [4];
+    always_comb {
+        b = '{x repeat N, default: 8'h00};
+    }
+    assign o = b[2];
+}
+
+module Top (
+    x: input  logic<8>,
+    o: output logic<8>,
+) {
+    inst u: Child::<3> (
+        x,
+        o,
+    );
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert!(ret.contains("b = '{0: x, 1: x, 2: x, default: 8'h00};"));
+    assert!(!ret.contains("3{x}"));
+}
+
 #[track_caller]
 fn emit(metadata: &Metadata, code: &str) -> String {
     emit_project(metadata, "prj", code)
