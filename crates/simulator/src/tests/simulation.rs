@@ -36264,6 +36264,43 @@ fn dataflow_event_config() -> Config {
 }
 
 #[test]
+fn aot_c_event_reuses_the_compile_of_equal_inputs() {
+    // An event whose inputs a previous build compiled loads that `.so` without
+    // emitting its source again, and simulates the same.
+    if !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, o: output logic<8>) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 3; }
+        }
+        assign o = r;
+    }
+    "#;
+    crate::backend::aot_c::emit::set_test_event_index(true);
+    let mut emitted = Vec::new();
+    for _ in 0..2 {
+        crate::backend::aot_c::emit::take_event_sources();
+        let ir = analyze(code, &dataflow_event_config());
+        emitted.push(crate::backend::aot_c::emit::take_event_sources());
+        assert!(!ir.whole_events.is_empty(), "the event must run as AOT-C");
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for c in 1..6u64 {
+            sim.step(&clk);
+            sim.ensure_comb_updated();
+            assert_eq!(sim.get("o").unwrap().payload_u64(), c * 3, "cycle {c}");
+        }
+    }
+    crate::backend::aot_c::emit::set_test_event_index(false);
+    assert!(emitted[1].is_empty(), "the second build must not emit");
+}
+
+#[test]
 fn aot_c_event_break_between_stores_to_one_watch() {
     // Two stores to `r` share one watch; the `break` between them leaves after
     // the first, which must still compare and mark.
