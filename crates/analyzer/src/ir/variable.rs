@@ -1073,9 +1073,15 @@ impl VarSelect {
                 }
                 let beg = self.0.last().unwrap();
                 let mut range = beg.token_range();
-                let beg = beg.eval_value(context);
+                let constant_beg = beg.comptime().is_const;
+                // Runtime placeholders are not bounds, even if a 2-state cast clears X/Z.
+                let beg = if constant_beg {
+                    beg.eval_value(context)
+                } else {
+                    Some(Value::new(0, 1, false))
+                };
 
-                let beg = if let Some(beg) = beg {
+                let mut beg = if let Some(beg) = beg {
                     beg.to_usize_saturating().unwrap_or(0)
                 } else {
                     // Even if beg is unknown, single select can be determined
@@ -1100,6 +1106,9 @@ impl VarSelect {
                     if !matches!(op, VarSelectOp::Colon) && !end_value.is_xz() && end == 0 {
                         context.insert_error(AnalyzerError::zero_size(&range));
                         return None;
+                    }
+                    if !constant_beg && matches!(op, VarSelectOp::MinusColon) {
+                        beg = end.saturating_sub(1);
                     }
                     // A `-:` width exceeding beg+1 underflows below index 0; `eval_value`
                     // would saturate (hide) the low bound, so reject it as out-of-range.
@@ -1139,6 +1148,9 @@ impl VarSelect {
                 }
 
                 for (i, index) in self.0.iter().enumerate() {
+                    if !index.comptime().is_const {
+                        continue;
+                    }
                     if let Some(size) = r#type.get(i)
                         && let Some(size) = size
                     {
@@ -1207,10 +1219,17 @@ impl VarSelect {
         let finish = |context: &mut Context, pair: (usize, usize), array: bool| {
             let (low, high) = if array { pair } else { (pair.1, pair.0) };
             high.checked_sub(low)?.checked_add(1)?;
-            Some((
-                context.check_size(pair.0, self.token_range())?,
-                context.check_size(pair.1, self.token_range())?,
-            ))
+            if self.is_const_with_range() {
+                Some((
+                    context.check_size(pair.0, self.token_range())?,
+                    context.check_size(pair.1, self.token_range())?,
+                ))
+            } else {
+                // Failure to evaluate a runtime selection is not a source diagnostic.
+                (pair.0 <= context.config.evaluate_size_limit
+                    && pair.1 <= context.config.evaluate_size_limit)
+                    .then_some(pair)
+            }
         };
         let storage = if is_array {
             r#type.total_array()?
