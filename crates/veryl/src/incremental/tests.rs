@@ -12,9 +12,13 @@ struct Project {
 
 impl Project {
     fn new(source: &str) -> Self {
+        Self::with_manifest(source, "")
+    }
+
+    fn with_manifest(source: &str, extra: &str) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let manifest = directory.path().join("Veryl.toml");
-        fs::write(&manifest, "[project]\nname = \"diagnostic_cache\"\nversion = \"0.1.0\"\n[build]\nexclude_std = true\nincremental = true\n").unwrap();
+        fs::write(&manifest, format!("[project]\nname = \"diagnostic_cache\"\nversion = \"0.1.0\"\n[build]\nexclude_std = true\nincremental = true\n{extra}")).unwrap();
         fs::write(directory.path().join("top.veryl"), source).unwrap();
         let mut metadata = Metadata::load(&manifest).unwrap();
         let paths = metadata.paths::<&str>(&[], true, true).unwrap();
@@ -112,4 +116,16 @@ fn files_without_diagnostics_still_restore() {
     let project = Project::new("module Top {}");
     assert_eq!(project.analyze(), (0, vec![]));
     assert_eq!(project.analyze(), (1, vec![]));
+}
+
+#[test]
+fn files_with_pass1_warnings_still_restore() {
+    let project = Project::with_manifest(
+        "module BadName {}",
+        "[lint.naming]\ncase_module = \"snake\"\n",
+    );
+    let (restored, expected) = project.analyze();
+    assert_eq!(restored, 0);
+    assert!(!expected.is_empty());
+    assert_eq!(project.analyze(), (1, expected));
 }
