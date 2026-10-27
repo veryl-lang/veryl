@@ -688,9 +688,10 @@ impl ValueU64 {
             Some(true) => on_true,
             Some(false) => on_false,
             None => {
+                // IEEE 1800-2023 Table 11-20 preserves only common known bits.
                 let mask = Self::gen_mask(width);
                 let same = !((on_true.payload ^ on_false.payload)
-                    | (on_true.mask_xz ^ on_false.mask_xz))
+                    | (on_true.mask_xz | on_false.mask_xz))
                     & mask;
                 Self {
                     payload: on_true.payload & same,
@@ -1648,7 +1649,7 @@ impl Value {
                     Some(false) => b.clone(),
                     None => {
                         let mask = ValueBigUint::gen_mask(width);
-                        let different = (a.payload() ^ b.payload()) | (a.mask_xz() ^ b.mask_xz());
+                        let different = (a.payload() ^ b.payload()) | a.mask_xz() | b.mask_xz();
                         let same = &mask ^ different;
                         ValueBigUint {
                             payload: Box::new(a.payload() & &same),

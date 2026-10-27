@@ -466,7 +466,7 @@ module Top {{
                         '0' => b,
                         '1' => a,
                         _ => {
-                            if a == b {
+                            if a == b && matches!(a, '0' | '1') {
                                 a
                             } else {
                                 'x'
@@ -1259,5 +1259,21 @@ module Top {{
                 "width={width}, index={index}\n{ir}"
             );
         }
+    }
+}
+
+#[test]
+fn runtime_cast_selects_do_not_use_placeholder_values_for_bounds() {
+    for selector in [
+        "[(index as i64) - 64'sd1+:3]",
+        "[(index as i64) - 64'sd1-:3]",
+        "[(index as i64) - 64'sd1 step 3]",
+        "[(index as i64) + 64'sd1024+:3]",
+    ] {
+        let code = format!(
+            "module Top(index: input logic<4>, data: input logic<8>, patch: input logic<3>, rd: output logic<3>, wr: output logic<8>) {{always_comb {{rd = data{selector}; wr = data; wr{selector} = patch;}}}}"
+        );
+        let errors = analyze_with_ir(&code);
+        assert!(errors.is_empty(), "{code}\n{errors:#?}");
     }
 }

@@ -1103,7 +1103,9 @@ impl Factor {
                     {
                         let value = expression.eval_value(context)?;
                         unknown |= value.is_xz();
+                        let is_const = expression.comptime().is_const;
                         *expression = Expression::create_value(value, expression.token_range());
+                        expression.comptime_mut().is_const = is_const;
                     }
                     if unknown {
                         return Some(Value::new_x(
