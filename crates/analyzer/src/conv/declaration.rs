@@ -1,5 +1,5 @@
 use crate::analyzer_error::{
-    AnalyzerError, ComponentInterfaceMismatchKind, MismatchAssignmentKind, MismatchTypeKind,
+    AnalyzerError, ComponentInterfaceMismatchKind, IncompatibleAssignmentKind, MismatchTypeKind,
     UnevaluableValueKind,
 };
 use crate::attribute::{AllowItem, Attribute};
@@ -393,10 +393,10 @@ impl Conv<&WithGenericParameterItem> for () {
                                 ));
                             }
                         } else {
-                            context.insert_error(AnalyzerError::mismatch_assignment(
+                            context.insert_error(AnalyzerError::incompatible_assignment(
                                 "number",
                                 &x.bound.to_string(),
-                                MismatchAssignmentKind::Normal,
+                                IncompatibleAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));
@@ -404,10 +404,10 @@ impl Conv<&WithGenericParameterItem> for () {
                     }
                     WithGenericArgumentItem::FixedType(_) => {
                         if !matches!(x.bound, GenericBoundKind::Type) {
-                            context.insert_error(AnalyzerError::mismatch_assignment(
+                            context.insert_error(AnalyzerError::incompatible_assignment(
                                 "type",
                                 &x.bound.to_string(),
-                                MismatchAssignmentKind::Normal,
+                                IncompatibleAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));

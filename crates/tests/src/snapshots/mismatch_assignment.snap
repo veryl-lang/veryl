@@ -4,7 +4,7 @@ expression: out
 ---
 mismatch_assignment (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_assignment)
 
-  ⚠ "logic<1>" can't be assigned to "bit<1>"
+  ⚠ assignment from "logic<1>" to "bit<1>" performs an implicit conversion
    ╭─[../../testcases/error/mismatch_assignment.veryl:3:21]
  2 │     let a : logic = 1;
  3 │     let _b: bit   = a;
@@ -12,4 +12,4 @@ mismatch_assignment (https://doc.veryl-lang.org/book/07_appendix/02_semantic_err
    ·                     ╰── Error location
  4 │ }
    ╰────
-  help:
+  help: make the conversion explicit if intended

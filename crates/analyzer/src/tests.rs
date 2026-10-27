@@ -8,6 +8,7 @@ use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table;
 
+mod assignment_diagnostic_tests;
 mod comb_loop_adversarial_tests;
 mod comb_loop_conservative_tests;
 mod comb_loop_diagnostic_tests;
@@ -5719,18 +5720,13 @@ fn array_slice_shape_mismatch() {
     assert_eq!(errors.len(), 1, "{errors:#?}");
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment {
-            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
-            ..
-        }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 }
 
 #[test]
 fn mismatch_assignment() {
-    // The unpacked dimensions disagree. No SystemVerilog tool accepts that, so
-    // the help says which axis is wrong, but the severity stays the warning the
-    // rest of this test covers: the check is conservative.
+    // Invalid assignments are errors; legal implicit scalar conversions warn.
     let code = r#"
     module ModuleA {
         let _a: logic[2] = 1;
@@ -5740,10 +5736,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment {
-            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
-            ..
-        }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -5756,10 +5749,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment {
-            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
-            ..
-        }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     // A 2-state destination answers `compatible` from its element kind alone,
@@ -5775,13 +5765,9 @@ fn mismatch_assignment() {
 
     let errors = analyze(code);
     assert!(
-        errors.iter().any(|x| matches!(
-            x,
-            AnalyzerError::MismatchAssignment {
-                kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
-                ..
-            }
-        )),
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::IncompatibleAssignment { .. })),
         "{errors:?}"
     );
 
@@ -5822,7 +5808,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -5843,7 +5829,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -5873,7 +5859,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -5960,7 +5946,7 @@ fn mismatch_assignment() {
     //let errors = analyze(code);
     //assert!(matches!(
     //    errors[0],
-    //    AnalyzerError::MismatchAssignment { .. }
+    //    AnalyzerError::IncompatibleAssignment { .. }
     //));
 
     let code = r#"
@@ -6035,7 +6021,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -6047,7 +6033,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -6069,7 +6055,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -6118,7 +6104,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -6133,7 +6119,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -6145,7 +6131,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"
@@ -6213,7 +6199,7 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::IncompatibleAssignment { .. }
     ));
 
     let code = r#"

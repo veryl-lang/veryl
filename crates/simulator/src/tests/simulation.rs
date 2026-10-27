@@ -34098,9 +34098,9 @@ fn whole_unpacked_array_unsized_fill() {
 
     for config in Config::all() {
         // The analyzer reports the fill against the array type as a
-        // `mismatch_assignment` warning, which `build` and `test` carry on
-        // through; that it does so at all is its own question.
-        let ir = analyze_top_allowing_mismatch_assignment(code, &config, "Top").unwrap();
+        // `incompatible_assignment` error. Bypass it to exercise native fill
+        // expansion independently of SystemVerilog assignment compatibility.
+        let ir = analyze_top_allowing_incompatible_assignment(code, &config, "Top").unwrap();
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();

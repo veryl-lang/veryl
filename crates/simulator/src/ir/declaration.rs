@@ -2848,8 +2848,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 // parent, so the two element counts have to agree. They do not
                 // when a port and its connection disagree on the unpacked
                 // dimensions, which is illegal SystemVerilog (IEEE 1800-2023
-                // 7.6) and which the analyzer reports as `mismatch_assignment`
-                // -- at Warning severity, so the design still reaches here.
+                // 7.6) and which the analyzer rejects as `incompatible_assignment`.
+                // Keep this defense for callers bypassing the analyzer errors.
                 // Too few child elements ran off the end; too many were
                 // dropped without a word.
                 if !element_wise && parent_element_indices.len() != child_meta.elements.len() {
