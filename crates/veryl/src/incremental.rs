@@ -268,8 +268,8 @@ impl Incremental {
     }
 
     /// Captures the file's pass1 output into the store. `cacheable` must
-    /// be false when pass1 produced any diagnostics (they would be lost on
-    /// restore).
+    /// be false when pass1 produced an error. Its warnings are kept with the
+    /// file's other diagnostics by `save`.
     pub fn capture(
         &mut self,
         path: &PathSet,

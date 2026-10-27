@@ -282,7 +282,12 @@ fn pass1_phase(
 
         let mut errors = analyzer.analyze_pass1(&path.prj, &parser.veryl);
         if let (Some(x), Some(watermark)) = (incremental.as_mut(), watermark.as_ref()) {
-            x.capture(path, &input, watermark, errors.is_empty());
+            x.capture(
+                path,
+                &input,
+                watermark,
+                !errors.iter().any(|x| x.is_error()),
+            );
         }
         check_error = check_error
             .append(&mut errors)
