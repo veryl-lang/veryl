@@ -1,7 +1,7 @@
 use crate::backend::inst::{ReuseOutcome, try_compile_inst_chunks};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::derived_clock::EdgeCandidate;
-use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
+use crate::ir::expression::{ExpressionContext, build_dynamic_write_select};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{
     BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
@@ -2839,7 +2839,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 };
 
                 let parent_dynamic_select = if parent_need_dynamic {
-                    Some(build_dynamic_bit_select(
+                    Some(build_dynamic_write_select(
                         context,
                         &parent_width_shape,
                         &parent_dst.select,

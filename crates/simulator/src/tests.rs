@@ -598,3 +598,9 @@ mod guarded_cover;
 mod hier_ref;
 mod simulation;
 mod testbench;
+
+mod selection_regressions;
+
+mod ff_payload_regressions;
+
+mod wide_bitwise_regressions;

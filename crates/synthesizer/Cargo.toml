@@ -26,8 +26,8 @@ veryl-parser   = {version = "0.22.0", path = "../parser"}
 # offline experimentation.
 aig = []
 
-[target.'cfg(target_family = "wasm")'.dependencies]
+[target.'cfg(any(target_family = "wasm", kani))'.dependencies]
 miette = {workspace = true, features = ["fancy-no-syscall"]}
 
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
+[target.'cfg(all(not(target_family = "wasm"), not(kani)))'.dependencies]
 miette = {workspace = true, features = ["fancy"]}

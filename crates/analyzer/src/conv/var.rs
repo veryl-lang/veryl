@@ -63,6 +63,29 @@ fn check_select_type(context: &mut Context, expr: &mut ir::Expression, value: &E
     }
 }
 
+// Check before selections on different path components are flattened into one
+// VarSelect. Only interface instances (including modport/interface ports) need
+// constant indices; their data members may still be selected dynamically.
+fn check_interface_instance_select(
+    context: &mut Context,
+    expr: &ir::Expression,
+    source: &Expression,
+) {
+    let Some((path, _)) = context.select_paths.last() else {
+        return;
+    };
+    if context
+        .var_paths
+        .get(path)
+        .is_some_and(|(_, x)| x.r#type.is_interface())
+        && !expr.comptime().is_elaboration_const()
+    {
+        context.insert_error(AnalyzerError::non_constant_interface_instance_select(
+            &source.into(),
+        ));
+    }
+}
+
 // SystemVerilog requires constant bounds for part-selects: the width for
 // indexed part-selects (`+:`/`-:`/`step`), and BOTH bounds for a `[msb:lsb]`
 // range (`Colon`). A runtime bound is unsynthesizable, so reject it.
@@ -236,6 +259,7 @@ fn conv_expression_identifier(
         let base_value = x.select.expression.as_ref();
         let mut base = Conv::conv(context, base_value)?;
         check_select_type(context, &mut base, base_value);
+        check_interface_instance_select(context, &base, base_value);
         if let Some(x) = &x.select.select_opt {
             let op = Conv::conv(context, x.select_operator.as_ref())?;
             let mut bound = Conv::conv(context, x.expression.as_ref())?;
@@ -318,6 +342,7 @@ fn conv_expression_identifier(
             let base_value = x.select.expression.as_ref();
             let mut base = Conv::conv(context, base_value)?;
             check_select_type(context, &mut base, base_value);
+            check_interface_instance_select(context, &base, base_value);
             if let Some(x) = &x.select.select_opt {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut bound = Conv::conv(context, x.expression.as_ref())?;
@@ -391,6 +416,7 @@ fn conv_hierarchical_identifier(
         let base_value = x.select.expression.as_ref();
         let mut base = Conv::conv(context, base_value)?;
         check_select_type(context, &mut base, base_value);
+        check_interface_instance_select(context, &base, base_value);
         if let Some(x) = &x.select.select_opt {
             let op = Conv::conv(context, x.select_operator.as_ref())?;
             let mut bound = Conv::conv(context, x.expression.as_ref())?;
@@ -444,6 +470,7 @@ fn conv_hierarchical_identifier(
             let base_value = x.select.expression.as_ref();
             let mut base = Conv::conv(context, base_value)?;
             check_select_type(context, &mut base, base_value);
+            check_interface_instance_select(context, &base, base_value);
             if let Some(x) = &x.select.select_opt {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut bound = Conv::conv(context, x.expression.as_ref())?;

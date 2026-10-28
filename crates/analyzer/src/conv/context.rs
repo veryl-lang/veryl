@@ -1,6 +1,7 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, InstanceNote};
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
+use crate::conv::package_const::{PackageConstCache, PackageConstKey, PackageConstUse};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
     IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
@@ -8,7 +9,7 @@ use crate::ir::{
 };
 use crate::namespace::Namespace;
 use crate::scope;
-use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
+use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, Symbol, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
 use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
@@ -102,8 +103,10 @@ pub struct Context {
     pub inst_signatures: HashMap<StrId, Signature>,
     pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
+    package_const_cache: PackageConstCache,
     /// Recursion depth of `eval_factor_path`, bounded by `symbol_eval_depth_limit`.
     pub function_eval_depth: usize,
+    pub function_eval_peak: usize,
     /// Recorded when `function_eval_depth`'s limit is hit, since the eval path
     /// may swallow an inserted error.
     pub function_eval_overflow: Option<(TokenRange, usize)>,
@@ -275,7 +278,9 @@ impl Context {
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
+        std::mem::swap(&mut self.package_const_cache, &mut tgt.package_const_cache);
         std::mem::swap(&mut self.function_eval_depth, &mut tgt.function_eval_depth);
+        std::mem::swap(&mut self.function_eval_peak, &mut tgt.function_eval_peak);
         std::mem::swap(
             &mut self.function_eval_overflow,
             &mut tgt.function_eval_overflow,
@@ -489,10 +494,14 @@ impl Context {
             return path;
         };
         path.resolve_imported(scope, &define_context, None);
+        self.apply_generic_maps(&mut path);
+        path
+    }
+
+    pub fn apply_generic_maps(&self, path: &mut GenericSymbolPath) {
         for map in self.generic_maps.iter().rev() {
             path.apply_map(map);
         }
-        path
     }
 
     pub fn insert_var_path(&mut self, path: VarPath, value: Comptime) -> VarId {
@@ -602,6 +611,57 @@ impl Context {
                 self.errors.push(error);
             }
         }
+    }
+
+    /// An evaluation that reports anything is not kept, and a kept one is not
+    /// reused where redoing it would exceed the depth limit: either way the
+    /// reuse would change what is reported.
+    pub(crate) fn eval_package_const(
+        &mut self,
+        symbol: &Symbol,
+        usage: PackageConstUse,
+        eval: impl FnOnce(&mut Self) -> IrResult<Comptime>,
+    ) -> IrResult<Comptime> {
+        let key = PackageConstKey::new(symbol, usage, self.in_generic, &self.generic_maps);
+        let start = self.function_eval_depth;
+        if let Some((value, depth)) = key.as_ref().and_then(|x| self.package_const_cache.get(x))
+            && start + depth <= self.config.symbol_eval_depth_limit
+        {
+            self.function_eval_peak = self.function_eval_peak.max(start + depth);
+            return Ok(value.clone());
+        }
+
+        #[cfg(test)]
+        PACKAGE_CONST_EVALUATIONS.set(PACKAGE_CONST_EVALUATIONS.get() + 1);
+        let outer_peak = std::mem::replace(&mut self.function_eval_peak, start);
+        let outer_eval_overflow = self.function_eval_overflow.take();
+        let outer_for_overflow = self.comptime_for_overflow.take();
+        let outer_errors = std::mem::take(&mut self.errors);
+        let ret = eval(self);
+        let errors = std::mem::replace(&mut self.errors, outer_errors);
+
+        let depth = self.function_eval_peak - start;
+        self.function_eval_peak = self.function_eval_peak.max(outer_peak);
+        let overflowed =
+            self.function_eval_overflow.is_some() || self.comptime_for_overflow.is_some();
+        // Only the first overflow is recorded.
+        if outer_eval_overflow.is_some() {
+            self.function_eval_overflow = outer_eval_overflow;
+        }
+        if outer_for_overflow.is_some() {
+            self.comptime_for_overflow = outer_for_overflow;
+        }
+
+        if let (Some(key), Ok(value)) = (key, &ret)
+            && errors.is_empty()
+            && !overflowed
+        {
+            self.package_const_cache.insert(key, value.clone(), depth);
+        }
+        for error in errors {
+            self.insert_error(error);
+        }
+        ret
     }
 
     fn instance_note(&self) -> Option<InstanceNote> {
@@ -1143,4 +1203,9 @@ mod analysis_transaction_tests {
         }
         assert_eq!(value(&context, id), &Value::new(0, 1, false));
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static PACKAGE_CONST_EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

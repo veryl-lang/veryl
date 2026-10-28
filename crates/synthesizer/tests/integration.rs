@@ -113,6 +113,91 @@ fn simple_dff() {
 }
 
 #[test]
+fn later_ff_reads_observe_pre_edge_state() {
+    let source = r#"
+        module Top (
+            clk: input clock, rst: input reset,
+            q: output logic<2>, previous: output logic<2>,
+        ) {
+            var state: logic<2>;
+            var prev: logic<2>;
+            always_ff {
+                if_reset {
+                    state = 1;
+                    prev = 0;
+                } else {
+                    state = state + 1;
+                    prev = state;
+                }
+            }
+            assign q = state;
+            assign previous = prev;
+        }
+    "#;
+    assert_previous(source, 1);
+}
+
+#[test]
+fn block_local_reads_observe_immediate_updates() {
+    let source = r#"
+        module Top (
+            clk: input clock, rst: input reset,
+            q: output logic<2>, previous: output logic<2>,
+        ) {
+            var state: logic<2>;
+            var prev: logic<2>;
+            always_ff {
+                if_reset {
+                    state = 1;
+                    prev = 0;
+                } else {
+                    var next: logic<2>;
+                    state = state + 1;
+                    next = state + 1;
+                    next = next + 1;
+                    prev = next;
+                }
+            }
+            assign q = state;
+            assign previous = prev;
+        }
+    "#;
+    assert_previous(source, 3);
+}
+
+fn assert_previous(source: &str, expected: u8) {
+    let (ir, top) = analyze(source, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let mut inputs = std::collections::HashMap::new();
+    for p in &gate.ports {
+        let name = p.name.to_string();
+        if name == "clk" || name == "rst" {
+            for &n in &p.nets {
+                inputs.insert(n, name == "clk");
+            }
+        }
+    }
+    let mut memo = gate.ffs.iter().map(|f| (f.q, f.reset_value)).collect();
+    let output = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "previous")
+        .unwrap();
+    assert_eq!(output.nets.len(), 2);
+    for (bit, net) in output.nets.iter().enumerate() {
+        let ff = gate
+            .ffs
+            .iter()
+            .find(|f| f.q == *net)
+            .expect("output flip-flop");
+        assert_eq!(
+            eval_net(&gate, ff.d, &inputs, &mut memo),
+            expected & (1 << bit) != 0
+        );
+    }
+}
+
+#[test]
 fn constant_reset_loop_folds_iterator_dependent_function_calls() {
     let code = r#"
         module Top (

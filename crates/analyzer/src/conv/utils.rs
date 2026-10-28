@@ -9,6 +9,7 @@ use crate::conv::checker::generic::check_generic_refereence;
 use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::context::RuntimeFunctionEffect;
 use crate::conv::instance::InstanceHistoryError;
+use crate::conv::package_const::PackageConstUse;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
 use crate::ir::{
@@ -104,13 +105,14 @@ pub fn try_infer_var_assign(
         }
     } else {
         crate::resolved_type_table::insert(dst_symbol.token.id, inferred.clone());
-        // Replace the placeholder Comptime so subsequent lookups see
-        // the inferred type, not `Unknown`.
-        let path = VarPath::new(dst_symbol.token.text);
-        if let Some((id, mut ct)) = context.find_path(&path) {
-            ct.r#type = inferred.clone();
-            context.insert_var_path_with_id(path, id, ct);
-        }
+    }
+    // The table outlives a conversion; the placeholder does not.
+    let path = VarPath::new(dst_symbol.token.text);
+    if let Some((id, mut ct)) = context.find_path(&path)
+        && ct.r#type != inferred
+    {
+        ct.r#type = inferred.clone();
+        context.insert_var_path_with_id(path, id, ct);
     }
     Ok(Some((comptime, ir_expr)))
 }
@@ -1284,16 +1286,22 @@ pub fn eval_struct_member(
                         x
                     } else {
                         let expr = x.value.as_ref().ok_or_else(|| ir_error!(token))?;
-                        let (comptime, mut expr) =
-                            eval_expr(context, Some(r#type.clone()), expr, false)?;
-                        // An array literal's per-element values are carried by
-                        // the comptime `eval_expr` builds; `eval_comptime`
-                        // alone leaves an array literal unevaluated.
-                        if matches!(comptime.value, ValueVariant::NumericArray(_)) {
-                            comptime
-                        } else {
-                            expr.eval_comptime(context, None).clone()
-                        }
+                        context.eval_package_const(
+                            &symbol.found,
+                            PackageConstUse::StructWhole,
+                            |c| {
+                                let (comptime, mut expr) =
+                                    eval_expr(c, Some(r#type.clone()), expr, false)?;
+                                // An array literal's per-element values are carried by
+                                // the comptime `eval_expr` builds; `eval_comptime`
+                                // alone leaves an array literal unevaluated.
+                                Ok(if matches!(comptime.value, ValueVariant::NumericArray(_)) {
+                                    comptime
+                                } else {
+                                    expr.eval_comptime(c, None).clone()
+                                })
+                            },
+                        )?
                     };
 
                     member_path.add_prelude(&path.0);
@@ -2624,6 +2632,7 @@ pub fn eval_factor_path(
     // resolved to a base case here; otherwise it recurses until the native
     // stack overflows.
     context.function_eval_depth += 1;
+    context.function_eval_peak = context.function_eval_peak.max(context.function_eval_depth);
     let ret = if context.function_eval_depth > context.config.symbol_eval_depth_limit {
         if context.function_eval_overflow.is_none() {
             context.function_eval_overflow = Some((token, context.function_eval_depth));
@@ -3171,13 +3180,17 @@ pub fn eval_factor_symbol(
             }
 
             if let Some(expr) = &x.value {
-                let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
-                let (mut comptime, _) =
-                    context.block(|c| eval_expr(c, Some(r#type), expr, false))?;
+                let mut comptime =
+                    context.eval_package_const(&symbol.found, PackageConstUse::Factor, |c| {
+                        let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                        let (mut comptime, _) =
+                            c.block(|c| eval_expr(c, Some(r#type), expr, false))?;
 
-                if let Some(width) = comptime.r#type.total_width() {
-                    comptime.value.expand_value(width);
-                }
+                        if let Some(width) = comptime.r#type.total_width() {
+                            comptime.value.expand_value(width);
+                        }
+                        Ok(comptime)
+                    })?;
 
                 comptime.token = token;
                 return Ok(ir::Factor::Value(comptime));
