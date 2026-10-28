@@ -1463,9 +1463,23 @@ pub fn eval_type(
 
                 x.kind
             }
-            ValueVariant::Numeric(x) => {
-                let value = x.to_usize_saturating().unwrap_or(0);
-                let value = context.check_size(value, path.paths[0].base.into());
+            ValueVariant::Numeric(value) => {
+                let size = value.to_usize_saturating();
+                match size {
+                    None => {
+                        let r#type = x.1.r#type.to_string();
+                        context.insert_error(AnalyzerError::invalid_operand(
+                            &r#type,
+                            &Op::As.to_string(),
+                            &path.paths[0].base.into(),
+                        ));
+                    }
+                    Some(0) => {
+                        context.insert_error(AnalyzerError::zero_size(&path.paths[0].base.into()));
+                    }
+                    _ => (),
+                }
+                let value = context.check_size(size.unwrap_or(0), path.paths[0].base.into());
                 width.push(value);
                 ir::TypeKind::Bit
             }

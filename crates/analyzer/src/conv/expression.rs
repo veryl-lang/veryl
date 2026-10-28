@@ -356,7 +356,18 @@ impl Conv<&CastingType> for ir::Factor {
                 r#type?
             } else {
                 let var_path: VarPathSelect = Conv::conv(context, identifier)?;
-                return eval_factor_path(context, symbol_path, var_path, false, token);
+                let factor = eval_factor_path(context, symbol_path, var_path, false, token)?;
+                let comptime = factor.comptime();
+                if comptime.is_const
+                    && let Ok(value) = comptime.get_value()
+                    && let Some(value) = value.to_usize_saturating()
+                {
+                    let _ = context.check_size(value, token);
+                    if value == 0 {
+                        context.insert_error(AnalyzerError::zero_size(&token));
+                    }
+                }
+                return Ok(factor);
             }
         } else {
             let (kind, width, signed, is_positive) = match value {
@@ -422,6 +433,9 @@ impl Conv<&CastingType> for ir::Factor {
                         && let Some(value) = value.to_usize_saturating()
                     {
                         let _ = context.check_size(value, token);
+                        if value == 0 {
+                            context.insert_error(AnalyzerError::zero_size(&token));
+                        }
                     }
 
                     return Ok(ir::Factor::Value(comptime));
@@ -434,6 +448,9 @@ impl Conv<&CastingType> for ir::Factor {
                         && let Some(value) = value.to_usize_saturating()
                     {
                         let _ = context.check_size(value, token);
+                        if value == 0 {
+                            context.insert_error(AnalyzerError::zero_size(&token));
+                        }
                     }
 
                     return Ok(ir::Factor::Value(comptime));
