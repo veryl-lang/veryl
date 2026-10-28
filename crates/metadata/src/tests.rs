@@ -1080,6 +1080,28 @@ bar = true
 }
 
 #[test]
+fn property_name_validation() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let toml_path = tempdir.path().join("Veryl.toml");
+    let load = |name: &str| {
+        let toml = format!("[project]\nname = \"main\"\n[properties]\n\"{name}\" = 1\n");
+        fs::write(&toml_path, toml).unwrap();
+        Metadata::load(&toml_path)
+    };
+
+    assert!(load("valid_name").is_ok());
+    assert!(load("_leading").is_ok());
+    assert!(load("Name1").is_ok());
+    for name in ["kebab-case", "1leading", "", "has space"] {
+        let err = load(name).unwrap_err();
+        assert!(
+            matches!(err, MetadataError::InvalidPropertyName(_)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn override_global_properties_of_dependencies() {
     let tempdir = tempfile::tempdir().unwrap();
 
