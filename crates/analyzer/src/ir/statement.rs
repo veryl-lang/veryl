@@ -761,6 +761,19 @@ pub struct AssignDestination {
 
 impl AssignDestination {
     pub fn total_width(&self, context: &mut Context) -> Option<usize> {
+        if !self.select.is_const_with_range() {
+            let r#type = &self.comptime.r#type;
+            let unit = if r#type.is_struct_union() || r#type.width().is_empty() {
+                1
+            } else {
+                r#type.kind.width()?
+            };
+            return self
+                .select
+                .eval_comptime(context, r#type, false)?
+                .total()?
+                .checked_mul(unit);
+        }
         let (beg, end) = self
             .select
             .eval_value(context, &self.comptime.r#type, false)?;
