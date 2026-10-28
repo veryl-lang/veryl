@@ -4452,6 +4452,61 @@ fn eval_net(
 }
 
 #[test]
+fn cast_boundaries_and_mixed_signedness() {
+    let source = r#"
+        module Top(
+            a: input signed logic, b: input logic<2>, c: input logic,
+            sum: output logic<3>, difference: output logic<3>,
+            cast_sum: output logic<3>, cast_operand: output logic<3>,
+            choose: output logic<3>, signed_cast: output logic<3>,
+        ) {
+            assign sum = a + b;
+            assign difference = a - b;
+            assign cast_sum = (a + b) as 1;
+            assign cast_operand = (a as 1) + b;
+            assign choose = if c ? a : b;
+            assign signed_cast = a as 1;
+        }
+    "#;
+    let (ir, top) = analyze(source, "Top");
+    let gate = build_gate_ir(&ir, top).expect("gate ir").module;
+    let ports: std::collections::HashMap<_, _> = gate
+        .ports
+        .iter()
+        .map(|p| (p.name.to_string(), &p.nets))
+        .collect();
+    for a in 0..2u32 {
+        for b in 0..4u32 {
+            for c in 0..2u32 {
+                let mut inputs = std::collections::HashMap::new();
+                for (name, value) in [("a", a), ("b", b), ("c", c)] {
+                    for (bit, &net) in ports[name].iter().enumerate() {
+                        inputs.insert(net, value & (1 << bit) != 0);
+                    }
+                }
+                let mut memo = std::collections::HashMap::new();
+                for (name, want) in [
+                    ("sum", a + b),
+                    ("difference", a.wrapping_sub(b) & 7),
+                    ("cast_sum", (a + b) & 1),
+                    ("cast_operand", a + b),
+                    ("choose", if c != 0 { a } else { b }),
+                    ("signed_cast", if a != 0 { 7 } else { 0 }),
+                ] {
+                    let got = ports[name]
+                        .iter()
+                        .enumerate()
+                        .fold(0u32, |value, (bit, &net)| {
+                            value | (u32::from(eval_net(&gate, net, &inputs, &mut memo)) << bit)
+                        });
+                    assert_eq!(got, want, "{name}: a={a} b={b} c={c}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn relational_comparison_uses_operand_signedness() {
     for (a_signed, b_signed) in [(true, true), (true, false), (false, true), (false, false)] {
         let a_type = if a_signed { "signed " } else { "" };
