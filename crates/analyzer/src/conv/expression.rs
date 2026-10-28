@@ -821,6 +821,22 @@ impl Conv<&IdentifierFactor> for ir::Expression {
             let symbol_path: GenericSymbolPath = value.expression_identifier.as_ref().into();
 
             let factor = eval_factor_path(context, symbol_path, var_path, true, token)?;
+            let r#type = &factor.comptime().r#type;
+            if value
+                .expression_identifier
+                .expression_identifier_opt
+                .is_some()
+                && !r#type.is_type()
+                && !r#type.is_systemverilog()
+                && !r#type.is_unknown()
+            {
+                context.insert_error(AnalyzerError::invalid_factor(
+                    None,
+                    "value with width",
+                    &token,
+                    &[],
+                ));
+            }
             Ok(ir::Expression::Term(Box::new(factor)))
         }
     }
