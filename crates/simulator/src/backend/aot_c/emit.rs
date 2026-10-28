@@ -4213,11 +4213,24 @@ pub fn prepare_event(
     skip_unchanged: bool,
     gates: &[EventGate],
 ) -> Option<(AotCell, bool, bool)> {
+    let input = event_input_key(stmts, skip_unchanged, gates);
+    match load_indexed_event(input) {
+        Some(IndexedEvent::Compiled(module, comb_marked, ff_marked)) => {
+            let cell = Arc::new(OnceLock::new());
+            let _ = cell.set(module);
+            return Some((cell, comb_marked, ff_marked));
+        }
+        Some(IndexedEvent::Declined) => return None,
+        None => {}
+    }
     DF_COVERED.with(|c| c.borrow_mut().clear());
     DF_FF_UNCOVERED.with(|c| c.set(false));
     DF_FF_UNCOVERED_WHY.with(|c| c.set([0; 2]));
     DF_LOCAL_WORDS.with(|n| n.set(0));
-    let src = emit_event_function(stmts, skip_unchanged, gates)?;
+    let Some(src) = emit_event_function(stmts, skip_unchanged, gates) else {
+        index_declined_event(input);
+        return None;
+    };
     #[cfg(test)]
     EVENT_SOURCES.with(|v| v.borrow_mut().push(src.clone()));
     let marks = DF_EVENT_MARKS.with(|m| m.borrow().clone());
@@ -4232,7 +4245,136 @@ pub fn prepare_event(
             why[0], why[1]
         );
     }
+    index_event(input, &src, comb_marked, ff_marked);
     Some((compile_or_spawn(src, async_mode), comb_marked, ff_marked))
+}
+
+/// Fingerprint of everything `emit_event_function` reads: the statements and
+/// gates, the dataflow marks and localization the caller set on this thread,
+/// the `VERYL_` environment, the version and the running binary.  Equal fingerprints emit
+/// equal sources, so a source's `.so` can be found without emitting it.
+fn event_input_key(stmts: &[ProtoStatement], skip_unchanged: bool, gates: &[EventGate]) -> u128 {
+    use std::hash::{Hash, Hasher};
+    let mut h = crate::backend::registry::Fp128::new();
+    h.write(b"veryl_aot_event");
+    veryl_metadata::VERYL_VERSION.hash(&mut h);
+    binary_identity().hash(&mut h);
+    veryl_environment().hash(&mut h);
+    stmts.hash(&mut h);
+    skip_unchanged.hash(&mut h);
+    for gate in gates {
+        (
+            gate.lo,
+            gate.hi,
+            gate.state_off,
+            &gate.compare,
+            &gate.out_comb,
+        )
+            .hash(&mut h);
+    }
+    DF_EVENT_MARKS.with(|x| x.borrow().as_deref().hash(&mut h));
+    DF_FF_MARKS.with(|x| x.borrow().as_deref().hash(&mut h));
+    LOCALIZE_FORCED_OFF.load(Ordering::Relaxed).hash(&mut h);
+    localize_armed().hash(&mut h);
+    let mut blocklist: Vec<isize> =
+        LOCALIZE_BLOCKLIST.with(|x| x.borrow().iter().copied().collect());
+    blocklist.sort_unstable();
+    blocklist.hash(&mut h);
+    LOCALIZE_RANGES.with(|x| x.borrow().hash(&mut h));
+    h.finish_128()
+}
+
+/// The running binary, by size and modification time: a rebuild changes the
+/// emitter without changing any input above, and the version tells apart only
+/// builds that stamp `VERSION`.
+fn binary_identity() -> Option<(u64, std::time::SystemTime)> {
+    static ID: OnceLock<Option<(u64, std::time::SystemTime)>> = OnceLock::new();
+    *ID.get_or_init(|| {
+        let meta = fs::metadata(std::env::current_exe().ok()?).ok()?;
+        Some((meta.len(), meta.modified().ok()?))
+    })
+}
+
+/// The `VERYL_` variables, which switch emitter and compiler options.
+fn veryl_environment() -> &'static [(String, String)] {
+    static ENV: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    ENV.get_or_init(|| {
+        let mut vars: Vec<_> = std::env::vars()
+            .filter(|(k, _)| k.starts_with("VERYL_"))
+            .collect();
+        vars.sort();
+        vars
+    })
+}
+
+fn event_index_path(input: u128) -> Option<PathBuf> {
+    #[cfg(test)]
+    if !TEST_EVENT_INDEX.with(|x| x.get()) {
+        return None;
+    }
+    Some(
+        aot_c_cache_dir()
+            .ok()?
+            .join(format!("veryl_aot_event_{input:032x}.idx")),
+    )
+}
+
+/// Records which `.so` the event source of `input` compiles to, with the
+/// dataflow flags its emission computed.
+fn index_event(input: u128, src: &str, comb_marked: bool, ff_marked: bool) {
+    let Some(path) = event_index_path(input) else {
+        return;
+    };
+    let (_, _, hash) = compile_key(src);
+    let _ = veryl_path::atomic_write(
+        &path,
+        format!("{hash} {} {}\n", comb_marked as u8, ff_marked as u8).as_bytes(),
+    );
+}
+
+/// Records that the emitter cannot cover the event of `input`.
+fn index_declined_event(input: u128) {
+    if let Some(path) = event_index_path(input) {
+        let _ = veryl_path::atomic_write(&path, b"declined\n");
+    }
+}
+
+enum IndexedEvent {
+    /// The `.so` and the dataflow flags.
+    Compiled(EmittedModule, bool, bool),
+    Declined,
+}
+
+/// What a previous run found for the event of `input`: its compiled `.so`,
+/// once published, or that the emitter declined it.
+fn load_indexed_event(input: u128) -> Option<IndexedEvent> {
+    let path = event_index_path(input)?;
+    let text = fs::read_to_string(&path).ok()?;
+    let mut fields = text.split_whitespace();
+    let hash = fields.next()?;
+    if hash == "declined" {
+        return Some(IndexedEvent::Declined);
+    }
+    let comb_marked = fields.next()? == "1";
+    let ff_marked = fields.next()? == "1";
+    let so_path = path.with_file_name(format!("veryl_aot_{hash}.so"));
+    if !so_path.exists() {
+        return None;
+    }
+    load_module(&so_path)
+        .ok()
+        .map(|module| IndexedEvent::Compiled(module, comb_marked, ff_marked))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Off in tests unless asked for, as a hit emits no source to inspect.
+    static TEST_EVENT_INDEX: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_event_index(on: bool) {
+    TEST_EVENT_INDEX.with(|x| x.set(on));
 }
 
 #[cfg(test)]
@@ -5245,10 +5387,15 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         }
     }
 
+    load_module(&so_path)
+}
+
+/// Opens a published `.so` and wires up its runtime hooks.
+fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
     // SAFETY: the .so was just compiled by us (or previously cached) and
     // exposes only `veryl_aot_eval`.  We never unload while the FuncPtr
     // is in use because EmittedModule keeps the library alive.
-    let lib = unsafe { libloading::Library::new(&so_path) }
+    let lib = unsafe { libloading::Library::new(so_path) }
         .map_err(|e| format!("dlopen {}: {}", so_path.display(), e))?;
     let func: FuncPtr = unsafe {
         *lib.get::<FuncPtr>(b"veryl_aot_eval\0")
