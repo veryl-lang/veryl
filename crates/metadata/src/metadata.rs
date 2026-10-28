@@ -137,12 +137,12 @@ impl fmt::Display for UrlPath {
     }
 }
 
-static VALID_PROJECT_NAME: Lazy<Regex> =
+static VALID_IDENTIFIER: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap());
 
 /// Validates a project or component name: identifiers only, `__` reserved.
 pub fn check_project_name(name: &str) -> Result<(), MetadataError> {
-    if !VALID_PROJECT_NAME.is_match(name) {
+    if !VALID_IDENTIFIER.is_match(name) {
         return Err(MetadataError::InvalidProjectName(name.to_string()));
     }
     if name.starts_with("__") {
@@ -256,6 +256,13 @@ impl Metadata {
 
     pub fn check(&self) -> Result<(), MetadataError> {
         check_project_name(&self.project.name)?;
+
+        // Properties are referred from Veryl sources as `$prop::name`
+        for name in self.properties.keys() {
+            if !VALID_IDENTIFIER.is_match(name) {
+                return Err(MetadataError::InvalidPropertyName(name.clone()));
+            }
+        }
 
         if let Some(ref license) = self.project.license {
             let _ = Expression::parse(license)?;
