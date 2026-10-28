@@ -113,6 +113,91 @@ fn simple_dff() {
 }
 
 #[test]
+fn later_ff_reads_observe_pre_edge_state() {
+    let source = r#"
+        module Top (
+            clk: input clock, rst: input reset,
+            q: output logic<2>, previous: output logic<2>,
+        ) {
+            var state: logic<2>;
+            var prev: logic<2>;
+            always_ff {
+                if_reset {
+                    state = 1;
+                    prev = 0;
+                } else {
+                    state = state + 1;
+                    prev = state;
+                }
+            }
+            assign q = state;
+            assign previous = prev;
+        }
+    "#;
+    assert_previous(source, 1);
+}
+
+#[test]
+fn block_local_reads_observe_immediate_updates() {
+    let source = r#"
+        module Top (
+            clk: input clock, rst: input reset,
+            q: output logic<2>, previous: output logic<2>,
+        ) {
+            var state: logic<2>;
+            var prev: logic<2>;
+            always_ff {
+                if_reset {
+                    state = 1;
+                    prev = 0;
+                } else {
+                    var next: logic<2>;
+                    state = state + 1;
+                    next = state + 1;
+                    next = next + 1;
+                    prev = next;
+                }
+            }
+            assign q = state;
+            assign previous = prev;
+        }
+    "#;
+    assert_previous(source, 3);
+}
+
+fn assert_previous(source: &str, expected: u8) {
+    let (ir, top) = analyze(source, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let mut inputs = std::collections::HashMap::new();
+    for p in &gate.ports {
+        let name = p.name.to_string();
+        if name == "clk" || name == "rst" {
+            for &n in &p.nets {
+                inputs.insert(n, name == "clk");
+            }
+        }
+    }
+    let mut memo = gate.ffs.iter().map(|f| (f.q, f.reset_value)).collect();
+    let output = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "previous")
+        .unwrap();
+    assert_eq!(output.nets.len(), 2);
+    for (bit, net) in output.nets.iter().enumerate() {
+        let ff = gate
+            .ffs
+            .iter()
+            .find(|f| f.q == *net)
+            .expect("output flip-flop");
+        assert_eq!(
+            eval_net(&gate, ff.d, &inputs, &mut memo),
+            expected & (1 << bit) != 0
+        );
+    }
+}
+
+#[test]
 fn constant_reset_loop_folds_iterator_dependent_function_calls() {
     let code = r#"
         module Top (
@@ -4364,6 +4449,61 @@ fn eval_net(
     };
     memo.insert(net, v);
     v
+}
+
+#[test]
+fn cast_boundaries_and_mixed_signedness() {
+    let source = r#"
+        module Top(
+            a: input signed logic, b: input logic<2>, c: input logic,
+            sum: output logic<3>, difference: output logic<3>,
+            cast_sum: output logic<3>, cast_operand: output logic<3>,
+            choose: output logic<3>, signed_cast: output logic<3>,
+        ) {
+            assign sum = a + b;
+            assign difference = a - b;
+            assign cast_sum = (a + b) as 1;
+            assign cast_operand = (a as 1) + b;
+            assign choose = if c ? a : b;
+            assign signed_cast = a as 1;
+        }
+    "#;
+    let (ir, top) = analyze(source, "Top");
+    let gate = build_gate_ir(&ir, top).expect("gate ir").module;
+    let ports: std::collections::HashMap<_, _> = gate
+        .ports
+        .iter()
+        .map(|p| (p.name.to_string(), &p.nets))
+        .collect();
+    for a in 0..2u32 {
+        for b in 0..4u32 {
+            for c in 0..2u32 {
+                let mut inputs = std::collections::HashMap::new();
+                for (name, value) in [("a", a), ("b", b), ("c", c)] {
+                    for (bit, &net) in ports[name].iter().enumerate() {
+                        inputs.insert(net, value & (1 << bit) != 0);
+                    }
+                }
+                let mut memo = std::collections::HashMap::new();
+                for (name, want) in [
+                    ("sum", a + b),
+                    ("difference", a.wrapping_sub(b) & 7),
+                    ("cast_sum", (a + b) & 1),
+                    ("cast_operand", a + b),
+                    ("choose", if c != 0 { a } else { b }),
+                    ("signed_cast", if a != 0 { 7 } else { 0 }),
+                ] {
+                    let got = ports[name]
+                        .iter()
+                        .enumerate()
+                        .fold(0u32, |value, (bit, &net)| {
+                            value | (u32::from(eval_net(&gate, net, &inputs, &mut memo)) << bit)
+                        });
+                    assert_eq!(got, want, "{name}: a={a} b={b} c={c}");
+                }
+            }
+        }
+    }
 }
 
 #[test]

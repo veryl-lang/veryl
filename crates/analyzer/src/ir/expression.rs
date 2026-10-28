@@ -222,10 +222,7 @@ impl Expression {
                             .and_then(|v| v.to_usize_saturating())
                             .unwrap_or(0),
                     };
-                    let inner = ExpressionContext {
-                        width: xc.width.max(cast_width),
-                        ..xc
-                    };
+                    let inner = xc.cast_operand(cast_width);
                     x.apply_context(context, inner);
                     (
                         x.comptime().expr_context,
@@ -267,14 +264,14 @@ impl Expression {
                 comptime.is_const = xc.is_const & yc.is_const;
                 comptime.is_global = xc.is_global & yc.is_global;
 
-                let mut ctx = op.eval_context_binary(xc, yc);
                 // A numeric width cast (`x as N`, emitted as `N'(x)`) keeps
                 // the operand's signedness. The width literal's signedness
                 // determines neither sign extension nor arithmetic shifting.
-                if *op == Op::As && !as_target_is_type {
-                    ctx.signed = xc.signed;
+                if *op == Op::As {
+                    Op::eval_context_cast(xc, yc, as_target_is_type)
+                } else {
+                    op.eval_context_binary(xc, yc)
                 }
-                ctx
             }
             Expression::Ternary(x, y, z, comptime) => {
                 // x is self-determined
@@ -532,22 +529,22 @@ impl Expression {
                 }
             }
             Expression::Ternary(x, y, z, _) => {
+                let non_integral = y.comptime().r#type.kind.is_float()
+                    || z.comptime().r#type.kind.is_float()
+                    || y.comptime().r#type.is_string()
+                    || z.comptime().r#type.is_string();
                 let x = x.eval_value(context)?;
                 let y = y.eval_value(context)?;
                 let z = z.eval_value(context)?;
-
-                // The outer expression's signedness propagates into both
-                // branches (LRM 11.8.2), so an unsigned context must suppress
-                // sign extension even when both branches are signed.
-                let width = y.width().max(z.width()).max(context_width);
-
-                // An ambiguous condition takes the false arm, as the constant
-                // fold in conv and the 2-state simulator do, rather than the
-                // bitwise merge of LRM 11.4.11.
-                let ret = if x.is_true() { y } else { z };
-                let mut ret = ret.expand(width, signed).into_owned();
-                ret.set_signed(signed);
-                Some(ret)
+                if non_integral {
+                    let width = y.width().max(z.width()).max(context_width);
+                    let selected = if x.is_true() { y } else { z };
+                    let mut ret = selected.expand(width, signed).into_owned();
+                    ret.set_signed(signed);
+                    Some(ret)
+                } else {
+                    Some(x.conditional(&y, &z, context_width, signed))
+                }
             }
             Expression::Concatenation(x, _) => {
                 let mut ret = Value::new(0, 0, false);
@@ -1080,7 +1077,7 @@ impl Factor {
         match self {
             Factor::Variable(id, index, select, comptime) => {
                 let idx = index.eval_value(context)?;
-                let (value, r#type) = if let Some(variable) = context.variables.get(id) {
+                let (mut value, r#type) = if let Some(variable) = context.variables.get(id) {
                     (variable.get_value(&idx)?.clone(), variable.r#type.clone())
                 } else if index.indices.is_empty() && select.is_empty() && comptime.is_const {
                     // Const/param scalar refs keep their folded value in comptime;
@@ -1097,7 +1094,38 @@ impl Factor {
                     // into `comptime.r#type`, whose width dimensions
                     // `gather_context` has already replaced by the selected
                     // width (mirrors `eval_assign` / `gather_ff`).
-                    let (beg, end) = select.eval_value(context, &r#type, false)?;
+                    let mut evaluated = select.clone();
+                    let mut unknown = false;
+                    for expression in evaluated
+                        .0
+                        .iter_mut()
+                        .chain(evaluated.1.iter_mut().map(|(_, end)| end))
+                    {
+                        let value = expression.eval_value(context)?;
+                        unknown |= value.is_xz();
+                        let is_const = expression.comptime().is_const;
+                        *expression = Expression::create_value(value, expression.token_range());
+                        expression.comptime_mut().is_const = is_const;
+                    }
+                    if unknown {
+                        return Some(Value::new_x(
+                            comptime.r#type.total_width()?,
+                            comptime.r#type.signed,
+                        ));
+                    }
+                    let (beg, end) = evaluated.eval_value(context, &r#type, false)?;
+                    // Rebased dynamic members may extend past their static prefix
+                    // into another field. Bound the data, without re-evaluating
+                    // side-effecting coordinates to construct another guard.
+                    if let Some(domain) = comptime.member_select_domain {
+                        let width = value.width();
+                        if domain.low > 0 && end < domain.low {
+                            value.assign(Value::new_x(width, false), domain.low - 1, 0);
+                        }
+                        if domain.high < width.saturating_sub(1) && beg > domain.high {
+                            value.assign(Value::new_x(width, false), width - 1, domain.high + 1);
+                        }
+                    }
                     let mut value = value.select(beg, end);
                     value.set_signed(comptime.r#type.signed);
                     Some(value)

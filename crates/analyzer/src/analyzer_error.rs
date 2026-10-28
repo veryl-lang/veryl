@@ -941,6 +941,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(non_constant_interface_instance_select),
+        help("use an elaboration-time constant to select an interface instance"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("interface instance select must be an elaboration-time constant")]
+    NonConstantInterfaceInstanceSelect {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_statement),
         help("remove {kind} statement"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2793,6 +2810,7 @@ impl AnalyzerError {
             AnalyzerError::MultipleAssignment { input, .. } => input,
             AnalyzerError::MultipleDefault { input, .. } => input,
             AnalyzerError::NonConstantSelectWidth { input, .. } => input,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { input, .. } => input,
             AnalyzerError::NonPositiveValue { input, .. } => input,
             AnalyzerError::ZeroSize { input, .. } => input,
             AnalyzerError::NonPortableDependency { input, .. } => input,
@@ -2899,6 +2917,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSizeType { instance, .. } => instance,
             AnalyzerError::InvalidRangeAssign { instance, .. } => instance,
             AnalyzerError::NonConstantSelectWidth { instance, .. } => instance,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { instance, .. } => instance,
             AnalyzerError::InvalidStatement { instance, .. } => instance,
             AnalyzerError::InvalidInitialAssign { instance, .. } => instance,
             AnalyzerError::InvalidForRange { instance, .. } => instance,
@@ -3030,6 +3049,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSizeType { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidRangeAssign { instance, .. } => instance.as_ref(),
             AnalyzerError::NonConstantSelectWidth { instance, .. } => instance.as_ref(),
+            AnalyzerError::NonConstantInterfaceInstanceSelect { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidStatement { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidInitialAssign { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidForRange { instance, .. } => instance.as_ref(),
@@ -3161,6 +3181,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSizeType { token_source, .. } => *token_source,
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
             AnalyzerError::InvalidInitialAssign { token_source, .. } => *token_source,
             AnalyzerError::InvalidForRange { token_source, .. } => *token_source,
@@ -3767,6 +3788,14 @@ impl AnalyzerError {
     }
     pub fn non_constant_select_width(token: &TokenRange) -> Self {
         AnalyzerError::NonConstantSelectWidth {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn non_constant_interface_instance_select(token: &TokenRange) -> Self {
+        AnalyzerError::NonConstantInterfaceInstanceSelect {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

@@ -191,8 +191,11 @@ impl Signature {
                     }
                 }
 
-                if !path_symbol.is_global_function() {
-                    for arg in path.paths[i].arguments.iter_mut() {
+                for arg in path.paths[i].arguments.iter_mut() {
+                    // A forwarded generic parameter is qualified by its value,
+                    // as the generic instance was registered.
+                    context.apply_generic_maps(arg);
+                    if !path_symbol.is_global_function() {
                         arg.append_namespace_path(&namespace, &path_symbol.namespace);
                     }
                 }

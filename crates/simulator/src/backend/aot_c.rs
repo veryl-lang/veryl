@@ -9,6 +9,8 @@
 
 pub(crate) mod emit;
 
+pub use emit::{emit_expr, emit_stmt};
+
 use crate::backend::{Backend, CompileCtx, CompiledWhole, DispatchOutcome};
 use crate::ir::{Event, ProtoStatement};
 use std::sync::Arc;
