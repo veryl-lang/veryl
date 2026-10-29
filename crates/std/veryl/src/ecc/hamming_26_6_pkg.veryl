@@ -20,6 +20,42 @@ pub package hamming_26_6_pkg {
     const ENCODE_MATRIX_ROW_4: bit<DATA_WIDTH> = 26'h3d555aa; // check[4] (15 ones)
     const ENCODE_MATRIX_ROW_5: bit<DATA_WIDTH> = 26'h3eaaaaa; // check[5] (15 ones)
 
+    // Syndrome produced by a single-bit error at each code bit.
+    const ERROR_SYNDROME: bit<CHECK_WIDTH> [CODE_WIDTH] = '{
+        6'h01, // check[0]
+        6'h02, // check[1]
+        6'h04, // check[2]
+        6'h08, // check[3]
+        6'h10, // check[4]
+        6'h20, // check[5]
+        6'h07, // data[0]
+        6'h38, // data[1]
+        6'h0b, // data[2]
+        6'h34, // data[3]
+        6'h0d, // data[4]
+        6'h32, // data[5]
+        6'h0e, // data[6]
+        6'h31, // data[7]
+        6'h13, // data[8]
+        6'h2c, // data[9]
+        6'h15, // data[10]
+        6'h2a, // data[11]
+        6'h16, // data[12]
+        6'h29, // data[13]
+        6'h19, // data[14]
+        6'h26, // data[15]
+        6'h1a, // data[16]
+        6'h25, // data[17]
+        6'h1c, // data[18]
+        6'h23, // data[19]
+        6'h1f, // data[20]
+        6'h2f, // data[21]
+        6'h37, // data[22]
+        6'h3b, // data[23]
+        6'h3d, // data[24]
+        6'h3e, // data[25]
+    };
+
     struct decode_result {
         error_pos: logic<CODE_WIDTH>, // error position (one-hot, [CHECK_WIDTH-1:0]=check, upper=data)
         corrected: logic            , // a single-bit error was located and corrected
@@ -57,44 +93,17 @@ pub package hamming_26_6_pkg {
         syndrome: input logic<CHECK_WIDTH>,
         width   : input u32               ,
     ) -> decode_result {
-        // Boolean-selector switch (SV: case (1'b1)); the syndrome values are mutually
-        // exclusive, so the branches stay parallel while sharing the width gate.
-        // A data branch that fails its width guard falls through to default -> detected.
-        switch {
-            syndrome == 6'h00: return decode_result'{error_pos: 32'h00000000, corrected: false, detected: false}; // no error
-            syndrome == 6'h01: return decode_result'{error_pos: 32'h00000001, corrected: true, detected: false}; // check[0]
-            syndrome == 6'h02: return decode_result'{error_pos: 32'h00000002, corrected: true, detected: false}; // check[1]
-            syndrome == 6'h04: return decode_result'{error_pos: 32'h00000004, corrected: true, detected: false}; // check[2]
-            syndrome == 6'h08: return decode_result'{error_pos: 32'h00000008, corrected: true, detected: false}; // check[3]
-            syndrome == 6'h10: return decode_result'{error_pos: 32'h00000010, corrected: true, detected: false}; // check[4]
-            syndrome == 6'h20: return decode_result'{error_pos: 32'h00000020, corrected: true, detected: false}; // check[5]
-            syndrome == 6'h07 && width >= 1: return decode_result'{error_pos: 32'h00000040, corrected: true, detected: false}; // data[0]
-            syndrome == 6'h38 && width >= 2: return decode_result'{error_pos: 32'h00000080, corrected: true, detected: false}; // data[1]
-            syndrome == 6'h0b && width >= 3: return decode_result'{error_pos: 32'h00000100, corrected: true, detected: false}; // data[2]
-            syndrome == 6'h34 && width >= 4: return decode_result'{error_pos: 32'h00000200, corrected: true, detected: false}; // data[3]
-            syndrome == 6'h0d && width >= 5: return decode_result'{error_pos: 32'h00000400, corrected: true, detected: false}; // data[4]
-            syndrome == 6'h32 && width >= 6: return decode_result'{error_pos: 32'h00000800, corrected: true, detected: false}; // data[5]
-            syndrome == 6'h0e && width >= 7: return decode_result'{error_pos: 32'h00001000, corrected: true, detected: false}; // data[6]
-            syndrome == 6'h31 && width >= 8: return decode_result'{error_pos: 32'h00002000, corrected: true, detected: false}; // data[7]
-            syndrome == 6'h13 && width >= 9: return decode_result'{error_pos: 32'h00004000, corrected: true, detected: false}; // data[8]
-            syndrome == 6'h2c && width >= 10: return decode_result'{error_pos: 32'h00008000, corrected: true, detected: false}; // data[9]
-            syndrome == 6'h15 && width >= 11: return decode_result'{error_pos: 32'h00010000, corrected: true, detected: false}; // data[10]
-            syndrome == 6'h2a && width >= 12: return decode_result'{error_pos: 32'h00020000, corrected: true, detected: false}; // data[11]
-            syndrome == 6'h16 && width >= 13: return decode_result'{error_pos: 32'h00040000, corrected: true, detected: false}; // data[12]
-            syndrome == 6'h29 && width >= 14: return decode_result'{error_pos: 32'h00080000, corrected: true, detected: false}; // data[13]
-            syndrome == 6'h19 && width >= 15: return decode_result'{error_pos: 32'h00100000, corrected: true, detected: false}; // data[14]
-            syndrome == 6'h26 && width >= 16: return decode_result'{error_pos: 32'h00200000, corrected: true, detected: false}; // data[15]
-            syndrome == 6'h1a && width >= 17: return decode_result'{error_pos: 32'h00400000, corrected: true, detected: false}; // data[16]
-            syndrome == 6'h25 && width >= 18: return decode_result'{error_pos: 32'h00800000, corrected: true, detected: false}; // data[17]
-            syndrome == 6'h1c && width >= 19: return decode_result'{error_pos: 32'h01000000, corrected: true, detected: false}; // data[18]
-            syndrome == 6'h23 && width >= 20: return decode_result'{error_pos: 32'h02000000, corrected: true, detected: false}; // data[19]
-            syndrome == 6'h1f && width >= 21: return decode_result'{error_pos: 32'h04000000, corrected: true, detected: false}; // data[20]
-            syndrome == 6'h2f && width >= 22: return decode_result'{error_pos: 32'h08000000, corrected: true, detected: false}; // data[21]
-            syndrome == 6'h37 && width >= 23: return decode_result'{error_pos: 32'h10000000, corrected: true, detected: false}; // data[22]
-            syndrome == 6'h3b && width >= 24: return decode_result'{error_pos: 32'h20000000, corrected: true, detected: false}; // data[23]
-            syndrome == 6'h3d && width >= 25: return decode_result'{error_pos: 32'h40000000, corrected: true, detected: false}; // data[24]
-            syndrome == 6'h3e && width >= 26: return decode_result'{error_pos: 32'h80000000, corrected: true, detected: false}; // data[25]
-            default: return decode_result'{error_pos: 32'h00000000, corrected: false, detected: true}; // undefined syndrome / out-of-range (multiple-bit error)
+        var result: decode_result;
+
+        // Each bit compares the syndrome with its own H column, so the comparisons are
+        // independent of each other. A non-zero syndrome that matches no column (including
+        // a data bit beyond the active width) leaves error_pos zero and is reported as detected.
+        for i in 0..CODE_WIDTH {
+            result.error_pos[i] = syndrome == ERROR_SYNDROME[i] && i <: CHECK_WIDTH + width;
         }
+
+        result.corrected = result.error_pos != '0;
+        result.detected  = syndrome != '0 && !result.corrected;
+        return result;
     }
 }
