@@ -39,3 +39,31 @@ fn interpreted_narrow_ff_log_preserves_four_state_payload() {
         }
     }
 }
+
+#[test]
+fn array_read_in_always_ff_and_at_a_runtime_index() {
+    let code = r#"
+    module Top (
+        clk: input clock, rst: input reset, idx: input logic, i_data: input logic<8>,
+        out: output logic<8>,
+    ) {
+        var regs: logic<8> [2];
+        var m: logic<8>;
+        always_ff {
+            if_reset {regs[0] = 0; regs[1] = 0; m = 0;}
+            else {regs[1] = i_data; m = regs[0];}
+        }
+        assign out = m + regs[idx];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clock = sim.get_clock("clk").unwrap();
+        let reset = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clock, &reset);
+        sim.set("idx", Value::new(1, 1, false));
+        sim.set("i_data", Value::new(7, 8, false));
+        sim.step(&clock);
+        assert_eq!(sim.get("out"), Some(Value::new(7, 8, false)), "{config:?}");
+    }
+}
