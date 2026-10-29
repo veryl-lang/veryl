@@ -137,6 +137,29 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(function_output_in_port_connection),
+        help("assign the result of \"{function}\" to a variable first, then connect that variable to the port"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "function \"{function}\" can't be called in a port connection because it has output argument \"{output}\""
+    )]
+    FunctionOutputInPortConnection {
+        function: String,
+        output: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("called from port connection")]
+        error_location: SourceSpan,
+        #[label(collection, "\"{output}\" is declared as an output here")]
+        output_declaration: Vec<SourceSpan>,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(combinational_loop),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
@@ -2709,6 +2732,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { input, .. } => input,
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { input, .. } => input,
             AnalyzerError::FunctionOutputInAlwaysFf { input, .. } => input,
+            AnalyzerError::FunctionOutputInPortConnection { input, .. } => input,
             AnalyzerError::CombinationalLoop { input, .. } => input,
             AnalyzerError::CombinationalLoopPositionOverflow { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
@@ -2850,6 +2874,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { instance, .. } => instance,
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { instance, .. } => instance,
             AnalyzerError::FunctionOutputInAlwaysFf { instance, .. } => instance,
+            AnalyzerError::FunctionOutputInPortConnection { instance, .. } => instance,
             AnalyzerError::CombinationalLoop { instance, .. } => instance,
             AnalyzerError::CombinationalLoopPositionOverflow { instance, .. } => instance,
             AnalyzerError::CyclicTypeDependency { instance, .. } => instance,
@@ -2981,6 +3006,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { instance, .. } => instance.as_ref(),
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { instance, .. } => instance.as_ref(),
             AnalyzerError::FunctionOutputInAlwaysFf { instance, .. } => instance.as_ref(),
+            AnalyzerError::FunctionOutputInPortConnection { instance, .. } => instance.as_ref(),
             AnalyzerError::CombinationalLoop { instance, .. } => instance.as_ref(),
             AnalyzerError::CombinationalLoopPositionOverflow { instance, .. } => instance.as_ref(),
             AnalyzerError::CyclicTypeDependency { instance, .. } => instance.as_ref(),
@@ -3112,6 +3138,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { token_source, .. } => *token_source,
             AnalyzerError::FunctionOutputInAlwaysFf { token_source, .. } => *token_source,
+            AnalyzerError::FunctionOutputInPortConnection { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoopPositionOverflow { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
@@ -3316,6 +3343,24 @@ impl AnalyzerError {
             function: function.to_string(),
             output: output.to_string(),
             destination: destination.to_string(),
+            input,
+            error_location: token.into(),
+            output_declaration,
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn function_output_in_port_connection(
+        function: &str,
+        output: &str,
+        token: &TokenRange,
+        declaration: Option<&TokenRange>,
+    ) -> Self {
+        let declarations = declaration.into_iter().copied().collect::<Vec<_>>();
+        let (input, output_declaration) = source_with_context(token, &declarations);
+        AnalyzerError::FunctionOutputInPortConnection {
+            function: function.to_string(),
+            output: output.to_string(),
             input,
             error_location: token.into(),
             output_declaration,

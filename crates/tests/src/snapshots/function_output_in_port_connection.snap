@@ -1,0 +1,22 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+function_output_in_port_connection (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#function_output_in_port_connection)
+
+  × function "write_seen" can't be called in a port connection because it has output argument "y"
+    ╭─[../../testcases/error/function_output_in_port_connection.veryl:22:12]
+ 21 │     inst u: function_output_in_port_connection_sub (
+ 22 │         i: write_seen(a, seen),
+    ·            ─────────┬─────────
+    ·                     ╰── called from port connection
+ 23 │         o                     ,
+    ╰────
+    ╭─[../../testcases/error/function_output_in_port_connection.veryl:15:9]
+ 14 │         x: input  logic<8>,
+ 15 │         y: output logic<8>,
+    ·         ┬
+    ·         ╰── "y" is declared as an output here
+ 16 │     ) -> logic<8> {
+    ╰────
+  help: assign the result of "write_seen" to a variable first, then connect that variable to the port
