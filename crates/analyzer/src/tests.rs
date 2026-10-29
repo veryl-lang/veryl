@@ -12977,6 +12977,33 @@ fn invalid_factor() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
     assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = i<4>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 8;
+    }
+    module ModuleA {
+        const W: u32 = 8;
+        let _a: u32 = W<4>;
+        let _b: u32 = PackageA::W<4>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+    assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
 }
 
 #[test]
