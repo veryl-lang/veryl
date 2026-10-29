@@ -3515,10 +3515,12 @@ impl ProtoExpression {
             );
             (payload, mask_xz)
         };
-        let payload = if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
-            && let Some(mask) = mask_xz
+        let payload = if matches!(
+            op,
+            Op::Add | Op::Sub | Op::Mul | Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor
+        ) && let Some(mask) = mask_xz
         {
-            // Bitwise unknown results are X (payload=0), never input Z (payload=1).
+            // Unknown results are X (payload=0), never input Z (payload=1).
             emit_wide_binary_op(
                 context,
                 builder,
