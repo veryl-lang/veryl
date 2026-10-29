@@ -35,6 +35,7 @@ mod interface_instance_select_tests;
 mod modport_connection_tests;
 mod package_alias_type_tests;
 mod statement_after_if_reset_tests;
+mod unit_cache_tests;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
