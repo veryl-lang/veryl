@@ -42,7 +42,9 @@ pub struct DerivedClock {
 /// An internally produced async reset, monitored for its ASSERTION.
 #[derive(Clone, Debug)]
 pub struct DerivedReset {
-    pub var_id: VarId,
+    /// The resets that assert with this net; their events fire together.
+    pub members: Vec<VarId>,
+    /// The start of the members' copy chain, possibly none of them.
     /// `is_ff()` selects between `ff_values` and `comb_values`.
     pub current_offset: VarOffset,
     /// Always 1 for a reset; carried for the `read_native_value` ABI.
@@ -137,19 +139,28 @@ pub fn build_schedule(
         })
         .collect();
 
-    let resets: Vec<DerivedReset> = candidates
-        .iter()
-        .filter_map(|(var_id, off, nb, polarity, _)| {
-            polarity
-                .filter(|_| driven(off))
-                .map(|active_low| DerivedReset {
-                    var_id: *var_id,
-                    current_offset: *off,
+    // A reset that only copies another asserts with it, so one read of the
+    // chain's source stands for all of them.
+    let mut resets: Vec<DerivedReset> = Vec::new();
+    let mut reset_at: HashMap<(VarOffset, bool), usize> = HashMap::default();
+    for (var_id, off, nb, polarity, _) in candidates {
+        let Some(active_low) = polarity.filter(|_| driven(off)) else {
+            continue;
+        };
+        let source = copy_root(*off, pre_jit_stmts, &output_to_writer);
+        match reset_at.get(&(source, active_low)) {
+            Some(&i) => resets[i].members.push(*var_id),
+            None => {
+                reset_at.insert((source, active_low), resets.len());
+                resets.push(DerivedReset {
+                    members: vec![*var_id],
+                    current_offset: source,
                     native_bytes: *nb,
                     active_low,
-                })
-        })
-        .collect();
+                });
+            }
+        }
+    }
 
     // FF-derived first, then comb-derived in topo order — matches the
     // chain-fire fixpoint's natural firing order.
@@ -254,6 +265,25 @@ fn copied_source(
         }
     }
     None
+}
+
+fn copy_root(
+    mut offset: VarOffset,
+    pre_jit_stmts: &[ProtoStatement],
+    output_to_writer: &HashMap<VarOffset, Writers>,
+) -> VarOffset {
+    // A chain longer than the statement count would revisit a writer.
+    for _ in 0..=pre_jit_stmts.len() {
+        let next = match output_to_writer.get(&offset).map(|w| w.as_slice()) {
+            Some([writer]) => pre_jit_stmts.get(*writer).and_then(copy_source),
+            _ => None,
+        };
+        match next {
+            Some(next) => offset = next,
+            None => return offset,
+        }
+    }
+    offset
 }
 
 /// `src` of a one-bit `dst = src`, also under the `& 1` a logic-to-clock

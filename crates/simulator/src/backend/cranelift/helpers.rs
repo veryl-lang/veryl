@@ -147,20 +147,34 @@ pub(crate) fn gen_mask_for_width(width: usize) -> u128 {
 }
 
 /// Clamped index → shift amount for a dynamic bit select, plus the test
-/// that the index is inside the array, which the clamp computes anyway.
-/// `None` for the second half means the index's own width cannot reach
-/// past the last element, so the caller emits no guard at all.
+/// that the index is known and inside the selection bounds. `None` for
+/// the second half means neither a range nor an unknown-value guard is needed.
 pub(crate) fn build_dynamic_select_shift_checked(
     dyn_sel: &ProtoDynamicBitSelect,
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
-) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+) -> Option<(CraneliftValue, Option<CraneliftValue>, CraneliftValue)> {
     // A zero-element select has no clamp target; leave the statement to the
     // interpreter rather than underflow `num_elements - 1` below.
     if dyn_sel.num_elements == 0 {
         return None;
     }
-    let (idx_payload, _) = dyn_sel.index_expr.build_binary(context, builder)?;
+    let (idx_payload, idx_mask_xz) = dyn_sel.index_expr.build_binary(context, builder)?;
+    let (idx_payload, rhs_shift) = if dyn_sel.low_adjust == 0 {
+        (idx_payload, builder.ins().iconst(I64, 0))
+    } else {
+        let adjust = builder.ins().iconst(I64, dyn_sel.low_adjust as i64);
+        let left = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThan, idx_payload, adjust);
+        let zero = builder.ins().iconst(I64, 0);
+        let low = builder.ins().isub(idx_payload, adjust);
+        let low = builder.ins().select(left, zero, low);
+        let skip = builder.ins().isub(adjust, idx_payload);
+        let skip = builder.ins().select(left, skip, zero);
+        let skip = builder.ins().imul_imm_s(skip, dyn_sel.elem_width as i64);
+        (low, skip)
+    };
     let num_elem = builder.ins().iconst(I64, dyn_sel.num_elements as i64);
     let max_idx = builder.ins().iconst(I64, (dyn_sel.num_elements - 1) as i64);
     let in_bounds = builder
@@ -170,7 +184,37 @@ pub(crate) fn build_dynamic_select_shift_checked(
     let shift = builder.ins().imul_imm_s(clamped, dyn_sel.elem_width as i64);
     let in_range = crate::ir::index_may_exceed(dyn_sel.index_expr.width(), dyn_sel.num_elements)
         .then_some(in_bounds);
-    Some((shift, in_range))
+    let in_range = if dyn_sel.low_adjust != 0 {
+        let overlaps =
+            builder
+                .ins()
+                .icmp_imm_u(IntCC::UnsignedLessThan, rhs_shift, dyn_sel.window as i64);
+        Some(match in_range {
+            Some(bounds) => builder.ins().band(bounds, overlaps),
+            None => overlaps,
+        })
+    } else {
+        in_range
+    };
+    let in_range = if let Some(unknown) = wide_any_xz(
+        context,
+        builder,
+        idx_mask_xz,
+        None,
+        returns_wide_pointer(&dyn_sel.index_expr),
+        false,
+        dyn_sel.index_expr.width(),
+        0,
+    ) {
+        let known = builder.ins().icmp_imm_s(IntCC::Equal, unknown, 0);
+        Some(match in_range {
+            Some(bounds) => builder.ins().band(bounds, known),
+            None => known,
+        })
+    } else {
+        in_range
+    };
+    Some((shift, in_range, rhs_shift))
 }
 
 // ── Wide (>128-bit) helper utilities ────────────────────────────────

@@ -4,7 +4,19 @@
 use crate::conv::Context;
 use crate::ir::{AssignDestination, MemberSelectDomain, Type, VarId, VarIndex, VarSelect};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct ArraySpan {
     pub start: usize,
     pub length: usize,
@@ -43,7 +55,9 @@ impl ArraySpan {
 
 /// Half-open packed-bit interval. Unlike a dense bit mask, its storage and
 /// operations are independent of the declared bit width.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct PackedSpan {
     pub start: usize,
     pub length: usize,

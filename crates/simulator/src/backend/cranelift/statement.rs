@@ -8,6 +8,7 @@ use super::runtime::{
 };
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain};
 use crate::ir::variable::native_bytes as calc_native_bytes;
+use crate::ir::write_log::log_window_for_span;
 use crate::ir::{
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoDynamicBitSelect,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
@@ -19,23 +20,6 @@ use cranelift::prelude::types::{I8, I16, I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
-
-/// Aligned 1/2/4/8-byte window containing byte span `[blo, bhi]`, or None.
-/// It must not run past `nb`: the commit writes the whole window.
-fn log_window_for_span(blo: usize, bhi: usize, nb: usize) -> Option<(usize, usize)> {
-    if bhi < blo || bhi >= nb {
-        return None;
-    }
-    let mut w = 1usize;
-    while w <= 8 {
-        let start = blo & !(w - 1);
-        if start + w > bhi && start + w <= nb {
-            return Some((start, w));
-        }
-        w <<= 1;
-    }
-    None
-}
 
 /// Push an FF write-log entry for a post-RMW `payload` (+ optional 4-state
 /// `mask_xz`). Narrow FFs (`nb <= 8`) push one I64 entry; wide FFs (`nb > 8`,
@@ -208,19 +192,45 @@ fn mask_out_of_range(
 }
 
 impl ProtoAssignDynamicStatement {
-    /// `Some(cond)` when this statement's runtime index can leave the array.
+    /// `Some(cond)` when the element index may be unknown or outside the array.
     fn dst_in_range(
         &self,
         idx_payload: CraneliftValue,
+        idx_mask_xz: Option<CraneliftValue>,
+        context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<CraneliftValue> {
-        index_may_exceed(self.dst_index_expr.width(), self.dst_num_elements).then(|| {
-            let n = builder.ins().iconst(I64, self.dst_num_elements as i64);
-            builder.ins().icmp(IntCC::UnsignedLessThan, idx_payload, n)
-        })
+        let bounds =
+            index_may_exceed(self.dst_index_expr.width(), self.dst_num_elements).then(|| {
+                let n = builder.ins().iconst(I64, self.dst_num_elements as i64);
+                builder.ins().icmp(IntCC::UnsignedLessThan, idx_payload, n)
+            });
+        let known = wide_any_xz(
+            context,
+            builder,
+            idx_mask_xz,
+            None,
+            returns_wide_pointer(&self.dst_index_expr),
+            false,
+            self.dst_index_expr.width(),
+            0,
+        )
+        .map(|unknown| builder.ins().icmp_imm_s(IntCC::Equal, unknown, 0));
+        and_in_range(builder, bounds, known)
     }
 
     pub fn can_build_binary(&self) -> bool {
+        if let Some(ds) = self
+            .dynamic_select
+            .as_ref()
+            .filter(|d| d.row_elements.is_some() || (d.low_adjust != 0 && self.dst_width > 64))
+        {
+            return ds.index_expr.width() <= 64
+                && ds.index_expr.can_build_binary()
+                && self.dst_index_expr.width() <= 64
+                && self.dst_index_expr.can_build_binary()
+                && self.expr.can_build_binary();
+        }
         if !self.expr.can_build_binary() || !self.dst_index_expr.can_build_binary() {
             return false;
         }
@@ -245,7 +255,7 @@ impl ProtoAssignDynamicStatement {
             if self.dst_width > 64 {
                 return self.dst_base.is_ff() && self.rhs_select.is_none();
             }
-            return dyn_sel.elem_width * dyn_sel.num_elements <= 64;
+            return dyn_sel.storage_width() <= 64;
         }
         // build_binary's rhs_select slicing assumes a ≤64-bit scalar
         // payload; wider sources stay on the interpreter (rare).
@@ -272,6 +282,13 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        if self
+            .dynamic_select
+            .as_ref()
+            .is_some_and(|d| d.row_elements.is_some() || (d.low_adjust != 0 && self.dst_width > 64))
+        {
+            return super::selection::assign_dynamic(self, context, builder);
+        }
         // The narrow path below assumes a native (≤8-byte) dst; route the
         // wide comb-base cases to their own emitter.  The 65..128-bit band
         // joins it only without `dynamic_select`, which that emitter declines.
@@ -328,8 +345,8 @@ impl ProtoAssignDynamicStatement {
         }
 
         // Compute dynamic address
-        let (idx_payload, _idx_mask_xz) = self.dst_index_expr.build_binary(context, builder)?;
-        let mut in_range = self.dst_in_range(idx_payload, builder);
+        let (idx_payload, idx_mask_xz) = self.dst_index_expr.build_binary(context, builder)?;
+        let mut in_range = self.dst_in_range(idx_payload, idx_mask_xz, context, builder);
 
         let max_idx = builder
             .ins()
@@ -440,27 +457,29 @@ impl ProtoAssignDynamicStatement {
         // test can join the element one; both must hold for the store.
         let dyn_shift = match &self.dynamic_select {
             Some(dyn_sel) => {
-                let (shift, sel_in_range) =
+                let (shift, sel_in_range, rhs_shift) =
                     build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
                 in_range = and_in_range(builder, in_range, sel_in_range);
-                Some(shift)
+                Some((shift, rhs_shift))
             }
             None => None,
         };
         *guard = begin_oob_guard(builder, in_range);
 
         if let Some(dyn_sel) = &self.dynamic_select {
-            let shift = dyn_shift?;
+            let (shift, rhs_shift) = dyn_shift?;
 
             // Clip mask and payload to the element width: a last-element
             // window can overhang, and RHS bits above the window must not
             // leak into neighbouring bits the interpreter leaves alone.
             let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = builder.ins().iconst(I64, elem_mask as i64);
+            let mask_val = builder.ins().ushr(mask_val, rhs_shift);
             let dyn_mask = builder.ins().ishl(mask_val, shift);
             let dyn_mask = band_const(builder, dyn_mask, gen_mask_for_width(self.dst_width), false);
             let not_mask = builder.ins().bnot(dyn_mask);
 
+            let payload = builder.ins().ushr(payload, rhs_shift);
             let payload = builder.ins().ishl(payload, shift);
             let payload = builder.ins().band(payload, dyn_mask);
 
@@ -471,6 +490,7 @@ impl ProtoAssignDynamicStatement {
                 store_i64_to_native(builder, result, addr, 0);
             }
             let mask_result = if let Some(mask_xz) = mask_xz {
+                let mask_xz = builder.ins().ushr(mask_xz, rhs_shift);
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
                 let mask_xz = builder.ins().band(mask_xz, dyn_mask);
                 let org = load_native_to_i64(builder, addr, nb_i32);
@@ -596,8 +616,8 @@ impl ProtoAssignDynamicStatement {
         builder: &mut FunctionBuilder,
         guard: &mut Option<Block>,
     ) -> Option<cranelift::prelude::Value> {
-        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
-        let in_range = self.dst_in_range(idx_payload, builder);
+        let (idx_payload, idx_mask_xz) = self.dst_index_expr.build_binary(context, builder)?;
+        let in_range = self.dst_in_range(idx_payload, idx_mask_xz, context, builder);
         let max_idx = builder
             .ins()
             .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
@@ -772,8 +792,8 @@ impl ProtoAssignDynamicStatement {
 
         let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
 
-        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
-        let mut in_range = self.dst_in_range(idx_payload, builder);
+        let (idx_payload, idx_mask_xz) = self.dst_index_expr.build_binary(context, builder)?;
+        let mut in_range = self.dst_in_range(idx_payload, idx_mask_xz, context, builder);
         let max_idx = builder
             .ins()
             .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
@@ -795,7 +815,7 @@ impl ProtoAssignDynamicStatement {
         // `AssignDynamicStatement::eval_step`'s order.
         let dyn_window = match self.dynamic_select.as_ref() {
             Some(dyn_sel) => {
-                let (shift, sel_in_range) =
+                let (shift, sel_in_range, _) =
                     build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
                 in_range = and_in_range(builder, in_range, sel_in_range);
                 Some((shift, dyn_sel.window))
@@ -1381,6 +1401,15 @@ impl ProtoAssignStatement {
     }
 
     pub fn can_build_binary(&self) -> bool {
+        if let Some(ds) = self
+            .dynamic_select
+            .as_ref()
+            .filter(|d| d.row_elements.is_some() || (d.low_adjust != 0 && self.dst_width > 128))
+        {
+            return ds.index_expr.width() <= 64
+                && ds.index_expr.can_build_binary()
+                && self.expr.can_build_binary();
+        }
         if !self.expr.can_build_binary() {
             return false;
         }
@@ -1407,7 +1436,7 @@ impl ProtoAssignStatement {
             // Wider than a register → `build_binary_wide`'s width-generic
             // RMW; narrower → the register RMW below, which needs the whole
             // span in an I64/I128.
-            if self.dst_width <= 128 && dyn_sel.elem_width * dyn_sel.num_elements > 128 {
+            if self.dst_width <= 128 && dyn_sel.storage_width() > 128 {
                 return false;
             }
         }
@@ -1435,6 +1464,11 @@ impl ProtoAssignStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        if self.dynamic_select.as_ref().is_some_and(|d| {
+            d.row_elements.is_some() || (d.low_adjust != 0 && self.dst_width > 128)
+        }) {
+            return super::selection::assign(self, context, builder);
+        }
         // Wide path: >128-bit destination
         if self.dst_width > 128 {
             return self.build_binary_wide(context, builder);
@@ -1641,7 +1675,8 @@ impl ProtoAssignStatement {
             };
 
         if let Some(dyn_sel) = &self.dynamic_select {
-            let (shift, in_range) = build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+            let (shift, in_range, rhs_shift) =
+                build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
 
             // Clip mask and payload to the declared width: a last-element
             // window can overhang, and `clip_select_to_width` drops those
@@ -1652,11 +1687,13 @@ impl ProtoAssignStatement {
             } else {
                 builder.ins().iconst(I64, elem_mask as i64)
             };
+            let mask_val = builder.ins().ushr(mask_val, rhs_shift);
             let dyn_mask = builder.ins().ishl(mask_val, shift);
             let dyn_mask = band_const(builder, dyn_mask, gen_mask_for_width(self.dst_width), wide);
             let dyn_mask = mask_out_of_range(context, builder, in_range, dyn_mask, wide);
             let not_mask = builder.ins().bnot(dyn_mask);
 
+            let payload = builder.ins().ushr(payload, rhs_shift);
             let payload = builder.ins().ishl(payload, shift);
             let payload = builder.ins().band(payload, dyn_mask);
 
@@ -1681,6 +1718,7 @@ impl ProtoAssignStatement {
             }
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
+                let mask_xz = builder.ins().ushr(mask_xz, rhs_shift);
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
                 let mask_xz = builder.ins().band(mask_xz, dyn_mask);
                 let z = if wide { context.zero_128 } else { context.zero };
@@ -2078,7 +2116,8 @@ impl ProtoAssignStatement {
                 }
                 None => sv,
             };
-            let (shift, in_range) = build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
+            let (shift, in_range, _) =
+                build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
             *guard = begin_oob_guard(builder, in_range);
             emit_wide_dynamic_field_store(
                 builder,
@@ -2149,7 +2188,7 @@ impl ProtoAssignStatement {
         // dead.
         let dyn_window = match self.dynamic_select.as_ref() {
             Some(dyn_sel) => {
-                let (shift, in_range) =
+                let (shift, in_range, _) =
                     build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
                 *guard = begin_oob_guard(builder, in_range);
                 Some((shift, dyn_sel.window))
@@ -2751,6 +2790,24 @@ fn emit_wide_log_chunks_dyn(
     nb: usize,
 ) {
     use crate::ir::write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    // An element up to 16 bytes is logged to the narrow pool, as every other
+    // write to it is: the commit applies the narrow pool before the wide one,
+    // so writes split across the two would lose their order.
+    if nb <= 16 {
+        let width_class = builder.ins().iconst(I32, 8);
+        for i in 0..nb / 8 {
+            let word = builder
+                .ins()
+                .load(I64, MemFlagsData::trusted(), src_ptr, (i * 8) as i32);
+            let off = if i == 0 {
+                base_offset_val
+            } else {
+                builder.ins().iadd_imm_s(base_offset_val, (i * 8) as i64)
+            };
+            emit_inline_write_log_push(context, builder, off, word, width_class);
+        }
+        return;
+    }
     let mut written: usize = 0;
     while written < nb {
         let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
@@ -2954,7 +3011,7 @@ fn cold_if_true_enabled() -> bool {
 /// Sets the dirty bits of the dataflow cells reading FF bytes `span` without
 /// comparing: a window store merges inside its helper call, so the new value
 /// is never in hand to compare against.
-fn emit_ff_mark_readers(
+pub(super) fn emit_ff_mark_readers(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
     span: Option<(u32, u32)>,

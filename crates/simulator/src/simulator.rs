@@ -571,6 +571,12 @@ impl Simulator {
         }
 
         if env::var("VERYL_DERIVED_CLOCK_DUMP").as_deref() == Ok("1") {
+            let resets = &ret.ir.derived_clock_schedule.resets;
+            eprintln!(
+                "[derived_reset] {} resets on {} nets",
+                resets.iter().map(|r| r.members.len()).sum::<usize>(),
+                resets.len()
+            );
             fn find_var_by_ptr(
                 module: &ModuleVariables,
                 ptr: *const u8,
@@ -698,6 +704,18 @@ impl Simulator {
         if rst.active_low { 1 - bit } else { bit }
     }
 
+    fn derived_reset_members(&self, indices: &[usize]) -> SmallVec<[VarId; 4]> {
+        indices
+            .iter()
+            .flat_map(|&i| {
+                self.ir.derived_clock_schedule.resets[i]
+                    .members
+                    .iter()
+                    .copied()
+            })
+            .collect()
+    }
+
     /// Re-arm every derived reset against the state as it now reads.
     fn snapshot_derived_reset_levels(&mut self) {
         for i in 0..self.ir.derived_clock_schedule.resets.len() {
@@ -807,19 +825,17 @@ impl Simulator {
                 return;
             }
             let has_components = !self.components.is_empty();
+            let fired = self.derived_reset_members(&fired);
             if has_components {
-                for &i in &fired {
-                    let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                for &vid in &fired {
                     self.stage_components(&Event::reset(vid));
                 }
             }
-            for &i in &fired {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &fired {
                 self.eval_event_stmts(&Event::reset(vid));
             }
             self.commit_event_log();
-            for &i in &fired {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &fired {
                 if has_components {
                     self.fire_components(&Event::reset(vid));
                 }
@@ -1963,9 +1979,9 @@ impl Simulator {
                     self.stage_components(&Event::clock(vid));
                 }
             }
+            let rst_batch = self.derived_reset_members(&rst_batch);
             if has_components {
-                for &i in &rst_batch {
-                    let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                for &vid in &rst_batch {
                     self.stage_components(&Event::reset(vid));
                 }
             }
@@ -1978,13 +1994,11 @@ impl Simulator {
             }
             // Resets last, so a net that both clocks and resets this
             // instant takes the reset value SV gives it.
-            for &i in &rst_batch {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &rst_batch {
                 self.eval_event_stmts(&Event::reset(vid));
             }
             self.commit_event_log();
-            for &i in &rst_batch {
-                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+            for &vid in &rst_batch {
                 if has_components {
                     self.fire_components(&Event::reset(vid));
                 }

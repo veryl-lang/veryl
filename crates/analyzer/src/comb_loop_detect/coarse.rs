@@ -39,7 +39,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 /// How much a coarse graph tells about its module.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 struct Status {
     /// Some dependencies are unknown, as they are to the precise tier.
     incomplete: bool,
@@ -55,7 +55,7 @@ impl Status {
 }
 
 /// What parents need from a module: which ports reach which.
-#[derive(Default)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct CoarseSummary {
     reach: HashMap<VarId, HashSet<VarId>>,
     status: Status,

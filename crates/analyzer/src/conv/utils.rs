@@ -9,6 +9,8 @@ use crate::conv::checker::generic::check_generic_refereence;
 use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::context::RuntimeFunctionEffect;
 use crate::conv::instance::InstanceHistoryError;
+use crate::conv::package_const::PackageConstUse;
+use crate::conv::unit_cache::{self, ChildReach, UnitEvent, UnitRecord};
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
 use crate::ir::{
@@ -29,7 +31,7 @@ use crate::value::Value;
 use crate::{HashMap, HashSet, ir_error};
 use std::rc::Rc;
 use std::sync::Arc;
-use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -94,6 +96,10 @@ pub fn try_infer_var_assign(
     let inferred = comptime.r#type.clone();
     check_inferred_type_emittable(context, &inferred, expr, token)?;
 
+    let stable = unit_cache::is_active().then(|| crate::ir::stable_type(&inferred));
+    if let Some(stable) = &stable {
+        unit_cache::check_replayed_type(&dst_symbol.token.id, stable);
+    }
     if let Some(existing) = crate::resolved_type_table::get(&dst_symbol.token.id) {
         if existing != inferred {
             context.insert_error(AnalyzerError::type_inference_conflict(
@@ -104,13 +110,19 @@ pub fn try_infer_var_assign(
         }
     } else {
         crate::resolved_type_table::insert(dst_symbol.token.id, inferred.clone());
-        // Replace the placeholder Comptime so subsequent lookups see
-        // the inferred type, not `Unknown`.
-        let path = VarPath::new(dst_symbol.token.text);
-        if let Some((id, mut ct)) = context.find_path(&path) {
-            ct.r#type = inferred.clone();
-            context.insert_var_path_with_id(path, id, ct);
-        }
+    }
+    // Also when it agrees: a replay skips entering it, and the conversion that
+    // entered it first may be one that does not run again.
+    if let Some(stable) = stable {
+        context.record_resolved_type(dst_symbol.token.id, stable);
+    }
+    // The table outlives a conversion; the placeholder does not.
+    let path = VarPath::new(dst_symbol.token.text);
+    if let Some((id, mut ct)) = context.find_path(&path)
+        && ct.r#type != inferred
+    {
+        ct.r#type = inferred.clone();
+        context.insert_var_path_with_id(path, id, ct);
     }
     Ok(Some((comptime, ir_expr)))
 }
@@ -1284,16 +1296,22 @@ pub fn eval_struct_member(
                         x
                     } else {
                         let expr = x.value.as_ref().ok_or_else(|| ir_error!(token))?;
-                        let (comptime, mut expr) =
-                            eval_expr(context, Some(r#type.clone()), expr, false)?;
-                        // An array literal's per-element values are carried by
-                        // the comptime `eval_expr` builds; `eval_comptime`
-                        // alone leaves an array literal unevaluated.
-                        if matches!(comptime.value, ValueVariant::NumericArray(_)) {
-                            comptime
-                        } else {
-                            expr.eval_comptime(context, None).clone()
-                        }
+                        context.eval_package_const(
+                            &symbol.found,
+                            PackageConstUse::StructWhole,
+                            |c| {
+                                let (comptime, mut expr) =
+                                    eval_expr(c, Some(r#type.clone()), expr, false)?;
+                                // An array literal's per-element values are carried by
+                                // the comptime `eval_expr` builds; `eval_comptime`
+                                // alone leaves an array literal unevaluated.
+                                Ok(if matches!(comptime.value, ValueVariant::NumericArray(_)) {
+                                    comptime
+                                } else {
+                                    expr.eval_comptime(c, None).clone()
+                                })
+                            },
+                        )?
                     };
 
                     member_path.add_prelude(&path.0);
@@ -1904,7 +1922,7 @@ pub fn eval_clock(context: &mut Context, value: &AlwaysFfDeclaration) -> IrResul
         }
     } else if let Some((x, id)) = context.get_default_clock() {
         let token = value.always_ff.always_ff_token.token;
-        symbol_table::add_reference(id, &token);
+        context.add_reference(id, token);
         Ok(x)
     } else {
         context.insert_error(AnalyzerError::missing_clock_signal(&token));
@@ -1959,7 +1977,7 @@ pub fn eval_reset(
         }
     } else if let Some((x, id)) = context.get_default_reset() {
         let token = value.always_ff.always_ff_token.token;
-        symbol_table::add_reference(id, &token);
+        context.add_reference(id, token);
         Ok(Some(x))
     } else {
         context.insert_error(AnalyzerError::missing_reset_signal(&token));
@@ -2624,6 +2642,7 @@ pub fn eval_factor_path(
     // resolved to a base case here; otherwise it recurses until the native
     // stack overflows.
     context.function_eval_depth += 1;
+    context.function_eval_peak = context.function_eval_peak.max(context.function_eval_depth);
     let ret = if context.function_eval_depth > context.config.symbol_eval_depth_limit {
         if context.function_eval_overflow.is_none() {
             context.function_eval_overflow = Some((token, context.function_eval_depth));
@@ -3171,13 +3190,17 @@ pub fn eval_factor_symbol(
             }
 
             if let Some(expr) = &x.value {
-                let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
-                let (mut comptime, _) =
-                    context.block(|c| eval_expr(c, Some(r#type), expr, false))?;
+                let mut comptime =
+                    context.eval_package_const(&symbol.found, PackageConstUse::Factor, |c| {
+                        let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                        let (mut comptime, _) =
+                            c.block(|c| eval_expr(c, Some(r#type), expr, false))?;
 
-                if let Some(width) = comptime.r#type.total_width() {
-                    comptime.value.expand_value(width);
-                }
+                        if let Some(width) = comptime.r#type.total_width() {
+                            comptime.value.expand_value(width);
+                        }
+                        Ok(comptime)
+                    })?;
 
                 comptime.token = token;
                 return Ok(ir::Factor::Value(comptime));
@@ -3956,6 +3979,70 @@ pub fn get_component(
     get_component_at(context, sig, token, None)
 }
 
+/// Like [`get_component`], with the body its file's checks read even when
+/// the component was replayed from the unit cache, which converts its header
+/// alone.
+pub fn get_component_body(
+    context: &mut Context,
+    sig: &Signature,
+    token: TokenRange,
+) -> IrResult<Arc<ir::Component>> {
+    let ret = get_component(context, sig, token)?;
+    let mut sig = sig.clone();
+    sig.normalize();
+    if !unit_cache::is_header_only(&sig) {
+        return Ok(ret);
+    }
+    let symbol = symbol_table::get(sig.symbol).unwrap();
+    convert_whole(context, &symbol, &sig, token, None, None)
+}
+
+/// The identifiers written in `module`.
+pub fn identifiers_in(module: &ModuleDeclaration) -> HashSet<StrId> {
+    use veryl_parser::veryl_walker::VerylWalker;
+
+    struct Collector(HashSet<StrId>);
+    impl VerylWalker for Collector {
+        fn identifier(&mut self, arg: &Identifier) {
+            self.0.insert(arg.identifier_token.token.text);
+        }
+    }
+
+    let mut collector = Collector(HashSet::default());
+    collector.module_declaration(module);
+    collector.0
+}
+
+/// Converts a component replayed from its header alone again, whole and
+/// without its diagnostics, which were replayed.
+fn convert_whole(
+    context: &mut Context,
+    symbol: &Symbol,
+    sig: &Signature,
+    token: TokenRange,
+    site: Option<TokenRange>,
+    body_names: Option<Arc<HashSet<StrId>>>,
+) -> IrResult<Arc<ir::Component>> {
+    context
+        .instance_history
+        .push_materialized(sig.clone(), site);
+    context.push_generic_map(sig.to_generic_map());
+    let (ret, _) = context.in_unit(
+        &symbol.inner_namespace(),
+        site.is_some(),
+        false,
+        true,
+        body_names,
+        |c| convert_component(c, symbol, sig, token, false),
+    );
+    context.pop_instance_history();
+    context.pop_generic_map();
+    if ret.is_ok() {
+        unit_cache::mark_whole(sig.clone());
+    }
+    ret
+}
+
 /// Records `token` as the instantiation site for diagnostics raised inside.
 pub fn get_instantiated_component(
     context: &mut Context,
@@ -3976,125 +4063,317 @@ fn get_component_at(
     sig.normalize();
     let sig = &sig;
 
-    if let Some((component, in_generic)) = context.get_instance_history(sig) {
-        if in_generic && !context.in_generic {
-            // The IR result gotten from the cache may be incomplete
-            // if the `in_generic` flag is set.
-            // Such result should be removed from the cache and be created again.
-            context.remove_instance_history(sig);
-            get_component_at(context, sig, token, site)
-        } else {
-            Ok(component)
-        }
-    } else {
-        let symbol = symbol_table::get(sig.symbol).unwrap();
+    let symbol = symbol_table::get(sig.symbol).unwrap();
+    if let SymbolKind::SystemVerilog = symbol.kind {
+        let component = ir::SystemVerilog {
+            name: symbol.token.text,
+            connects: vec![],
+        };
+        return Ok(Arc::new(ir::Component::SystemVerilog(component)));
+    }
 
-        if let SymbolKind::SystemVerilog = symbol.kind {
-            let component = ir::SystemVerilog {
-                name: symbol.token.text,
-                connects: vec![],
-            };
-            return Ok(Arc::new(ir::Component::SystemVerilog(component)));
-        }
-
-        let err = context.push_instance_history(sig.clone(), site);
-
-        if let Err(x) = err {
-            match x {
-                InstanceHistoryError::ExceedDepthLimit(x) => {
-                    context.insert_error(AnalyzerError::exceed_limit(
-                        ExceedLimitKind::HierarchyDepth,
-                        x,
-                        &token,
-                    ));
-                }
-                InstanceHistoryError::ExceedTotalLimit(x) => {
-                    context.insert_error(AnalyzerError::exceed_limit(
-                        ExceedLimitKind::TotalInstance,
-                        x,
-                        &token,
-                    ));
-                }
-                InstanceHistoryError::InfiniteRecursion => {
-                    context.insert_error(AnalyzerError::infinite_recursion(&token));
-                }
-            }
-            return Err(ir_error!(token));
-        }
-
-        context.push_generic_map(sig.to_generic_map());
-
-        let ret = context.block(|c| match &symbol.kind {
-            SymbolKind::Module(x) if !x.is_proto => {
-                let definition =
-                    definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
-                let Definition::Module(x) = definition.as_ref() else {
-                    unreachable!()
-                };
-
-                let header_only = c.in_generic;
-                let component: IrResult<ir::Module> = Conv::conv(c, (x, header_only));
-                match component {
-                    Ok(mut component) => {
-                        component.signature = sig.clone();
-                        if !c.config.retain_component_body {
-                            component.functions.clear();
-                            component.declarations.clear();
-                        }
-
-                        let component = Arc::new(ir::Component::Module(component));
-                        c.set_instance_history(sig, component.clone());
-                        Ok(component)
-                    }
-                    Err(x) => Err(x),
-                }
-            }
-            SymbolKind::Interface(x) if !x.is_proto => {
-                let definition = x
-                    .definition
-                    .and_then(definition_table::get)
-                    .ok_or_else(|| ir_error!(token))?;
-                let Definition::Interface(x) = definition.as_ref() else {
-                    unreachable!()
-                };
-
-                let component: IrResult<ir::Interface> = Conv::conv(c, x);
-                component.map(|component| {
-                    let component = Arc::new(ir::Component::Interface(component));
-                    c.set_instance_history(sig, component.clone());
-                    component
-                })
-            }
-            SymbolKind::Module(x) if x.is_proto => {
-                let definition =
-                    definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
-                let Definition::ProtoModule(x) = definition.as_ref() else {
-                    unreachable!()
-                };
-
-                let component: IrResult<ir::Module> = Conv::conv(c, x);
-                match component {
-                    Ok(mut component) => {
-                        component.signature = sig.clone();
-                        if !c.config.retain_component_body {
-                            component.functions.clear();
-                            component.declarations.clear();
-                        }
-
-                        let component = Arc::new(ir::Component::Module(component));
-                        c.set_instance_history(sig, component.clone());
-                        Ok(component)
-                    }
-                    Err(x) => Err(x),
-                }
-            }
-            _ => Err(ir_error!(token)),
+    let key = context
+        .instance_history
+        .tracks_keys()
+        .then(|| sig.stable_key());
+    if let Some(key) = &key {
+        context.record_child_reach(ChildReach {
+            key: key.clone(),
+            overridden: sig.to_overridden_string(),
+            has_overrides: sig.has_overrides(),
+            site,
+            token,
         });
+    }
 
-        // Outside the block so an early `?` in it cannot skip the pop.
+    let body_names = context.body_names_at(site);
+    if let Some((component, in_generic)) = context.get_instance_history(sig) {
+        if let Some(names) = &body_names
+            && unit_cache::has_header_only_under(&component, names)
+        {
+            return convert_whole(context, &symbol, sig, token, site, body_names);
+        }
+        if !in_generic || context.in_generic {
+            return Ok(component);
+        }
+        // The IR result gotten from the cache may be incomplete
+        // if the `in_generic` flag is set.
+        // Such result should be removed from the cache and be created again.
+        context.remove_instance_history(sig);
+    }
+
+    let namespace = symbol.inner_namespace();
+    let instantiated = site.is_some();
+
+    if let Some(key) = &key
+        && context.instance_history.is_memoized_ghost(key)
+    {
+        context
+            .instance_history
+            .push_materialized(sig.clone(), site);
+        context.push_generic_map(sig.to_generic_map());
+        let ret = convert_replayed(context, &symbol, sig, token, key, body_names);
         context.pop_instance_history();
         context.pop_generic_map();
+        return ret;
+    }
+
+    if let Err(x) = context.push_instance_history(sig.clone(), site) {
+        insert_reach_error(context, x, &token);
+        return Err(ir_error!(token));
+    }
+
+    context.push_generic_map(sig.to_generic_map());
+
+    let cacheable = key.is_some()
+        && !context.in_generic
+        && matches!(
+            symbol.kind,
+            SymbolKind::Module(_) | SymbolKind::Interface(_)
+        );
+    let replay = key
+        .as_ref()
+        .filter(|key| cacheable && unit_cache::is_replayable(key))
+        .and_then(|key| unit_cache::get(key));
+    let ret = if let Some(record) = replay {
+        replay_record(context, &record);
+        convert_replayed(
+            context,
+            &symbol,
+            sig,
+            token,
+            key.as_ref().unwrap(),
+            body_names,
+        )
+    } else {
+        let record = cacheable && unit_cache::is_recording();
+        let (ret, events) =
+            context.in_unit(&namespace, instantiated, record, false, body_names, |c| {
+                convert_component(c, &symbol, sig, token, false)
+            });
+        if let (Some(key), Some(events), Some(file)) = (key, events, symbol.token.source.get_path())
+        {
+            // A conflict depends on the other signatures entering the type first.
+            let conflict = events.iter().any(|x| {
+                matches!(
+                    x,
+                    UnitEvent::Error(AnalyzerError::TypeInferenceConflict { .. })
+                )
+            });
+            match signature_input_files(sig) {
+                Some(inputs) if !conflict => {
+                    let ok = ret.is_ok();
+                    let needs_body = match ret.as_deref() {
+                        Ok(ir::Component::Module(x)) => {
+                            !x.interface_assignments.is_empty()
+                                || !x.interface_assignment_processes.is_empty()
+                        }
+                        _ => true,
+                    };
+                    unit_cache::insert(
+                        key,
+                        UnitRecord {
+                            file,
+                            inputs,
+                            events,
+                            ok,
+                            needs_body,
+                        },
+                    );
+                }
+                _ => unit_cache::remove(&key, file),
+            }
+        }
         ret
+    };
+
+    // Outside the unit so an early `?` in it cannot skip the pop.
+    context.pop_instance_history();
+    context.pop_generic_map();
+    ret
+}
+
+fn insert_reach_error(context: &mut Context, error: InstanceHistoryError, token: &TokenRange) {
+    let error = match error {
+        InstanceHistoryError::ExceedDepthLimit(x) => {
+            AnalyzerError::exceed_limit(ExceedLimitKind::HierarchyDepth, x, token)
+        }
+        InstanceHistoryError::ExceedTotalLimit(x) => {
+            AnalyzerError::exceed_limit(ExceedLimitKind::TotalInstance, x, token)
+        }
+        InstanceHistoryError::InfiniteRecursion => AnalyzerError::infinite_recursion(token),
+    };
+    // Raised again whenever the reach is replayed, so not part of the record.
+    context.insert_error_unrecorded(error);
+}
+
+/// The files defining what the generic arguments of `sig` name, which the
+/// conversion reads besides the component's own file and its dependencies;
+/// `None` when one does not resolve.
+fn signature_input_files(sig: &Signature) -> Option<Vec<PathId>> {
+    fn path_files(path: &GenericSymbolPath, out: &mut Vec<PathId>) -> Option<()> {
+        if !path.is_resolvable() {
+            return Some(());
+        }
+        let symbol = symbol_table::resolve(path).ok()?;
+        out.extend(symbol.found.token.source.get_path());
+        for x in &path.paths {
+            for arg in &x.arguments {
+                path_files(arg, out)?;
+            }
+        }
+        Some(())
+    }
+    fn sig_files(sig: &Signature, out: &mut Vec<PathId>) -> Option<()> {
+        for (_, path) in &sig.generic_parameters {
+            path_files(path, out)?;
+        }
+        for (_, x) in &sig.modport_signatures {
+            sig_files(x, out)?;
+        }
+        Some(())
+    }
+    let mut ret = Vec::new();
+    sig_files(sig, &mut ret)?;
+    ret.sort();
+    ret.dedup();
+    Some(ret)
+}
+
+/// Replays what converting a unit did to the diagnostics, reaching its
+/// children as the conversion did.
+fn replay_record(context: &mut Context, record: &UnitRecord) {
+    for event in &record.events {
+        let UnitEvent::Child(reach) = event else {
+            context.replay_event(event);
+            continue;
+        };
+        if context
+            .instance_history
+            .is_reached(&reach.key, context.in_generic)
+        {
+            continue;
+        }
+        let pushed = context.instance_history.push_ghost(
+            &reach.key,
+            &reach.overridden,
+            reach.has_overrides,
+            reach.site,
+            &context.config,
+        );
+        if let Err(x) = pushed {
+            insert_reach_error(context, x, &reach.token);
+            continue;
+        }
+        let record = unit_cache::get(&reach.key);
+        if let Some(record) = &record {
+            replay_record(context, record);
+        }
+        context
+            .instance_history
+            .pop_ghost(record.is_some_and(|x| x.ok));
+    }
+}
+
+/// Converts a component whose diagnostics were replayed, as far as its
+/// parents read it: a module's header alone, unless its body drives the
+/// interfaces connected to it or a test reads it.
+fn convert_replayed(
+    context: &mut Context,
+    symbol: &Symbol,
+    sig: &Signature,
+    token: TokenRange,
+    key: &str,
+    body_names: Option<Arc<HashSet<StrId>>>,
+) -> IrResult<Arc<ir::Component>> {
+    let header_only = matches!(symbol.kind, SymbolKind::Module(_))
+        && body_names.is_none()
+        && unit_cache::get(key).is_some_and(|x| !x.needs_body);
+    let instantiated = context.get_current_site().is_some();
+    let (ret, _) = context.in_unit(
+        &symbol.inner_namespace(),
+        instantiated,
+        false,
+        true,
+        body_names,
+        |c| convert_component(c, symbol, sig, token, header_only),
+    );
+    if header_only && let Ok(component) = &ret {
+        unit_cache::register_stub(sig.clone(), key.to_string(), component);
+    }
+    ret
+}
+
+fn convert_component(
+    c: &mut Context,
+    symbol: &Symbol,
+    sig: &Signature,
+    token: TokenRange,
+    header_only: bool,
+) -> IrResult<Arc<ir::Component>> {
+    match &symbol.kind {
+        SymbolKind::Module(x) if !x.is_proto => {
+            let definition = definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
+            let Definition::Module(x) = definition.as_ref() else {
+                unreachable!()
+            };
+
+            let header_only = header_only || c.in_generic;
+            let component: IrResult<ir::Module> = Conv::conv(c, (x, header_only));
+            match component {
+                Ok(mut component) => {
+                    component.signature = sig.clone();
+                    if !c.config.retain_component_body {
+                        component.functions.clear();
+                        component.declarations.clear();
+                    }
+
+                    let component = Arc::new(ir::Component::Module(component));
+                    c.set_instance_history(sig, component.clone());
+                    Ok(component)
+                }
+                Err(x) => Err(x),
+            }
+        }
+        SymbolKind::Interface(x) if !x.is_proto => {
+            let definition = x
+                .definition
+                .and_then(definition_table::get)
+                .ok_or_else(|| ir_error!(token))?;
+            let Definition::Interface(x) = definition.as_ref() else {
+                unreachable!()
+            };
+
+            let component: IrResult<ir::Interface> = Conv::conv(c, x);
+            component.map(|component| {
+                let component = Arc::new(ir::Component::Interface(component));
+                c.set_instance_history(sig, component.clone());
+                component
+            })
+        }
+        SymbolKind::Module(x) if x.is_proto => {
+            let definition = definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
+            let Definition::ProtoModule(x) = definition.as_ref() else {
+                unreachable!()
+            };
+
+            let component: IrResult<ir::Module> = Conv::conv(c, x);
+            match component {
+                Ok(mut component) => {
+                    component.signature = sig.clone();
+                    if !c.config.retain_component_body {
+                        component.functions.clear();
+                        component.declarations.clear();
+                    }
+
+                    let component = Arc::new(ir::Component::Module(component));
+                    c.set_instance_history(sig, component.clone());
+                    Ok(component)
+                }
+                Err(x) => Err(x),
+            }
+        }
+        _ => Err(ir_error!(token)),
     }
 }
 
@@ -4869,6 +5148,35 @@ pub fn function_call(
                     }
                 }
             }
+        }
+
+        // IEEE 1800-2023 13.4: a function with an output argument can't be
+        // called outside a procedural statement, and a port connection is
+        // emitted as an expression.
+        if c.in_inst_port
+            && !c.is_affiliated(Affiliation::Function)
+            && let Some(symbol) = &symbol
+            && let SymbolKind::Function(function) = &symbol.kind
+            && let Some(output_port) = function.ports.iter().find(|port| {
+                symbol_table::get(port.symbol).is_some_and(|x| {
+                    matches!(
+                        x.kind,
+                        SymbolKind::Port(ref p)
+                            if matches!(
+                                p.direction,
+                                symbol::Direction::Output | symbol::Direction::Inout
+                            )
+                    )
+                })
+            })
+        {
+            let declaration = TokenRange::from(&output_port.token.token);
+            c.insert_error(AnalyzerError::function_output_in_port_connection(
+                &func.name.to_string(),
+                &output_port.token.token.text.to_string(),
+                &token,
+                Some(&declaration),
+            ));
         }
 
         let mut comptime = func.r#type.clone();

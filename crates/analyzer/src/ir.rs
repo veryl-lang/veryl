@@ -46,7 +46,7 @@ pub use ir::{Component, Ir, IrError, IrResult, SystemVerilog};
 pub use module::Module;
 pub use op::Op;
 pub use shape::{Shape, ShapeRef};
-pub use signature::Signature;
+pub use signature::{Signature, stable_type};
 pub use statement::{
     AssignDestination, AssignStatement, CaseArm, CasePattern, CaseStatement, ControlFlow, ForBound,
     ForRange, ForStatement, HierAssignDestination, IfResetStatement, IfStatement, QueueOp,
