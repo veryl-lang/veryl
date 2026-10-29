@@ -66,3 +66,48 @@ fn wide_four_state_bitwise_results_are_canonical() {
         }
     }
 }
+
+#[test]
+fn wide_four_state_shifts_keep_known_bits() {
+    let code = r#"
+    module Top (
+        clk: input clock, rst: input reset, a: input logic<160>, b: input logic<8>,
+        shr: output logic<160>, shl: output logic<160>, shb: output logic<160>,
+    ) {
+        always_ff {
+            if_reset {shr = 0; shl = 0; shb = 0;}
+            else {shr = a >> 8; shl = a << 8; shb = a >> b;}
+        }
+    }
+    "#;
+    let known: String = (0..128).map(|i| ['0', '1'][(i / 3) % 2]).collect();
+    let digits = format!("{}{known}", "x".repeat(32));
+    let shifted_right = format!("{}{}", "0".repeat(8), &digits[..152]);
+    let shifted_left = format!("{}{}", &digits[8..], "0".repeat(8));
+    for use_jit in [false, true] {
+        let config = Config {
+            use_4state: true,
+            use_jit,
+            ..Default::default()
+        };
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clock = sim.get_clock("clk").unwrap();
+        let reset = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clock, &reset);
+        sim.set("a", Value::from_str(&format!("160'b{digits}")).unwrap());
+        sim.set("b", Value::from_str("8'bx").unwrap());
+        sim.step(&clock);
+        for (port, bits) in [
+            ("shr", shifted_right.as_str()),
+            ("shl", shifted_left.as_str()),
+            ("shb", &"x".repeat(160)),
+        ] {
+            assert_eq!(
+                sim.get(port),
+                Some(Value::from_str(&format!("160'b{bits}")).unwrap()),
+                "{port}, jit={use_jit}"
+            );
+        }
+    }
+}
