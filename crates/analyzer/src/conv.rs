@@ -8,6 +8,7 @@ pub mod instance;
 pub mod ir;
 mod package_const;
 pub mod statement;
+pub mod unit_cache;
 pub mod utils;
 pub mod var;
 pub use context::Context;
