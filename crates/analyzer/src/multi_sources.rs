@@ -1,11 +1,71 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Source {
     pub path: String,
     pub text: String,
-    #[serde(default)]
     pub line_offset: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SourceRepr {
+    path: String,
+    text: String,
+    #[serde(default)]
+    line_offset: usize,
+}
+
+/// `line_offset` of a source whose text, the whole file, is left out.
+const FILE_TEXT_LEFT_OUT: usize = usize::MAX;
+
+impl Source {
+    /// A copy for a record, leaving out the text if it is the whole file of
+    /// `len` bytes at `path`: a diagnostic quotes its whole file, so records of
+    /// many diagnostics would otherwise repeat it.
+    pub fn without_file_text(&self, path: &str, len: usize) -> Self {
+        if self.line_offset == 0 && self.path == path && self.text.len() == len {
+            Source {
+                path: self.path.clone(),
+                text: String::new(),
+                line_offset: FILE_TEXT_LEFT_OUT,
+            }
+        } else {
+            self.clone()
+        }
+    }
+
+    pub fn is_file_text_left_out(&self) -> bool {
+        self.line_offset == FILE_TEXT_LEFT_OUT
+    }
+
+    pub fn restore_file_text(&mut self, text: String) {
+        if self.is_file_text_left_out() {
+            self.text = text;
+            self.line_offset = 0;
+        }
+    }
+}
+
+impl Serialize for Source {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SourceRepr {
+            path: self.path.clone(),
+            text: self.text.clone(),
+            line_offset: self.line_offset,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Source {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let repr = SourceRepr::deserialize(deserializer)?;
+        Ok(Source {
+            path: repr.path,
+            text: repr.text,
+            line_offset: repr.line_offset,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -18,6 +18,7 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
+use veryl_analyzer::conv::unit_cache;
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
 use veryl_analyzer::{Analyzer, AnalyzerError, CachedDiagnostic};
@@ -242,6 +243,7 @@ fn pass1_phase(
     let mut check_error = CheckError::new(metadata.build.error_count_limit);
     let mut contexts = Vec::new();
     let mut stopwatch = StopWatch::new();
+    unit_cache::clear();
 
     let mut incremental = opts
         .incremental
@@ -416,15 +418,19 @@ pub fn analyze(
         );
     }
 
-    let mut analyzer_context = veryl_analyzer::Context::default();
-
-    for name in opts.defines {
-        analyzer_context
-            .config
-            .defines
-            .insert(resource_table::insert_str(name));
+    // Components of restored files are replayed from their records instead of
+    // converted. A caller asking for the IR needs every body.
+    match incremental.as_ref() {
+        Some(x) if !ir_requested => {
+            unit_cache::set_recording(true);
+            unit_cache::set_reusable_files(Some(
+                x.restored_files()
+                    .map(|x| resource_table::insert_path(x))
+                    .collect(),
+            ));
+        }
+        _ => unit_cache::clear(),
     }
-    analyzer_context.enable_conv_profiler();
 
     // A local IR when the caller supplied none, so post-pass2's combinational-
     // loop check has something to inspect (cheap — it shares most work with pass2).
@@ -433,26 +439,63 @@ pub fn analyze(
         Some(ref mut x) => x,
         None => &mut local_ir,
     };
-    for context in &contexts {
-        if !context.skip {
-            let path = &context.path;
-            analyzer_context.set_project_name(&path.prj);
-            let mut errors = context.analyzer.analyze_pass2(
-                &context.parser.veryl,
-                &mut analyzer_context,
-                Some(ir_for_pass2),
-            );
-            check_error = check_error
-                .append(&mut errors)
-                .check_err_if(opts.fail_fast)?;
+    // Converted again when the analysis of a replayed unit is missing a
+    // result, with that unit converted instead.
+    let (pass2_errors, mut post_pass2_errors) = loop {
+        unit_cache::begin_pass();
+        let mut analyzer_context = veryl_analyzer::Context::default();
+        if unit_cache::is_active() {
+            analyzer_context.instance_history.track_keys();
         }
+        for name in opts.defines {
+            analyzer_context
+                .config
+                .defines
+                .insert(resource_table::insert_str(name));
+        }
+        analyzer_context.enable_conv_profiler();
+
+        let mut pass2_errors = Vec::new();
+        let mut failed = false;
+        for context in &contexts {
+            if !context.skip {
+                let path = &context.path;
+                analyzer_context.set_project_name(&path.prj);
+                let errors = context.analyzer.analyze_pass2(
+                    &context.parser.veryl,
+                    &mut analyzer_context,
+                    Some(ir_for_pass2),
+                );
+                failed = opts.fail_fast && errors.iter().any(|x| x.is_error());
+                pass2_errors.push(errors);
+                if failed {
+                    break;
+                }
+            }
+        }
+
+        debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
+        analyzer_context.finalize_conv_profiler()?;
+        if failed {
+            break (pass2_errors, Vec::new());
+        }
+
+        let errors = Analyzer::analyze_post_pass2(ir_for_pass2);
+        if !unit_cache::force_requested() {
+            break (pass2_errors, errors);
+        }
+        // Not `msb_table`: post_pass1 fills it too, and pass2 rewrites its own
+        // entries identically.
+        debug!("Converting replayed units again");
+        veryl_analyzer::resolved_type_table::clear();
+        *ir_for_pass2 = veryl_analyzer::ir::Ir::default();
+    };
+    for mut errors in pass2_errors {
+        check_error = check_error
+            .append(&mut errors)
+            .check_err_if(opts.fail_fast)?;
     }
-
-    debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
-    analyzer_context.finalize_conv_profiler()?;
-
-    let mut errors = Analyzer::analyze_post_pass2(ir_for_pass2);
-    check_error = check_error.append(&mut errors);
+    check_error = check_error.append(&mut post_pass2_errors);
 
     // After all passes, so the re-derived diagnostics are present to dedup against.
     check_error.drop_cached_duplicates();

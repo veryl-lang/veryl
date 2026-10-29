@@ -35,6 +35,7 @@ mod interface_instance_select_tests;
 mod modport_connection_tests;
 mod package_alias_type_tests;
 mod statement_after_if_reset_tests;
+mod unit_cache_tests;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
@@ -22297,6 +22298,75 @@ fn function_local_write_has_no_scheduler_side_effect() {
         !errors
             .iter()
             .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_output_in_port_connection() {
+    let code = r#"
+    module ModuleA (
+        i: input  logic,
+        o: output logic,
+    ) {
+        assign o = i;
+    }
+    module ModuleB (
+        a: input  logic,
+        o: output logic,
+        s: output logic,
+    ) {
+        function calculate (x: input logic, y: output logic) -> logic {
+            y = x;
+            return x;
+        }
+        inst u: ModuleA (
+            i: calculate(a, s) & 1'b1,
+            o                       ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInPortConnection { .. }))
+    );
+
+    // A call with an output argument inside the body of a function that is
+    // itself called from the port connection is a procedural statement.
+    let code = r#"
+    module ModuleA (
+        i: input  logic,
+        o: output logic,
+    ) {
+        assign o = i;
+    }
+    module ModuleB (
+        a: input  logic,
+        o: output logic,
+    ) {
+        function inner (x: input logic, y: output logic) -> logic {
+            y = x;
+            return x;
+        }
+        function outer::<W: u32> (x: input logic) -> logic {
+            var tmp: logic;
+            return inner(x, tmp);
+        }
+        inst u: ModuleA (
+            i: outer::<1>(a),
+            o               ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInPortConnection { .. })),
+        "{errors:?}"
     );
 }
 
