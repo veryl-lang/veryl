@@ -2,7 +2,10 @@ use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_bound;
 use crate::conv::checker::proto::check_proto;
-use crate::conv::utils::{check_module_with_unevaluable_generic_parameters, get_component};
+use crate::conv::utils::{
+    check_module_with_unevaluable_generic_parameters, get_component, get_component_body,
+    identifiers_in,
+};
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{self, IrResult, VarKind, VarPath, Variable};
 use crate::symbol::SymbolKind;
@@ -54,7 +57,7 @@ impl Conv<&Veryl> for ir::Ir {
                                     top_level_memo_sig(context, decl.identifier.as_ref())
                                 {
                                     let token: TokenRange = decl.identifier.as_ref().into();
-                                    if let Ok(component) = get_component(context, &sig, token)
+                                    if let Ok(component) = get_component_body(context, &sig, token)
                                         && let ir::Component::Module(m) = component.as_ref()
                                     {
                                         let mut component = m.clone();
@@ -293,6 +296,9 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         {
             context.push_namespace(symbol.found.inner_namespace());
             context.in_test_module = x.test.is_some();
+            if context.in_test_module {
+                context.body_names = Some(std::sync::Arc::new(identifiers_in(module_declaration)));
+            }
             if let Some(x) = x.default_clock {
                 let path = VarPath::new(symbol_table::get(x).unwrap().token.text);
                 context.set_default_clock(path, x);
@@ -412,7 +418,10 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         context.pop_namespace();
+        // A test module's names are its own, not those of the modules after it.
+        let body_names = upper_context.body_names.take();
         upper_context.inherit(&mut context);
+        upper_context.body_names = body_names;
 
         Ok(ir::Module {
             name: module_declaration.identifier.text(),
@@ -518,7 +527,6 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
             .extract_if(|_, v| v.affiliation != Affiliation::Function)
             .collect();
 
-        context.pop_namespace();
         upper_context.inherit(&mut context);
 
         ret?;

@@ -6987,6 +6987,13 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             }
+            // A watched reset may be a net no event reads: the source of a
+            // chain of reset copies.
+            for r in &derived_clock_schedule.resets {
+                if !r.current_offset.is_ff() {
+                    block.insert(r.current_offset.raw());
+                }
+            }
             (block, ranges)
         });
 

@@ -2,6 +2,79 @@ use super::*;
 use crate::output_buffer;
 
 #[test]
+fn guarded_loop_local_is_produced_before_each_read() {
+    let code = r#"
+    module Reduce (
+        enabled: input logic<2>,
+        data: input logic<2>,
+        result: output logic,
+        forwarded: output logic<2>,
+    ) {
+        always_comb {
+            forwarded = enabled;
+            result = 0;
+            for i in 0..2 {
+                if enabled[i] {
+                    let hit: logic = data[i];
+                    result |= hit;
+                }
+            }
+        }
+    }
+    module Top (
+        enabled: input logic<2>,
+        data: input logic<2>,
+        result: output logic,
+    ) {
+        var forwarded: logic<2>;
+        var masked: logic<2>;
+        assign masked = data & forwarded;
+        inst dut: Reduce (enabled, data: masked, result, forwarded);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for e in (0..4).rev() {
+            for d in (0..4).rev() {
+                sim.set("enabled", Value::new(e, 2, false));
+                sim.set("data", Value::new(d, 2, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("result").unwrap(),
+                    Value::new(u64::from(e & d != 0), 1, false),
+                    "enabled={e} data={d} {config:?}"
+                );
+            }
+        }
+        if config.use_4state {
+            for (enabled, data, expected) in [
+                (
+                    Value::new(0, 2, false),
+                    Value::new_x(2, false),
+                    Value::new(0, 1, false),
+                ),
+                (
+                    Value::new(1, 2, false),
+                    Value::new_x(2, false),
+                    Value::new_x(1, false),
+                ),
+                (
+                    Value::new_x(2, false),
+                    Value::new(3, 2, false),
+                    Value::new(0, 1, false),
+                ),
+            ] {
+                sim.set("enabled", enabled);
+                sim.set("data", data);
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(sim.get("result").unwrap(), expected, "{config:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn simple_comb() {
     let code = r#"
     module Top (
@@ -2298,6 +2371,8 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         dst_width: 5888,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(idx2.clone()),
             elem_width: 92,
             window: 92,
@@ -2318,6 +2393,8 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         dst_width: 1536,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(idx2),
             elem_width: 1,
             window: 32,
@@ -7436,16 +7513,16 @@ fn generic_interface_port_complete_initial_writes() {
     // Element two is referenced by the child but unreachable by a one-bit
     // index; truncating its index must not redirect an initialization of zero.
     let code = r#"
-        interface Bus { var data: logic<8>; }
+        interface Bus { var data: logic<8> [3]; }
         module Child (clk: input clock, bus: interface) {
-            always_ff { bus.data = bus.data + 8'd1; }
+            always_ff { bus.data[2] = bus.data[2] + 8'd1; }
         }
         module Top (clk: input clock, index: input logic, a: output logic<8>, c: output logic<8>) {
             #[allow(initial_assign)]
-            inst bus: Bus [3];
-            inst u: Child (clk, bus: bus[2]);
-            initial { bus[2].data = '0; bus[index].data = 8'h3c; }
-            assign a = bus[0].data; assign c = bus[2].data;
+            inst bus: Bus;
+            inst u: Child (clk, bus);
+            initial { bus.data[2] = '0; bus.data[index] = 8'h3c; }
+            assign a = bus.data[0]; assign c = bus.data[2];
         }
     "#;
     for config in Config::all() {
@@ -28389,6 +28466,8 @@ fn wide_dynamic_bit_select_store_gate() {
         dst_width,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(index.clone()),
             elem_width: 1,
             window,
@@ -32588,6 +32667,170 @@ fn an_async_reset_the_design_produces_itself_asserts_when_it_falls() {
 }
 
 #[test]
+fn copies_of_a_design_reset_assert_together_from_one_monitored_net() {
+    // `rst_a` and `rst_b` only copy `rst_l`: the three resets are watched as
+    // one net, and its assertion still fires every domain they reset.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q0  : output logic,
+        q1  : output logic,
+        q2  : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let rst_l: '_ reset_async_low = ~f;
+        let rst_a: '_ reset_async_low = rst_l;
+        let rst_b: '_ reset_async_low = rst_a;
+        inst u0: Sub (clk, rst_l, q: q0);
+        inst u1: Sub (clk, rst_l: rst_a, q: q1);
+        inst u2: Sub (clk, rst_l: rst_b, q: q2);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X; the assertion edge is what is under test.
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let resets = &ir.derived_clock_schedule.resets;
+        assert!(
+            resets.len() < resets.iter().map(|r| r.members.len()).sum::<usize>(),
+            "the copies share a monitored net: {resets:?}"
+        );
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(1, 1, false),
+                "{q} released ({config:?})"
+            );
+        }
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(0, 1, false),
+                "{q} reset ({config:?})"
+            );
+        }
+    }
+}
+
+#[test]
+fn reset_copies_of_a_plain_net_assert_from_that_net() {
+    // `n` is not a reset and no event reads it, yet it is what the two copies
+    // are watched through, so it has to stay in the comb buffer.  `rst_h`
+    // inverts and watches its own net.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module SubH (
+        clk  : input  clock           ,
+        rst_h: input  reset_async_high,
+        q    : output logic           ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_h) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q0  : output logic,
+        q1  : output logic,
+        q2  : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let n    : logic                = ~f;
+        let rst_a: '_ reset_async_low  = n;
+        let rst_b: '_ reset_async_low  = n;
+        let rst_h: '_ reset_async_high = ~rst_a;
+        inst u0: Sub (clk, rst_l: rst_a, q: q0);
+        inst u1: Sub (clk, rst_l: rst_b, q: q1);
+        inst u2: SubH (clk, rst_h, q: q2);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X; the assertion edge is what is under test.
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(1, 1, false),
+                "{q} released ({config:?})"
+            );
+        }
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(0, 1, false),
+                "{q} reset ({config:?})"
+            );
+        }
+    }
+}
+
+#[test]
 fn an_abstract_reset_the_design_produces_itself_uses_the_configured_polarity() {
     // Same shape as the test above, but the reset carries no declared
     // polarity: the edge to monitor comes from the project's `reset_type`.
@@ -36094,6 +36337,43 @@ fn dataflow_event_config() -> Config {
 }
 
 #[test]
+fn aot_c_event_reuses_the_compile_of_equal_inputs() {
+    // An event whose inputs a previous build compiled loads that `.so` without
+    // emitting its source again, and simulates the same.
+    if !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, o: output logic<8>) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 3; }
+        }
+        assign o = r;
+    }
+    "#;
+    crate::backend::aot_c::emit::set_test_event_index(true);
+    let mut emitted = Vec::new();
+    for _ in 0..2 {
+        crate::backend::aot_c::emit::take_event_sources();
+        let ir = analyze(code, &dataflow_event_config());
+        emitted.push(crate::backend::aot_c::emit::take_event_sources());
+        assert!(!ir.whole_events.is_empty(), "the event must run as AOT-C");
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for c in 1..6u64 {
+            sim.step(&clk);
+            sim.ensure_comb_updated();
+            assert_eq!(sim.get("o").unwrap().payload_u64(), c * 3, "cycle {c}");
+        }
+    }
+    crate::backend::aot_c::emit::set_test_event_index(false);
+    assert!(emitted[1].is_empty(), "the second build must not emit");
+}
+
+#[test]
 fn aot_c_event_break_between_stores_to_one_watch() {
     // Two stores to `r` share one watch; the `break` between them leaves after
     // the first, which must still compare and mark.
@@ -37385,5 +37665,313 @@ fn reset_value_literal_context() {
             assert_eq!(sim.get("o_eq").unwrap(), Value::new(exp_eq, 1, false));
             assert_eq!(sim.get("o_ne").unwrap(), Value::new(exp_ne, 1, false));
         }
+    }
+}
+
+#[test]
+fn two_always_ff_on_one_clock_writing_fields_of_one_register_both_land() {
+    // The blocks differ in their reset but share the clock event and its
+    // commit, so `x` takes a write from each in the same step.  The fields
+    // share a byte: a field write logs only the bytes it covers.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a  : input  logic<4>,
+        b  : input  logic<4>,
+        y  : output logic<8>,
+    ) {
+        var x: logic<8>;
+        var r: logic<8>;
+        always_ff (clk) {
+            x[3:0] = a;
+        }
+        always_ff (clk, rst) {
+            if_reset {
+                x[7:4] = 0;
+                r      = 0;
+            } else {
+                x[7:4] = b;
+                r      = x;
+            }
+        }
+        assign y = r;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("a", Value::new(0x3, 4, false));
+        sim.set("b", Value::new(0x5, 4, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0x53, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn a_constant_index_write_after_a_runtime_index_write_to_its_wide_element_wins() {
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        rst:  input  reset,
+        we:   input  logic,
+        wc:   input  logic,
+        idx:  input  logic<2>,
+        ridx: input  logic<2>,
+        a:    input  logic<100>,
+        b:    input  logic<100>,
+        q:    output logic<100>,
+    ) {
+        var mem: logic<100> [4];
+        var r: logic<100>;
+        assign q = r;
+        always_ff {
+            if_reset {
+                mem = '{0, 0, 0, 0};
+                r = 0;
+            } else {
+                if we {
+                    mem[idx] = a;
+                }
+                if wc {
+                    mem[2] = b;
+                }
+                r = mem[ridx];
+            }
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("we", Value::new(0, 1, false));
+        sim.set("wc", Value::new(1, 1, false));
+        sim.set("idx", Value::new(2, 2, false));
+        sim.set("ridx", Value::new(2, 2, false));
+        sim.set("a", Value::new(0x55, 100, false));
+        sim.set("b", Value::new(0x11, 100, false));
+        // Element 2 holds `b` before the step that writes both, so a write
+        // compared against the current value would see `b` as unchanged.
+        sim.step(&clk);
+        sim.set("we", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x11, 100, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn interpreted_and_compiled_writes_to_one_wide_element_keep_their_order() {
+    // `$display` keeps its branch interpreted while the other is compiled, so
+    // the two writes to element 2 are logged by different backends.
+    for (first, second, want) in [
+        ("mem[2] = b; $display(\"\");", "mem[idx] = a;", 0x55),
+        ("mem[idx] = a; $display(\"\");", "mem[2] = b;", 0x11),
+    ] {
+        let code = format!(
+            r#"
+    module Top (
+        clk:  input  clock,
+        we:   input  logic,
+        idx:  input  logic<2>,
+        a:    input  logic<100>,
+        b:    input  logic<100>,
+        q:    output logic<100>,
+    ) {{
+        var mem: logic<100> [4];
+        assign q = mem[2];
+        always_ff (clk) {{
+            if we {{
+                {first}
+            }}
+            if we {{
+                {second}
+            }}
+        }}
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("we", Value::new(1, 1, false));
+            sim.set("idx", Value::new(2, 2, false));
+            sim.set("a", Value::new(0x55, 100, false));
+            sim.set("b", Value::new(0x11, 100, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(want, 100, false),
+                "{first} / {second} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_clock_event_and_a_reset_event_in_one_commit_keep_their_write_order() {
+    // `step_reset` fires the clk block and the clk2 block's reset in one
+    // commit.  `m[i][j]` keeps the reset event off AOT-C while the clk event
+    // runs on it, and the `$display` variant leaves its write interpreted.
+    for extra in ["", "if j != 0 { x[29:0] = 0; $display(\"\"); }"] {
+        let code = r#"
+    module Top (
+        clk:  input 'd clock,
+        clk2: input 'd clock,
+        rst:  input 'd reset_async_high,
+        i:    input 'd logic<2>,
+        j:    input 'd logic<3>,
+        a:    input 'd logic<70>,
+        b:    input 'd logic<30>,
+        q:    output logic<100>,
+        y:    output logic<100>,
+    ) {
+        var x: 'd logic<100>;
+        var m: 'd logic<8> [4];
+        var yy: 'd logic<100>;
+        assign y = yy;
+        assign q = x;
+        always_ff (clk) {
+            x[99:30] = a;
+            yy = x;
+        }
+        always_ff (clk2, rst) {
+            if_reset {
+                x[29:0] = 0;
+                m[i][j] = 0;
+                EXTRA
+            } else {
+                x[29:0] = b;
+                m[i][j] = 1;
+            }
+        }
+    }
+    "#
+        .replace("EXTRA", extra);
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let clk2 = sim.get_clock("clk2").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.set("i", Value::new(0, 2, false));
+            sim.set("j", Value::new(1, 3, false));
+            sim.set("a", Value::new(0x3, 70, false));
+            sim.set("b", Value::new(0x3fff_ffff, 30, false));
+            sim.step(&clk2);
+            sim.step(&clk);
+            sim.set("a", Value::new(0x7, 70, false));
+            sim.step_reset(&clk, &rst);
+            assert_eq!(
+                sim.get("q").unwrap().payload_u128(),
+                0x7u128 << 30,
+                "{extra:?} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_sixteen_byte_write_into_a_wider_register_lands_after_a_whole_write() {
+    // The later write is 16 bytes, but its register is wider, so both writes
+    // go to the wide pool.
+    for (decl, [lo, hi], write, want) in [
+        (
+            "logic<256>",
+            ["x[127:0]", "x[255:128]"],
+            "x[191:64] = b;",
+            (0x1234u128 << 64 | 0xffff, 0),
+        ),
+        (
+            "logic<2, 128>",
+            ["x[0]", "x[1]"],
+            "x[idx] = b;",
+            (0xffff, 0x1234),
+        ),
+    ] {
+        let code = format!(
+            r#"
+    module Top (
+        clk:  input  clock,
+        idx:  input  logic,
+        a:    input  logic<256>,
+        b:    input  logic<128>,
+        q_lo: output logic<128>,
+        q_hi: output logic<128>,
+    ) {{
+        var x: {decl};
+        assign q_lo = {lo};
+        assign q_hi = {hi};
+        always_ff (clk) {{
+            x = a;
+            {write}
+        }}
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("idx", Value::new(1, 1, false));
+            sim.set("a", Value::new(0xffff, 256, false));
+            sim.set("b", Value::new(0x1234, 128, false));
+            sim.step(&clk);
+            let got = (
+                sim.get("q_lo").unwrap().payload_u128(),
+                sim.get("q_hi").unwrap().payload_u128(),
+            );
+            assert_eq!(got, want, "{decl} {write} {config:?}");
+        }
+    }
+}
+
+#[test]
+fn a_field_write_after_a_runtime_index_write_to_its_element_merges_with_it() {
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        idx:  input  logic<2>,
+        a:    input  logic<8>,
+        b:    input  logic<4>,
+        q:    output logic<8>,
+    ) {
+        var mem: logic<8> [4];
+        assign q = mem[2];
+        always_ff (clk) {
+            mem[idx]      = a;
+            mem[2][3:0]   = b;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("idx", Value::new(2, 2, false));
+        sim.set("a", Value::new(0xa0, 8, false));
+        sim.set("b", Value::new(0x5, 4, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0xa5, 8, false),
+            "{config:?}"
+        );
     }
 }

@@ -31,6 +31,7 @@ mod region;
 mod ssa;
 mod steps;
 mod summary;
+mod unit;
 
 #[cfg(test)]
 pub(crate) use procedure::{
@@ -57,7 +58,6 @@ use graph::{
 pub(crate) use graph::{
     cycle_decision_work, cycle_search_work, reset_cycle_decision_work, reset_cycle_search_work,
 };
-use hierarchy::module_postorder;
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
 use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
@@ -75,6 +75,8 @@ pub(crate) use steps::{FIRST_ALLOWANCE, reset_steps_taken, steps_taken, with_ste
 use summary::{ExpansionBudget, compute_module_summary};
 #[cfg(test)]
 pub(crate) use summary::{module_summary_work, reset_module_summary_work};
+use unit::Node;
+pub(crate) use unit::UnitAnalysis;
 
 use crate::AnalyzerError;
 use crate::HashMap;
@@ -104,7 +106,12 @@ pub(crate) fn analysis_size() -> (usize, usize, usize) {
 }
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
-    check_inner(ir).0
+    check_with_completeness(ir).0
+}
+
+/// Return diagnostics together with the detector's analysis-completeness flag.
+pub fn check_with_completeness(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
+    check_inner(ir)
 }
 
 #[cfg(test)]
@@ -207,20 +214,81 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut cleared = HashSet::default();
     #[cfg(test)]
     let mut misses = CoarseMissCheck::default();
+    let recording = crate::conv::unit_cache::is_active();
+    unit::clear_keys();
 
     let mut diagnostic_replays = DiagnosticReplayCache::default();
     let mut reported = HashSet::default();
-    for module in module_postorder(ir) {
+    for node in unit::postorder(ir) {
+        let module = match &node {
+            Node::Live(module) => *module,
+            Node::Cached(cached) => {
+                let Some(analysis) = cached.analysis() else {
+                    complete = false;
+                    continue;
+                };
+                if let (Some(signature), Some(coarse)) = (&cached.signature, &analysis.coarse) {
+                    coarse_summaries.insert(signature.clone(), coarse.clone());
+                }
+                if analysis.cleared {
+                    complete &= analysis.complete;
+                    cleared.insert(node.ident());
+                    continue;
+                }
+                for child in node.children() {
+                    complete &=
+                        summarize_precisely(child, &mut cleared, &mut summaries, &mut errors);
+                }
+                if let Some((summary, build_errors)) = &analysis.precise {
+                    errors.extend(build_errors.iter().cloned());
+                    if let Some(signature) = &cached.signature {
+                        summaries.insert(signature.clone(), summary.clone());
+                    }
+                }
+                for (paths, error) in &analysis.cycles {
+                    if reported.insert((analysis.symbol.clone(), paths.clone())) {
+                        errors.push(error.clone());
+                    }
+                }
+                complete &= analysis.complete;
+                continue;
+            }
+        };
+        let key = recording.then(|| unit::key_of(&module.signature));
+        if let Some(key) = &key {
+            let children = hierarchy::child_modules(module)
+                .map(|x| unit::key_of(&x.signature))
+                .collect();
+            let symbol = unit::symbol_name(module);
+            unit::update(key, |x| {
+                *x = unit::UnitAnalysis {
+                    symbol,
+                    children,
+                    ..Default::default()
+                }
+            });
+        }
         let (verdict, coarse_summary) = coarse::analyze(module, &coarse_summaries);
         #[cfg(test)]
         let miss_check = misses.enter(module, &verdict);
+        if let Some(key) = &key {
+            let coarse = coarse_summary.clone();
+            unit::update(key, |x| x.coarse = Some(coarse));
+        }
         coarse_summaries.insert(module.signature.clone(), coarse_summary);
         if verdict.proves_acyclic() && !precise_tier_only() {
             complete &= verdict.is_complete();
-            cleared.insert(module.signature.clone());
+            if let Some(key) = &key {
+                let module_complete = verdict.is_complete();
+                unit::update(key, |x| {
+                    x.cleared = true;
+                    x.complete = module_complete;
+                });
+            }
+            cleared.insert(node.ident());
             continue;
         }
-        for child in hierarchy::child_modules(module) {
+        for child in node.children() {
             complete &= summarize_precisely(child, &mut cleared, &mut summaries, &mut errors);
         }
 
@@ -228,27 +296,50 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
         let (graph, module_complete) = match build_module_graph(module, &summaries, &mut steps) {
             Ok(result) => result,
             Err(error) => {
+                if let Some(key) = &key {
+                    let error = (*error).clone();
+                    unit::update(key, |x| {
+                        x.precise = Some((ModuleCombSummary::default(), vec![error]));
+                    });
+                }
                 errors.push(*error);
                 complete = false;
                 summaries.insert(module.signature.clone(), ModuleCombSummary::default());
                 continue;
             }
         };
+        let mut found = Vec::new();
         let cycles_complete = check_graph(
             module,
             &graph,
             &mut steps,
             &summaries,
             &mut diagnostic_replays,
-            &mut errors,
-            &mut reported,
+            &mut found,
+            &reported,
+            recording,
         );
+        if !found.is_empty() {
+            let symbol = unit::symbol_name(module);
+            for (paths, error) in &found {
+                if reported.insert((symbol.clone(), paths.clone())) {
+                    errors.push(error.clone());
+                }
+            }
+        }
         #[cfg(test)]
         miss_check.check(module);
-        summaries.insert(
-            module.signature.clone(),
-            module_summary(module, &graph, module_complete && cycles_complete),
-        );
+        let summary = module_summary(module, &graph, module_complete && cycles_complete);
+        if let Some(key) = &key {
+            let summary = summary.clone();
+            let module_complete = module_complete && cycles_complete;
+            unit::update(key, |x| {
+                x.precise = Some((summary, vec![]));
+                x.cycles = found;
+                x.complete = module_complete;
+            });
+        }
+        summaries.insert(module.signature.clone(), summary);
         complete &= module_complete && cycles_complete;
     }
 
@@ -261,32 +352,60 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
 /// the analysis did not visit keep no summary, as before. Returns false when
 /// a module failed to build, which leaves the analysis incomplete.
 fn summarize_precisely(
-    root: &Module,
-    cleared: &mut HashSet<Signature>,
+    root: Node<'_>,
+    cleared: &mut HashSet<unit::Ident>,
     summaries: &mut HashMap<Signature, ModuleCombSummary>,
     errors: &mut Vec<AnalyzerError>,
 ) -> bool {
     let mut complete = true;
     // A worklist instead of recursion, so a deep hierarchy needs no stack.
     let mut work = vec![(root, false)];
-    while let Some((module, children_done)) = work.pop() {
+    while let Some((node, children_done)) = work.pop() {
         if !children_done {
-            if cleared.remove(&module.signature) {
-                work.push((module, true));
-                work.extend(hierarchy::child_modules(module).map(|child| (child, false)));
+            if cleared.remove(&node.ident()) {
+                let children = node.children();
+                work.push((node, true));
+                work.extend(children.into_iter().map(|child| (child, false)));
             }
             continue;
         }
-        // The coarse tier clears only modules within the precise tier's
-        // positions, so this builds; an error is still the user's to see.
-        let summary = match build_module_graph(module, summaries, &mut Steps::new()) {
-            Ok((graph, module_complete)) => module_summary(module, &graph, module_complete),
-            Err(error) => {
-                errors.push(*error);
-                complete = false;
-                ModuleCombSummary::default()
+        let module = match &node {
+            Node::Live(module) => *module,
+            Node::Cached(cached) => {
+                let precise = cached.analysis().and_then(|x| x.precise.as_ref());
+                let Some((summary, build_errors)) = precise else {
+                    if cached.analysis.is_some() {
+                        crate::conv::unit_cache::request_conversion(&cached.chain);
+                    }
+                    complete = false;
+                    continue;
+                };
+                errors.extend(build_errors.iter().cloned());
+                complete &= build_errors.is_empty();
+                if let Some(signature) = &cached.signature {
+                    summaries.insert(signature.clone(), summary.clone());
+                }
+                continue;
             }
         };
+        // The coarse tier clears only modules within the precise tier's
+        // positions, so this builds; an error is still the user's to see.
+        let (summary, build_errors) = match build_module_graph(module, summaries, &mut Steps::new())
+        {
+            Ok((graph, module_complete)) => {
+                (module_summary(module, &graph, module_complete), vec![])
+            }
+            Err(error) => {
+                complete = false;
+                (ModuleCombSummary::default(), vec![*error])
+            }
+        };
+        if crate::conv::unit_cache::is_active() {
+            let key = unit::key_of(&module.signature);
+            let precise = (summary.clone(), build_errors.clone());
+            unit::update(&key, |x| x.precise = Some(precise));
+        }
+        errors.extend(build_errors);
         summaries.insert(module.signature.clone(), summary);
     }
     complete

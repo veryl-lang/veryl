@@ -79,6 +79,10 @@ pub struct FileEntry {
     /// like one generated before the source was modified.
     #[serde(default)]
     pub updated_time: Option<SystemTime>,
+    /// Blob path of the conversion records of the components this file
+    /// defines, replayed while the file is restored.
+    #[serde(default)]
+    pub units: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -183,7 +187,7 @@ impl Store {
         let name = content_hash(&data);
         let rel = format!("{FRAGMENT_DIR}/{}/{}.{FRAGMENT_EXT}", &name[..2], name);
         let path = self.root.join(&rel);
-        if !path.exists() {
+        if fs::read(&path).ok().as_deref() != Some(data.as_slice()) {
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
@@ -198,6 +202,9 @@ impl Store {
     /// Reads and verifies a content-addressed blob, returning its payload.
     fn read_blob(&self, rel: &str) -> Option<Vec<u8>> {
         let data = fs::read(self.root.join(rel)).ok()?;
+        if content_hash(&data) != Path::new(rel).file_stem()?.to_str()? {
+            return None;
+        }
         let payload = data.strip_prefix(BLOB_MAGIC.as_slice())?;
         let (version, payload) = payload.split_first_chunk::<4>()?;
         if u32::from_le_bytes(*version) != SCHEMA_VERSION {
@@ -222,6 +229,7 @@ impl Store {
                 diagnostics: None,
                 generic_instance_hash: String::new(),
                 updated_time: None,
+                units: None,
             },
         );
     }
@@ -247,6 +255,28 @@ impl Store {
     /// failure is treated as absent.
     pub fn load_diagnostics(&self, entry: &FileEntry) -> Option<Vec<u8>> {
         self.read_blob(entry.diagnostics.as_ref()?)
+    }
+
+    /// Attaches the units blob to the in-progress entry for `src`. Skips
+    /// files without a fragment, which are never restored.
+    pub fn set_units(&mut self, src: &str, blob: &[u8]) {
+        if self
+            .next_files
+            .get(src)
+            .is_none_or(|x| x.fragment.is_none())
+        {
+            return;
+        }
+        let rel = self.write_blob(blob);
+        if let Some(entry) = self.next_files.get_mut(src) {
+            entry.units = rel;
+        }
+    }
+
+    /// Loads and verifies the units blob behind an entry. Any failure is
+    /// treated as absent.
+    pub fn load_units(&self, entry: &FileEntry) -> Option<Vec<u8>> {
+        self.read_blob(entry.units.as_ref()?)
     }
 
     /// Marks the file as analyzed this build but keeps its existing blob
@@ -329,7 +359,12 @@ impl Store {
             .manifest
             .files
             .values()
-            .flat_map(|x| x.fragment.iter().chain(x.diagnostics.iter()))
+            .flat_map(|x| {
+                x.fragment
+                    .iter()
+                    .chain(x.diagnostics.iter())
+                    .chain(x.units.iter())
+            })
             .map(|x| self.root.join(x))
             .collect();
 
@@ -458,6 +493,26 @@ mod tests {
 
         let reopened = Store::open(&root, "key");
         assert_eq!(reopened.entry("a.veryl").unwrap().file_hash, "h2");
+    }
+
+    #[test]
+    fn payload_corruption_misses_and_rewriting_repairs_the_blob() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(directory.path(), "key");
+        store.put("source".into(), "hash".into(), Some(b"payload"));
+        store.save();
+        let entry = store.entry("source").unwrap().clone();
+        let path = directory.path().join(entry.fragment.as_ref().unwrap());
+        let mut corrupt = fs::read(&path).unwrap();
+        *corrupt.last_mut().unwrap() ^= 1;
+        fs::write(&path, corrupt).unwrap();
+        assert!(store.load(&entry).is_none());
+        store.put("source".into(), "hash".into(), Some(b"payload"));
+        store.save();
+        assert_eq!(
+            store.load(store.entry("source").unwrap()).as_deref(),
+            Some(b"payload".as_slice())
+        );
     }
 
     fn walk_blobs(root: &Path) -> Vec<PathBuf> {

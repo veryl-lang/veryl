@@ -30,7 +30,12 @@ pub(crate) fn synthesize_expr(
     }
 
     let raw = synth_raw(ctx, expr, current, target_width)?;
-    Ok(resize(raw, target_width, expr_signed(expr)))
+    // Mixed signed/unsigned expressions zero-extend their operands (11.8.2).
+    Ok(resize(
+        raw,
+        target_width,
+        expr.comptime().expr_context.signed,
+    ))
 }
 
 fn expr_signed(expr: &Expression) -> bool {
@@ -138,6 +143,17 @@ fn synth_raw(
     match expr {
         Expression::Term(factor) => synth_factor(ctx, factor, current),
         Expression::Unary(op, inner, _comptime) => synth_unary(ctx, *op, inner, current, ctx_width),
+        Expression::Binary(x, Op::As, _, comptime) => {
+            // IEEE 1800-2023 6.24.1: assignment context stops at the cast.
+            let cast_width = comptime
+                .r#type
+                .total_width()
+                .ok_or_else(|| SynthesizerError::unknown_width("cast target", &comptime.token))?;
+            let operand_width = x.comptime().r#type.total_width().unwrap_or(cast_width);
+            let nets = synthesize_expr(ctx, x, current, cast_width.max(operand_width))?;
+            let nets = resize(nets, cast_width, expr_signed(x));
+            Ok(resize(nets, ctx_width, comptime.expr_context.signed))
+        }
         Expression::Binary(x, op, y, comptime) => {
             let signed = comptime.expr_context.signed;
             synth_binary(ctx, x, *op, y, current, ctx_width, signed)
@@ -427,10 +443,15 @@ fn synth_factor(
             let element_nets: Vec<NetId> = if ctx.ram_vars.contains_key(id) {
                 read_ram(ctx, id, index, current)?
             } else {
-                // The `current` map shadows the persistent nets within a block
-                // so that `a = a + 1`-style reads pick up the previous value.
-                let src_nets = current
-                    .get(id)
+                // Block-local variables use blocking assignments even in always_ff.
+                let pending = if ctx.ff_snapshot_reads
+                    && ctx.ff_allocation.get(id).is_some_and(|ff| ff.nonblocking)
+                {
+                    None
+                } else {
+                    current.get(id)
+                };
+                let src_nets = pending
                     .cloned()
                     .or_else(|| ctx.variables.get(id).map(|s| s.nets.clone()))
                     .ok_or_else(|| {

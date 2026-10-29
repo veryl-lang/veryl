@@ -17,7 +17,14 @@ fn generic_interface_port_dynamic_unknown_direction() {
             }}
         "#
         );
-        assert!(analyze(&code).is_empty(), "default {default}");
+        let errors = analyze(&code);
+        assert!(
+            matches!(
+                errors.as_slice(),
+                [AnalyzerError::NonConstantInterfaceInstanceSelect { .. }]
+            ),
+            "default {default}: {errors:?}"
+        );
     }
 }
 
@@ -187,6 +194,17 @@ fn generic_interface_port_dynamic_default() {
         "#
             );
             let errors = analyze(&code);
+            // A default value does not make an input an elaboration-time constant.
+            assert_eq!(
+                errors
+                    .iter()
+                    .filter(|e| {
+                        matches!(e, AnalyzerError::NonConstantInterfaceInstanceSelect { .. })
+                    })
+                    .count(),
+                1,
+                "{binding}, default {default}: {errors:?}"
+            );
             assert_eq!(
                 errors
                     .iter()
@@ -195,7 +213,7 @@ fn generic_interface_port_dynamic_default() {
                 "{binding}, default {default}: {errors:?}"
             );
             if !conflict {
-                assert!(errors.is_empty(), "{errors:?}");
+                assert_eq!(errors.len(), 1, "{errors:?}");
             }
         }
     }

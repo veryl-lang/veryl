@@ -89,10 +89,10 @@ fn b1() -> BigUint {
 
 /// `base ** exp` masked to `width` bits via modpow (folds the width mask in and
 /// accepts any exponent). `mag`/`negative` are the base's magnitude and sign.
-fn pow_mod_width(mag: &BigUint, negative: bool, exp: usize, width: usize) -> BigUint {
+fn pow_mod_width(mag: &BigUint, negative: bool, exp: &BigUint, width: usize) -> BigUint {
     let modulus = ValueBigUint::gen_mask(width) + BigUint::from(1u32);
-    let ret = mag.modpow(&BigUint::from(exp), &modulus);
-    if negative && exp % 2 == 1 && !ret.is_zero() {
+    let ret = mag.modpow(exp, &modulus);
+    if negative && exp.bit(0) && !ret.is_zero() {
         (&modulus - &ret) % &modulus // odd power of a negative base
     } else {
         ret
@@ -195,6 +195,18 @@ impl Op {
             },
             _ => unreachable!(),
         }
+    }
+
+    pub fn eval_context_cast(
+        x: ExpressionContext,
+        target: ExpressionContext,
+        target_is_type: bool,
+    ) -> ExpressionContext {
+        let mut result = Op::As.eval_context_binary(x, target);
+        if !target_is_type {
+            result.signed = x.signed;
+        }
+        result
     }
 
     fn invalid_operand(&self, context: &mut Context, x: &Comptime) -> Type {
@@ -671,22 +683,7 @@ impl Op {
             Op::Sub => {
                 let x = x.expand(width, signed);
                 match x.as_ref() {
-                    Value::U64(x) => {
-                        let mut ret = x.clone();
-                        if ret.is_xz() {
-                            Value::U64(ValueU64::new_x(width, x.signed))
-                        } else {
-                            let mask = ValueU64::gen_mask(width);
-                            ret.payload ^= mask;
-                            // Two's complement is taken modulo 2^width, and
-                            // at width 64 the complement of zero is u64::MAX,
-                            // so the carry out of the top bit is the value's
-                            // own overflow rather than a fault.
-                            ret.payload = ret.payload.wrapping_add(1);
-                            ret.payload &= mask;
-                            Value::U64(ret)
-                        }
-                    }
+                    Value::U64(x) => Value::U64(x.negate(width)),
                     Value::BigUint(x) => {
                         let mut ret = x.clone();
                         if ret.is_xz() {
@@ -704,13 +701,7 @@ impl Op {
             Op::BitNot => {
                 let x = x.expand(width, signed);
                 match x.as_ref() {
-                    Value::U64(x) => {
-                        let mut ret = x.clone();
-                        let mask = ValueU64::gen_mask(width);
-                        ret.payload ^= mask;
-                        ret.payload &= ret.mask_xz ^ mask;
-                        Value::U64(ret)
-                    }
+                    Value::U64(x) => Value::U64(x.bit_not(width)),
                     Value::BigUint(x) => {
                         let mut ret = x.clone();
                         let mask = mask_cache.get(width);
@@ -721,110 +712,88 @@ impl Op {
                 }
             }
             Op::BitAnd => {
-                let (is_zero, is_x) = match x {
-                    Value::U64(x) => {
-                        let mask = ValueU64::gen_mask(x.width as usize);
-                        let is_zero = x.payload | x.mask_xz != mask;
-                        let is_x = x.mask_xz != 0;
-                        (is_zero, is_x)
-                    }
+                let ret = match x {
+                    Value::U64(x) => x.reduce_and(false),
                     Value::BigUint(x) => {
                         let mask = mask_cache.get(x.width as usize);
                         let is_zero = x.payload() | x.mask_xz() != *mask;
                         let is_x = x.mask_xz() != &b0();
-                        (is_zero, is_x)
+                        ValueU64::new_bit_0x(is_zero, is_x)
                     }
                 };
 
-                let ret = ValueU64::new_bit_0x(is_zero, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
             Op::BitNand => {
-                let (is_one, is_x) = match x {
-                    Value::U64(x) => {
-                        let mask = ValueU64::gen_mask(x.width as usize);
-                        let is_one = x.payload | x.mask_xz != mask;
-                        let is_x = x.mask_xz != 0;
-                        (is_one, is_x)
-                    }
+                let ret = match x {
+                    Value::U64(x) => x.reduce_and(true),
                     Value::BigUint(x) => {
                         let mask = mask_cache.get(x.width as usize);
                         let is_one = x.payload() | x.mask_xz() != *mask;
                         let is_x = x.mask_xz() != &b0();
-                        (is_one, is_x)
+                        ValueU64::new_bit_1x(is_one, is_x)
                     }
                 };
 
-                let ret = ValueU64::new_bit_1x(is_one, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
             Op::BitOr => {
-                let (is_one, is_x) = match x {
-                    Value::U64(x) => {
-                        let mask = ValueU64::gen_mask(x.width as usize);
-                        let is_one = x.payload & (x.mask_xz ^ mask) != 0;
-                        let is_x = x.mask_xz != 0;
-                        (is_one, is_x)
-                    }
+                let ret = match x {
+                    Value::U64(x) => x.reduce_or(false),
                     Value::BigUint(x) => {
                         let mask = mask_cache.get(x.width as usize);
                         let is_one = x.payload() & (x.mask_xz() ^ mask) != b0();
                         let is_x = x.mask_xz() != &b0();
-                        (is_one, is_x)
+                        ValueU64::new_bit_1x(is_one, is_x)
                     }
                 };
 
-                let ret = ValueU64::new_bit_1x(is_one, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
             Op::BitNor | Op::LogicNot => {
-                let (is_zero, is_x) = match x {
-                    Value::U64(x) => {
-                        let mask = ValueU64::gen_mask(x.width as usize);
-                        let is_zero = x.payload & (x.mask_xz ^ mask) != 0;
-                        let is_x = x.mask_xz != 0;
-                        (is_zero, is_x)
-                    }
+                let ret = match x {
+                    Value::U64(x) => x.reduce_or(true),
                     Value::BigUint(x) => {
                         let mask = mask_cache.get(x.width as usize);
                         let is_zero = x.payload() & (x.mask_xz() ^ mask) != b0();
                         let is_x = x.mask_xz() != &b0();
-                        (is_zero, is_x)
+                        ValueU64::new_bit_0x(is_zero, is_x)
                     }
                 };
 
-                let ret = ValueU64::new_bit_0x(is_zero, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
             Op::BitXor => {
-                let ret = if x.is_xz() {
-                    ValueU64::new_x(1, false)
-                } else {
-                    let ret = match x {
-                        Value::U64(x) => x.payload.count_ones() % 2 == 1,
-                        Value::BigUint(x) => x.payload.count_ones() % 2 == 1,
-                    };
-                    ValueU64::new(ret.into(), 1, false)
+                let ret = match x {
+                    Value::U64(x) => x.reduce_xor(false),
+                    Value::BigUint(x) => {
+                        if x.is_xz() {
+                            ValueU64::new_x(1, false)
+                        } else {
+                            let ret = x.payload.count_ones() % 2 == 1;
+                            ValueU64::new(ret.into(), 1, false)
+                        }
+                    }
                 };
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::BitXnor => {
-                let ret = if x.is_xz() {
-                    ValueU64::new_x(1, false)
-                } else {
-                    let ret = match x {
-                        Value::U64(x) => x.payload.count_ones() % 2 == 0,
-                        Value::BigUint(x) => x.payload.count_ones() % 2 == 0,
-                    };
-                    ValueU64::new(ret.into(), 1, false)
+                let ret = match x {
+                    Value::U64(x) => x.reduce_xor(true),
+                    Value::BigUint(x) => {
+                        if x.is_xz() {
+                            ValueU64::new_x(1, false)
+                        } else {
+                            let ret = x.payload.count_ones() % 2 == 0;
+                            ValueU64::new(ret.into(), 1, false)
+                        }
+                    }
                 };
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             _ => unimplemented!(),
         }
@@ -858,13 +827,7 @@ impl Op {
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        if x.is_xz() | y.is_xz() {
-                            Value::U64(ValueU64::new_x(width, signed))
-                        } else {
-                            let mut payload = x.payload.wrapping_add(y.payload);
-                            payload &= ValueU64::gen_mask(width);
-                            Value::U64(ValueU64::new(payload, width, signed))
-                        }
+                        Value::U64(x.add_sub(y, width, signed, false))
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         if x.is_xz() | y.is_xz() {
@@ -883,15 +846,7 @@ impl Op {
                 let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        if x.is_xz() | y.is_xz() {
-                            Value::U64(ValueU64::new_x(width, signed))
-                        } else {
-                            let mut payload = x.payload.wrapping_sub(y.payload);
-                            payload &= ValueU64::gen_mask(width);
-                            Value::U64(ValueU64::new(payload, width, signed))
-                        }
-                    }
+                    (Value::U64(x), Value::U64(y)) => Value::U64(x.add_sub(y, width, signed, true)),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         if x.is_xz() | y.is_xz() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
@@ -912,15 +867,7 @@ impl Op {
                 let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        if x.is_xz() | y.is_xz() {
-                            Value::U64(ValueU64::new_x(width, signed))
-                        } else {
-                            let mut payload = x.payload.wrapping_mul(y.payload);
-                            payload &= ValueU64::gen_mask(width);
-                            Value::U64(ValueU64::new(payload, width, signed))
-                        }
-                    }
+                    (Value::U64(x), Value::U64(y)) => Value::U64(x.multiply(y, width, signed)),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         if x.is_xz() | y.is_xz() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
@@ -939,25 +886,7 @@ impl Op {
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let y_masked = y.payload & ValueU64::gen_mask(width);
-                        if x.is_xz() || y.is_xz() || y_masked == 0 {
-                            Value::U64(ValueU64::new_x(width, signed))
-                        } else {
-                            let mut payload = if signed {
-                                // Sign-extend operands from the
-                                // expression width; on i64::MIN / -1
-                                // overflow fall back to the dividend.
-                                let sh = 64 - width;
-                                let xs = ((x.payload << sh) as i64) >> sh;
-                                let ys = ((y.payload << sh) as i64) >> sh;
-                                xs.checked_div(ys).unwrap_or(xs) as u64
-                            } else {
-                                x.payload / y.payload
-                            };
-
-                            payload &= ValueU64::gen_mask(width);
-                            Value::U64(ValueU64::new(payload, width, signed))
-                        }
+                        Value::U64(x.divide_remainder(y, width, signed, false))
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         if x.is_xz() || y.is_xz() || y.payload() == &b0() {
@@ -982,22 +911,7 @@ impl Op {
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let y_masked = y.payload & ValueU64::gen_mask(width);
-                        if x.is_xz() || y.is_xz() || y_masked == 0 {
-                            Value::U64(ValueU64::new_x(width, signed))
-                        } else {
-                            let mut payload = if signed {
-                                let sh = 64 - width;
-                                let xs = ((x.payload << sh) as i64) >> sh;
-                                let ys = ((y.payload << sh) as i64) >> sh;
-                                xs.checked_rem(ys).unwrap_or(0) as u64
-                            } else {
-                                x.payload % y.payload
-                            };
-
-                            payload &= ValueU64::gen_mask(width);
-                            Value::U64(ValueU64::new(payload, width, signed))
-                        }
+                        Value::U64(x.divide_remainder(y, width, signed, true))
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         if x.is_xz() || y.is_xz() || y.payload() == &b0() {
@@ -1023,15 +937,7 @@ impl Op {
                 let y = resize(y, width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let payload = x.payload & y.payload;
-                        let mut ret = ValueU64::new(payload, width, false);
-                        ret.mask_xz = (x.mask_xz & y.mask_xz)
-                            | (x.mask_xz & !y.mask_xz & y.payload)
-                            | (y.mask_xz & !x.mask_xz & x.payload);
-                        ret.payload &= !ret.mask_xz;
-                        Value::U64(ret)
-                    }
+                    (Value::U64(x), Value::U64(y)) => Value::U64(x.bit_and(y, width)),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let payload = x.payload() & y.payload();
                         let mut ret = ValueBigUint::new_biguint(payload, width, false);
@@ -1050,15 +956,7 @@ impl Op {
                 let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let payload = x.payload | y.payload;
-                        let mut ret = ValueU64::new(payload, width, false);
-                        ret.mask_xz = (x.mask_xz & y.mask_xz)
-                            | (x.mask_xz & !y.mask_xz & !y.payload)
-                            | (y.mask_xz & !x.mask_xz & !x.payload);
-                        ret.payload &= !ret.mask_xz;
-                        Value::U64(ret)
-                    }
+                    (Value::U64(x), Value::U64(y)) => Value::U64(x.bit_or(y, width)),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let payload = x.payload() | y.payload();
                         let mut ret = ValueBigUint::new_biguint(payload, width, false);
@@ -1077,13 +975,7 @@ impl Op {
                 let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let payload = x.payload ^ y.payload;
-                        let mut ret = ValueU64::new(payload, width, false);
-                        ret.mask_xz = x.mask_xz | y.mask_xz;
-                        ret.payload &= !ret.mask_xz;
-                        Value::U64(ret)
-                    }
+                    (Value::U64(x), Value::U64(y)) => Value::U64(x.bit_xor(y, width)),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let payload = x.payload() ^ y.payload();
                         let mut ret = ValueBigUint::new_biguint(payload, width, false);
@@ -1100,14 +992,7 @@ impl Op {
                 let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let mask = ValueU64::gen_mask(width);
-                        let payload = x.payload ^ y.payload ^ mask;
-                        let mut ret = ValueU64::new(payload, width, false);
-                        ret.mask_xz = x.mask_xz | y.mask_xz;
-                        ret.payload &= !ret.mask_xz;
-                        Value::U64(ret)
-                    }
+                    (Value::U64(x), Value::U64(y)) => Value::U64(x.bit_xnor(y, width)),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let mask = mask_cache.get(width);
                         let payload = x.payload() ^ y.payload() ^ mask;
@@ -1121,148 +1006,90 @@ impl Op {
             }
             Op::Eq => {
                 let xy_width = x.width().max(y.width());
-                // Both-signed operands sign-extend to the comparison width
-                // (LRM 11.4.5); mixed/unsigned ones zero-extend.
                 let eq_signed = x.signed() && y.signed();
                 let x = x.expand(xy_width, eq_signed);
                 let y = y.expand(xy_width, eq_signed);
-
-                let (is_zero, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_zero = (x.payload & !x.mask_xz) != (y.payload & !y.mask_xz);
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
-
-                        (is_zero, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.equal(y, false, false),
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let x_mask = mask_cache.get(x.width as usize).clone();
-                        let y_mask = mask_cache.get(y.width as usize);
-
-                        let is_zero = (x.payload() & (x.mask_xz() ^ x_mask))
-                            != (y.payload() & (y.mask_xz() ^ y_mask));
-                        let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
-
-                        (is_zero, is_x)
+                        let full_mask = mask_cache.get(xy_width);
+                        let compare_mask = full_mask.clone();
+                        let known_mask =
+                            &compare_mask & (x.mask_xz() ^ full_mask) & (y.mask_xz() ^ full_mask);
+                        let mismatch = ((x.payload() ^ y.payload()) & known_mask) != b0();
+                        let unknown = ((x.mask_xz() | y.mask_xz()) & compare_mask) != b0();
+                        ValueU64::new_bit_0x(mismatch, unknown)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_0x(is_zero, is_x);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::Ne => {
                 let xy_width = x.width().max(y.width());
                 let eq_signed = x.signed() && y.signed();
                 let x = x.expand(xy_width, eq_signed);
                 let y = y.expand(xy_width, eq_signed);
-
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_one = (x.payload & !x.mask_xz) != (y.payload & !y.mask_xz);
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
-
-                        (is_one, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.equal(y, false, true),
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let x_mask = mask_cache.get(x.width as usize).clone();
-                        let y_mask = mask_cache.get(y.width as usize);
-
-                        let is_one = (x.payload() & (x.mask_xz() ^ x_mask))
-                            != (y.payload() & (y.mask_xz() ^ y_mask));
-                        let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
-
-                        (is_one, is_x)
+                        let full_mask = mask_cache.get(xy_width);
+                        let compare_mask = full_mask.clone();
+                        let known_mask =
+                            &compare_mask & (x.mask_xz() ^ full_mask) & (y.mask_xz() ^ full_mask);
+                        let mismatch = ((x.payload() ^ y.payload()) & known_mask) != b0();
+                        let unknown = ((x.mask_xz() | y.mask_xz()) & compare_mask) != b0();
+                        ValueU64::new_bit_1x(mismatch, unknown)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_1x(is_one, is_x);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::EqWildcard => {
                 let xy_width = x.width().max(y.width());
                 let eq_signed = x.signed() && y.signed();
                 let x = x.expand(xy_width, eq_signed);
                 let y = y.expand(xy_width, eq_signed);
-
-                let (is_mismatch, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let compare_mask = !y.mask_xz;
-                        let val_diff = (x.payload ^ y.payload) & compare_mask;
-                        let definite_diff = val_diff & !x.mask_xz;
-                        let is_mismatch = definite_diff != 0;
-                        let is_x = x.mask_xz & compare_mask != 0;
-                        (is_mismatch, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.equal(y, true, false),
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let full_mask = mask_cache.get(y.width as usize);
+                        let full_mask = mask_cache.get(xy_width);
                         let compare_mask = y.mask_xz() ^ full_mask;
-
-                        let val_diff = (x.payload() ^ y.payload()) & &compare_mask;
-                        let definite_diff = val_diff & (x.mask_xz() ^ full_mask);
-                        let is_mismatch = definite_diff != b0();
-                        let is_x = x.mask_xz() & &compare_mask != b0();
-                        (is_mismatch, is_x)
+                        let known_mask =
+                            &compare_mask & (x.mask_xz() ^ full_mask) & (y.mask_xz() ^ full_mask);
+                        let mismatch = ((x.payload() ^ y.payload()) & known_mask) != b0();
+                        let unknown = ((x.mask_xz() | y.mask_xz()) & compare_mask) != b0();
+                        ValueU64::new_bit_0x(mismatch, unknown)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_0x(is_mismatch, is_x);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::NeWildcard => {
                 let xy_width = x.width().max(y.width());
                 let eq_signed = x.signed() && y.signed();
                 let x = x.expand(xy_width, eq_signed);
                 let y = y.expand(xy_width, eq_signed);
-
-                let (is_mismatch, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let compare_mask = !y.mask_xz;
-                        let val_diff = (x.payload ^ y.payload) & compare_mask;
-                        let definite_diff = val_diff & !x.mask_xz;
-                        let is_mismatch = definite_diff != 0;
-                        let is_x = x.mask_xz & compare_mask != 0;
-                        (is_mismatch, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.equal(y, true, true),
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let full_mask = mask_cache.get(y.width as usize);
+                        let full_mask = mask_cache.get(xy_width);
                         let compare_mask = y.mask_xz() ^ full_mask;
-
-                        let val_diff = (x.payload() ^ y.payload()) & &compare_mask;
-                        let definite_diff = val_diff & (x.mask_xz() ^ full_mask);
-                        let is_mismatch = definite_diff != b0();
-                        let is_x = x.mask_xz() & &compare_mask != b0();
-                        (is_mismatch, is_x)
+                        let known_mask =
+                            &compare_mask & (x.mask_xz() ^ full_mask) & (y.mask_xz() ^ full_mask);
+                        let mismatch = ((x.payload() ^ y.payload()) & known_mask) != b0();
+                        let unknown = ((x.mask_xz() | y.mask_xz()) & compare_mask) != b0();
+                        ValueU64::new_bit_1x(mismatch, unknown)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_1x(is_mismatch, is_x);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::Greater => {
                 let xy_width = x.width().max(y.width());
                 let x = x.expand(xy_width, signed);
                 let y = y.expand(xy_width, signed);
-
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_one = if signed {
-                            // max(1): a width-0 operand (`'0`/`'1`) would make sh 64 and overflow.
-                            let sh = 64 - xy_width.max(1);
-                            ((x.payload << sh) as i64) >> sh > ((y.payload << sh) as i64) >> sh
-                        } else {
-                            x.payload > y.payload
-                        };
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
-
-                        (is_one, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.compare(y, signed, true, false),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let is_one = if signed {
                             x.to_bigint() > y.to_bigint()
@@ -1271,32 +1098,18 @@ impl Op {
                         };
                         let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
 
-                        (is_one, is_x)
+                        ValueU64::new_bit_x1(is_x, is_one)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_x1(is_x, is_one);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::GreaterEq => {
                 let xy_width = x.width().max(y.width());
                 let x = x.expand(xy_width, signed);
                 let y = y.expand(xy_width, signed);
-
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_one = if signed {
-                            let sh = 64 - xy_width.max(1);
-                            ((x.payload << sh) as i64) >> sh >= ((y.payload << sh) as i64) >> sh
-                        } else {
-                            x.payload >= y.payload
-                        };
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
-
-                        (is_one, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.compare(y, signed, true, true),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let is_one = if signed {
                             x.to_bigint() >= y.to_bigint()
@@ -1305,32 +1118,18 @@ impl Op {
                         };
                         let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
 
-                        (is_one, is_x)
+                        ValueU64::new_bit_x1(is_x, is_one)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_x1(is_x, is_one);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::Less => {
                 let xy_width = x.width().max(y.width());
                 let x = x.expand(xy_width, signed);
                 let y = y.expand(xy_width, signed);
-
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_one = if signed {
-                            let sh = 64 - xy_width.max(1);
-                            ((x.payload << sh) as i64) >> sh < ((y.payload << sh) as i64) >> sh
-                        } else {
-                            x.payload < y.payload
-                        };
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
-
-                        (is_one, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.compare(y, signed, false, false),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let is_one = if signed {
                             x.to_bigint() < y.to_bigint()
@@ -1339,32 +1138,18 @@ impl Op {
                         };
                         let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
 
-                        (is_one, is_x)
+                        ValueU64::new_bit_x1(is_x, is_one)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_x1(is_x, is_one);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::LessEq => {
                 let xy_width = x.width().max(y.width());
                 let x = x.expand(xy_width, signed);
                 let y = y.expand(xy_width, signed);
-
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_one = if signed {
-                            let sh = 64 - xy_width.max(1);
-                            ((x.payload << sh) as i64) >> sh <= ((y.payload << sh) as i64) >> sh
-                        } else {
-                            x.payload <= y.payload
-                        };
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
-
-                        (is_one, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.compare(y, signed, false, true),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let is_one = if signed {
                             x.to_bigint() <= y.to_bigint()
@@ -1373,29 +1158,19 @@ impl Op {
                         };
                         let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
 
-                        (is_one, is_x)
+                        ValueU64::new_bit_x1(is_x, is_one)
                     }
                     _ => unreachable!(),
                 };
-
-                let ret = ValueU64::new_bit_x1(is_x, is_one);
-                let ret = Value::U64(ret);
-                ret.expand(width, false).into_owned()
+                Value::U64(ret).expand(width, false).into_owned()
             }
             Op::LogicAnd => {
                 let xy_width = x.width().max(y.width());
                 let x = x.expand(xy_width, false);
                 let y = y.expand(xy_width, false);
 
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_one = (x.payload & !x.mask_xz != 0) && (y.payload & !y.mask_xz != 0);
-                        let is_zero = (x.payload == 0 && x.mask_xz == 0)
-                            || (y.payload == 0 && y.mask_xz == 0);
-                        let is_x = !is_zero && (x.mask_xz != 0 || y.mask_xz != 0);
-
-                        (is_one, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.logical_binary(y, true),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let x_mask = mask_cache.get(x.width as usize).clone();
                         let y_mask = mask_cache.get(y.width as usize);
@@ -1405,12 +1180,11 @@ impl Op {
                             || (y.payload() == &b0() && y.mask_xz() == &b0());
                         let is_x = !is_zero && (x.mask_xz() != &b0() || y.mask_xz() != &b0());
 
-                        (is_one, is_x)
+                        ValueU64::new_bit_1x(is_one, is_x)
                     }
                     _ => unreachable!(),
                 };
 
-                let ret = ValueU64::new_bit_1x(is_one, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
@@ -1419,13 +1193,8 @@ impl Op {
                 let x = x.expand(xy_width, false);
                 let y = y.expand(xy_width, false);
 
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
-                    (Value::U64(x), Value::U64(y)) => {
-                        let is_one = (x.payload & !x.mask_xz != 0) || (y.payload & !y.mask_xz != 0);
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
-
-                        (is_one, is_x)
-                    }
+                let ret = match (x.as_ref(), y.as_ref()) {
+                    (Value::U64(x), Value::U64(y)) => x.logical_binary(y, false),
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let x_mask = mask_cache.get(x.width as usize).clone();
                         let y_mask = mask_cache.get(y.width as usize);
@@ -1433,12 +1202,11 @@ impl Op {
                             || (y.payload() & (y.mask_xz() ^ y_mask) != b0());
                         let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
 
-                        (is_one, is_x)
+                        ValueU64::new_bit_1x(is_one, is_x)
                     }
                     _ => unreachable!(),
                 };
 
-                let ret = ValueU64::new_bit_1x(is_one, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
@@ -1448,17 +1216,8 @@ impl Op {
 
                 match x.as_ref() {
                     Value::U64(x) => {
-                        if let Some(y) = y {
-                            let mut ret = x.clone();
-                            ret.signed = false;
-                            let s = y.min(64) as u32;
-                            ret.payload = ret.payload.unbounded_shr(s);
-                            ret.mask_xz = ret.mask_xz.unbounded_shr(s);
-                            let ret = Value::U64(ret);
-                            ret.expand(width, false).into_owned()
-                        } else {
-                            Value::U64(ValueU64::new_x(width, false))
-                        }
+                        let ret = Value::U64(x.shift_right(y, width, signed, false));
+                        ret.expand(width, false).into_owned()
                     }
                     Value::BigUint(x) => {
                         if let Some(y) = y {
@@ -1480,20 +1239,8 @@ impl Op {
 
                 match x.as_ref() {
                     Value::U64(x) => {
-                        if let Some(y) = y {
-                            let mask = ValueU64::gen_mask(width);
-                            let mut ret = x.clone();
-                            ret.signed = false;
-                            let s = y.min(64) as u32;
-                            ret.payload = ret.payload.unbounded_shl(s);
-                            ret.mask_xz = ret.mask_xz.unbounded_shl(s);
-                            ret.payload &= mask;
-                            ret.mask_xz &= mask;
-                            let ret = Value::U64(ret);
-                            ret.expand(width, false).into_owned()
-                        } else {
-                            Value::U64(ValueU64::new_x(width, false))
-                        }
+                        let ret = Value::U64(x.shift_left(y, width, false));
+                        ret.expand(width, false).into_owned()
                     }
                     Value::BigUint(x) => {
                         if let Some(y) = y {
@@ -1520,34 +1267,8 @@ impl Op {
 
                 match x.as_ref() {
                     Value::U64(x) => {
-                        if let Some(y) = y {
-                            let mut ret = x.clone();
-
-                            let (ext_payload, ext_mask_xz) = if signed {
-                                // y >= width: saturate width - y to 0 (avoids the
-                                // underflow) -> ext_mask is the full sign fill.
-                                let mut ext_mask = ValueU64::gen_mask(width.saturating_sub(y));
-                                ext_mask ^= ValueU64::gen_mask(width);
-
-                                let payload_msb = ((x.payload >> (x.width - 1)) & 1) == 1;
-                                let mask_xz_msb = ((x.mask_xz >> (x.width - 1)) & 1) == 1;
-                                let ext_payload = if payload_msb { ext_mask } else { 0 };
-                                let ext_mask_xz = if mask_xz_msb { ext_mask } else { 0 };
-                                (ext_payload, ext_mask_xz)
-                            } else {
-                                (0, 0)
-                            };
-
-                            let s = y.min(64) as u32;
-                            ret.payload = ret.payload.unbounded_shr(s);
-                            ret.mask_xz = ret.mask_xz.unbounded_shr(s);
-                            ret.payload |= ext_payload;
-                            ret.mask_xz |= ext_mask_xz;
-                            let ret = Value::U64(ret);
-                            ret.expand(width, false).into_owned()
-                        } else {
-                            Value::U64(ValueU64::new_x(width, false))
-                        }
+                        let ret = Value::U64(x.shift_right(y, width, signed, true));
+                        ret.expand(width, false).into_owned()
                     }
                     Value::BigUint(x) => {
                         if let Some(y) = y {
@@ -1585,19 +1306,8 @@ impl Op {
 
                 match x.as_ref() {
                     Value::U64(x) => {
-                        if let Some(y) = y {
-                            let mask = ValueU64::gen_mask(width);
-                            let mut ret = x.clone();
-                            let s = y.min(64) as u32;
-                            ret.payload = ret.payload.unbounded_shl(s);
-                            ret.mask_xz = ret.mask_xz.unbounded_shl(s);
-                            ret.payload &= mask;
-                            ret.mask_xz &= mask;
-                            let ret = Value::U64(ret);
-                            ret.expand(width, false).into_owned()
-                        } else {
-                            Value::U64(ValueU64::new_x(width, false))
-                        }
+                        let ret = Value::U64(x.shift_left(y, width, true));
+                        ret.expand(width, false).into_owned()
                     }
                     Value::BigUint(x) => {
                         if let Some(y) = y {
@@ -1620,9 +1330,14 @@ impl Op {
             Op::Pow => {
                 let x = x.expand(width, signed);
 
-                // IEEE 1800 11.4.3.1 (power operator rules): a negative exponent yields 0 / 1 / ±1 / x by
-                // the base value; `to_usize` would reinterpret it as a huge
-                // unsigned magnitude and compute modular-inverse garbage.
+                if let (Value::U64(base), Value::U64(exponent)) = (x.as_ref(), y) {
+                    return Value::U64(base.power(exponent, width));
+                }
+                if y.is_xz() {
+                    return Value::new_x(width, false);
+                }
+
+                // Negative powers use integer base cases rather than modular inverses.
                 let y_negative = y.signed()
                     && match y {
                         Value::U64(v) => v.width > 0 && (v.payload >> (v.width - 1)) & 1 == 1,
@@ -1664,57 +1379,50 @@ impl Op {
                     };
                 }
 
-                // Like the shift arms, accept a >64-bit exponent value
-                // (Value::to_usize is None for every BigUint): non-x/z wide
-                // exponents convert, saturating at usize::MAX.
-                let y = y.to_usize_saturating();
+                let exponent = match y {
+                    Value::U64(y) => BigUint::from(y.payload),
+                    Value::BigUint(y) => y.payload.as_ref().clone(),
+                };
 
                 match x.as_ref() {
                     Value::U64(x) => {
-                        if let Some(y) = y {
-                            if x.is_xz() {
-                                Value::U64(ValueU64::new_x(width, x.signed))
-                            } else if x.signed {
-                                let base = x.to_i64().unwrap();
-                                let payload = pow_mod_width(
-                                    &BigUint::from(base.unsigned_abs()),
-                                    base < 0,
-                                    y,
-                                    width,
-                                )
-                                .to_u64()
-                                .unwrap_or(0);
-                                Value::U64(ValueU64::new(payload, width, true))
-                            } else {
-                                let payload =
-                                    pow_mod_width(&BigUint::from(x.payload), false, y, width)
-                                        .to_u64()
-                                        .unwrap_or(0);
-                                Value::U64(ValueU64::new(payload, width, false))
-                            }
+                        if x.is_xz() {
+                            Value::U64(ValueU64::new_x(width, x.signed))
+                        } else if x.signed {
+                            let base = x.to_i64().unwrap();
+                            let payload = pow_mod_width(
+                                &BigUint::from(base.unsigned_abs()),
+                                base < 0,
+                                &exponent,
+                                width,
+                            )
+                            .to_u64()
+                            .unwrap_or(0);
+                            Value::U64(ValueU64::new(payload, width, true))
                         } else {
-                            Value::U64(ValueU64::new_x(width, false))
+                            let payload =
+                                pow_mod_width(&BigUint::from(x.payload), false, &exponent, width)
+                                    .to_u64()
+                                    .unwrap_or(0);
+                            Value::U64(ValueU64::new(payload, width, false))
                         }
                     }
                     Value::BigUint(x) => {
-                        if let Some(y) = y {
-                            if x.is_xz() {
-                                Value::BigUint(ValueBigUint::new_x(width, x.signed))
-                            } else if x.signed {
-                                let base = x.to_bigint().unwrap();
-                                let payload = pow_mod_width(
-                                    base.magnitude(),
-                                    base.sign() == Sign::Minus,
-                                    y,
-                                    width,
-                                );
-                                Value::BigUint(ValueBigUint::new_biguint(payload, width, true))
-                            } else {
-                                let payload = pow_mod_width(x.payload.as_ref(), false, y, width);
-                                Value::BigUint(ValueBigUint::new_biguint(payload, width, false))
-                            }
+                        if x.is_xz() {
+                            Value::BigUint(ValueBigUint::new_x(width, x.signed))
+                        } else if x.signed {
+                            let base = x.to_bigint().unwrap();
+                            let payload = pow_mod_width(
+                                base.magnitude(),
+                                base.sign() == Sign::Minus,
+                                &exponent,
+                                width,
+                            );
+                            Value::BigUint(ValueBigUint::new_biguint(payload, width, true))
                         } else {
-                            Value::BigUint(ValueBigUint::new_x(width, false))
+                            let payload =
+                                pow_mod_width(x.payload.as_ref(), false, &exponent, width);
+                            Value::BigUint(ValueBigUint::new_biguint(payload, width, false))
                         }
                     }
                 }

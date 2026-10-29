@@ -1,6 +1,8 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, InstanceNote};
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
-use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
+use crate::conv::instance::{InstanceHistory, InstanceHistoryError, Reach};
+use crate::conv::package_const::{PackageConstCache, PackageConstKey, PackageConstUse};
+use crate::conv::unit_cache::{self, ChildReach, UnitEvent};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
     IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
@@ -8,7 +10,7 @@ use crate::ir::{
 };
 use crate::namespace::Namespace;
 use crate::scope;
-use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
+use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, Symbol, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
 use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
@@ -102,8 +104,10 @@ pub struct Context {
     pub inst_signatures: HashMap<StrId, Signature>,
     pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
+    package_const_cache: PackageConstCache,
     /// Recursion depth of `eval_factor_path`, bounded by `symbol_eval_depth_limit`.
     pub function_eval_depth: usize,
+    pub function_eval_peak: usize,
     /// Recorded when `function_eval_depth`'s limit is hit, since the eval path
     /// may swallow an inserted error.
     pub function_eval_overflow: Option<(TokenRange, usize)>,
@@ -134,6 +138,11 @@ pub struct Context {
     component_sizing: usize,
     global_func_callers: Vec<Namespace>,
     pub in_test_module: bool,
+    /// In a test module and the components its hierarchical references may
+    /// reach: the identifiers of the test module, which name every instance
+    /// such a reference passes. A component instantiated under one of them is
+    /// read whole, so a replayed one is converted whole.
+    pub body_names: Option<Arc<HashSet<StrId>>>,
     pub in_dependency: bool,
     pub in_global_func: Option<Token>,
     pub in_if_reset: bool,
@@ -185,13 +194,27 @@ pub struct Context {
     /// `type A = B; type B = A` chains that `eval_type` would otherwise follow
     /// forever (type_dag reports the cycle, but `dump` evaluates anyway).
     typedef_visiting: Vec<SymbolId>,
-    errors: Vec<AnalyzerError>,
+    errors: ErrorSink,
     profiler: Option<Arc<Mutex<ConvProfile>>>,
     project_name: Option<String>,
 }
 
+/// The diagnostics of a conversion. Moves with them through `inherit`, so the
+/// recording and the suppression cover everything converted in a unit.
+#[derive(Default)]
+struct ErrorSink {
+    errors: Vec<AnalyzerError>,
+    /// What a recorded unit did to its own diagnostics.
+    events: Option<Vec<UnitEvent>>,
+    eval_overflow_recorded: bool,
+    for_overflow_recorded: bool,
+    /// Set while converting a component whose diagnostics were replayed.
+    suppressed: bool,
+}
+
 /// Namespace-tagged so a same-named parameter of another component is not
 /// answered from this frame.
+#[derive(Clone)]
 struct ParameterOverride {
     namespace: Namespace,
     values: HashMap<VarPath, (Comptime, Expression)>,
@@ -204,7 +227,7 @@ struct AnalysisTransaction {
     function_eval_depth: usize,
     function_eval_overflow: Option<(TokenRange, usize)>,
     function_call_stack: Vec<Signature>,
-    errors: Vec<AnalyzerError>,
+    errors: ErrorSink,
 }
 
 impl Context {
@@ -275,7 +298,9 @@ impl Context {
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
+        std::mem::swap(&mut self.package_const_cache, &mut tgt.package_const_cache);
         std::mem::swap(&mut self.function_eval_depth, &mut tgt.function_eval_depth);
+        std::mem::swap(&mut self.function_eval_peak, &mut tgt.function_eval_peak);
         std::mem::swap(
             &mut self.function_eval_overflow,
             &mut tgt.function_eval_overflow,
@@ -298,9 +323,189 @@ impl Context {
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
         self.component_sizing = tgt.component_sizing;
+        self.body_names = tgt.body_names.clone();
         self.config = tgt.config.clone();
         self.profiler = tgt.profiler.clone();
         self.project_name = tgt.project_name.clone();
+    }
+
+    /// Runs `f` on a context carrying only the inputs a component conversion
+    /// may depend on: the frames pushed for `namespace` and the shared caches.
+    /// Its diagnostics are merged back as raised, keeping their instance notes.
+    ///
+    /// With `record`, what the unit does to its diagnostics is returned for
+    /// the unit cache. With `suppressed`, its diagnostics are dropped: they
+    /// were replayed from that cache.
+    pub fn in_unit<T>(
+        &mut self,
+        namespace: &Namespace,
+        instantiated: bool,
+        record: bool,
+        suppressed: bool,
+        body_names: Option<Arc<HashSet<StrId>>>,
+        f: impl FnOnce(&mut Context) -> T,
+    ) -> (T, Option<Vec<UnitEvent>>) {
+        let mut unit = Context {
+            config: self.config.clone(),
+            profiler: self.profiler.clone(),
+            project_name: self.project_name.clone(),
+            in_generic: self.in_generic,
+            body_names,
+            ..Default::default()
+        };
+        if let Some(x) = self
+            .overrides
+            .iter()
+            .rev()
+            .find(|x| x.namespace == *namespace)
+        {
+            unit.overrides.push(x.clone());
+        }
+        if let Some(x) = self.generic_maps.last() {
+            unit.generic_maps.push(x.clone());
+        }
+        if instantiated && let Some(x) = self.modport_signatures.last() {
+            unit.modport_signatures.push(x.clone());
+        }
+        let suppressed = suppressed || self.errors.suppressed;
+        unit.errors.suppressed = suppressed;
+        if record && !suppressed {
+            unit.errors.events = Some(Vec::new());
+        }
+        self.swap_unit_caches(&mut unit);
+
+        let ret = f(&mut unit);
+
+        self.swap_unit_caches(&mut unit);
+        unit.record_overflow();
+        if !suppressed {
+            if self.function_eval_overflow.is_none() {
+                self.function_eval_overflow = unit.function_eval_overflow;
+            }
+            if self.comptime_for_overflow.is_none() {
+                self.comptime_for_overflow = unit.comptime_for_overflow;
+            }
+            for mut error in unit.errors.errors {
+                let note = error.instance_mut().take();
+                self.insert_error_with_note(error, note);
+            }
+        }
+        (ret, unit.errors.events)
+    }
+
+    /// Records the first overflow of a unit when it is first seen, which
+    /// places it before the children reached later.
+    fn record_overflow(&mut self) {
+        let sink = &mut self.errors;
+        let Some(events) = &mut sink.events else {
+            return;
+        };
+        if let Some((token, depth)) = self.function_eval_overflow
+            && !sink.eval_overflow_recorded
+        {
+            events.push(UnitEvent::EvalOverflow(token, depth));
+            sink.eval_overflow_recorded = true;
+        }
+        if let Some(token) = self.comptime_for_overflow
+            && !sink.for_overflow_recorded
+        {
+            events.push(UnitEvent::ForOverflow(token));
+            sink.for_overflow_recorded = true;
+        }
+    }
+
+    pub fn record_child_reach(&mut self, reach: ChildReach) {
+        self.record_overflow();
+        if let Some(events) = &mut self.errors.events {
+            events.push(UnitEvent::Child(reach));
+        }
+    }
+
+    /// The `body_names` of the component instantiated at `site`, when a
+    /// hierarchical reference may read its body.
+    pub fn body_names_at(&self, site: Option<TokenRange>) -> Option<Arc<HashSet<StrId>>> {
+        let names = self.body_names.as_ref()?;
+        names.contains(&site?.beg.text).then(|| Arc::clone(names))
+    }
+
+    /// Applies a replayed event of a unit whose conversion was skipped. The
+    /// caller replays children itself.
+    pub fn replay_event(&mut self, event: &UnitEvent) {
+        // A reference is not a diagnostic: it stands whether or not they are
+        // suppressed.
+        if let UnitEvent::Reference(target, token) = event {
+            let path = crate::symbol_path::SymbolPath::new(&[target.text]);
+            if let Some((scope, define_context)) = scope::token_scope(target.id)
+                && let Ok(symbol) = crate::symbol_table::resolve(
+                    crate::symbol_path::SymbolPathNamespace::from_scope(
+                        path,
+                        scope,
+                        define_context,
+                    ),
+                )
+            {
+                crate::symbol_table::add_reference(symbol.found.id, token);
+            }
+        }
+        if self.errors.suppressed {
+            return;
+        }
+        match event {
+            UnitEvent::Error(x) => {
+                let note = self.instance_note();
+                self.insert_error_with_note(unit_cache::restore_file_text(x.clone()), note);
+            }
+            UnitEvent::EvalOverflow(token, depth) => {
+                if self.function_eval_overflow.is_none() {
+                    self.function_eval_overflow = Some((*token, *depth));
+                }
+            }
+            UnitEvent::ForOverflow(token) => {
+                if self.comptime_for_overflow.is_none() {
+                    self.comptime_for_overflow = Some(*token);
+                }
+            }
+            UnitEvent::ResolvedType(token, inferred) => {
+                // A conversion would check against the type entered already,
+                // and report a conflict: convert the units instead.
+                let chain = self.instance_history.keys();
+                match crate::resolved_type_table::get(token) {
+                    Some(existing) => {
+                        if crate::ir::stable_type(&existing) != *inferred {
+                            unit_cache::request_conversion(&chain);
+                        }
+                    }
+                    None => unit_cache::note_replayed_type(*token, inferred.clone(), chain),
+                }
+            }
+            UnitEvent::Reference(..) => (),
+            UnitEvent::Child(_) => (),
+        }
+    }
+
+    pub fn add_reference(&mut self, id: SymbolId, token: Token) {
+        crate::symbol_table::add_reference(id, &token);
+        if let Some(events) = &mut self.errors.events
+            && let Some(symbol) = crate::symbol_table::get(id)
+        {
+            events.push(UnitEvent::Reference(symbol.token, token));
+        }
+    }
+
+    pub fn record_resolved_type(
+        &mut self,
+        token: veryl_parser::resource_table::TokenId,
+        inferred: String,
+    ) {
+        if let Some(events) = &mut self.errors.events {
+            events.push(UnitEvent::ResolvedType(token, inferred));
+        }
+    }
+
+    fn swap_unit_caches(&mut self, unit: &mut Context) {
+        std::mem::swap(&mut self.instance_history, &mut unit.instance_history);
+        std::mem::swap(&mut self.package_const_cache, &mut unit.package_const_cache);
+        std::mem::swap(&mut self.function_effects, &mut unit.function_effects);
     }
 
     pub fn set_project_name(&mut self, project_name: &str) {
@@ -489,10 +694,14 @@ impl Context {
             return path;
         };
         path.resolve_imported(scope, &define_context, None);
+        self.apply_generic_maps(&mut path);
+        path
+    }
+
+    pub fn apply_generic_maps(&self, path: &mut GenericSymbolPath) {
         for map in self.generic_maps.iter().rev() {
             path.apply_map(map);
         }
-        path
     }
 
     pub fn insert_var_path(&mut self, path: VarPath, value: Comptime) -> VarId {
@@ -560,6 +769,25 @@ impl Context {
     }
 
     pub fn insert_error(&mut self, mut error: AnalyzerError) {
+        if self.errors.suppressed {
+            return;
+        }
+        if let Some(events) = &mut self.errors.events {
+            events.push(UnitEvent::Error(unit_cache::record_copy(&mut error)));
+        }
+        let note = self.instance_note();
+        self.insert_error_with_note(error, note);
+    }
+
+    pub fn insert_error_unrecorded(&mut self, error: AnalyzerError) {
+        if self.errors.suppressed {
+            return;
+        }
+        let note = self.instance_note();
+        self.insert_error_with_note(error, note);
+    }
+
+    fn insert_error_with_note(&mut self, mut error: AnalyzerError, note: Option<InstanceNote>) {
         let mut replaced = false;
 
         // merge MultipleAssignment which have same identifier
@@ -569,7 +797,7 @@ impl Context {
             ..
         } = error
         {
-            for e in &mut self.errors {
+            for e in &mut self.errors.errors {
                 if let AnalyzerError::MultipleAssignment {
                     identifier: org_ident,
                     error_locations: org_locations,
@@ -587,21 +815,72 @@ impl Context {
         }
 
         if !replaced {
-            let note = self.instance_note();
             let existing = self
+                .errors
                 .errors
                 .iter_mut()
                 .position(|x| x.same_report(&mut error));
             if let Some(existing) = existing {
                 // Raised without an override too, so no instance explains it.
                 if note.is_none() {
-                    *self.errors[existing].instance_mut() = None;
+                    *self.errors.errors[existing].instance_mut() = None;
                 }
             } else {
                 *error.instance_mut() = note;
-                self.errors.push(error);
+                self.errors.errors.push(error);
             }
         }
+    }
+
+    /// An evaluation that reports anything is not kept, and a kept one is not
+    /// reused where redoing it would exceed the depth limit: either way the
+    /// reuse would change what is reported.
+    pub(crate) fn eval_package_const(
+        &mut self,
+        symbol: &Symbol,
+        usage: PackageConstUse,
+        eval: impl FnOnce(&mut Self) -> IrResult<Comptime>,
+    ) -> IrResult<Comptime> {
+        let key = PackageConstKey::new(symbol, usage, self.in_generic, &self.generic_maps);
+        let start = self.function_eval_depth;
+        if let Some((value, depth)) = key.as_ref().and_then(|x| self.package_const_cache.get(x))
+            && start + depth <= self.config.symbol_eval_depth_limit
+        {
+            self.function_eval_peak = self.function_eval_peak.max(start + depth);
+            return Ok(value.clone());
+        }
+
+        #[cfg(test)]
+        PACKAGE_CONST_EVALUATIONS.set(PACKAGE_CONST_EVALUATIONS.get() + 1);
+        let outer_peak = std::mem::replace(&mut self.function_eval_peak, start);
+        let outer_eval_overflow = self.function_eval_overflow.take();
+        let outer_for_overflow = self.comptime_for_overflow.take();
+        let outer_errors = std::mem::take(&mut self.errors);
+        let ret = eval(self);
+        let errors = std::mem::replace(&mut self.errors, outer_errors);
+
+        let depth = self.function_eval_peak - start;
+        self.function_eval_peak = self.function_eval_peak.max(outer_peak);
+        let overflowed =
+            self.function_eval_overflow.is_some() || self.comptime_for_overflow.is_some();
+        // Only the first overflow is recorded.
+        if outer_eval_overflow.is_some() {
+            self.function_eval_overflow = outer_eval_overflow;
+        }
+        if outer_for_overflow.is_some() {
+            self.comptime_for_overflow = outer_for_overflow;
+        }
+
+        if let (Some(key), Ok(value)) = (key, &ret)
+            && errors.errors.is_empty()
+            && !overflowed
+        {
+            self.package_const_cache.insert(key, value.clone(), depth);
+        }
+        for error in errors.errors {
+            self.insert_error(error);
+        }
+        ret
     }
 
     fn instance_note(&self) -> Option<InstanceNote> {
@@ -613,7 +892,7 @@ impl Context {
         let (_, outermost_site) = frames.first()?;
         let mut path: Vec<_> = frames
             .iter()
-            .map(|(sig, site)| format!("{}: {}", site.beg.text, sig.to_overridden_string()))
+            .map(|(sig, site)| format!("{}: {}", site.beg.text, sig))
             .collect();
         if path.len() > KEPT_AT_EACH_END * 2 + 1 {
             let elided = path.len() - KEPT_AT_EACH_END * 2;
@@ -881,12 +1160,16 @@ impl Context {
         &mut self,
         x: Signature,
         site: Option<TokenRange>,
-    ) -> Result<bool, InstanceHistoryError> {
+    ) -> Result<Reach, InstanceHistoryError> {
         self.instance_history.push(x, site, &self.config)
     }
 
     pub fn pop_instance_history(&mut self) {
         self.instance_history.pop();
+    }
+
+    pub fn get_current_site(&self) -> Option<TokenRange> {
+        self.instance_history.get_current_site()
     }
 
     pub fn get_current_signature(&self) -> Option<&Signature> {
@@ -1086,7 +1369,7 @@ impl Context {
     }
 
     pub fn drain_errors(&mut self) -> Vec<AnalyzerError> {
-        std::mem::take(&mut self.errors)
+        std::mem::take(&mut self.errors.errors)
     }
 }
 
@@ -1143,4 +1426,9 @@ mod analysis_transaction_tests {
         }
         assert_eq!(value(&context, id), &Value::new(0, 1, false));
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static PACKAGE_CONST_EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

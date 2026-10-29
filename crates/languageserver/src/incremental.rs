@@ -69,7 +69,7 @@ impl LsIncremental {
         scope::set_project(prj, is_root);
 
         match fragment_cache::restore(&fragment, prj) {
-            Ok(()) => {
+            Ok(_) => {
                 self.store.keep(&src);
                 self.restored += 1;
                 true

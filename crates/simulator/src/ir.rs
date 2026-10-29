@@ -53,6 +53,7 @@ pub use variable::{
 };
 pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
+pub use write_log::{WriteLogBuffer, ff_commit_from_log, ff_commit_from_log_marking};
 
 use crate::backend::CompiledWhole;
 use crate::residency;

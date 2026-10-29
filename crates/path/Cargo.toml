@@ -16,10 +16,12 @@ log         = {workspace = true}
 thiserror   = {workspace = true}
 walkdir     = {workspace = true}
 
-[target.'cfg(target_family = "wasm")'.dependencies]
+[target.'cfg(any(target_family = "wasm", kani))'.dependencies]
 miette      = {workspace = true, features = ["fancy-no-syscall"]}
 
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
+[target.'cfg(all(not(target_family = "wasm"), not(kani)))'.dependencies]
 miette      = {workspace = true, features = ["fancy"]}
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 fs4         = {version = "1.1.0", features = ["sync"]}
 tempfile    = {workspace = true}

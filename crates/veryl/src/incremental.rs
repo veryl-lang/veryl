@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use veryl_analyzer::conv::unit_cache;
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::{Analyzer, CachedDiagnostic, scope, symbol_table, type_dag};
@@ -220,8 +221,24 @@ impl Incremental {
             self.miss.insert(path.src.clone());
             return false;
         };
-        // Loaded now while `entry` is borrowed; replayed only on success.
-        let diag_bytes = self.store.load_diagnostics(entry);
+        // Diagnostics need no ID codec, so validate before restoring analyzer state.
+        let diagnostics = if entry.diagnostics.is_some() {
+            let Some(bytes) = self.store.load_diagnostics(entry) else {
+                debug!("Failed to load diagnostics ({src})");
+                self.miss.insert(path.src.clone());
+                return false;
+            };
+            match fragment_cache::restore_diagnostics(&bytes) {
+                Ok(diagnostics) => diagnostics,
+                Err(x) => {
+                    debug!("Failed to decode diagnostics ({src}): {x}");
+                    self.miss.insert(path.src.clone());
+                    return false;
+                }
+            }
+        } else {
+            Vec::new()
+        };
         let Ok(fragment) = Fragment::from_bytes(&bytes) else {
             debug!("Failed to decode fragment ({src})");
             self.miss.insert(path.src.clone());
@@ -234,17 +251,17 @@ impl Incremental {
         scope::set_project(prj, is_root);
 
         match fragment_cache::restore(&fragment, prj) {
-            Ok(()) => {
+            Ok(window) => {
+                let path_id = resource_table::insert_path(&path.src);
+                unit_cache::set_file_window(path_id, window);
+                if let Some(bytes) = self.store.load_units(entry) {
+                    unit_cache::decode_file(path_id, &bytes);
+                }
                 self.store.keep(&src);
                 self.restored += 1;
                 self.restored_paths.insert(path.src.clone());
                 self.inputs.remove(&path.src);
-                if let Some(diag_bytes) = diag_bytes {
-                    match fragment_cache::restore_diagnostics(&diag_bytes) {
-                        Ok(diags) => self.restored_diagnostics.extend(diags),
-                        Err(x) => debug!("Failed to restore diagnostics ({src}): {x}"),
-                    }
-                }
+                self.restored_diagnostics.extend(diagnostics);
                 true
             }
             Err(x) => {
@@ -257,8 +274,8 @@ impl Incremental {
     }
 
     /// Captures the file's pass1 output into the store. `cacheable` must
-    /// be false when pass1 produced any diagnostics (they would be lost on
-    /// restore).
+    /// be false when pass1 produced an error. Its warnings are kept with the
+    /// file's other diagnostics by `save`.
     pub fn capture(
         &mut self,
         path: &PathSet,
@@ -270,6 +287,10 @@ impl Incremental {
         let Some(hash) = self.hashes.get(&path.src).cloned() else {
             return;
         };
+        unit_cache::set_file_window(
+            resource_table::insert_path(&path.src),
+            fragment_cache::window_since(watermark),
+        );
 
         let blob = if cacheable {
             match fragment_cache::capture(&path.src, input, watermark) {
@@ -284,6 +305,11 @@ impl Incremental {
         };
 
         self.store.put(src, hash, blob.as_deref());
+    }
+
+    /// The files restored this build, whose components may be replayed.
+    pub fn restored_files(&self) -> impl Iterator<Item = &PathBuf> {
+        self.restored_paths.iter()
     }
 
     /// Drains the diagnostics of files restored this build, for the caller to
@@ -367,6 +393,12 @@ impl Incremental {
                 .set_tests(&src.to_string_lossy(), names, has_non_native_test);
         }
 
+        for path in self.hashes.keys() {
+            if let Some(blob) = unit_cache::encode_file(resource_table::insert_path(path)) {
+                self.store.set_units(&path.to_string_lossy(), &blob);
+            }
+        }
+
         // Restored files' diagnostics are already preserved by `Store::keep`,
         // so only freshly analyzed files appear here.
         for (src, diagnostics) in diagnosed {
@@ -428,3 +460,6 @@ fn global_key(metadata: &Metadata, defines: &[String]) -> Option<String> {
         &defines,
     ]))
 }
+
+#[cfg(test)]
+mod tests;

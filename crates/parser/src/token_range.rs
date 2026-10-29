@@ -28,21 +28,9 @@ impl TokenRange {
     }
 
     pub fn include(&self, path: PathId, line: u32, column: u32) -> bool {
-        if self.beg.source == path {
-            if self.beg.line == line {
-                if self.end.line == line {
-                    self.beg.column <= column && column <= self.end.column
-                } else {
-                    self.beg.column <= column
-                }
-            } else if self.end.line == line {
-                column <= self.end.column
-            } else {
-                self.beg.line < line && line < self.end.line
-            }
-        } else {
-            false
-        }
+        self.beg.source == path
+            && (self.beg.line, self.beg.column) <= (line, column)
+            && (line, column) <= (self.end.end_line(), self.end.end_column())
     }
 
     pub fn offset(&mut self, value: u32) {
@@ -65,15 +53,14 @@ impl TokenRange {
 
 impl From<&TokenRange> for miette::SourceSpan {
     fn from(x: &TokenRange) -> Self {
-        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
+        let length = x.end.pos as usize - x.beg.pos as usize + x.end.length as usize;
         (x.beg.pos as usize, length).into()
     }
 }
 
 impl From<TokenRange> for miette::SourceSpan {
     fn from(x: TokenRange) -> Self {
-        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
-        (x.beg.pos as usize, length).into()
+        (&x).into()
     }
 }
 
@@ -1607,3 +1594,52 @@ impl From<&Veryl> for TokenRange {
     }
 }
 impl_token_ext!(Veryl);
+
+#[cfg(all(test, target_pointer_width = "64"))]
+mod span_regressions {
+    use super::*;
+    #[test]
+    fn span_addition_widens_before_adding_token_length() {
+        let range = TokenRange {
+            beg: Token {
+                pos: 0,
+                ..Default::default()
+            },
+            end: Token {
+                pos: u32::MAX,
+                length: 2,
+                ..Default::default()
+            },
+        };
+        let span: miette::SourceSpan = range.into();
+        assert_eq!(span.len(), u32::MAX as usize + 2);
+    }
+}
+
+#[cfg(test)]
+mod position_regressions {
+    use super::*;
+
+    #[test]
+    fn cursor_range_includes_the_final_tokens_unicode_characters() {
+        let path = PathId(7);
+        let source = TokenSource::File {
+            path,
+            text: Default::default(),
+        };
+        let beg = Token::new("a", 2, 1, 1, 0, source);
+        let end = Token::new("α😀z", 2, 4, 7, 3, source);
+        let range = TokenRange { beg, end };
+        for column in [1, 4, 5, 6] {
+            assert!(range.include(path, 2, column));
+        }
+        assert!(!range.include(path, 2, 7));
+        let range = TokenRange {
+            beg,
+            end: Token::new("x\n😀z", 2, 4, 7, 3, source),
+        };
+        assert!(range.include(path, 3, 1));
+        assert!(range.include(path, 3, 2));
+        assert!(!range.include(path, 3, 3));
+    }
+}

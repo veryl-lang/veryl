@@ -9,7 +9,7 @@ use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_token::TokenSource;
 
-#[derive(Error, Diagnostic, Debug, PartialEq, Eq)]
+#[derive(Error, Diagnostic, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
@@ -127,6 +127,29 @@ pub enum AnalyzerError {
         #[source_code]
         input: MultiSources,
         #[label("\"{destination}\" is declared outside this always_ff")]
+        error_location: SourceSpan,
+        #[label(collection, "\"{output}\" is declared as an output here")]
+        output_declaration: Vec<SourceSpan>,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(function_output_in_port_connection),
+        help("assign the result of \"{function}\" to a variable first, then connect that variable to the port"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "function \"{function}\" can't be called in a port connection because it has output argument \"{output}\""
+    )]
+    FunctionOutputInPortConnection {
+        function: String,
+        output: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("called from port connection")]
         error_location: SourceSpan,
         #[label(collection, "\"{output}\" is declared as an output here")]
         output_declaration: Vec<SourceSpan>,
@@ -907,6 +930,23 @@ pub enum AnalyzerError {
     )]
     #[error("`+:`/`-:`/`step` part-select width must be a constant")]
     NonConstantSelectWidth {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(non_constant_interface_instance_select),
+        help("use an elaboration-time constant to select an interface instance"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("interface instance select must be an elaboration-time constant")]
+    NonConstantInterfaceInstanceSelect {
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2692,6 +2732,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { input, .. } => input,
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { input, .. } => input,
             AnalyzerError::FunctionOutputInAlwaysFf { input, .. } => input,
+            AnalyzerError::FunctionOutputInPortConnection { input, .. } => input,
             AnalyzerError::CombinationalLoop { input, .. } => input,
             AnalyzerError::CombinationalLoopPositionOverflow { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
@@ -2769,6 +2810,139 @@ impl AnalyzerError {
             AnalyzerError::MultipleAssignment { input, .. } => input,
             AnalyzerError::MultipleDefault { input, .. } => input,
             AnalyzerError::NonConstantSelectWidth { input, .. } => input,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { input, .. } => input,
+            AnalyzerError::NonPositiveValue { input, .. } => input,
+            AnalyzerError::ZeroSize { input, .. } => input,
+            AnalyzerError::NonPortableDependency { input, .. } => input,
+            AnalyzerError::PrivateMember { input, .. } => input,
+            AnalyzerError::PrivateNamespace { input, .. } => input,
+            AnalyzerError::ReferringBeforeDefinition { input, .. } => input,
+            AnalyzerError::ReferringInactiveDefinition { input, .. } => input,
+            AnalyzerError::ReservedIdentifier { input, .. } => input,
+            AnalyzerError::StatementAfterIfReset { input, .. } => input,
+            AnalyzerError::SvKeywordUsage { input, .. } => input,
+            AnalyzerError::SvWithImplicitReset { input, .. } => input,
+            AnalyzerError::TooLargeEnumVariant { input, .. } => input,
+            AnalyzerError::TooLargeNumber { input, .. } => input,
+            AnalyzerError::TooMuchEnumVariant { input, .. } => input,
+            AnalyzerError::TypeInferenceConflict { input, .. } => input,
+            AnalyzerError::TypeInferenceNotSupported { input, .. } => input,
+            AnalyzerError::UnassignableOutput { input, .. } => input,
+            AnalyzerError::NonConstantOutputSelect { input, .. } => input,
+            AnalyzerError::UnassignVariable { input, .. } => input,
+            AnalyzerError::UncoveredBranch { input, .. } => input,
+            AnalyzerError::UndefinedIdentifier { input, .. } => input,
+            AnalyzerError::UnenclosedInnerIfExpression { input, .. } => input,
+            AnalyzerError::UnevaluableValue { input, .. } => input,
+            AnalyzerError::UnexpandableModport { input, .. } => input,
+            AnalyzerError::UnknownAttribute { input, .. } => input,
+            AnalyzerError::UnknownEmbedLang { input, .. } => input,
+            AnalyzerError::UnknownEmbedWay { input, .. } => input,
+            AnalyzerError::UnknownIncludeWay { input, .. } => input,
+            AnalyzerError::UnknownMember { input, .. } => input,
+            AnalyzerError::UnknownMsb { input, .. } => input,
+            AnalyzerError::UnknownParam { input, .. } => input,
+            AnalyzerError::UnknownPort { input, .. } => input,
+            AnalyzerError::UnknownTbPort { input, .. } => input,
+            AnalyzerError::ComponentInterfaceMismatch { input, .. } => input,
+            AnalyzerError::UnknownUnsafe { input, .. } => input,
+            AnalyzerError::UnresolvableGenericExpression { input, .. } => input,
+            AnalyzerError::UnsignedArithShift { input, .. } => input,
+            AnalyzerError::UnusedReturn { input, .. } => input,
+            AnalyzerError::UnpackedStructUnionMember { input, .. } => input,
+            AnalyzerError::UnusedVariable { input, .. } => input,
+            AnalyzerError::WrongSeparator { input, .. } => input,
+            AnalyzerError::ZeroWidthNumber { input, .. } => input,
+        }
+    }
+
+    pub fn input_sources_mut(&mut self) -> &mut MultiSources {
+        match self {
+            AnalyzerError::AmbiguousElsif { input, .. } => input,
+            AnalyzerError::AmbiguousIdentifier { input, .. } => input,
+            AnalyzerError::AnonymousIdentifierUsage { input, .. } => input,
+            AnalyzerError::CallNonFunction { input, .. } => input,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { input, .. } => input,
+            AnalyzerError::FunctionOutputInAlwaysFf { input, .. } => input,
+            AnalyzerError::FunctionOutputInPortConnection { input, .. } => input,
+            AnalyzerError::CombinationalLoop { input, .. } => input,
+            AnalyzerError::CombinationalLoopPositionOverflow { input, .. } => input,
+            AnalyzerError::CyclicTypeDependency { input, .. } => input,
+            AnalyzerError::CyclicFileDependency { input, .. } => input,
+            AnalyzerError::DuplicateArgument { input, .. } => input,
+            AnalyzerError::DuplicatedIdentifier { input, .. } => input,
+            AnalyzerError::DuplicateEnumVariant { input, .. } => input,
+            AnalyzerError::ExceedLimit { input, .. } => input,
+            AnalyzerError::FixedTypeWithSignedModifier { input, .. } => input,
+            AnalyzerError::ForLoopOverflow { input, .. } => input,
+            AnalyzerError::GenericInferenceFailed { input, .. } => input,
+            AnalyzerError::ImplicitClockConversion { input, .. } => input,
+            AnalyzerError::IncludeFailure { input, .. } => input,
+            AnalyzerError::IncompatProto { input, .. } => input,
+            AnalyzerError::InfiniteRecursion { input, .. } => input,
+            AnalyzerError::InvalidAssignment { input, .. } => input,
+            AnalyzerError::InvalidCast { input, .. } => input,
+            AnalyzerError::InvalidClock { input, .. } => input,
+            AnalyzerError::InvalidClockAssignment { input, .. } => input,
+            AnalyzerError::InvalidClockDomain { input, .. } => input,
+            AnalyzerError::InvalidConnectOperand { input, .. } => input,
+            AnalyzerError::InvalidDirection { input, .. } => input,
+            AnalyzerError::InvalidEmbed { input, .. } => input,
+            AnalyzerError::InvalidEmbedIdentifier { input, .. } => input,
+            AnalyzerError::InvalidEnumVariant { input, .. } => input,
+            AnalyzerError::InvalidFactor { input, .. } => input,
+            AnalyzerError::InvalidForRange { input, .. } => input,
+            AnalyzerError::InvalidForStep { input, .. } => input,
+            AnalyzerError::InvalidIdentifier { input, .. } => input,
+            AnalyzerError::InvalidImport { input, .. } => input,
+            AnalyzerError::InvalidMixin { input, .. } => input,
+            AnalyzerError::InvalidLogicalOperand { input, .. } => input,
+            AnalyzerError::InvalidLsb { input, .. } => input,
+            AnalyzerError::InvalidModifier { input, .. } => input,
+            AnalyzerError::InvalidModportItem { input, .. } => input,
+            AnalyzerError::InvalidMsb { input, .. } => input,
+            AnalyzerError::InvalidNumberCharacter { input, .. } => input,
+            AnalyzerError::InvalidOperand { input, .. } => input,
+            AnalyzerError::InvalidPortDefaultValue { input, .. } => input,
+            AnalyzerError::InvalidRange { input, .. } => input,
+            AnalyzerError::InvalidRangeAssign { input, .. } => input,
+            AnalyzerError::InvalidReset { input, .. } => input,
+            AnalyzerError::InvalidSelect { input, .. } => input,
+            AnalyzerError::InvalidSizeType { input, .. } => input,
+            AnalyzerError::InvalidStatement { input, .. } => input,
+            AnalyzerError::InvalidInitialAssign { input, .. } => input,
+            AnalyzerError::InvalidTbUsage { input, .. } => input,
+            AnalyzerError::InvalidTest { input, .. } => input,
+            AnalyzerError::InvalidTypeDeclaration { input, .. } => input,
+            AnalyzerError::InvalidUnsizedLiteral { input, .. } => input,
+            AnalyzerError::InvalidWavedrom { input, .. } => input,
+            AnalyzerError::InvisibleIndentifier { input, .. } => input,
+            AnalyzerError::LastItemWithDefine { input, .. } => input,
+            AnalyzerError::LastItemWithDefineInModport { input, .. } => input,
+            AnalyzerError::MemberAccessOnArray { input, .. } => input,
+            AnalyzerError::MismatchAssignment { input, .. } => input,
+            AnalyzerError::MismatchAttributeArgs { input, .. } => input,
+            AnalyzerError::MismatchCaseLabel { input, .. } => input,
+            AnalyzerError::MismatchClockDomain { input, .. } => input,
+            AnalyzerError::MismatchFunctionArg { input, .. } => input,
+            AnalyzerError::MismatchFunctionArity { input, .. } => input,
+            AnalyzerError::MismatchGenericsArity { input, .. } => input,
+            AnalyzerError::MismatchType { input, .. } => input,
+            AnalyzerError::MissingClockDomain { input, .. } => input,
+            AnalyzerError::MissingClockSignal { input, .. } => input,
+            AnalyzerError::MissingDefaultArgument { input, .. } => input,
+            AnalyzerError::MissingIfReset { input, .. } => input,
+            AnalyzerError::MissingPort { input, .. } => input,
+            AnalyzerError::MissingResetSignal { input, .. } => input,
+            AnalyzerError::MissingResetStatement { input, .. } => input,
+            AnalyzerError::MissingTbPort { input, .. } => input,
+            AnalyzerError::MissingTri { input, .. } => input,
+            AnalyzerError::MixedFunctionArgument { input, .. } => input,
+            AnalyzerError::MixedStructUnionMember { input, .. } => input,
+            AnalyzerError::MultipleAssignment { input, .. } => input,
+            AnalyzerError::MultipleDefault { input, .. } => input,
+            AnalyzerError::NonConstantSelectWidth { input, .. } => input,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { input, .. } => input,
             AnalyzerError::NonPositiveValue { input, .. } => input,
             AnalyzerError::ZeroSize { input, .. } => input,
             AnalyzerError::NonPortableDependency { input, .. } => input,
@@ -2832,6 +3006,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { instance, .. } => instance,
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { instance, .. } => instance,
             AnalyzerError::FunctionOutputInAlwaysFf { instance, .. } => instance,
+            AnalyzerError::FunctionOutputInPortConnection { instance, .. } => instance,
             AnalyzerError::CombinationalLoop { instance, .. } => instance,
             AnalyzerError::CombinationalLoopPositionOverflow { instance, .. } => instance,
             AnalyzerError::CyclicTypeDependency { instance, .. } => instance,
@@ -2874,6 +3049,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSizeType { instance, .. } => instance,
             AnalyzerError::InvalidRangeAssign { instance, .. } => instance,
             AnalyzerError::NonConstantSelectWidth { instance, .. } => instance,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { instance, .. } => instance,
             AnalyzerError::InvalidStatement { instance, .. } => instance,
             AnalyzerError::InvalidInitialAssign { instance, .. } => instance,
             AnalyzerError::InvalidForRange { instance, .. } => instance,
@@ -2962,6 +3138,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { instance, .. } => instance.as_ref(),
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { instance, .. } => instance.as_ref(),
             AnalyzerError::FunctionOutputInAlwaysFf { instance, .. } => instance.as_ref(),
+            AnalyzerError::FunctionOutputInPortConnection { instance, .. } => instance.as_ref(),
             AnalyzerError::CombinationalLoop { instance, .. } => instance.as_ref(),
             AnalyzerError::CombinationalLoopPositionOverflow { instance, .. } => instance.as_ref(),
             AnalyzerError::CyclicTypeDependency { instance, .. } => instance.as_ref(),
@@ -3004,6 +3181,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSizeType { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidRangeAssign { instance, .. } => instance.as_ref(),
             AnalyzerError::NonConstantSelectWidth { instance, .. } => instance.as_ref(),
+            AnalyzerError::NonConstantInterfaceInstanceSelect { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidStatement { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidInitialAssign { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidForRange { instance, .. } => instance.as_ref(),
@@ -3092,6 +3270,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { token_source, .. } => *token_source,
             AnalyzerError::FunctionOutputInAlwaysFf { token_source, .. } => *token_source,
+            AnalyzerError::FunctionOutputInPortConnection { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoopPositionOverflow { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
@@ -3134,6 +3313,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSizeType { token_source, .. } => *token_source,
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
             AnalyzerError::InvalidInitialAssign { token_source, .. } => *token_source,
             AnalyzerError::InvalidForRange { token_source, .. } => *token_source,
@@ -3295,6 +3475,24 @@ impl AnalyzerError {
             function: function.to_string(),
             output: output.to_string(),
             destination: destination.to_string(),
+            input,
+            error_location: token.into(),
+            output_declaration,
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn function_output_in_port_connection(
+        function: &str,
+        output: &str,
+        token: &TokenRange,
+        declaration: Option<&TokenRange>,
+    ) -> Self {
+        let declarations = declaration.into_iter().copied().collect::<Vec<_>>();
+        let (input, output_declaration) = source_with_context(token, &declarations);
+        AnalyzerError::FunctionOutputInPortConnection {
+            function: function.to_string(),
+            output: output.to_string(),
             input,
             error_location: token.into(),
             output_declaration,
@@ -3722,6 +3920,14 @@ impl AnalyzerError {
     }
     pub fn non_constant_select_width(token: &TokenRange) -> Self {
         AnalyzerError::NonConstantSelectWidth {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn non_constant_interface_instance_select(token: &TokenRange) -> Self {
+        AnalyzerError::NonConstantInterfaceInstanceSelect {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -4539,7 +4745,7 @@ impl AnalyzerError {
 /// the component's interface manifest. Carried by
 /// [`AnalyzerError::ComponentInterfaceMismatch`] so each mismatch has a
 /// distinct, testable value instead of an ad-hoc message string.
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComponentInterfaceMismatchKind {
     #[error(
         "the method returns {returned} bit(s) but the destination is {destination} bit(s) wide"
@@ -4641,7 +4847,7 @@ pub enum CaseLabelMismatch {
     ExclusiveBound,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExceedLimitKind {
     EvaluateSize,
     HierarchyDepth,
@@ -4658,7 +4864,7 @@ impl fmt::Display for ExceedLimitKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IncompatProtoKind {
     IncompatibleAlias(StrId),
     IncompatibleFunction(StrId),
@@ -4747,7 +4953,7 @@ impl fmt::Display for IncompatProtoKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidConnectOperandKind {
     IncludeInout,
     InstanceArray,
@@ -4768,7 +4974,7 @@ impl fmt::Display for InvalidConnectOperandKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidWavedromKind {
     InvalidJson(String),
     MissingSignalArray,
@@ -4810,7 +5016,7 @@ impl fmt::Display for InvalidWavedromKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidModifierKind {
     NotTopModule,
     NotClockReset,
@@ -4829,7 +5035,7 @@ impl fmt::Display for InvalidModifierKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidModportItemKind {
     Function,
     Variable,
@@ -4844,7 +5050,7 @@ impl fmt::Display for InvalidModportItemKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidPortDefaultValueKind {
     NotGlobal,
     InFunction,
@@ -4871,7 +5077,7 @@ impl fmt::Display for InvalidPortDefaultValueKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MismatchTypeKind {
     SymbolKind {
         name: String,
@@ -4939,7 +5145,7 @@ impl fmt::Display for MismatchTypeKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidSelectKind {
     WrongOrder {
         beg: usize,
@@ -4982,7 +5188,7 @@ impl fmt::Display for InvalidSelectKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidForRangeKind {
     /// A bare expression where a `..`/`..=` range is required.
     BareExpression,
@@ -5013,7 +5219,7 @@ impl fmt::Display for InvalidForRangeKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidForStepKind {
     /// `step += 0`: an additive step of 0 never advances.
     ZeroStep,
@@ -5042,7 +5248,7 @@ impl fmt::Display for InvalidForStepKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidTestKind {
     NoTopModuleCocotb,
 }
@@ -5055,7 +5261,7 @@ impl fmt::Display for InvalidTestKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MultipleDefaultKind {
     Clock,
     Reset,
@@ -5074,7 +5280,7 @@ impl fmt::Display for MultipleDefaultKind {
 
 /// Refines the `mismatch_assignment` help. The severity stays a warning: the
 /// check is conservative and a false positive must not stop a build.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MismatchAssignmentKind {
     Normal,
     /// The unpacked dimensions disagree, which no SystemVerilog tool accepts
@@ -5093,7 +5299,7 @@ impl fmt::Display for MismatchAssignmentKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DuplicatedIdentifierKind {
     Normal,
     RawIdentifier { raw: String },
@@ -5120,7 +5326,7 @@ impl fmt::Display for DuplicatedIdentifierKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum UnevaluableValueKind {
     CaseCondition,
     ConstValue,
@@ -5129,6 +5335,45 @@ pub enum UnevaluableValueKind {
     ParameterValue,
     ResetValue,
     SystemFunctionArg(&'static str),
+}
+
+#[derive(Deserialize)]
+enum UnevaluableValueKindRepr {
+    CaseCondition,
+    ConstValue,
+    EnumVariant,
+    ForRange,
+    ParameterValue,
+    ResetValue,
+    SystemFunctionArg(String),
+}
+
+impl<'de> Deserialize<'de> for UnevaluableValueKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match UnevaluableValueKindRepr::deserialize(deserializer)? {
+            UnevaluableValueKindRepr::CaseCondition => Self::CaseCondition,
+            UnevaluableValueKindRepr::ConstValue => Self::ConstValue,
+            UnevaluableValueKindRepr::EnumVariant => Self::EnumVariant,
+            UnevaluableValueKindRepr::ForRange => Self::ForRange,
+            UnevaluableValueKindRepr::ParameterValue => Self::ParameterValue,
+            UnevaluableValueKindRepr::ResetValue => Self::ResetValue,
+            UnevaluableValueKindRepr::SystemFunctionArg(name) => {
+                Self::SystemFunctionArg(intern_static_str(name))
+            }
+        })
+    }
+}
+
+/// The names are system function names, so interning them leaks a bounded set.
+fn intern_static_str(name: String) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut names = NAMES.lock().unwrap();
+    if let Some(x) = names.iter().find(|x| **x == name) {
+        return x;
+    }
+    let name: &'static str = Box::leak(name.into_boxed_str());
+    names.push(name);
+    name
 }
 
 impl fmt::Display for UnevaluableValueKind {
