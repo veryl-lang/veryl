@@ -1528,7 +1528,32 @@ impl Type {
     }
 
     pub fn is_compatible(&self, other: &Type) -> bool {
-        self.to_string() == other.to_string()
+        self.to_normalized_string() == other.to_normalized_string()
+    }
+
+    /// Stringify with imported and aliased paths expanded
+    /// so that different spellings of the same item compare equal.
+    fn to_normalized_string(&self) -> String {
+        let mut text = String::new();
+        for x in &self.modifier {
+            text.push_str(&x.to_string());
+        }
+        if let TypeKind::UserDefined(x) = &self.kind {
+            text.push_str(&normalize_path(&x.path).to_string());
+        } else {
+            text.push_str(&self.kind.to_string());
+        }
+        if !self.width.is_empty() {
+            text.push('<');
+            text.push_str(&normalized_expressions(&self.width));
+            text.push('>');
+        }
+        if !self.array.is_empty() {
+            text.push_str(" [");
+            text.push_str(&normalized_expressions(&self.array));
+            text.push(']');
+        }
+        text
     }
 
     pub fn has_modifier(&self, kind: &TypeModifierKind) -> bool {
@@ -2007,13 +2032,49 @@ impl fmt::Display for TypeModifier {
     }
 }
 
-impl fmt::Display for Type {
+fn normalize_path(path: &GenericSymbolPath) -> GenericSymbolPath {
+    let mut path = path.clone();
+    if path.is_resolvable()
+        && let Some((scope, define_context)) = scope::token_scope(path.paths[0].base.id)
+    {
+        path.resolve_imported(scope, &define_context, None);
+        path.unalias(None);
+    }
+    path
+}
+
+fn normalized_expressions(exprs: &[syntax_tree::Expression]) -> String {
+    let mut stringifier = NormalizedStringifier::default();
+    for (i, x) in exprs.iter().enumerate() {
+        if i != 0 {
+            stringifier.string.push_str(", ");
+        }
+        stringifier.expression(x);
+    }
+    stringifier.string
+}
+
+/// Stringifier which expands imported and aliased paths
+#[derive(Default)]
+struct NormalizedStringifier {
+    string: String,
+}
+
+impl VerylWalker for NormalizedStringifier {
+    fn veryl_token(&mut self, arg: &VerylToken) {
+        self.string.push_str(&arg.to_string());
+    }
+
+    fn scoped_identifier(&mut self, arg: &syntax_tree::ScopedIdentifier) {
+        let path: GenericSymbolPath = arg.into();
+        self.string.push_str(&normalize_path(&path).to_string());
+    }
+}
+
+impl fmt::Display for TypeKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
-        for x in &self.modifier {
-            text.push_str(&x.to_string());
-        }
-        match &self.kind {
+        match self {
             TypeKind::Clock => text.push_str("clock"),
             TypeKind::ClockPosedge => text.push_str("clock posedge"),
             TypeKind::ClockNegedge => text.push_str("clock negedge"),
@@ -2055,6 +2116,17 @@ impl fmt::Display for Type {
             TypeKind::Any => text.push_str("any"),
             TypeKind::Inferred => text.push('_'),
         }
+        text.fmt(f)
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+        for x in &self.modifier {
+            text.push_str(&x.to_string());
+        }
+        text.push_str(&self.kind.to_string());
         if !self.width.is_empty() {
             text.push('<');
             for (i, x) in self.width.iter().enumerate() {
