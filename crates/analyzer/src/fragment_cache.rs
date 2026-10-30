@@ -66,6 +66,28 @@ pub fn watermark() -> FragmentWatermark {
     }
 }
 
+/// Where one file's tokens and text are numbered in this run.
+#[derive(Clone, Copy, Debug)]
+pub struct FileWindow {
+    pub token: IdWindow,
+    pub text: IdWindow,
+}
+
+/// The window of the file parsed since `watermark`. Call right after its
+/// pass1, as `capture` would.
+pub fn window_since(watermark: &FragmentWatermark) -> FileWindow {
+    FileWindow {
+        token: IdWindow {
+            start: watermark.token,
+            end: resource_table::peek_token_id(),
+        },
+        text: IdWindow {
+            start: watermark.text,
+            end: text_table::peek_text_id(),
+        },
+    }
+}
+
 /// The ID-normalized part of a fragment, serialized with the fragment
 /// codec sessions active.
 #[derive(Serialize, Deserialize)]
@@ -228,7 +250,7 @@ pub fn capture(
 /// least once (it inserts the shared project namespace symbol, which this
 /// does not). On failure the tables may hold a partial restore; the caller
 /// must `drop` the file and fall back to a regular parse + pass1.
-pub fn restore(fragment: &Fragment, prj: StrId) -> Result<(), FragmentError> {
+pub fn restore(fragment: &Fragment, prj: StrId) -> Result<FileWindow, FragmentError> {
     let path_id = resource_table::insert_path(&fragment.src_path);
 
     let token_base = resource_table::reserve_token_ids(fragment.token_count);
@@ -306,7 +328,16 @@ pub fn restore(fragment: &Fragment, prj: StrId) -> Result<(), FragmentError> {
         generic_inference_table::push_pending(entry);
     }
 
-    Ok(())
+    Ok(FileWindow {
+        token: IdWindow {
+            start: token_base,
+            end: token_base + fragment.token_count,
+        },
+        text: IdWindow {
+            start: text_base,
+            end: text_base + 1,
+        },
+    })
 }
 
 #[cfg(test)]

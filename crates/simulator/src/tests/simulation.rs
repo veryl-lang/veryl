@@ -2,6 +2,79 @@ use super::*;
 use crate::output_buffer;
 
 #[test]
+fn guarded_loop_local_is_produced_before_each_read() {
+    let code = r#"
+    module Reduce (
+        enabled: input logic<2>,
+        data: input logic<2>,
+        result: output logic,
+        forwarded: output logic<2>,
+    ) {
+        always_comb {
+            forwarded = enabled;
+            result = 0;
+            for i in 0..2 {
+                if enabled[i] {
+                    let hit: logic = data[i];
+                    result |= hit;
+                }
+            }
+        }
+    }
+    module Top (
+        enabled: input logic<2>,
+        data: input logic<2>,
+        result: output logic,
+    ) {
+        var forwarded: logic<2>;
+        var masked: logic<2>;
+        assign masked = data & forwarded;
+        inst dut: Reduce (enabled, data: masked, result, forwarded);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for e in (0..4).rev() {
+            for d in (0..4).rev() {
+                sim.set("enabled", Value::new(e, 2, false));
+                sim.set("data", Value::new(d, 2, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("result").unwrap(),
+                    Value::new(u64::from(e & d != 0), 1, false),
+                    "enabled={e} data={d} {config:?}"
+                );
+            }
+        }
+        if config.use_4state {
+            for (enabled, data, expected) in [
+                (
+                    Value::new(0, 2, false),
+                    Value::new_x(2, false),
+                    Value::new(0, 1, false),
+                ),
+                (
+                    Value::new(1, 2, false),
+                    Value::new_x(2, false),
+                    Value::new_x(1, false),
+                ),
+                (
+                    Value::new_x(2, false),
+                    Value::new(3, 2, false),
+                    Value::new(0, 1, false),
+                ),
+            ] {
+                sim.set("enabled", enabled);
+                sim.set("data", data);
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(sim.get("result").unwrap(), expected, "{config:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn simple_comb() {
     let code = r#"
     module Top (
