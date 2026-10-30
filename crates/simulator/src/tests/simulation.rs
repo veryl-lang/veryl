@@ -7906,9 +7906,7 @@ fn generic_interface_port_parent_initialization() {
 }
 
 #[test]
-fn generic_interface_port_array_over_analysis_limit() {
-    // Writes through direction-free ports come from interval summaries, so
-    // arrays over `evaluate_array_limit` (128) simulate too.
+fn generic_interface_port_array_analysis_limit() {
     for size in [128, 129] {
         let code = format!(
             r#"
