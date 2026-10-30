@@ -4111,13 +4111,87 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ArrayLiteralList'
     fn array_literal_list(&mut self, arg: &ArrayLiteralList) {
-        self.array_literal_item(&arg.array_literal_item);
-        for x in &arg.array_literal_list_list {
-            self.group_begin();
-            self.comma(&x.comma);
-            self.soft_line();
-            self.array_literal_item(&x.array_literal_item);
-            self.group_end();
+        let mut items = vec![arg.array_literal_item.as_ref()];
+        items.extend(
+            arg.array_literal_list_list
+                .iter()
+                .map(|x| x.array_literal_item.as_ref()),
+        );
+
+        let has_default = items.iter().any(|item| {
+            matches!(
+                item.array_literal_item_group.as_ref(),
+                ArrayLiteralItemGroup::DefaulColonExpression(_)
+            )
+        });
+        let has_repeat = items.iter().any(|item| {
+            matches!(
+                item.array_literal_item_group.as_ref(),
+                ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x)
+                    if x.array_literal_item_opt.is_some()
+            )
+        });
+
+        // SystemVerilog allows either positional items, keyed items, or one
+        // replication of the whole pattern. Veryl array literals also allow a
+        // repeat on an individual item, so expand such repeats when they are
+        // combined with other items. A default item makes the pattern keyed.
+        let rewrite_pattern = (has_default && items.len() > 1) || (has_repeat && items.len() > 1);
+        if rewrite_pattern {
+            let mut values = Vec::new();
+            let mut default = None;
+            for item in &items {
+                match item.array_literal_item_group.as_ref() {
+                    ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
+                        let repeat = if let Some(repeat) = &x.array_literal_item_opt {
+                            array_literal_repeat_count(self.generic_map.last(), &repeat.expression)
+                        } else {
+                            Some(1)
+                        };
+                        let Some(repeat) = repeat else {
+                            // Semantic analysis reports non-constant repeat
+                            // counts. Preserve the existing output if analysis
+                            // did not reject one for some other reason.
+                            array_literal_list_original(self, arg);
+                            return;
+                        };
+                        values.extend(std::iter::repeat_n(x.expression.as_ref(), repeat));
+                    }
+                    ArrayLiteralItemGroup::DefaulColonExpression(_) => default = Some(*item),
+                }
+            }
+
+            let mut first = true;
+            for (index, value) in values.into_iter().enumerate() {
+                if !first {
+                    self.group_begin();
+                    self.str(",");
+                    self.soft_line();
+                }
+                if has_default {
+                    self.str(&format!("{index}:"));
+                    self.space(1);
+                }
+                self.expression(value);
+                if !first {
+                    self.group_end();
+                }
+                first = false;
+            }
+
+            if let Some(default) = default {
+                if !first {
+                    self.group_begin();
+                    self.str(",");
+                    self.soft_line();
+                }
+                self.array_literal_item(default);
+                if !first {
+                    self.group_end();
+                }
+            }
+        } else {
+            array_literal_list_original(self, arg);
         }
     }
 
@@ -6907,6 +6981,31 @@ impl From<&mut Emitter> for SymbolContext {
             bound_namespace: value.bound_namespace.clone(),
         }
     }
+}
+
+fn array_literal_list_original(emitter: &mut Emitter, arg: &ArrayLiteralList) {
+    emitter.array_literal_item(&arg.array_literal_item);
+    for x in &arg.array_literal_list_list {
+        emitter.group_begin();
+        emitter.comma(&x.comma);
+        emitter.soft_line();
+        emitter.array_literal_item(&x.array_literal_item);
+        emitter.group_end();
+    }
+}
+
+fn array_literal_repeat_count(
+    generic_maps: Option<&Vec<GenericMap>>,
+    expr: &Expression,
+) -> Option<usize> {
+    let token = expr.range();
+    let mut context = Context::default();
+    if let Some(maps) = generic_maps {
+        context.push_generic_map(maps.clone());
+    }
+    let mut repeat: ir::Expression = Conv::conv(&mut context, expr).ok()?;
+    let repeat = veryl_analyzer::conv::utils::eval_repeat(&mut context, &mut repeat)?;
+    context.check_size(repeat.to_usize_saturating()?, token)
 }
 
 fn namespace_string(
