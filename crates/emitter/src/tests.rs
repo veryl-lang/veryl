@@ -2073,6 +2073,9 @@ module ModuleD (
 module ModuleE (
     if_a: modport InterfaceA::mp[2]
 ) {}
+module ModuleG (
+    if_a: modport InterfaceA::mp[2, 4]
+) {}
 module ModuleF {
     inst if_a: InterfaceA[2, 3, 4];
 
@@ -2099,6 +2102,24 @@ module ModuleF {
     );
     inst u_e3: ModuleE (
         if_a: if_a[1][2][1 step 2]
+    );
+    inst u_g0: ModuleG (
+        if_a: if_a[1][0:1]
+    );
+    inst u_g1: ModuleG (
+        if_a: if_a[1][0+:2]
+    );
+    inst u_g2: ModuleG (
+        if_a: if_a[1][2-:2]
+    );
+    inst u_g3: ModuleG (
+        if_a: if_a[1][0 step 2]
+    );
+    inst u_c0: ModuleC (
+        if_a: if_a[1+:1]
+    );
+    inst u_c1: ModuleC (
+        if_a: if_a[1 step 1]
     );
 }
 "#;
@@ -2129,6 +2150,10 @@ module prj_ModuleE (
     prj_InterfaceA.mp if_a [2]
 );
 endmodule
+module prj_ModuleG (
+    prj_InterfaceA.mp if_a [2*4]
+);
+endmodule
 module prj_ModuleF;
     prj_InterfaceA if_a [2*3*4] ();
 
@@ -2151,10 +2176,28 @@ module prj_ModuleF;
         .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(2):(1)*(3)*(4)+(2)*(4)+(2)+(2)-1])
     );
     prj_ModuleE u_e2 (
-        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(3):(1)*(3)*(4)+(2)*(4)+(3)-(2)+1])
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(3)-(2)+1:(1)*(3)*(4)+(2)*(4)+(3)])
     );
     prj_ModuleE u_e3 (
         .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(1)*(2):(1)*(3)*(4)+(2)*(4)+((1)+1)*(2)-1])
+    );
+    prj_ModuleG u_g0 (
+        .if_a (if_a[(1)*(3)*(4)+(0)*(4):(1)*(3)*(4)+((1)+1)*(4)-1])
+    );
+    prj_ModuleG u_g1 (
+        .if_a (if_a[(1)*(3)*(4)+(0)*(4):(1)*(3)*(4)+((0)+(2))*(4)-1])
+    );
+    prj_ModuleG u_g2 (
+        .if_a (if_a[(1)*(3)*(4)+((2)-(2)+1)*(4):(1)*(3)*(4)+((2)+1)*(4)-1])
+    );
+    prj_ModuleG u_g3 (
+        .if_a (if_a[(1)*(3)*(4)+(0)*(2)*(4):(1)*(3)*(4)+((0)+1)*(2)*(4)-1])
+    );
+    prj_ModuleC u_c0 (
+        .if_a (if_a[(1)*(3)*(4):((1)+(1))*(3)*(4)-1])
+    );
+    prj_ModuleC u_c1 (
+        .if_a (if_a[(1)*(1)*(3)*(4):((1)+1)*(1)*(3)*(4)-1])
     );
 endmodule
 //# sourceMappingURL=test.sv.map

@@ -1838,6 +1838,7 @@ impl Emitter {
 
     fn emit_flattened_select(&mut self, select: &[Box<Select>], array_size: &[Expression]) {
         let last_select = select.last().unwrap();
+        let last_index = select.len() - 1;
 
         for (i, x) in select.iter().enumerate() {
             if i == 0 {
@@ -1846,24 +1847,37 @@ impl Emitter {
                 self.token(&x.l_bracket.l_bracket_token.replace("+"));
             }
 
-            self.str("(");
-            self.expression(&x.expression);
-            self.str(")");
+            let inner = array_size.get(i + 1..).unwrap_or(&[]);
+            let select_operator = x
+                .select_opt
+                .as_ref()
+                .filter(|_| i == last_index)
+                .map(|y| (&*y.select_operator, &y.expression));
 
-            if (i + 1) < array_size.len() {
-                self.force_duplicated = true;
-                for x in array_size.iter().skip(i + 1) {
-                    self.str("*(");
-                    self.expression(x);
-                    self.str(")");
+            match select_operator {
+                Some((SelectOperator::MinusColon(_), width)) => {
+                    self.emit_flattened_index(inner, false, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")-(");
+                        s.expression(width);
+                        s.str(")+1");
+                    });
                 }
-                self.force_duplicated = false;
-            } else if let Some(ref y) = x.select_opt
-                && matches!(&*y.select_operator, SelectOperator::Step(_))
-            {
-                self.str("*(");
-                self.expression(&y.expression);
-                self.str(")");
+                Some((SelectOperator::Step(_), step)) => {
+                    self.str("(");
+                    self.expression(&x.expression);
+                    self.str(")*(");
+                    self.expression(step);
+                    self.str(")");
+                    self.emit_flattened_array_size(inner);
+                }
+                _ => {
+                    self.str("(");
+                    self.expression(&x.expression);
+                    self.str(")");
+                    self.emit_flattened_array_size(inner);
+                }
             }
         }
 
@@ -1880,59 +1894,101 @@ impl Emitter {
                 self.token(&x.l_bracket.l_bracket_token.replace("+"));
             }
 
-            if (i + 1) < select.len() || x.select_opt.is_none() {
-                if (i + 1) < select.len() {
-                    self.str("(");
-                    self.expression(&x.expression);
-                    self.str(")");
-                } else {
-                    self.str("((");
-                    self.expression(&x.expression);
-                    self.str(")+1)");
-                }
+            let inner = array_size.get(i + 1..).unwrap_or(&[]);
+            if i < last_index {
+                self.str("(");
+                self.expression(&x.expression);
+                self.str(")");
+                self.emit_flattened_array_size(inner);
+                continue;
+            }
 
-                for x in array_size.iter().skip(i + 1) {
-                    self.str("*(");
-                    self.expression(x);
-                    self.str(")");
-                }
+            let select_operator = x
+                .select_opt
+                .as_ref()
+                .map(|y| (&*y.select_operator, &y.expression));
 
-                if (i + 1) == select.len() {
+            match select_operator {
+                None => {
+                    self.emit_flattened_index(inner, true, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")");
+                    });
+                }
+                Some((SelectOperator::Colon(_), end)) => {
+                    self.emit_flattened_index(inner, true, |s| {
+                        s.str("(");
+                        s.expression(end);
+                        s.str(")");
+                    });
+                }
+                Some((SelectOperator::PlusColon(_), width)) => {
+                    self.emit_flattened_index(inner, false, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")+(");
+                        s.expression(width);
+                        s.str(")");
+                    });
                     self.str("-1");
                 }
-            } else if let Some(ref y) = x.select_opt {
-                match &*y.select_operator {
-                    SelectOperator::Colon(_) => {
-                        self.str("(");
-                        self.expression(&y.expression);
-                        self.str(")");
-                    }
-                    SelectOperator::PlusColon(_) => {
-                        self.str("(");
-                        self.expression(&x.expression);
-                        self.str(")+(");
-                        self.expression(&y.expression);
-                        self.str(")-1");
-                    }
-                    SelectOperator::MinusColon(_) => {
-                        self.str("(");
-                        self.expression(&x.expression);
-                        self.str(")-(");
-                        self.expression(&y.expression);
-                        self.str(")+1");
-                    }
-                    SelectOperator::Step(_) => {
-                        self.str("((");
-                        self.expression(&x.expression);
-                        self.str(")+1)*(");
-                        self.expression(&y.expression);
-                        self.str(")-1");
-                    }
+                Some((SelectOperator::MinusColon(_), _)) => {
+                    self.emit_flattened_index(inner, true, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")");
+                    });
+                }
+                Some((SelectOperator::Step(_), step)) => {
+                    self.str("((");
+                    self.expression(&x.expression);
+                    self.str(")+1)*(");
+                    self.expression(step);
+                    self.str(")");
+                    self.emit_flattened_array_size(inner);
+                    self.str("-1");
                 }
             }
         }
         self.force_duplicated = false;
         self.r_bracket(&last_select.r_bracket);
+    }
+
+    /// Emits the flattened index of the element at `index` in the outer dimension.
+    /// If `last` is true, the index points to the last element of the sub-array of the inner dimensions.
+    fn emit_flattened_index<F: FnOnce(&mut Self)>(
+        &mut self,
+        inner: &[Expression],
+        last: bool,
+        index: F,
+    ) {
+        if inner.is_empty() {
+            index(self);
+            return;
+        }
+
+        self.str("(");
+        index(self);
+        if last {
+            self.str("+1");
+        }
+        self.str(")");
+        self.emit_flattened_array_size(inner);
+        if last {
+            self.str("-1");
+        }
+    }
+
+    fn emit_flattened_array_size(&mut self, array_size: &[Expression]) {
+        let force_duplicated = self.force_duplicated;
+        self.force_duplicated = true;
+        for x in array_size {
+            self.str("*(");
+            self.expression(x);
+            self.str(")");
+        }
+        self.force_duplicated = force_duplicated;
     }
 
     fn emit_width(&mut self, exp: &Expression) {
