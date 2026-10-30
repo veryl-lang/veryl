@@ -1871,6 +1871,36 @@ fn multiple_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA(
+        clk : input clock,
+        a0 : input logic<3>,
+        a1 : input logic<3>,
+        d0 : input logic,
+        d1 : input logic,
+    ) {
+        #[ifdef(FOO)]
+        {
+            // This block will not be evaluated
+        }
+        #[else]
+        {
+            #[allow(multiple_assign)]
+            var memory : logic[8];
+
+            always_ff {
+                memory[a0] = d0;
+            }
+            always_ff {
+                memory[a1] = d1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -12661,6 +12691,18 @@ fn invalid_operand() {
 
     let code = r#"
     module ModuleA {
+        const W: logic<32> = 'x;
+        var a: logic<8>;
+        let _b: logic<8> = a as W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
         function func::<N: u32> {
             gen W: u32 = N;
             var a: u32;
@@ -12972,6 +13014,33 @@ fn invalid_factor() {
             a[logic:0] = 0;
             b[1:logic] = 0;
         }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+    assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = i<4>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 8;
+    }
+    module ModuleA {
+        const W: u32 = 8;
+        let _a: u32 = W<4>;
+        let _b: u32 = PackageA::W<4>;
     }
     "#;
 
@@ -16675,6 +16744,20 @@ fn exceed_limit() {
     let code = r#"
     module ModuleA {
         var _a: logic<10000000>;
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 10000000;
+    }
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as PackageA::W;
+        assign a = 0;
     }
     "#;
 
@@ -23765,6 +23848,66 @@ fn zero_size() {
     let code = r#"
     module ModuleA {
         var a: logic<8> [0];
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        const W: u32 = 0;
+        var a: logic<8>;
+        let _b: logic<8> = a as W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 0;
+    }
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as PackageA::W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as 0;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as 32'd0;
         assign a = 0;
     }
     "#;
