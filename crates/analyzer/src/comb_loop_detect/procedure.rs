@@ -681,15 +681,17 @@ fn collect_summary_statement_variables(
                 collect_summary_statement_variables(module, &statement.default, ids);
             }
             Statement::For(statement) => {
-                ids.insert(statement.var_id);
-                let (start, end) = match &statement.range {
-                    ForRange::Forward { start, end, .. }
-                    | ForRange::Reverse { start, end, .. }
-                    | ForRange::Stepped { start, end, .. } => (start, end),
-                };
-                for bound in [start, end] {
-                    if let ForBound::Expression(expression) = bound {
-                        collect_summary_expression_variables(module, expression, ids);
+                for iterator in &statement.iterators {
+                    ids.insert(iterator.var_id);
+                    let (start, end) = match &iterator.range {
+                        ForRange::Forward { start, end, .. }
+                        | ForRange::Reverse { start, end, .. }
+                        | ForRange::Stepped { start, end, .. } => (start, end),
+                    };
+                    for bound in [start, end] {
+                        if let ForBound::Expression(expression) = bound {
+                            collect_summary_expression_variables(module, expression, ids);
+                        }
                     }
                 }
                 collect_summary_statement_variables(module, &statement.body, ids);
@@ -1769,10 +1771,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     self.collect_statement_write_footprint(&statement.default, keys, visited);
                 }
                 Statement::For(statement) => {
-                    let (start, end, _) = for_range_bounds(&statement.range);
-                    for bound in [start, end] {
-                        if let ForBound::Expression(expression) = bound {
-                            self.collect_expression_write_footprint(expression, keys, visited);
+                    for range in statement.ranges() {
+                        let (start, end, _) = for_range_bounds(range);
+                        for bound in [start, end] {
+                            if let ForBound::Expression(expression) = bound {
+                                self.collect_expression_write_footprint(expression, keys, visited);
+                            }
                         }
                     }
                     self.collect_statement_write_footprint(&statement.body, keys, visited);
@@ -2920,14 +2924,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) -> FlowResult {
-        let range_controls = self.eval_for_range_controls(&statement.range, controls);
-        if self.for_range_is_proven_empty(&statement.range) {
+        let mut range_controls = controls.to_vec();
+        for range in statement.ranges() {
+            range_controls = self.eval_for_range_controls(range, &range_controls);
+        }
+        if statement
+            .ranges()
+            .any(|range| self.for_range_is_proven_empty(range))
+        {
             return FlowResult::new(ProcedureFlow::Continue);
         }
 
-        if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
+        if let Some(iterations) = statement.eval_iter(&mut self.ctx) {
             self.eval_known_for_iterations(statement, &range_controls, iterations)
-        } else if statement.range.is_over_size_limit(&mut self.ctx) {
+        } else if statement.is_over_size_limit(&mut self.ctx) {
             // A resource limit must not turn a finite, statically known loop
             // into the more conservative runtime-loop semantics. Without an
             // exact finite summary, suppress dependencies from this procedure
@@ -2962,22 +2972,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .is_some_and(|(start, end)| start == end)
     }
 
-    fn set_known_iterator_value(&mut self, statement: &ForStatement, value: usize) {
+    fn set_known_iterator_value(&mut self, statement: &ForStatement, values: &[usize]) {
         // A static iterator changes in the compile-time store without a new
         // SSA definition. Calls from different iterations therefore cannot
         // share guards just because their actuals have the same SSA versions.
         self.shared_call_branches.clear();
-        let Some(variable) = self.ctx.variables.get_mut(&statement.var_id) else {
-            return;
-        };
-        let Some(width) = statement.var_type.total_width() else {
-            return;
-        };
-        variable.set_value(
-            &[],
-            Value::new(value as u64, width, statement.var_type.signed),
-            None,
-        );
+        for (iterator, value) in statement.iterators.iter().zip(values) {
+            let Some(variable) = self.ctx.variables.get_mut(&iterator.var_id) else {
+                continue;
+            };
+            let Some(width) = iterator.var_type.total_width() else {
+                continue;
+            };
+            variable.set_value(
+                &[],
+                Value::new(*value as u64, width, iterator.var_type.signed),
+                None,
+            );
+        }
     }
 
     fn forget_runtime_iterator_value(&mut self, iterator: VarId) {
@@ -2993,7 +3005,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         statement: &ForStatement,
         range_controls: &[VersionId],
-        iterations: Vec<usize>,
+        iterations: Vec<Vec<usize>>,
     ) -> FlowResult {
         let parent_condition = self.path_condition.clone();
         let checkpoint = self.ssa.checkpoint();
@@ -3004,8 +3016,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut flow = ProcedureFlow::Continue;
         let mut iteration_controls = range_controls.to_vec();
         for value in iterations {
-            self.set_known_iterator_value(statement, value);
-            let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
+            self.set_known_iterator_value(statement, &value);
+            let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, &value);
             let result = self.eval_block(
                 body.as_deref().unwrap_or(&statement.body),
                 &iteration_controls,
@@ -3049,9 +3061,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // accesses such as x[i], x[i + 1], and x[j] all may address the same
         // LSP region. Evaluate the body once without binding the iterator so
         // the ordinary dynamic-access rules conservatively retain that alias.
-        self.forget_runtime_iterator_value(statement.var_id);
+        for iterator in &statement.iterators {
+            self.forget_runtime_iterator_value(iterator.var_id);
+        }
         let parent_condition = self.path_condition.clone();
-        let may_execute_zero_times = for_range_has_dynamic_bounds(&statement.range);
+        let may_execute_zero_times = statement.ranges().any(for_range_has_dynamic_bounds);
         let checkpoint = self.ssa.checkpoint();
         self.loop_flows.push(LoopFlow {
             checkpoint,

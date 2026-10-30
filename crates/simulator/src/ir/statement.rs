@@ -4097,16 +4097,23 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     method,
                 }]
             }
+            air::Statement::For(x) if x.iterators.len() > 1 => {
+                let flattened = flatten_for(context, x)?;
+                Conv::conv(context, &air::Statement::For(Box::new(flattened)))?
+            }
             air::Statement::For(x) => {
+                let [iterator] = x.iterators.as_slice() else {
+                    return Err(SimulatorError::unsupported_description(&x.token));
+                };
                 let scope = context.scope();
                 let meta = scope
                     .variable_meta
-                    .get(&x.var_id)
+                    .get(&iterator.var_id)
                     .ok_or_else(|| SimulatorError::unsupported_description(&x.token))?;
                 let var_offset = meta.elements[0].current;
                 let var_width = meta.width;
                 let var_native_bytes = meta.native_bytes;
-                let var_signed = x.var_type.signed;
+                let var_signed = iterator.var_type.signed;
 
                 let mut body = vec![];
                 for stmt in &x.body {
@@ -4133,7 +4140,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         }
                     }
                 };
-                let range = match &x.range {
+                let range = match &iterator.range {
                     air::ForRange::Forward {
                         start,
                         end,
@@ -4197,6 +4204,179 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
 
         Ok(result)
     }
+}
+
+/// A multi-dimensional loop runs as one loop over a flattened index, as the
+/// emitted SystemVerilog does, so a `break` leaves every dimension. Each
+/// iterator is assigned from the index at the top of the body.
+fn flatten_for(
+    context: &mut Context,
+    src: &air::ForStatement,
+) -> Result<air::ForStatement, SimulatorError> {
+    let token = src.token;
+    let unsupported = || SimulatorError::unsupported_description(&token);
+
+    // The ranges of a multi-dimensional loop are elaboration-time constants,
+    // so each is known here as (first value, descending, count).
+    let mut dims = Vec::with_capacity(src.iterators.len());
+    for x in &src.iterators {
+        let (rev, start, end, inclusive) = match &x.range {
+            air::ForRange::Forward {
+                start: air::ForBound::Const(start, _),
+                end: air::ForBound::Const(end, _),
+                inclusive,
+                step: 1,
+            } => (false, *start, *end, *inclusive),
+            air::ForRange::Reverse {
+                start: air::ForBound::Const(start, _),
+                end: air::ForBound::Const(end, _),
+                inclusive,
+                step: 1,
+            } => (true, *start, *end, *inclusive),
+            _ => return Err(unsupported()),
+        };
+        let end = if inclusive {
+            end.checked_add(1).ok_or_else(unsupported)?
+        } else {
+            end
+        };
+        let count = end.saturating_sub(start);
+        let first = if rev { end.saturating_sub(1) } else { start };
+        dims.push((first, rev, count));
+    }
+    let total = dims
+        .iter()
+        .try_fold(1usize, |acc, x| acc.checked_mul(x.2))
+        .filter(|x| *x <= i32::MAX as usize)
+        .ok_or_else(unsupported)?;
+
+    let index_type = src.iterators[0].var_type.clone();
+    let width = index_type.total_width().ok_or_else(unsupported)?;
+    let signed = index_type.signed;
+
+    // Storage of the index, which no variable of the source holds.
+    let native_bytes = calc_native_bytes(width);
+    let bytes = super::variable::value_size(native_bytes, context.config.use_4state);
+    let offset = super::variable::align_up_64(context.comb_total_bytes as isize);
+    context.comb_total_bytes = offset as usize + bytes;
+    let scope = context.scope();
+    while scope
+        .variable_meta
+        .contains_key(&scope.analyzer_context.var_id)
+        || scope
+            .analyzer_context
+            .variables
+            .contains_key(&scope.analyzer_context.var_id)
+    {
+        scope.analyzer_context.var_id.inc();
+    }
+    let index_id = scope.analyzer_context.var_id;
+    scope.analyzer_context.var_id.inc();
+    let index_name = src
+        .iterators
+        .iter()
+        .map(|x| x.var_name.to_string())
+        .collect::<Vec<_>>()
+        .join("_");
+    let index_name = veryl_parser::resource_table::insert_str(&format!("__{index_name}"));
+    scope.variable_meta.insert(
+        index_id,
+        super::variable::VariableMeta {
+            path: air::VarPath::new(index_name),
+            r#type: index_type.clone(),
+            width,
+            native_bytes,
+            elements: vec![super::variable::VariableElement {
+                native_bytes,
+                current: VarOffset::Comb(offset),
+                next_offset: 0,
+            }],
+            initial_values: vec![],
+            uniform_buffer: true,
+        },
+    );
+
+    let index_comptime = air::Comptime::from_type(
+        index_type.clone(),
+        veryl_analyzer::symbol::ClockDomain::None,
+        token,
+    );
+    let index = || {
+        air::Expression::Term(Box::new(air::Factor::Variable(
+            index_id,
+            air::VarIndex::default(),
+            air::VarSelect::default(),
+            index_comptime.clone(),
+        )))
+    };
+    let constant = |value: usize| {
+        air::Expression::create_value(AnalyzerValue::new(value as u64, width, signed), token)
+    };
+    let binary = |lhs: air::Expression, op: air::Op, rhs: air::Expression| {
+        air::Expression::Binary(
+            Box::new(lhs),
+            op,
+            Box::new(rhs),
+            Box::new(air::Comptime::create_unknown(token)),
+        )
+    };
+
+    let mut body = Vec::with_capacity(src.iterators.len() + src.body.len());
+    for (k, (x, (first, rev, count))) in src.iterators.iter().zip(&dims).enumerate() {
+        let stride: usize = dims[k + 1..].iter().map(|x| x.2).product();
+        let mut offset = index();
+        if stride != 1 {
+            offset = binary(offset, air::Op::Div, constant(stride));
+        }
+        // The outermost iterator never exceeds its count.
+        if k != 0 {
+            offset = binary(offset, air::Op::Rem, constant(*count));
+        }
+        let mut expr = if *rev {
+            binary(constant(*first), air::Op::Sub, offset)
+        } else if *first != 0 {
+            binary(constant(*first), air::Op::Add, offset)
+        } else {
+            offset
+        };
+        expr.eval_comptime(&mut context.scope().analyzer_context, Some(width));
+
+        body.push(air::Statement::Assign(air::AssignStatement {
+            dst: vec![air::AssignDestination {
+                id: x.var_id,
+                path: air::VarPath::new(x.var_name),
+                index: air::VarIndex::default(),
+                select: air::VarSelect::default(),
+                comptime: air::Comptime::from_type(
+                    x.var_type.clone(),
+                    veryl_analyzer::symbol::ClockDomain::None,
+                    token,
+                ),
+                token,
+            }],
+            hier_dst: None,
+            width: Some(width),
+            expr,
+            token,
+        }));
+    }
+    body.extend(src.body.iter().cloned());
+
+    Ok(air::ForStatement {
+        iterators: vec![air::ForIterator {
+            var_id: index_id,
+            var_name: index_name,
+            var_type: index_type,
+            range: air::ForRange::Forward {
+                start: air::ForBound::Const(0, signed),
+                end: air::ForBound::Const(total, signed),
+                inclusive: false,
+                step: 1,
+            },
+        }],
+        body,
+        token,
+    })
 }
 
 impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {

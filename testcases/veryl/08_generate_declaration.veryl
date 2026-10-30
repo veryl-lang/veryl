@@ -49,4 +49,12 @@ module Module08 {
             a = i;
         }
     }
+
+    // multi-dimensional for declaration
+    for i in 0..2, j in rev 0..3 :label5 {
+        var a: logic;
+        always_ff (i_clk) {
+            a = i + j;
+        }
+    }
 }

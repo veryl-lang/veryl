@@ -5229,6 +5229,9 @@ pub enum InvalidForStepKind {
     NeverAdvances,
     /// Const-bound scan found the step stalling before the end of the range.
     StopsAdvancing,
+    /// `step` on a multi-dimensional loop, which is emitted as one flattened
+    /// loop.
+    MultiDimension,
 }
 
 impl fmt::Display for InvalidForStepKind {
@@ -5243,6 +5246,9 @@ impl fmt::Display for InvalidForStepKind {
             }
             InvalidForStepKind::StopsAdvancing => {
                 "for-loop step stops advancing before reaching the end of the range".fmt(f)
+            }
+            InvalidForStepKind::MultiDimension => {
+                "multi-dimensional for-loop does not support step".fmt(f)
             }
         }
     }
