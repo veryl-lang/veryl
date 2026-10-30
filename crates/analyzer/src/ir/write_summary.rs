@@ -17,7 +17,6 @@
 //! Regions are intervals, so the summary is independent of array sizes and
 //! bit widths.
 
-use crate::BigUint;
 use crate::conv::Context;
 use crate::ir::span::{ArraySpan, PackedSpan, dst_writes};
 use crate::ir::{
@@ -25,11 +24,14 @@ use crate::ir::{
     InstInterfaceBinding, Module, Statement, SystemFunctionCall, SystemFunctionKind, VarId,
     Variable,
 };
+use crate::{BigUint, HashMap};
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Debug, Default)]
 pub struct WriteSummary {
-    pub processes: Vec<ProcessWrites>,
+    processes: Vec<ProcessWrites>,
+    /// `(process, write)` of the writes to each variable.
+    by_id: HashMap<VarId, Vec<(usize, usize)>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -87,15 +89,31 @@ impl WriteSummary {
         }
         context.rollback_analysis_transaction();
         processes.retain(|x| !x.writes.is_empty());
-        Self { processes }
+        let mut by_id: HashMap<_, Vec<_>> = HashMap::default();
+        for (process, x) in processes.iter().enumerate() {
+            for (write, x) in x.writes.iter().enumerate() {
+                by_id.entry(x.id).or_default().push((process, write));
+            }
+        }
+        Self { processes, by_id }
+    }
+
+    pub fn processes(&self) -> &[ProcessWrites] {
+        &self.processes
+    }
+
+    /// Writes to `id`, driving or not, with the index of their process.
+    fn process_writes(&self, id: VarId) -> impl Iterator<Item = (usize, &RegionWrite)> {
+        self.by_id
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .map(|&(process, write)| (process, &self.processes[process].writes[write]))
     }
 
     /// Writes to `id`, driving or not.
     pub fn writes(&self, id: VarId) -> impl Iterator<Item = &RegionWrite> {
-        self.processes
-            .iter()
-            .flat_map(|x| &x.writes)
-            .filter(move |x| x.id == id)
+        self.process_writes(id).map(|(_, x)| x)
     }
 
     /// Per array element of `id`, out of `elements`, the packed bits some
@@ -321,19 +339,12 @@ pub(crate) fn lifted_processes(
         .iter()
         .filter(|x| members(child, x.child))
         .collect();
-    let mut processes = Vec::new();
-    for child_process in &child.write_summary.processes {
-        let mut process = ProcessWrites::default();
-        for binding in &bindings {
-            for write in child_process
-                .writes
-                .iter()
-                .filter(|x| x.id == binding.child)
-            {
-                lift(context, binding, write, inst.token, &mut process);
-            }
+    let summary = &child.write_summary;
+    let mut processes = vec![ProcessWrites::default(); summary.processes.len()];
+    for binding in &bindings {
+        for (process, write) in summary.process_writes(binding.child) {
+            lift(context, binding, write, inst.token, &mut processes[process]);
         }
-        processes.push(process);
     }
     processes
 }

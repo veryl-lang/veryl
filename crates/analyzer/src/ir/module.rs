@@ -76,7 +76,7 @@ impl Module {
     /// bindings, and so need the body rather than the header alone.
     pub fn writes_through_interfaces(&self) -> bool {
         self.write_summary
-            .processes
+            .processes()
             .iter()
             .flat_map(|x| &x.writes)
             .any(|x| {
