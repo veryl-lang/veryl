@@ -9,3 +9,16 @@ sourcemap_target = {type = "none"}
 b = {path = "../b"}
 d = {path = "../d"}
 e = {path = "../e"}
+
+[properties]
+for_asic = false
+
+[[sv.filesets]]
+root         = "ip"
+files        = ["rtl/a_ip.sv"]
+include_dirs = ["include"]
+
+[[sv.filesets]]
+root      = "ip"
+enable_if = "for_asic"
+files     = ["asic/a_ip_asic.sv"]

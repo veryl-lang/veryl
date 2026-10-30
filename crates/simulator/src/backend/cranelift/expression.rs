@@ -3071,9 +3071,10 @@ impl ProtoExpression {
             signed,
         );
         let shift_width = width.max(x_width);
-        let x_ptr = if (matches!(op, Op::LogicShiftR) || matches!(op, Op::ArithShiftR) && !signed)
-            && shift_width < op_nb * 8
-        {
+        let zero_fills = (matches!(op, Op::LogicShiftR)
+            || matches!(op, Op::ArithShiftR) && !signed)
+            && shift_width < op_nb * 8;
+        let x_ptr = if zero_fills {
             // Sign extension fills the native buffer, but logical right
             // shifts must zero-fill from the expression's logical width.
             // Copy before masking because x_ptr can alias variable storage.
@@ -3423,25 +3424,97 @@ impl ProtoExpression {
             emit_wide_apply_mask(context, builder, payload, op_nb, width);
         }
 
-        // 4-state handling for arithmetic/bitwise ops
-        let mask_xz = self.build_wide_4state_binary_mask(
-            context,
-            builder,
+        let shift_op = matches!(
             op,
-            &WideOperandPair {
-                x_mask_xz,
-                y_mask_xz,
-                x_ptr,
-                y_ptr,
-                x_width,
-                y_width,
-                x_is_ptr: returns_wide_pointer(x),
-                y_is_ptr: returns_wide_pointer(y),
-                width,
-                op_nb,
-                signed,
-            },
+            Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR
         );
+        let (payload, mask_xz) = if shift_op && context.use_4state {
+            let x_mask = x_mask_xz.map(|m| {
+                let src = marshal_wide_operand(
+                    context,
+                    builder,
+                    returns_wide_pointer(x),
+                    m,
+                    x_width,
+                    op_nb,
+                    signed,
+                );
+                let src = if zero_fills {
+                    let dst =
+                        emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), src, op_nb);
+                    emit_wide_apply_mask(context, builder, dst, op_nb, shift_width);
+                    dst
+                } else {
+                    src
+                };
+                let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
+                let dst = alloc_wide_slot(builder, op_nb);
+                let (helper, last) = match op {
+                    Op::LogicShiftL | Op::ArithShiftL => (wide_fn_addrs::shl(), nb_val),
+                    Op::ArithShiftR if expr_context.signed => {
+                        let packed = wide_ops::pack_nb_width(op_nb, op_nb * 8);
+                        (
+                            wide_fn_addrs::ashr(),
+                            builder.ins().iconst(I32, packed as i64),
+                        )
+                    }
+                    _ => (wide_fn_addrs::lshr(), nb_val),
+                };
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::BinaryOp,
+                    helper,
+                    &[dst, src, amount, last],
+                );
+                if result_nb == op_nb {
+                    emit_wide_apply_mask(context, builder, dst, op_nb, width);
+                }
+                dst
+            });
+            let y_is_xz = wide_any_xz(
+                context,
+                builder,
+                None,
+                y_mask_xz,
+                false,
+                returns_wide_pointer(y),
+                0,
+                y_width,
+            );
+            match y_is_xz {
+                Some(y_is_xz) => {
+                    let full_mask = emit_wide_fill_ones(context, builder, op_nb, width);
+                    let zero = alloc_wide_zero(builder, op_nb);
+                    let shifted = x_mask.unwrap_or(zero);
+                    let mask = emit_wide_select(builder, y_is_xz, full_mask, shifted, op_nb);
+                    let payload = emit_wide_select(builder, y_is_xz, zero, payload, op_nb);
+                    (payload, Some(mask))
+                }
+                None => (payload, x_mask),
+            }
+        } else {
+            // 4-state handling for arithmetic/bitwise ops
+            let mask_xz = self.build_wide_4state_binary_mask(
+                context,
+                builder,
+                op,
+                &WideOperandPair {
+                    x_mask_xz,
+                    y_mask_xz,
+                    x_ptr,
+                    y_ptr,
+                    x_width,
+                    y_width,
+                    x_is_ptr: returns_wide_pointer(x),
+                    y_is_ptr: returns_wide_pointer(y),
+                    width,
+                    op_nb,
+                    signed,
+                },
+            );
+            (payload, mask_xz)
+        };
         let payload = if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
             && let Some(mask) = mask_xz
         {
@@ -3660,13 +3733,7 @@ impl ProtoExpression {
                 emit_wide_apply_mask(context, builder, result_mask, op_nb, width);
                 Some(result_mask)
             }
-            Op::Add
-            | Op::Sub
-            | Op::Mul
-            | Op::LogicShiftL
-            | Op::LogicShiftR
-            | Op::ArithShiftL
-            | Op::ArithShiftR => {
+            Op::Add | Op::Sub | Op::Mul => {
                 // If any operand has X/Z, result mask = all-ones for width
                 let is_xz = wide_any_xz(
                     context, builder, x_mask_xz, y_mask_xz, x_is_ptr, y_is_ptr, x_width, y_width,
