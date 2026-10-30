@@ -316,14 +316,15 @@ pub(crate) fn lifted_processes(
     let Component::Module(child) = inst.component.as_ref() else {
         return vec![];
     };
+    let bindings: Vec<_> = inst
+        .interface_bindings
+        .iter()
+        .filter(|x| members(child, x.child))
+        .collect();
     let mut processes = Vec::new();
     for child_process in &child.write_summary.processes {
         let mut process = ProcessWrites::default();
-        for binding in inst
-            .interface_bindings
-            .iter()
-            .filter(|x| members(child, x.child))
-        {
+        for binding in &bindings {
             for write in child_process
                 .writes
                 .iter()

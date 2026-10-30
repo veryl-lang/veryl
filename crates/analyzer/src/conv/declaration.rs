@@ -532,8 +532,9 @@ impl Conv<&PortDeclarationItem> for () {
                     if let Some(name) = modport {
                         r#type.kind = ir::TypeKind::Modport(Arc::new(sig), name);
                     } else {
-                        // Direction-free members remain references. Their
-                        // actual write masks are collected after conversion.
+                        // Direction-free members remain references. What
+                        // the module writes through them is in its write
+                        // summary.
                         for variable in context.variables.values_mut() {
                             if variable.path.starts_with(&path.0)
                                 && variable.kind == VarKind::Variable

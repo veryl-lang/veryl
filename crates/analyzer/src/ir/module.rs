@@ -62,10 +62,12 @@ impl Module {
     /// (`bus: interface`), whose direction follows from what this module writes.
     pub fn is_direction_free_member(&self, id: VarId) -> bool {
         self.variables.get(&id).is_some_and(|variable| {
+            // A port is named by one identifier, the first of its members' paths.
             variable.kind == VarKind::Inout
-                && self.port_types.iter().any(|(path, (ty, _))| {
-                    matches!(ty.kind, TypeKind::AbstractInterface(None))
-                        && variable.path.starts_with(&path.0)
+                && variable.path.0.first().is_some_and(|port| {
+                    self.port_types
+                        .get(&VarPath::new(*port))
+                        .is_some_and(|(ty, _)| matches!(ty.kind, TypeKind::AbstractInterface(None)))
                 })
         })
     }
