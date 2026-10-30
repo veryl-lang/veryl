@@ -788,8 +788,6 @@ impl AssignDestination {
     ) {
         if let Some(variable) = context.get_variable_info(self.id) {
             let is_index_const = self.index.is_const();
-            let is_select_const = self.select.is_const_with_range();
-            let is_const = is_index_const & is_select_const;
 
             let range = if !is_index_const {
                 variable.r#type.array.calc_range(&[])
@@ -832,17 +830,7 @@ impl AssignDestination {
                                 errors.push(AnalyzerError::unassign_variable(&text, &self.token));
                             }
 
-                            let maybe = !is_const | assign_context.is_system_verilog();
-                            // Exclude SV connects: the direction may be a read.
-                            let dynamic = !is_const && !assign_context.is_system_verilog();
-                            assign_table.insert_assign(
-                                &variable,
-                                index,
-                                mask.clone(),
-                                maybe,
-                                dynamic,
-                                self.token,
-                            );
+                            assign_table.insert_assign(&variable, index, mask.clone(), self.token);
                         }
                     }
                 }

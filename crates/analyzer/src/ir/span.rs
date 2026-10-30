@@ -1,6 +1,7 @@
 //! Interval regions of a variable: unpacked-array elements and packed bits.
 //! Storage and operations are independent of array sizes and bit widths.
 
+use crate::BigUint;
 use crate::conv::Context;
 use crate::ir::{AssignDestination, MemberSelectDomain, Type, VarId, VarIndex, VarSelect};
 
@@ -78,6 +79,11 @@ impl PackedSpan {
 
     pub fn end(self) -> usize {
         self.start + self.length
+    }
+
+    /// The bits of the span as a dense mask.
+    pub fn mask(self) -> BigUint {
+        ((BigUint::from(1u32) << self.length) - 1u32) << self.start
     }
 
     pub fn overlaps(self, other: Self) -> bool {

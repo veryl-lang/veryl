@@ -1,6 +1,6 @@
 use crate::HashSet;
 use crate::conv::Context;
-use crate::ir::{Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
+use crate::ir::{RegionWrite, Shape, ShapeRef, VarId, VarIndex, VarPath, Variable, VariableInfo};
 use crate::symbol::Affiliation;
 use crate::{AnalyzerError, BigUint, HashMap};
 use std::borrow::Cow;
@@ -28,91 +28,50 @@ impl AssignContext {
     pub fn is_function(&self) -> bool {
         self == &AssignContext::Function
     }
-
-    pub fn is_system_verilog(&self) -> bool {
-        self == &AssignContext::SystemVerilog
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct AssignTableEntry {
     pub mask: Vec<BigUint>,
-    /// Const-index writes only; conflicts check this, not `mask`, since `maybe` is sticky.
-    pub definite_mask: Vec<BigUint>,
     pub path: VarPath,
     pub width: Option<usize>,
     pub array: Shape,
     pub affiliation: Affiliation,
-    pub maybe: bool,
-    /// Per array element: the bits a non-const index/select may have written.
-    pub dynamic_mask: Vec<BigUint>,
     pub tokens: Vec<TokenRange>,
 }
 
 impl AssignTableEntry {
-    pub fn new(
-        variable: &VariableInfo,
-        index: &[usize],
-        mask: BigUint,
-        maybe: bool,
-        dynamic: bool,
-        token: TokenRange,
-    ) -> Self {
+    pub fn new(variable: &VariableInfo, index: &[usize], mask: BigUint, token: TokenRange) -> Self {
         let array = &variable.r#type.array;
         let mut masks = vec![];
-        let mut dynamics = vec![];
 
         let index = array.calc_index(index);
         if let Some(array) = array.total() {
             for i in 0..array {
                 if index == Some(i) {
                     masks.push(mask.clone());
-                    dynamics.push(if dynamic { mask.clone() } else { 0u32.into() });
                 } else {
                     masks.push(0u32.into());
-                    dynamics.push(0u32.into());
                 }
             }
         }
 
-        let definite_mask: Vec<BigUint> = if maybe {
-            masks.iter().map(|_| BigUint::from(0u32)).collect()
-        } else {
-            masks.clone()
-        };
         Self {
             mask: masks,
-            definite_mask,
             path: variable.path.clone(),
             width: variable.total_width(),
             array: array.to_owned(),
             affiliation: variable.affiliation,
-            maybe,
-            dynamic_mask: dynamics,
             tokens: vec![token],
         }
     }
 
-    pub fn add(
-        &mut self,
-        index: &[usize],
-        mask: &BigUint,
-        maybe: bool,
-        dynamic: bool,
-        token: TokenRange,
-    ) {
+    pub fn add(&mut self, index: &[usize], mask: &BigUint, token: TokenRange) {
         let Some(i) = self.array.calc_index(index) else {
             return;
         };
 
         self.mask[i] |= mask;
-        if !maybe {
-            self.definite_mask[i] |= mask;
-        }
-        if dynamic {
-            self.dynamic_mask[i] |= mask;
-        }
-        self.maybe |= maybe;
         self.tokens.push(token);
     }
 
@@ -126,13 +85,6 @@ impl AssignTableEntry {
     pub fn merge_by_or(&mut self, value: &AssignTableEntry) {
         for (i, val) in self.mask.iter_mut().enumerate() {
             *val |= &value.mask[i];
-        }
-        for (i, val) in self.definite_mask.iter_mut().enumerate() {
-            *val |= &value.definite_mask[i];
-        }
-        self.maybe |= value.maybe;
-        for (i, val) in self.dynamic_mask.iter_mut().enumerate() {
-            *val |= &value.dynamic_mask[i];
         }
     }
 }
@@ -241,8 +193,6 @@ impl AssignTable {
         variable: &VariableInfo,
         index: Vec<usize>,
         mask: BigUint,
-        maybe: bool,
-        dynamic: bool,
         token: TokenRange,
     ) {
         if variable.r#type.total_array().unwrap_or(0) > self.array_limit {
@@ -259,10 +209,28 @@ impl AssignTable {
 
         self.table
             .entry(variable.id)
-            .and_modify(|x| x.add(&index, &mask, maybe, dynamic, token))
-            .or_insert(AssignTableEntry::new(
-                variable, &index, mask, maybe, dynamic, token,
-            ));
+            .and_modify(|x| x.add(&index, &mask, token))
+            .or_insert(AssignTableEntry::new(variable, &index, mask, token));
+    }
+
+    /// A summarized write, region by region.
+    pub fn insert_region(&mut self, context: &mut Context, write: &RegionWrite) {
+        let Some(variable) = context.get_variable_info(write.id) else {
+            return;
+        };
+        if variable.r#type.total_array().unwrap_or(0) > self.array_limit {
+            return;
+        }
+        let Some(end) = write.array.end() else {
+            return;
+        };
+        let mask = write.packed.mask();
+        for element in write.array.start..end {
+            let index = VarIndex::from_index(element, &variable.r#type.array);
+            if let Some(index) = index.eval_value(context) {
+                self.insert_assign(&variable, index, mask.clone(), write.token);
+            }
+        }
     }
 
     pub fn insert_reference(&mut self, variable: &Variable, index: Vec<usize>, mask: BigUint) {
@@ -286,28 +254,6 @@ impl AssignTable {
                 .or_insert_with(|| (0..total).map(|_| BigUint::from(0u32)).collect());
             if let Some(x) = entry.get_mut(flat) {
                 *x |= &mask;
-            }
-        }
-    }
-
-    /// Initialization by the configuration bitstream is not a driving process,
-    /// so it must not conflict with what drives the variable at run time.
-    /// `mask` is kept, so the write still counts for the unassigned check.
-    pub fn exempt_initial_writes(&mut self, context: &Context) {
-        let zero = BigUint::from(0u32);
-        for (id, entry) in self.table.iter_mut() {
-            if !context
-                .variables
-                .get(id)
-                .is_some_and(Variable::allow_initial_assign)
-            {
-                continue;
-            }
-            for x in entry.definite_mask.iter_mut() {
-                *x = zero.clone();
-            }
-            for x in entry.dynamic_mask.iter_mut() {
-                *x = zero.clone();
             }
         }
     }
@@ -593,14 +539,12 @@ mod tests {
         let variable = VariableInfo::new(&variable);
 
         let mask = ValueBigUint::gen_mask_range(10, 1);
-        table.insert_assign(&variable, vec![], mask, false, false, TokenRange::default());
+        table.insert_assign(&variable, vec![], mask, TokenRange::default());
 
         let mask = ValueBigUint::gen_mask_range(20, 11);
-        table.insert_assign(&variable, vec![], mask, true, true, TokenRange::default());
+        table.insert_assign(&variable, vec![], mask, TokenRange::default());
 
         let entry = &table.table[&variable.id];
         assert_eq!(entry.mask[0], ValueBigUint::gen_mask_range(20, 1));
-        assert_eq!(entry.definite_mask[0], ValueBigUint::gen_mask_range(10, 1));
-        assert_eq!(entry.dynamic_mask[0], ValueBigUint::gen_mask_range(20, 11));
     }
 }

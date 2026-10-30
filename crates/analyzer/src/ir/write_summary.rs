@@ -11,6 +11,7 @@
 //! Regions are intervals, so the summary is independent of array sizes and
 //! bit widths.
 
+use crate::BigUint;
 use crate::conv::Context;
 use crate::ir::span::{ArraySpan, PackedSpan, dst_writes};
 use crate::ir::{
@@ -81,6 +82,35 @@ impl WriteSummary {
         processes.retain(|x| !x.writes.is_empty());
         Self { processes }
     }
+
+    /// Writes to `id`, driving or not.
+    pub fn writes(&self, id: VarId) -> impl Iterator<Item = &RegionWrite> {
+        self.processes
+            .iter()
+            .flat_map(|x| &x.writes)
+            .filter(move |x| x.id == id)
+    }
+
+    /// Packed bits of array `element` of `id` that some process drives.
+    pub fn driven_bits(&self, id: VarId, element: usize) -> BigUint {
+        element_bits(self.writes(id).filter(|x| x.driving), element)
+    }
+
+    /// Packed bits of array `element` of `id` that some process writes,
+    /// including writes that do not drive it.
+    pub fn written_bits(&self, id: VarId, element: usize) -> BigUint {
+        element_bits(self.writes(id), element)
+    }
+}
+
+fn element_bits<'a>(writes: impl Iterator<Item = &'a RegionWrite>, element: usize) -> BigUint {
+    let mut ret = BigUint::default();
+    for write in writes {
+        if write.array.start <= element && write.array.end().is_none_or(|end| element < end) {
+            ret |= write.packed.mask();
+        }
+    }
+    ret
 }
 
 impl ProcessWrites {
@@ -247,25 +277,36 @@ fn instance_processes(
             }
             processes.push(process);
         }
-        Component::Module(child) => {
-            // Child processes stay separate: two of them may drive the same
-            // parent region through aliased bindings.
-            for child_process in &child.write_summary.processes {
-                let mut process = ProcessWrites::default();
-                for binding in &inst.interface_bindings {
-                    for write in child_process
-                        .writes
-                        .iter()
-                        .filter(|x| x.id == binding.child)
-                    {
-                        lift(context, binding, write, inst.token, &mut process);
-                    }
-                }
-                processes.push(process);
-            }
-        }
+        Component::Module(_) => processes.extend(lifted_processes(context, inst)),
         Component::Interface(_) => {}
     }
+}
+
+/// The processes of a child module mapped through the interface bindings of
+/// its instance onto the parent variables. Child processes stay separate: two
+/// of them may drive the same parent region through aliased bindings.
+pub(crate) fn lifted_processes(
+    context: &mut Context,
+    inst: &InstDeclaration,
+) -> Vec<ProcessWrites> {
+    let Component::Module(child) = inst.component.as_ref() else {
+        return vec![];
+    };
+    let mut processes = Vec::new();
+    for child_process in &child.write_summary.processes {
+        let mut process = ProcessWrites::default();
+        for binding in &inst.interface_bindings {
+            for write in child_process
+                .writes
+                .iter()
+                .filter(|x| x.id == binding.child)
+            {
+                lift(context, binding, write, inst.token, &mut process);
+            }
+        }
+        processes.push(process);
+    }
+    processes
 }
 
 /// Map a child write through a binding onto the parent variable.

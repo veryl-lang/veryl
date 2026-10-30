@@ -1699,9 +1699,6 @@ fn interface_reference_bindings(
         {
             continue;
         }
-        if matches!(module.interface_assignments.get(&binding.child), Some(None)) {
-            return Err(SimulatorError::unsupported_description(&inst.token));
-        }
         actuals.extend(
             targets(analyzer, metas, module, binding)
                 .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?,
@@ -1773,7 +1770,6 @@ fn interface_reference_aliases(
         if !binding.index.is_const()
             || !binding.select.is_empty()
             || child.r#type.total_width() != Some(parent.width)
-            || matches!(module.interface_assignments.get(&binding.child), Some(None))
         {
             return Err(SimulatorError::unsupported_description(&inst.token));
         }
@@ -1851,14 +1847,13 @@ fn connect_interface_references(
     for binding in bindings {
         if let Some(child) = child_metas.get(&binding.child) {
             for (element, meta) in child.elements.iter().enumerate() {
-                let mask =
-                    if let Some(Some(writes)) = module.interface_assignments.get(&binding.child) {
-                        &writes.definite_mask[element] | &writes.dynamic_mask[element]
-                    } else if inst.outputs.iter().any(|o| o.id == binding.child) {
-                        (num_bigint::BigUint::from(1u32) << child.width) - 1u32
-                    } else {
-                        num_bigint::BigUint::default()
-                    };
+                let mask = if module.is_direction_free_member(binding.child) {
+                    module.write_summary.driven_bits(binding.child, element)
+                } else if inst.outputs.iter().any(|o| o.id == binding.child) {
+                    (num_bigint::BigUint::from(1u32) << child.width) - 1u32
+                } else {
+                    num_bigint::BigUint::default()
+                };
                 *output_masks.entry(meta.current).or_default() |= mask;
             }
         }
@@ -1886,9 +1881,6 @@ fn connect_interface_references(
             || selection.result_start != 0
             || selection.length != child.elements.len()
         {
-            return Err(SimulatorError::unsupported_description(&inst.token));
-        }
-        if matches!(module.interface_assignments.get(&binding.child), Some(None)) {
             return Err(SimulatorError::unsupported_description(&inst.token));
         }
         let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
@@ -1977,10 +1969,13 @@ pub(crate) fn propagate_interface_initialization(
                 vec![]
             };
             for binding in &references {
-                let writes = child_module
-                    .interface_assignments
-                    .get(&binding.child)
-                    .and_then(Option::as_ref);
+                let direction_free = child_module.is_direction_free_member(binding.child);
+                let written = direction_free
+                    && child_module
+                        .write_summary
+                        .writes(binding.child)
+                        .next()
+                        .is_some();
                 let (Some(parent), Some(child)) = (
                     metas.get(&binding.parent),
                     child_meta.variable_meta.get(&binding.child),
@@ -1999,8 +1994,10 @@ pub(crate) fn propagate_interface_initialization(
                 };
                 for (element, child_element) in child.elements.iter().enumerate() {
                     let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
-                    let mask = if let Some(writes) = writes {
-                        &writes.definite_mask[element] | &writes.dynamic_mask[element]
+                    let mask = if direction_free {
+                        child_module
+                            .write_summary
+                            .driven_bits(binding.child, element)
                     } else if inst.outputs.iter().any(|o| o.id == binding.child) {
                         full.clone()
                     } else {
@@ -2017,7 +2014,13 @@ pub(crate) fn propagate_interface_initialization(
                     }
                     // Any initial store in the child reaches the same net,
                     // including bits with a runtime writer in the child.
-                    let mask = writes.map(|w| w.mask[element].clone()).unwrap_or(full);
+                    let mask = if written {
+                        child_module
+                            .write_summary
+                            .written_bits(binding.child, element)
+                    } else {
+                        full
+                    };
                     if mask != 0u32.into() {
                         bindings.push(Binding {
                             from: child_element.clone(),

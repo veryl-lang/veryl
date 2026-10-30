@@ -3,10 +3,10 @@ use crate::HashMap;
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::Context;
-use crate::ir::assign_table::{AssignTable, AssignTableEntry, ReferencedEntry};
+use crate::ir::assign_table::{AssignTable, ReferencedEntry};
 use crate::ir::{
-    Declaration, FfTable, Function, Signature, Type, VarId, VarIndex, VarKind, VarPath, Variable,
-    WriteSummary,
+    Declaration, FfTable, Function, Signature, Type, TypeKind, VarId, VarIndex, VarKind, VarPath,
+    Variable, WriteSummary,
 };
 use crate::symbol::ClockDomain;
 use crate::value::ValueBigUint;
@@ -35,14 +35,6 @@ pub struct Module {
     /// function captures them. They have paths and IDs for dependency
     /// analysis, but are not ordinary module variables or signal ports.
     pub interface_members: HashMap<VarId, Variable>,
-    /// Per-element write masks through direction-free interface ports. Retain
-    /// definite, dynamic and unknown-direction writes across instance boundaries.
-    /// `None` records a member whose array exceeds the assignment-analysis
-    /// limit; consumers must not interpret unavailable masks as read-only.
-    pub interface_assignments: HashMap<VarId, Option<AssignTableEntry>>,
-    /// Keep independent driving processes separate when ports alias at a
-    /// later instance boundary, including through pass-through modules.
-    pub interface_assignment_processes: Vec<HashMap<VarId, AssignTableEntry>>,
     /// Regions written by each driving process, including the processes of
     /// children lifted through interface bindings.
     pub write_summary: WriteSummary,
@@ -66,6 +58,30 @@ pub struct Module {
 }
 
 impl Module {
+    /// Whether `id` is a member of a direction-free interface port
+    /// (`bus: interface`), whose direction follows from what this module writes.
+    pub fn is_direction_free_member(&self, id: VarId) -> bool {
+        self.variables.get(&id).is_some_and(|variable| {
+            variable.kind == VarKind::Inout
+                && self.port_types.iter().any(|(path, (ty, _))| {
+                    matches!(ty.kind, TypeKind::AbstractInterface(None))
+                        && variable.path.starts_with(&path.0)
+                })
+        })
+    }
+
+    /// Whether parents lift writes from the summary through interface
+    /// bindings, and so need the body rather than the header alone.
+    pub fn writes_through_interfaces(&self) -> bool {
+        self.write_summary
+            .processes
+            .iter()
+            .flat_map(|x| &x.writes)
+            .any(|x| {
+                self.interface_members.contains_key(&x.id) || self.is_direction_free_member(x.id)
+            })
+    }
+
     pub fn eval_assign(&mut self, context: &mut Context) {
         // FfTable is a derived property of the IR -- safe to (re)build
         // even when `suppress_unassigned` short-circuits the rest of
@@ -85,9 +101,6 @@ impl Module {
         for (i, x) in self.declarations.iter().enumerate() {
             let mut new_table = AssignTable::new(context);
             x.eval_assign(context, &mut new_table);
-            if matches!(x, Declaration::Initial(_)) {
-                new_table.exempt_initial_writes(context);
-            }
             // Snapshot per-decl reference masks before `new_table` is dropped.
             // `Declaration::eval_assign` no longer clears `refernced`, so the
             // accumulated reads/writes are still in place here.
