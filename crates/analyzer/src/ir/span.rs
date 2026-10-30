@@ -52,6 +52,16 @@ impl ArraySpan {
             length: self.length,
         })
     }
+
+    /// The union of two touching or overlapping spans.
+    pub fn union(self, other: Self) -> Option<Self> {
+        let start = self.start.min(other.start);
+        let end = self.end()?.max(other.end()?);
+        (self.start <= other.end()? && other.start <= self.end()?).then_some(Self {
+            start,
+            length: end - start,
+        })
+    }
 }
 
 /// Half-open packed-bit interval. Unlike a dense bit mask, its storage and
@@ -99,6 +109,16 @@ impl PackedSpan {
     pub fn translated(self, from: usize, to: usize) -> Option<Self> {
         let start = self.start.checked_sub(from)?.checked_add(to)?;
         Self::new(start, self.length)
+    }
+
+    /// The union of two touching or overlapping spans.
+    pub fn union(self, other: Self) -> Option<Self> {
+        let start = self.start.min(other.start);
+        let end = self.end().max(other.end());
+        (self.start <= other.end() && other.start <= self.end()).then_some(Self {
+            start,
+            length: end - start,
+        })
     }
 }
 

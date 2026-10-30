@@ -12,7 +12,8 @@
 //! emitted as an SV loop, so its iterator is not a static index and the
 //! process claims what the constant prefix of the destination selects, as in
 //! the longest static prefix rule ([`Extent::Claimed`]). What the iterations
-//! actually write is recorded separately ([`Extent::Written`]).
+//! actually write is recorded separately ([`Extent::Iteration`]), always
+//! inside the claimed region.
 //!
 //! Regions are intervals, so the summary is independent of array sizes and
 //! bit widths.
@@ -51,13 +52,52 @@ pub struct RegionWrite {
     pub token: TokenRange,
 }
 
+impl RegionWrite {
+    /// Extend this region by `other` when the union is a region.
+    fn coalesce(&mut self, other: &RegionWrite) -> bool {
+        if (self.id, self.driving, self.extent, self.token)
+            != (other.id, other.driving, other.extent, other.token)
+        {
+            return false;
+        }
+        if self.array == other.array
+            && let Some(packed) = self.packed.union(other.packed)
+        {
+            self.packed = packed;
+            true
+        } else if self.packed == other.packed
+            && let Some(array) = self.array.union(other.array)
+        {
+            self.array = array;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Extent {
-    /// The region is written.
-    Written,
+    /// The region is written and owned by the process.
+    Exact,
     /// The region is owned by the process, which may write only part of it:
     /// the longest static prefix of a write inside a `for` loop.
     Claimed,
+    /// The region is written by an iteration of a `for` loop, within a
+    /// region the process claims.
+    Iteration,
+}
+
+impl Extent {
+    /// Whether the process owns the region against other drivers.
+    pub fn is_claimed(self) -> bool {
+        matches!(self, Extent::Exact | Extent::Claimed)
+    }
+
+    /// Whether the process writes the whole region.
+    pub fn is_written(self) -> bool {
+        matches!(self, Extent::Exact | Extent::Iteration)
+    }
 }
 
 impl WriteSummary {
@@ -106,7 +146,7 @@ impl WriteSummary {
         self.processes
             .iter()
             .flat_map(|x| &x.writes)
-            .filter(move |x| x.id == id && x.extent == Extent::Written)
+            .filter(move |x| x.id == id && x.extent.is_written())
     }
 
     /// Per array element of `id`, out of `elements`, the packed bits some
@@ -149,7 +189,7 @@ impl Collector {
         Self {
             writes: Vec::new(),
             driving,
-            extent: Extent::Written,
+            extent: Extent::Exact,
         }
     }
 
@@ -166,14 +206,21 @@ impl Collector {
     }
     fn add(&mut self, context: &mut Context, dst: &AssignDestination) {
         for (array, packed) in dst_writes(dst, context) {
-            self.writes.push(RegionWrite {
+            let write = RegionWrite {
                 id: dst.id,
                 array,
                 packed,
                 driving: self.driving,
                 extent: self.extent,
                 token: dst.token,
-            });
+            };
+            // Successive iterations usually write adjacent regions.
+            if let Some(last) = self.writes.last_mut()
+                && last.coalesce(&write)
+            {
+                continue;
+            }
+            self.writes.push(write);
         }
     }
 
@@ -225,13 +272,23 @@ impl Collector {
                         self.add_statements(context, &x.body);
                         continue;
                     };
-                    let extent = std::mem::replace(&mut self.extent, Extent::Claimed);
-                    self.add_statements(context, &x.body);
-                    self.extent = extent;
+                    let extent = self.extent;
+                    // Within a claimed region only the claim matters, and
+                    // within an iteration the enclosing loop already claims.
+                    if extent == Extent::Claimed {
+                        self.add_statements(context, &x.body);
+                        continue;
+                    }
+                    if extent == Extent::Exact {
+                        self.extent = Extent::Claimed;
+                        self.add_statements(context, &x.body);
+                    }
+                    self.extent = Extent::Iteration;
                     for iteration in iterations {
                         let body = specialize_iteration(context, x, iteration);
                         self.add_statements(context, body.as_deref().unwrap_or(&x.body));
                     }
+                    self.extent = extent;
                 }
                 Statement::FunctionCall(x) => self.add_function_call(context, x),
                 Statement::TbMethodCall(x) => {

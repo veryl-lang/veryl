@@ -69,7 +69,12 @@ fn check_module(module: &Module, reports: &mut Reports) {
     // Identical regions driven by one process share an entry.
     let mut driven: HashMap<VarId, HashMap<ProcessRegion, Vec<TokenRange>>> = HashMap::default();
     for (process, writes) in module.write_summary.processes.iter().enumerate() {
-        for write in writes.writes.iter().filter(|x| x.driving) {
+        // Iteration writes lie within a claimed region of the same process.
+        for write in writes
+            .writes
+            .iter()
+            .filter(|x| x.driving && x.extent.is_claimed())
+        {
             driven
                 .entry(write.id)
                 .or_default()

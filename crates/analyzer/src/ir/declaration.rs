@@ -1,11 +1,11 @@
 use crate::conv::Context;
+use crate::ir::Module;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::write_summary::lifted_processes;
 use crate::ir::{
     AssignDestination, Component, Comptime, Expression, FfTable, Statement, VarId, VarIndex,
     VarSelect,
 };
-use crate::ir::{Extent, Module};
 use crate::value::Value;
 use indent::indent_all_by;
 use std::fmt;
@@ -378,11 +378,7 @@ impl InstDeclaration {
             }
         }
         for process in lifted_processes(context, self, Module::is_direction_free_member) {
-            for write in process
-                .writes
-                .iter()
-                .filter(|x| x.extent == Extent::Written)
-            {
+            for write in process.writes.iter().filter(|x| x.extent.is_written()) {
                 assign_table.insert_region(context, write);
             }
         }
