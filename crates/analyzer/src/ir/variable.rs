@@ -1284,8 +1284,12 @@ impl VarSelect {
             r#type.kind.width()?
         };
 
+        let flat;
         let r#type = if is_array {
             &r#type.array
+        } else if r#type.is_struct_union() {
+            flat = Shape::new(vec![Some(storage)]);
+            &flat
         } else {
             r#type.width()
         };
