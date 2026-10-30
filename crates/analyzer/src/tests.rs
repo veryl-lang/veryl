@@ -4462,6 +4462,97 @@ fn incompat_proto() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let inputs = vec![
+        r#"
+        package cfg_pkg {
+            const WIDTH: u32 = 8;
+        }
+        "#,
+        r#"
+        proto module ProtoModule (
+            o_data: output logic<cfg_pkg::WIDTH>,
+        );
+        "#,
+        r#"
+        import cfg_pkg::WIDTH;
+        module ModuleA for ProtoModule (
+            o_data: output logic<WIDTH>,
+        ) {
+            assign o_data = '0;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty());
+
+    let inputs = vec![
+        r#"
+        package cfg_pkg {
+            type T = logic<8>;
+        }
+        "#,
+        r#"
+        proto module ProtoModule (
+            o_data: output cfg_pkg::T,
+        );
+        "#,
+        r#"
+        import cfg_pkg::T;
+        module ModuleA for ProtoModule (
+            o_data: output T,
+        ) {
+            assign o_data = '0;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package cfg_pkg {
+        const WIDTH: u32 = 8;
+        type T = logic<8>;
+    }
+    alias package cfg_alias_pkg = cfg_pkg;
+    proto module ProtoModule (
+        o_data: output logic<cfg_pkg::WIDTH>,
+        o_t   : output cfg_pkg::T,
+    );
+    module ModuleA for ProtoModule (
+        o_data: output logic<cfg_alias_pkg::WIDTH>,
+        o_t   : output cfg_alias_pkg::T,
+    ) {
+        assign o_data = '0;
+        assign o_t    = '0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package cfg_a_pkg {
+        const WIDTH: u32 = 8;
+    }
+    package cfg_b_pkg {
+        const WIDTH: u32 = 8;
+    }
+    proto module ProtoModule (
+        o_data: output logic<cfg_a_pkg::WIDTH>,
+    );
+    module ModuleA for ProtoModule (
+        o_data: output logic<WIDTH>,
+    ) {
+        import cfg_b_pkg::WIDTH;
+        assign o_data = '0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
 }
 
 #[test]
@@ -7746,6 +7837,23 @@ fn undefined_identifier() {
     "#;
 
     let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let inputs = vec![
+        r#"
+        package cfg_pkg {
+            const WIDTH: u32 = 8;
+        }
+        "#,
+        r#"
+        import cfg_pkg::WIDTH;
+        proto module ProtoModule (
+            o_data: output logic<WIDTH>,
+        );
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
     assert!(errors.is_empty());
 }
 
