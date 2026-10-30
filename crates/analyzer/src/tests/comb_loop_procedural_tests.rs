@@ -2502,3 +2502,96 @@ fn zz_q9_struct_to_struct_through_instance() {
     "#;
     assert_comb_loop("Q9 struct through instance, no cast", code, false);
 }
+
+#[test]
+fn comb_loop_constant_truth_uses_all_bits() {
+    for literal in [
+        "1'b1",
+        "128'd1",
+        "128'h1_0000_0000_0000_0000",
+        "2'b1x",
+        "2'b1z",
+    ] {
+        for body in [
+            format!("o = {literal} || feedback;"),
+            format!("if {literal} {{ o = true; }} else {{ o = feedback; }}"),
+            format!("o = if {literal} ? true : feedback;"),
+        ] {
+            let code = format!(
+                "module Top (o: output logic) {{ var feedback: logic; assign feedback = o; always_comb {{ {body} }} }}"
+            );
+            // Multi-bit logical operands warn, but their truth value is defined.
+            let mut errors = analyze(&code);
+            errors.retain(|e| !matches!(e, AnalyzerError::InvalidLogicalOperand { .. }));
+            assert!(errors.is_empty(), "{code}\n{errors:#?}");
+            assert!(comb_loop_analysis_is_complete(&code), "{code}");
+        }
+    }
+    for (literal, op, expected) in [
+        ("128'd0", "&&", false),
+        ("128'd0", "||", true),
+        ("128'd1", "&&", true),
+        ("2'b0x", "&&", true),
+        ("2'b0x", "||", true),
+        ("128'hx", "&&", true),
+        ("128'hx", "||", true),
+    ] {
+        let code = format!(
+            "module Top (o: output logic) {{ var feedback: logic; assign feedback = o; assign o = {literal} {op} feedback; }}"
+        );
+        let mut errors = analyze(&code);
+        errors.retain(|e| !matches!(e, AnalyzerError::InvalidLogicalOperand { .. }));
+        assert!(
+            errors
+                .iter()
+                .all(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+            "{errors:#?}"
+        );
+        assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{code}");
+    }
+}
+
+#[test]
+fn comb_loop_wide_shift_counts_preserve_bit_dependencies() {
+    for width in [32, 64, 65, 128] {
+        for count in [0, 1, 8] {
+            for op in ["<<", "<<<", ">>", ">>>"] {
+                let code = format!(
+                    "module Top (o: output i8) {{ var feedback: i8; assign feedback = o; assign o = feedback {op} {width}'d{count}; }}"
+                );
+                // Arithmetic right shift preserves the sign bit's feedback.
+                assert_complete_comb_loop(&code, count == 0 || op == ">>>");
+            }
+        }
+    }
+    for count in [
+        "128'h1_0000_0000_0000_0000",
+        "128'hffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff",
+    ] {
+        for op in ["<<", "<<<", ">>", ">>>"] {
+            let code = format!(
+                "module Top (o: output i8) {{ var feedback: i8; assign feedback = o; assign o = feedback {op} {count}; }}"
+            );
+            assert_complete_comb_loop(&code, op == ">>>");
+        }
+    }
+}
+
+#[test]
+fn comb_loop_wide_repeat_counts_preserve_bit_and_array_dependencies() {
+    for width in [32, 64, 65, 128] {
+        for expected in [false, true] {
+            let bit = usize::from(expected);
+            let code = format!(
+                "module Top (o: output logic<2>) {{ var feedback: logic<2>; assign feedback = o; assign o = {{feedback[{bit}] repeat {width}'d1, 1'b0}}; }}"
+            );
+            assert_complete_comb_loop(&code, expected);
+            let index = usize::from(!expected);
+            let code = format!(
+                "module Top (o: output logic[2]) {{ var feedback: logic[2]; assign feedback = o; assign o = '{{feedback[{index}] repeat {width}'d1, 1'b0}}; }}"
+            );
+            assert_complete_comb_loop(&code, expected);
+        }
+    }
+}

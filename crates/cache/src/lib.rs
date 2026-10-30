@@ -79,6 +79,10 @@ pub struct FileEntry {
     /// like one generated before the source was modified.
     #[serde(default)]
     pub updated_time: Option<SystemTime>,
+    /// Blob path of the conversion records of the components this file
+    /// defines, replayed while the file is restored.
+    #[serde(default)]
+    pub units: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -225,6 +229,7 @@ impl Store {
                 diagnostics: None,
                 generic_instance_hash: String::new(),
                 updated_time: None,
+                units: None,
             },
         );
     }
@@ -250,6 +255,28 @@ impl Store {
     /// failure is treated as absent.
     pub fn load_diagnostics(&self, entry: &FileEntry) -> Option<Vec<u8>> {
         self.read_blob(entry.diagnostics.as_ref()?)
+    }
+
+    /// Attaches the units blob to the in-progress entry for `src`. Skips
+    /// files without a fragment, which are never restored.
+    pub fn set_units(&mut self, src: &str, blob: &[u8]) {
+        if self
+            .next_files
+            .get(src)
+            .is_none_or(|x| x.fragment.is_none())
+        {
+            return;
+        }
+        let rel = self.write_blob(blob);
+        if let Some(entry) = self.next_files.get_mut(src) {
+            entry.units = rel;
+        }
+    }
+
+    /// Loads and verifies the units blob behind an entry. Any failure is
+    /// treated as absent.
+    pub fn load_units(&self, entry: &FileEntry) -> Option<Vec<u8>> {
+        self.read_blob(entry.units.as_ref()?)
     }
 
     /// Marks the file as analyzed this build but keeps its existing blob
@@ -332,7 +359,12 @@ impl Store {
             .manifest
             .files
             .values()
-            .flat_map(|x| x.fragment.iter().chain(x.diagnostics.iter()))
+            .flat_map(|x| {
+                x.fragment
+                    .iter()
+                    .chain(x.diagnostics.iter())
+                    .chain(x.units.iter())
+            })
             .map(|x| self.root.join(x))
             .collect();
 
