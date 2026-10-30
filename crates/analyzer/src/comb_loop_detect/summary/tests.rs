@@ -1,9 +1,9 @@
 use super::*;
 use crate::comb_loop_detect::graph::{GraphDependency, GraphNode};
 use crate::comb_loop_detect::model::SummaryRegion;
-use crate::comb_loop_detect::region::{ArraySpan, PackedSpan};
 use crate::comb_loop_detect::ssa::{BranchId, PathCondition, PositionDomain};
 use crate::ir::VarId;
+use crate::ir::span::{ArraySpan, PackedSpan};
 
 fn node(graph: &mut DependencyGraph) -> NodeIndex {
     let id = VarId::from_raw(graph.node_count() as u32);
