@@ -18,7 +18,6 @@
 //! Regions are intervals, so the summary is independent of array sizes and
 //! bit widths.
 
-use crate::BigUint;
 use crate::conv::Context;
 use crate::ir::peel::{has_own_break, specialize_iteration};
 use crate::ir::span::{ArraySpan, PackedSpan, dst_writes};
@@ -27,6 +26,7 @@ use crate::ir::{
     InstInterfaceBinding, Module, Statement, SystemFunctionCall, SystemFunctionKind, VarId,
     Variable,
 };
+use crate::{BigUint, HashMap, HashSet};
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Debug, Default)]
@@ -53,13 +53,9 @@ pub struct RegionWrite {
 }
 
 impl RegionWrite {
-    /// Extend this region by `other` when the union is a region.
+    /// Extend this region by `other` of the same key when the union is a
+    /// region.
     fn coalesce(&mut self, other: &RegionWrite) -> bool {
-        if (self.id, self.driving, self.extent, self.token)
-            != (other.id, other.driving, other.extent, other.token)
-        {
-            return false;
-        }
         if self.array == other.array
             && let Some(packed) = self.packed.union(other.packed)
         {
@@ -76,7 +72,7 @@ impl RegionWrite {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Extent {
     /// The region is written and owned by the process.
     Exact,
@@ -177,11 +173,19 @@ fn element_masks<'a>(
     ret
 }
 
+/// `(id, driving, extent, token)`: writes that may be coalesced.
+type WriteKey = (VarId, bool, Extent, TokenRange);
+
 /// Walks the statements of one process.
 struct Collector {
     writes: Vec<RegionWrite>,
     driving: bool,
     extent: Extent,
+    /// The latest write of each key, which the next one may extend.
+    latest: HashMap<WriteKey, usize>,
+    /// Regions already recorded, which repeat in every iteration of an
+    /// enclosing loop.
+    recorded: HashSet<(WriteKey, ArraySpan, PackedSpan)>,
 }
 
 impl Collector {
@@ -190,6 +194,8 @@ impl Collector {
             writes: Vec::new(),
             driving,
             extent: Extent::Exact,
+            latest: HashMap::default(),
+            recorded: HashSet::default(),
         }
     }
 
@@ -214,12 +220,17 @@ impl Collector {
                 extent: self.extent,
                 token: dst.token,
             };
+            let key = (write.id, write.driving, write.extent, write.token);
+            if !self.recorded.insert((key, array, packed)) {
+                continue;
+            }
             // Successive iterations usually write adjacent regions.
-            if let Some(last) = self.writes.last_mut()
-                && last.coalesce(&write)
+            if let Some(&latest) = self.latest.get(&key)
+                && self.writes[latest].coalesce(&write)
             {
                 continue;
             }
+            self.latest.insert(key, self.writes.len());
             self.writes.push(write);
         }
     }

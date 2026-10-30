@@ -388,3 +388,43 @@ fn loop_iterations_are_coalesced_under_their_claim() {
     let errors = analyze(&code.replace("OTHER", "assign o[0] = 1'b1;"));
     assert_eq!(multiple_assignments(&errors).len(), 1, "{errors:?}");
 }
+
+#[test]
+fn interleaved_loop_writes_are_coalesced() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<2>,
+        p: output logic<64>,
+    ) {
+        always_comb {
+            for i in 0..64 {
+                for j in 0..64 {
+                    o[0] = 1'b0;
+                    o[1] = 1'b1;
+                    p[j] = 1'b0;
+                }
+            }
+        }
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    let module = ir.module_postorder()[0];
+    let iterations = module.write_summary.processes[0]
+        .writes
+        .iter()
+        .filter(|x| x.extent == Extent::Iteration)
+        .count();
+    // One region for each assignment, not for each iteration.
+    assert_eq!(iterations, 3);
+}
