@@ -1,5 +1,4 @@
 use crate::conv::Context;
-use crate::conv::checker::portability::allow_multiple_assign;
 use crate::conv::utils::{
     check_compatibility, check_implicit_clock_conversion, eval_array_literal,
 };
@@ -413,7 +412,7 @@ impl FunctionCall {
                     ) {
                         let mask = ValueBigUint::gen_mask_range(beg, end);
                         let dynamic = !dst.index.is_const() || !dst.select.is_const_with_range();
-                        let (success, tokens) = assign_table.insert_assign(
+                        assign_table.insert_assign(
                             &variable,
                             index,
                             mask,
@@ -421,16 +420,6 @@ impl FunctionCall {
                             dynamic,
                             self.comptime.token,
                         );
-                        if !success
-                            && assign_context.is_ff()
-                            && !allow_multiple_assign(context, dst.id)
-                        {
-                            context.insert_error(AnalyzerError::multiple_assignment(
-                                &variable.path.to_string(),
-                                &self.comptime.token,
-                                &tokens,
-                            ));
-                        }
                     }
                 }
             }

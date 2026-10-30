@@ -1,9 +1,7 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::model::SummaryRegion;
-use super::region::{
-    ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
-};
+use super::region::{BitPartition, NodeKey, signed_difference};
 use super::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
     PositionDomain, PositionRelation, RanOut, Replication, SsaStore, VersionId,
@@ -11,6 +9,7 @@ use super::ssa::{
 use super::steps::Steps;
 use crate::conv::Context;
 use crate::ir::VarId;
+use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
     Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain,
