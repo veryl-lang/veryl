@@ -401,3 +401,43 @@ fn generic_interface_port_preserves_feedthrough_dependencies() {
         }
     }
 }
+
+const CHILD_LOOP: &str = r#"
+interface Bus { var data: logic<8> [4]; }
+module Child (bus: interface) {
+    always_comb {
+        for i in 0..COUNT {
+            bus.data[i] = 8'h3c;
+        }
+    }
+}
+module Pass (bus: interface) { inst u: Child (bus); }
+module Top (out: output logic<8>) {
+    inst bus: Bus;
+    inst u: Pass (bus);
+    PARENT
+    assign out = bus.data[1];
+}
+"#;
+
+#[test]
+fn generic_interface_port_loop_claims_its_static_prefix() {
+    // Lifted loop writes cover the static prefix, as against other drivers.
+    // Elements the iterations never reach are therefore not reported as
+    // unassigned in the parent either.
+    let code = |parent: &str| CHILD_LOOP.replace("COUNT", "1").replace("PARENT", parent);
+    let errors = analyze(&code(""));
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+    let errors = analyze(&code("assign bus.data[3] = 8'h00;"));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+}

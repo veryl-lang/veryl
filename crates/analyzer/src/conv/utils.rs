@@ -4178,10 +4178,7 @@ fn get_component_at(
                 Some(inputs) if !conflict => {
                     let ok = ret.is_ok();
                     let needs_body = match ret.as_deref() {
-                        Ok(ir::Component::Module(x)) => {
-                            !x.interface_assignments.is_empty()
-                                || !x.interface_assignment_processes.is_empty()
-                        }
+                        Ok(ir::Component::Module(x)) => x.writes_through_interfaces(),
                         _ => true,
                     };
                     unit_cache::insert(

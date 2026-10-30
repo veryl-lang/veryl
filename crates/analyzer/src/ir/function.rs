@@ -411,15 +411,7 @@ impl FunctionCall {
                         dst.comptime.member_select_domain,
                     ) {
                         let mask = ValueBigUint::gen_mask_range(beg, end);
-                        let dynamic = !dst.index.is_const() || !dst.select.is_const_with_range();
-                        assign_table.insert_assign(
-                            &variable,
-                            index,
-                            mask,
-                            dynamic,
-                            dynamic,
-                            self.comptime.token,
-                        );
+                        assign_table.insert_assign(&variable, index, mask, self.comptime.token);
                     }
                 }
             }

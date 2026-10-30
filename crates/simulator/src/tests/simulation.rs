@@ -7922,21 +7922,13 @@ fn generic_interface_port_array_analysis_limit() {
         "#
         );
         for config in Config::all() {
-            let result = analyze_top(&code, &config, "Top");
-            if size == 129 {
-                assert!(
-                    matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
-                    "{config:?}"
-                );
-            } else {
-                let mut sim = Simulator::new(result.unwrap(), None);
-                sim.step(&Event::clock(VarId::SYNTHETIC));
-                assert_eq!(
-                    sim.get("data").unwrap(),
-                    Value::new(0x3c, 8, false),
-                    "{config:?}"
-                );
-            }
+            let mut sim = Simulator::new(analyze_top(&code, &config, "Top").unwrap(), None);
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(0x3c, 8, false),
+                "{size} {config:?}"
+            );
         }
     }
 }

@@ -532,8 +532,9 @@ impl Conv<&PortDeclarationItem> for () {
                     if let Some(name) = modport {
                         r#type.kind = ir::TypeKind::Modport(Arc::new(sig), name);
                     } else {
-                        // Direction-free members remain references. Their
-                        // actual write masks are collected after conversion.
+                        // Direction-free members remain references. What
+                        // the module writes through them is in its write
+                        // summary.
                         for variable in context.variables.values_mut() {
                             if variable.path.starts_with(&path.0)
                                 && variable.kind == VarKind::Variable
@@ -1725,13 +1726,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             };
 
                             if let Some(actual) = connects.interface_binding {
-                                let references =
-                                    component.variables.iter().filter(|(_, variable)| {
-                                        matches!(
-                                            dst_type.kind,
-                                            ir::TypeKind::AbstractInterface(None)
-                                        ) && variable.kind == VarKind::Inout
-                                    });
+                                let references = component
+                                    .variables
+                                    .iter()
+                                    .filter(|(id, _)| component.is_direction_free_member(**id));
                                 for (child, child_variable) in
                                     component.interface_members.iter().chain(references)
                                 {

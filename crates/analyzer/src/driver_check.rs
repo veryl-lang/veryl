@@ -68,7 +68,7 @@ struct Write {
 fn check_module(module: &Module, reports: &mut Reports) {
     // Identical regions driven by one process share an entry.
     let mut driven: HashMap<VarId, HashMap<ProcessRegion, Vec<TokenRange>>> = HashMap::default();
-    for (process, writes) in module.write_summary.processes.iter().enumerate() {
+    for (process, writes) in module.write_summary.processes().iter().enumerate() {
         for write in writes.writes.iter().filter(|x| x.driving) {
             driven
                 .entry(write.id)
