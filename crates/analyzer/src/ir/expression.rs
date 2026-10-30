@@ -1248,6 +1248,12 @@ impl Factor {
                 index.gather_ff(context, table, decl, assign_target, from_ff);
                 select.gather_ff(context, table, decl, assign_target, from_ff);
             }
+            Factor::HierVariable(x) => {
+                x.index
+                    .gather_ff(context, table, decl, assign_target, from_ff);
+                x.select
+                    .gather_ff(context, table, decl, assign_target, from_ff);
+            }
             Factor::FunctionCall(x) => {
                 x.gather_ff(context, table, decl, assign_target, from_ff);
             }

@@ -16,7 +16,19 @@ use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 
-#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Debug, Default)]
+#[derive(
+    Clone,
+    Copy,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct VarId(u32);
 
 impl VarId {
@@ -287,7 +299,18 @@ impl From<VarPathSelect> for (VarPath, VarSelect, TokenRange) {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct VarPath(pub Vec<StrId>);
 
 impl VarPath {

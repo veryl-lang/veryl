@@ -16,7 +16,19 @@ pub(super) fn translate_position(position: usize, offset: isize) -> Option<usize
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub(super) struct ArraySpan {
     pub(super) start: usize,
     pub(super) length: usize,
@@ -55,7 +67,9 @@ impl ArraySpan {
 
 /// Half-open packed-bit interval. Unlike a dense bit mask, its storage and
 /// operations are independent of the declared bit width.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(super) struct PackedSpan {
     pub(super) start: usize,
     pub(super) length: usize,

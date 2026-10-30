@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use veryl_analyzer::conv::unit_cache;
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::{Analyzer, CachedDiagnostic, scope, symbol_table, type_dag};
@@ -250,7 +251,12 @@ impl Incremental {
         scope::set_project(prj, is_root);
 
         match fragment_cache::restore(&fragment, prj) {
-            Ok(()) => {
+            Ok(window) => {
+                let path_id = resource_table::insert_path(&path.src);
+                unit_cache::set_file_window(path_id, window);
+                if let Some(bytes) = self.store.load_units(entry) {
+                    unit_cache::decode_file(path_id, &bytes);
+                }
                 self.store.keep(&src);
                 self.restored += 1;
                 self.restored_paths.insert(path.src.clone());
@@ -281,6 +287,10 @@ impl Incremental {
         let Some(hash) = self.hashes.get(&path.src).cloned() else {
             return;
         };
+        unit_cache::set_file_window(
+            resource_table::insert_path(&path.src),
+            fragment_cache::window_since(watermark),
+        );
 
         let blob = if cacheable {
             match fragment_cache::capture(&path.src, input, watermark) {
@@ -295,6 +305,11 @@ impl Incremental {
         };
 
         self.store.put(src, hash, blob.as_deref());
+    }
+
+    /// The files restored this build, whose components may be replayed.
+    pub fn restored_files(&self) -> impl Iterator<Item = &PathBuf> {
+        self.restored_paths.iter()
     }
 
     /// Drains the diagnostics of files restored this build, for the caller to
@@ -376,6 +391,12 @@ impl Incremental {
         for (src, (names, has_non_native_test)) in tests {
             self.store
                 .set_tests(&src.to_string_lossy(), names, has_non_native_test);
+        }
+
+        for path in self.hashes.keys() {
+            if let Some(blob) = unit_cache::encode_file(resource_table::insert_path(path)) {
+                self.store.set_units(&path.to_string_lossy(), &blob);
+            }
         }
 
         // Restored files' diagnostics are already preserved by `Store::keep`,

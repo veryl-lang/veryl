@@ -35,6 +35,7 @@ mod interface_instance_select_tests;
 mod modport_connection_tests;
 mod package_alias_type_tests;
 mod statement_after_if_reset_tests;
+mod unit_cache_tests;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
@@ -12659,6 +12660,18 @@ fn invalid_operand() {
 
     let code = r#"
     module ModuleA {
+        const W: logic<32> = 'x;
+        var a: logic<8>;
+        let _b: logic<8> = a as W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
         function func::<N: u32> {
             gen W: u32 = N;
             var a: u32;
@@ -12970,6 +12983,33 @@ fn invalid_factor() {
             a[logic:0] = 0;
             b[1:logic] = 0;
         }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+    assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = i<4>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 8;
+    }
+    module ModuleA {
+        const W: u32 = 8;
+        let _a: u32 = W<4>;
+        let _b: u32 = PackageA::W<4>;
     }
     "#;
 
@@ -16673,6 +16713,20 @@ fn exceed_limit() {
     let code = r#"
     module ModuleA {
         var _a: logic<10000000>;
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 10000000;
+    }
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as PackageA::W;
+        assign a = 0;
     }
     "#;
 
@@ -22274,6 +22328,75 @@ fn function_local_write_has_no_scheduler_side_effect() {
 }
 
 #[test]
+fn function_output_in_port_connection() {
+    let code = r#"
+    module ModuleA (
+        i: input  logic,
+        o: output logic,
+    ) {
+        assign o = i;
+    }
+    module ModuleB (
+        a: input  logic,
+        o: output logic,
+        s: output logic,
+    ) {
+        function calculate (x: input logic, y: output logic) -> logic {
+            y = x;
+            return x;
+        }
+        inst u: ModuleA (
+            i: calculate(a, s) & 1'b1,
+            o                       ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInPortConnection { .. }))
+    );
+
+    // A call with an output argument inside the body of a function that is
+    // itself called from the port connection is a procedural statement.
+    let code = r#"
+    module ModuleA (
+        i: input  logic,
+        o: output logic,
+    ) {
+        assign o = i;
+    }
+    module ModuleB (
+        a: input  logic,
+        o: output logic,
+    ) {
+        function inner (x: input logic, y: output logic) -> logic {
+            y = x;
+            return x;
+        }
+        function outer::<W: u32> (x: input logic) -> logic {
+            var tmp: logic;
+            return inner(x, tmp);
+        }
+        inst u: ModuleA (
+            i: outer::<1>(a),
+            o               ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInPortConnection { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn function_output_in_always_ff_requires_process_local_variable() {
     let code = r#"
     module ModuleA (
@@ -23694,6 +23817,66 @@ fn zero_size() {
     let code = r#"
     module ModuleA {
         var a: logic<8> [0];
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        const W: u32 = 0;
+        var a: logic<8>;
+        let _b: logic<8> = a as W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 0;
+    }
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as PackageA::W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as 0;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as 32'd0;
         assign a = 0;
     }
     "#;
