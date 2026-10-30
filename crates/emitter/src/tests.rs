@@ -5446,6 +5446,130 @@ fn struct_member_ifdef_keeps_semicolon_inside_guard() {
 }
 
 #[test]
+fn attribute_in_ifdef_blocks() {
+    let code = r#"
+module ByteWriteDualPortRAM(
+    i_clk  : input  clock             ,
+    i_rst  : input  reset             ,
+    i_wen0 : input  logic<4>          ,
+    i_din0 : input  logic<4, 8>       ,
+    i_addr0: input  logic<$clog2(128)>,
+    o_dout0: output logic<4, 8>       ,
+    i_wen1 : input  logic<4>          ,
+    i_din1 : input  logic<4, 8>       ,
+    i_addr1: input  logic<$clog2(128)>,
+    o_dout1: output logic<4, 8>       ,
+) {
+    #[ifdef(FOO)]
+    {
+        for b in 0..4 :BYTE_MEMORY {
+            #[allow(multiple_assign)]
+            var memory: logic<8> [128];
+
+            always_ff {
+                if (i_wen0[b]) {
+                    memory[i_addr0] = i_din0[b];
+                }
+                o_dout0[b] = memory[i_addr0];
+            }
+            always_ff {
+                if (i_wen1[b]) {
+                    memory[i_addr1] = i_din1[b];
+                }
+                o_dout1[b] = memory[i_addr1];
+            }
+        }
+    }
+    #[else]
+    {
+        #[allow(multiple_assign)]
+        var memory: logic<4 * 8> [128];
+
+        always_ff {
+            for b in 0..4 {
+                if (i_wen0[b]) {
+                    memory[i_addr0][b * 8+:8] = i_din0[b];
+                }
+            }
+            o_dout0 = memory[i_addr0];
+        }
+        always_ff {
+            for b in 0..4 {
+                if (i_wen1[b]) {
+                    memory[i_addr1][b * 8+:8] = i_din1[b];
+                }
+            }
+            o_dout1 = memory[i_addr1];
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ByteWriteDualPortRAM (
+    input  var logic                   i_clk  ,
+    input  var logic                   i_rst  ,
+    input  var logic [4-1:0]           i_wen0 ,
+    input  var logic [4-1:0][8-1:0]    i_din0 ,
+    input  var logic [$clog2(128)-1:0] i_addr0,
+    output var logic [4-1:0][8-1:0]    o_dout0,
+    input  var logic [4-1:0]           i_wen1 ,
+    input  var logic [4-1:0][8-1:0]    i_din1 ,
+    input  var logic [$clog2(128)-1:0] i_addr1,
+    output var logic [4-1:0][8-1:0]    o_dout1
+);
+    `ifdef FOO
+    for (genvar b = 0; b < 4; b++) begin :BYTE_MEMORY
+
+        logic [8-1:0] memory [128];
+
+        always @ (posedge i_clk) begin
+            if ((i_wen0[b])) begin
+                memory[i_addr0] <= i_din0[b];
+            end
+            o_dout0[b] <= memory[i_addr0];
+        end
+        always @ (posedge i_clk) begin
+            if ((i_wen1[b])) begin
+                memory[i_addr1] <= i_din1[b];
+            end
+            o_dout1[b] <= memory[i_addr1];
+        end
+    end
+
+    `else
+    logic [(4 * 8)-1:0] memory [128];
+
+    always @ (posedge i_clk) begin
+        for (int b = 0; b < 4; b++) begin
+            if ((i_wen0[b])) begin
+                memory[i_addr0][b * 8+:8] <= i_din0[b];
+            end
+        end
+        o_dout0 <= memory[i_addr0];
+    end
+    always @ (posedge i_clk) begin
+        for (int b = 0; b < 4; b++) begin
+            if ((i_wen1[b])) begin
+                memory[i_addr1][b * 8+:8] <= i_din1[b];
+            end
+        end
+        o_dout1 <= memory[i_addr1];
+    end
+    `endif
+
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn non_portable_variable_lowers_always_ff_to_always() {
     // SystemVerilog forbids another process from writing a variable an
     // `always_ff` writes, so the opt-in has to drop the `_ff`.

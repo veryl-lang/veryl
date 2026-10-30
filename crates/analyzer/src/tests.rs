@@ -1870,6 +1870,36 @@ fn multiple_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA(
+        clk : input clock,
+        a0 : input logic<3>,
+        a1 : input logic<3>,
+        d0 : input logic,
+        d1 : input logic,
+    ) {
+        #[ifdef(FOO)]
+        {
+            // This block will not be evaluated
+        }
+        #[else]
+        {
+            #[allow(multiple_assign)]
+            var memory : logic[8];
+
+            always_ff {
+                memory[a0] = d0;
+            }
+            always_ff {
+                memory[a1] = d1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

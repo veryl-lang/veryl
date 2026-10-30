@@ -9,7 +9,7 @@ use veryl_parser::token_range::{TokenExt, TokenRange};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
 enum IfdefState {
     #[default]
     None,
@@ -216,6 +216,64 @@ impl CheckAttribute {
         self.ifdef_pos.clear();
         self.ifdef_neg.clear();
     }
+
+    fn restore_ifdef(&mut self, saved: (IfdefState, Vec<StrId>, Vec<StrId>)) {
+        self.ifdef_state = saved.0;
+        self.ifdef_pos = saved.1;
+        self.ifdef_neg = saved.2;
+    }
+
+    fn walk_module_group(&mut self, x: &ModuleGroup) {
+        let attrs: Vec<_> = x
+            .module_group_list
+            .iter()
+            .map(|x| x.attribute.as_ref())
+            .collect();
+        self.attrs(&attrs, x.range(), false);
+
+        if let ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(inner) =
+            x.module_group_group.as_ref()
+        {
+            let saved_ifdef = (
+                self.ifdef_state,
+                self.ifdef_pos.clone(),
+                self.ifdef_neg.clone(),
+            );
+            self.reset_ifdef();
+
+            for item in &inner.module_group_group_list {
+                self.walk_module_group(item.module_group.as_ref());
+            }
+
+            self.restore_ifdef(saved_ifdef);
+        }
+    }
+
+    fn walk_generate_group(&mut self, x: &GenerateGroup) {
+        let attrs: Vec<_> = x
+            .generate_group_list
+            .iter()
+            .map(|x| x.attribute.as_ref())
+            .collect();
+        self.attrs(&attrs, x.range(), false);
+
+        if let GenerateGroupGroup::LBraceGenerateGroupGroupListRBrace(inner) =
+            x.generate_group_group.as_ref()
+        {
+            let saved_ifdef = (
+                self.ifdef_state,
+                self.ifdef_pos.clone(),
+                self.ifdef_neg.clone(),
+            );
+            self.reset_ifdef();
+
+            for item in &inner.generate_group_group_list {
+                self.walk_generate_group(item.generate_group.as_ref());
+            }
+
+            self.restore_ifdef(saved_ifdef);
+        }
+    }
 }
 
 impl Handler for CheckAttribute {
@@ -402,13 +460,7 @@ impl VerylGrammarTrait for CheckAttribute {
         if let HandlerPoint::Before = self.point {
             self.reset_ifdef();
             for x in &arg.module_declaration_list {
-                let x = x.module_group.as_ref();
-                let attrs: Vec<_> = x
-                    .module_group_list
-                    .iter()
-                    .map(|x| x.attribute.as_ref())
-                    .collect();
-                self.attrs(&attrs, x.range(), false);
+                self.walk_module_group(x.module_group.as_ref());
             }
         }
         Ok(())
@@ -434,13 +486,7 @@ impl VerylGrammarTrait for CheckAttribute {
         if let HandlerPoint::Before = self.point {
             self.reset_ifdef();
             for x in &arg.generate_named_block_list {
-                let x = x.generate_group.as_ref();
-                let attrs: Vec<_> = x
-                    .generate_group_list
-                    .iter()
-                    .map(|x| x.attribute.as_ref())
-                    .collect();
-                self.attrs(&attrs, x.range(), false);
+                self.walk_generate_group(x.generate_group.as_ref());
             }
         }
         Ok(())
@@ -453,13 +499,7 @@ impl VerylGrammarTrait for CheckAttribute {
         if let HandlerPoint::Before = self.point {
             self.reset_ifdef();
             for x in &arg.generate_optional_named_block_list {
-                let x = x.generate_group.as_ref();
-                let attrs: Vec<_> = x
-                    .generate_group_list
-                    .iter()
-                    .map(|x| x.attribute.as_ref())
-                    .collect();
-                self.attrs(&attrs, x.range(), false);
+                self.walk_generate_group(x.generate_group.as_ref());
             }
         }
         Ok(())
