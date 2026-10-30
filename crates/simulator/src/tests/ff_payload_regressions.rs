@@ -67,3 +67,47 @@ fn array_read_in_always_ff_and_at_a_runtime_index() {
         assert_eq!(sim.get("out"), Some(Value::new(7, 8, false)), "{config:?}");
     }
 }
+
+#[test]
+fn child_driven_array_element_with_whole_array_read() {
+    let code = r#"
+    module Child (data: input logic<8>, out: output logic<8>) {
+        assign out = data;
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        data: input logic<8>,
+        out: output logic<8>,
+        prev: output logic<8>,
+    ) {
+        var regs: logic<8> [2];
+        var copied: logic<8> [2];
+
+        always_ff {
+            if_reset {
+                regs[0] = 0;
+                prev = 0;
+            } else {
+                regs[0] = data;
+                prev = regs[0];
+            }
+        }
+
+        inst u: Child (data, out: regs[1]);
+        assign copied = regs;
+        assign out = copied[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clock = sim.get_clock("clk").unwrap();
+        let reset = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clock, &reset);
+
+        sim.set("data", Value::new(7, 8, false));
+        assert_eq!(sim.get("out"), Some(Value::new(7, 8, false)), "{config:?}");
+    }
+}

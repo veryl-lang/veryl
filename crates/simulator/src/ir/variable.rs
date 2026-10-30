@@ -536,11 +536,12 @@ pub fn create_variable_meta(
         // Exception: a runtime-indexed array needs one uniform buffer/stride for
         // DynamicVariable access, yet the FfTable only flags its base element --
         // so force every element to FF for the arrays in `dyn_indexed`, and for
-        // an array with no comb-driven element that is read at a runtime index.
+        // an array whose every element is written in always_ff and that is read
+        // at a runtime index.
         let any_ff = (0..total_array).any(|i| ff_table.is_ff(v.id, i));
         let all_ff = (0..total_array).all(|i| ff_table.is_ff(v.id, i));
         let dyn_read = ff_table.range_refered.contains_key(&v.id)
-            && (0..total_array).all(|i| ff_table.writers(v.id, i).2.is_none());
+            && (0..total_array).all(|i| ff_table.writers(v.id, i).0.is_some());
         let force_ff = any_ff && total_array > 1 && (dyn_indexed.contains(&v.id) || dyn_read);
         // Lets `dynamic_index_info` reject a runtime index into a mixed array
         // in O(1).
