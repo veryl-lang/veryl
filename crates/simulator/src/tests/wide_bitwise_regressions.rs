@@ -111,3 +111,42 @@ fn wide_four_state_shifts_keep_known_bits() {
         }
     }
 }
+
+#[test]
+fn wide_four_state_arithmetic_gives_x() {
+    let code = r#"
+    module Top (
+        clk: input clock, rst: input reset, a: input logic<160>,
+        add: output logic<160>, sub: output logic<160>, mul: output logic<160>,
+    ) {
+        always_ff {
+            if_reset {add = 0; sub = 0; mul = 0;}
+            else {add = a + 0; sub = a - 1; mul = a * 1;}
+        }
+    }
+    "#;
+    let known: String = (0..128).map(|i| ['0', '1'][(i / 3) % 2]).collect();
+    let digits = format!("{}{known}", "x".repeat(32));
+    let unknown = format!("160'b{}", "x".repeat(160));
+    for use_jit in [false, true] {
+        let config = Config {
+            use_4state: true,
+            use_jit,
+            ..Default::default()
+        };
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clock = sim.get_clock("clk").unwrap();
+        let reset = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clock, &reset);
+        sim.set("a", Value::from_str(&format!("160'b{digits}")).unwrap());
+        sim.step(&clock);
+        for port in ["add", "sub", "mul"] {
+            assert_eq!(
+                sim.get(port),
+                Some(Value::from_str(&unknown).unwrap()),
+                "{port}, jit={use_jit}"
+            );
+        }
+    }
+}
