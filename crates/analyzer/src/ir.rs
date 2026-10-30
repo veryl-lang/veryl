@@ -61,7 +61,7 @@ pub use variable::{
     VariableInfo,
 };
 pub use width_expr::{WidthExpr, WidthOp};
-pub use write_summary::{Extent, ProcessWrites, RegionWrite, WriteSummary};
+pub use write_summary::{ProcessWrites, RegionWrite, WriteSummary};
 
 #[cfg(test)]
 mod tests;

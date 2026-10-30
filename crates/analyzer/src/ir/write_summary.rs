@@ -8,25 +8,23 @@
 //! lifted through a direction-free interface binding. Writes inside one
 //! process never conflict with each other: the last one wins.
 //!
-//! A write inside a procedural `for` loop is recorded twice. The loop is
-//! emitted as an SV loop, so its iterator is not a static index and the
-//! process claims what the constant prefix of the destination selects, as in
-//! the longest static prefix rule ([`Extent::Claimed`]). What the iterations
-//! actually write is recorded separately ([`Extent::Iteration`]), always
-//! inside the claimed region.
+//! A procedural `for` loop is emitted as an SV loop, so its iterator is not a
+//! static index: a write inside it covers what the constant prefix of its
+//! destination selects, as in the longest static prefix rule. Elements of
+//! that region the iterations never reach are included, so the region is
+//! what the process owns rather than what it certainly writes.
 //!
 //! Regions are intervals, so the summary is independent of array sizes and
 //! bit widths.
 
+use crate::BigUint;
 use crate::conv::Context;
-use crate::ir::peel::{has_own_break, specialize_iteration};
 use crate::ir::span::{ArraySpan, PackedSpan, dst_writes};
 use crate::ir::{
     AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
     InstInterfaceBinding, Module, Statement, SystemFunctionCall, SystemFunctionKind, VarId,
     Variable,
 };
-use crate::{BigUint, HashMap, HashSet};
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Debug, Default)]
@@ -48,54 +46,7 @@ pub struct RegionWrite {
     /// connections of unknown direction, which may only read, and
     /// initialization exempted by `#[allow(initial_assign)]`.
     pub driving: bool,
-    pub extent: Extent,
     pub token: TokenRange,
-}
-
-impl RegionWrite {
-    /// Extend this region by `other` of the same key when the union is a
-    /// region.
-    fn coalesce(&mut self, other: &RegionWrite) -> bool {
-        if self.array.contains(other.array) && self.packed.contains(other.packed) {
-            true
-        } else if self.array == other.array
-            && let Some(packed) = self.packed.union(other.packed)
-        {
-            self.packed = packed;
-            true
-        } else if self.packed == other.packed
-            && let Some(array) = self.array.union(other.array)
-        {
-            self.array = array;
-            true
-        } else {
-            false
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Extent {
-    /// The region is written and owned by the process.
-    Exact,
-    /// The region is owned by the process, which may write only part of it:
-    /// the longest static prefix of a write inside a `for` loop.
-    Claimed,
-    /// The region is written by an iteration of a `for` loop, within a
-    /// region the process claims.
-    Iteration,
-}
-
-impl Extent {
-    /// Whether the process owns the region against other drivers.
-    pub fn is_claimed(self) -> bool {
-        matches!(self, Extent::Exact | Extent::Claimed)
-    }
-
-    /// Whether the process writes the whole region.
-    pub fn is_written(self) -> bool {
-        matches!(self, Extent::Exact | Extent::Iteration)
-    }
 }
 
 impl WriteSummary {
@@ -139,24 +90,24 @@ impl WriteSummary {
         Self { processes }
     }
 
-    /// Written regions of `id`, driving or not.
-    pub fn written(&self, id: VarId) -> impl Iterator<Item = &RegionWrite> {
+    /// Writes to `id`, driving or not.
+    pub fn writes(&self, id: VarId) -> impl Iterator<Item = &RegionWrite> {
         self.processes
             .iter()
             .flat_map(|x| &x.writes)
-            .filter(move |x| x.id == id && x.extent.is_written())
+            .filter(move |x| x.id == id)
     }
 
     /// Per array element of `id`, out of `elements`, the packed bits some
     /// process drives.
     pub fn driven_masks(&self, id: VarId, elements: usize) -> Vec<BigUint> {
-        element_masks(self.written(id).filter(|x| x.driving), elements)
+        element_masks(self.writes(id).filter(|x| x.driving), elements)
     }
 
     /// Per array element of `id`, out of `elements`, the packed bits some
     /// process writes, including writes that do not drive it.
     pub fn written_masks(&self, id: VarId, elements: usize) -> Vec<BigUint> {
-        element_masks(self.written(id), elements)
+        element_masks(self.writes(id), elements)
     }
 }
 
@@ -175,19 +126,10 @@ fn element_masks<'a>(
     ret
 }
 
-/// `(id, driving, extent, token)`: writes that may be coalesced.
-type WriteKey = (VarId, bool, Extent, TokenRange);
-
 /// Walks the statements of one process.
 struct Collector {
     writes: Vec<RegionWrite>,
     driving: bool,
-    extent: Extent,
-    /// The latest write of each key, which the next one may extend.
-    latest: HashMap<WriteKey, usize>,
-    /// The regions that started a write, which repeat in every iteration of
-    /// an enclosing loop. One per write, so it grows with the summary.
-    recorded: HashSet<(WriteKey, ArraySpan, PackedSpan)>,
 }
 
 impl Collector {
@@ -195,9 +137,6 @@ impl Collector {
         Self {
             writes: Vec::new(),
             driving,
-            extent: Extent::Exact,
-            latest: HashMap::default(),
-            recorded: HashSet::default(),
         }
     }
 
@@ -214,26 +153,13 @@ impl Collector {
     }
     fn add(&mut self, context: &mut Context, dst: &AssignDestination) {
         for (array, packed) in dst_writes(dst, context) {
-            let write = RegionWrite {
+            self.writes.push(RegionWrite {
                 id: dst.id,
                 array,
                 packed,
                 driving: self.driving,
-                extent: self.extent,
                 token: dst.token,
-            };
-            let key = (write.id, write.driving, write.extent, write.token);
-            // Successive iterations usually write adjacent regions.
-            if let Some(&latest) = self.latest.get(&key)
-                && self.writes[latest].coalesce(&write)
-            {
-                continue;
-            }
-            if !self.recorded.insert((key, array, packed)) {
-                continue;
-            }
-            self.latest.insert(key, self.writes.len());
-            self.writes.push(write);
+            });
         }
     }
 
@@ -274,35 +200,8 @@ impl Collector {
                     }
                     self.add_statements(context, &x.default);
                 }
-                Statement::For(x) => {
-                    let iterations = if has_own_break(&x.body) {
-                        None
-                    } else {
-                        x.range.eval_iter(context)
-                    };
-                    let Some(iterations) = iterations else {
-                        // The iterator is unknown in every write.
-                        self.add_statements(context, &x.body);
-                        continue;
-                    };
-                    let extent = self.extent;
-                    // Within a claimed region only the claim matters, and
-                    // within an iteration the enclosing loop already claims.
-                    if extent == Extent::Claimed {
-                        self.add_statements(context, &x.body);
-                        continue;
-                    }
-                    if extent == Extent::Exact {
-                        self.extent = Extent::Claimed;
-                        self.add_statements(context, &x.body);
-                    }
-                    self.extent = Extent::Iteration;
-                    for iteration in iterations {
-                        let body = specialize_iteration(context, x, iteration);
-                        self.add_statements(context, body.as_deref().unwrap_or(&x.body));
-                    }
-                    self.extent = extent;
-                }
+                // The iterator is not a static index in any write.
+                Statement::For(x) => self.add_statements(context, &x.body),
                 Statement::FunctionCall(x) => self.add_function_call(context, x),
                 Statement::TbMethodCall(x) => {
                     if let Some(dst) = &x.ret {
@@ -488,7 +387,6 @@ fn lift(
             array,
             packed,
             driving: write.driving,
-            extent: write.extent,
             token,
         });
     }

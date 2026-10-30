@@ -378,7 +378,7 @@ impl InstDeclaration {
             }
         }
         for process in lifted_processes(context, self, Module::is_direction_free_member) {
-            for write in process.writes.iter().filter(|x| x.extent.is_written()) {
+            for write in &process.writes {
                 assign_table.insert_region(context, write);
             }
         }

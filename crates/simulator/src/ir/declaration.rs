@@ -1991,7 +1991,7 @@ pub(crate) fn propagate_interface_initialization(
                 let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
                 let (output_masks, initial_masks) = if direction_free {
                     let summary = &child_module.write_summary;
-                    let initial = if summary.written(binding.child).next().is_some() {
+                    let initial = if summary.writes(binding.child).next().is_some() {
                         summary.written_masks(binding.child, elements)
                     } else {
                         vec![full.clone(); elements]

@@ -1,5 +1,4 @@
 use super::*;
-use crate::BigUint;
 
 #[test]
 fn generic_interface_port_dynamic_unknown_direction() {
@@ -422,65 +421,23 @@ module Top (out: output logic<8>) {
 "#;
 
 #[test]
-fn generic_interface_port_loop_writes_only_its_iterations() {
-    let code =
-        |count: &str, parent: &str| CHILD_LOOP.replace("COUNT", count).replace("PARENT", parent);
-    let unassigned = |errors: &[AnalyzerError]| {
-        errors
+fn generic_interface_port_loop_claims_its_static_prefix() {
+    // Lifted loop writes cover the static prefix, as against other drivers.
+    // Elements the iterations never reach are therefore not reported as
+    // unassigned in the parent either.
+    let code = |parent: &str| CHILD_LOOP.replace("COUNT", "1").replace("PARENT", parent);
+    let errors = analyze(&code(""));
+    assert!(
+        !errors
             .iter()
-            .any(|e| matches!(e, AnalyzerError::UnassignVariable { .. }))
-    };
-
-    // `bus.data[1]` is read but only `bus.data[0]` is written.
-    let errors = analyze(&code("1", ""));
-    assert!(unassigned(&errors), "{errors:?}");
-    let errors = analyze(&code("4", ""));
-    assert!(!unassigned(&errors), "{errors:?}");
-
-    // The loop still claims the whole array against other drivers.
-    let errors = analyze(&code("1", "assign bus.data[3] = 8'h00;"));
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+    let errors = analyze(&code("assign bus.data[3] = 8'h00;"));
     assert!(
         errors
             .iter()
             .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
         "{errors:?}"
-    );
-}
-
-#[test]
-fn generic_interface_port_loop_drives_only_its_iterations() {
-    symbol_table::clear();
-    attribute_table::clear();
-    doc_comment_table::clear();
-
-    let code = CHILD_LOOP.replace("COUNT", "2").replace("PARENT", "");
-    let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
-    let analyzer = Analyzer::new(&metadata);
-    let mut context = Context::default();
-    let mut ir = Ir::default();
-    analyzer.analyze_pass1("prj", &parser.veryl);
-    Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
-
-    // The specialization instantiated by `Pass`, where `bus.data` is the
-    // only member; the top-level `Child` has no actual interface.
-    let (child, data) = ir
-        .module_postorder()
-        .into_iter()
-        .filter(|x| x.name.to_string() == "Child")
-        .find_map(|x| {
-            let data = x
-                .variables
-                .keys()
-                .find(|id| x.is_direction_free_member(**id))?;
-            Some((x, *data))
-        })
-        .unwrap();
-    let full = BigUint::from(0xffu32);
-    let none = BigUint::default();
-    assert_eq!(
-        child.write_summary.driven_masks(data, 4),
-        vec![full.clone(), full, none.clone(), none]
     );
 }
