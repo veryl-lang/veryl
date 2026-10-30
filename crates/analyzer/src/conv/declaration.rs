@@ -1725,13 +1725,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             };
 
                             if let Some(actual) = connects.interface_binding {
-                                let references =
-                                    component.variables.iter().filter(|(_, variable)| {
-                                        matches!(
-                                            dst_type.kind,
-                                            ir::TypeKind::AbstractInterface(None)
-                                        ) && variable.kind == VarKind::Inout
-                                    });
+                                let references = component
+                                    .variables
+                                    .iter()
+                                    .filter(|(id, _)| component.is_direction_free_member(**id));
                                 for (child, child_variable) in
                                     component.interface_members.iter().chain(references)
                                 {

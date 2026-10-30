@@ -5,6 +5,7 @@ use crate::ir::{
     AssignDestination, Component, Comptime, Expression, FfTable, Statement, VarId, VarIndex,
     VarSelect,
 };
+use crate::ir::{Extent, Module};
 use crate::value::Value;
 use indent::indent_all_by;
 use std::fmt;
@@ -376,8 +377,12 @@ impl InstDeclaration {
                 dst.eval_assign(context, assign_table, AssignContext::SystemVerilog);
             }
         }
-        for process in lifted_processes(context, self) {
-            for write in &process.writes {
+        for process in lifted_processes(context, self, Module::is_direction_free_member) {
+            for write in process
+                .writes
+                .iter()
+                .filter(|x| x.extent == Extent::Written)
+            {
                 assign_table.insert_region(context, write);
             }
         }

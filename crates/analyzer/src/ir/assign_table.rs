@@ -1,6 +1,6 @@
 use crate::HashSet;
 use crate::conv::Context;
-use crate::ir::{RegionWrite, Shape, ShapeRef, VarId, VarIndex, VarPath, Variable, VariableInfo};
+use crate::ir::{RegionWrite, Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
 use crate::symbol::Affiliation;
 use crate::{AnalyzerError, BigUint, HashMap};
 use std::borrow::Cow;
@@ -41,14 +41,19 @@ pub struct AssignTableEntry {
 }
 
 impl AssignTableEntry {
-    pub fn new(variable: &VariableInfo, index: &[usize], mask: BigUint, token: TokenRange) -> Self {
+    /// `element` is the linear array index, or `None` if out of range.
+    pub fn new(
+        variable: &VariableInfo,
+        element: Option<usize>,
+        mask: BigUint,
+        token: TokenRange,
+    ) -> Self {
         let array = &variable.r#type.array;
         let mut masks = vec![];
 
-        let index = array.calc_index(index);
         if let Some(array) = array.total() {
             for i in 0..array {
-                if index == Some(i) {
+                if element == Some(i) {
                     masks.push(mask.clone());
                 } else {
                     masks.push(0u32.into());
@@ -66,8 +71,8 @@ impl AssignTableEntry {
         }
     }
 
-    pub fn add(&mut self, index: &[usize], mask: &BigUint, token: TokenRange) {
-        let Some(i) = self.array.calc_index(index) else {
+    pub fn add(&mut self, element: Option<usize>, mask: &BigUint, token: TokenRange) {
+        let Some(i) = element else {
             return;
         };
 
@@ -120,11 +125,11 @@ impl ReferencedEntry {
         }
     }
 
-    pub fn new_assign(index: &[usize], array: &ShapeRef, mask: &BigUint) -> Self {
+    pub fn new_assign(element: Option<usize>, array: &ShapeRef, mask: &BigUint) -> Self {
         let mut mask_ref = vec![];
         let mut mask_assign = vec![];
 
-        if let Some(index) = array.calc_index(index)
+        if let Some(index) = element
             && let Some(array) = array.total()
         {
             for i in 0..array {
@@ -152,8 +157,8 @@ impl ReferencedEntry {
         }
     }
 
-    pub fn add_assign(&mut self, index: &[usize], mask: &BigUint) {
-        if let Some(index) = self.array.calc_index(index)
+    pub fn add_assign(&mut self, element: Option<usize>, mask: &BigUint) {
+        if let Some(index) = element
             && let Some(x) = self.mask_assign.get_mut(index)
         {
             *x |= mask;
@@ -198,39 +203,47 @@ impl AssignTable {
         if variable.r#type.total_array().unwrap_or(0) > self.array_limit {
             return;
         }
+        let element = variable.r#type.array.calc_index(&index);
+        self.insert_element(variable, element, mask, token);
+    }
 
+    /// The written region of a summarized write.
+    pub fn insert_region(&mut self, context: &Context, write: &RegionWrite) {
+        let Some(variable) = context.get_variable_info(write.id) else {
+            return;
+        };
+        let Some(total) = variable.r#type.total_array() else {
+            return;
+        };
+        if total > self.array_limit {
+            return;
+        }
+        let mask = write.packed.mask();
+        let end = write.array.end().unwrap_or(usize::MAX).min(total);
+        for element in write.array.start..end {
+            self.insert_element(&variable, Some(element), mask.clone(), write.token);
+        }
+    }
+
+    fn insert_element(
+        &mut self,
+        variable: &VariableInfo,
+        element: Option<usize>,
+        mask: BigUint,
+        token: TokenRange,
+    ) {
         let array = &variable.r#type.array;
 
         // add assign bit
         self.refernced
             .entry(variable.id)
-            .and_modify(|x| x.add_assign(&index, &mask))
-            .or_insert(ReferencedEntry::new_assign(&index, array, &mask));
+            .and_modify(|x| x.add_assign(element, &mask))
+            .or_insert(ReferencedEntry::new_assign(element, array, &mask));
 
         self.table
             .entry(variable.id)
-            .and_modify(|x| x.add(&index, &mask, token))
-            .or_insert(AssignTableEntry::new(variable, &index, mask, token));
-    }
-
-    /// A summarized write, region by region.
-    pub fn insert_region(&mut self, context: &mut Context, write: &RegionWrite) {
-        let Some(variable) = context.get_variable_info(write.id) else {
-            return;
-        };
-        if variable.r#type.total_array().unwrap_or(0) > self.array_limit {
-            return;
-        }
-        let Some(end) = write.array.end() else {
-            return;
-        };
-        let mask = write.packed.mask();
-        for element in write.array.start..end {
-            let index = VarIndex::from_index(element, &variable.r#type.array);
-            if let Some(index) = index.eval_value(context) {
-                self.insert_assign(&variable, index, mask.clone(), write.token);
-            }
-        }
+            .and_modify(|x| x.add(element, &mask, token))
+            .or_insert(AssignTableEntry::new(variable, element, mask, token));
     }
 
     pub fn insert_reference(&mut self, variable: &Variable, index: Vec<usize>, mask: BigUint) {

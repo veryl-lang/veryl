@@ -1846,14 +1846,15 @@ fn connect_interface_references(
     let mut output_masks: HashMap<VarOffset, num_bigint::BigUint> = HashMap::default();
     for binding in bindings {
         if let Some(child) = child_metas.get(&binding.child) {
-            for (element, meta) in child.elements.iter().enumerate() {
-                let mask = if module.is_direction_free_member(binding.child) {
-                    module.write_summary.driven_bits(binding.child, element)
-                } else if inst.outputs.iter().any(|o| o.id == binding.child) {
-                    (num_bigint::BigUint::from(1u32) << child.width) - 1u32
-                } else {
-                    num_bigint::BigUint::default()
-                };
+            let elements = child.elements.len();
+            let masks = if module.is_direction_free_member(binding.child) {
+                module.write_summary.driven_masks(binding.child, elements)
+            } else if inst.outputs.iter().any(|o| o.id == binding.child) {
+                vec![(num_bigint::BigUint::from(1u32) << child.width) - 1u32; elements]
+            } else {
+                vec![num_bigint::BigUint::default(); elements]
+            };
+            for (meta, mask) in child.elements.iter().zip(masks) {
                 *output_masks.entry(meta.current).or_default() |= mask;
             }
         }
@@ -1969,13 +1970,6 @@ pub(crate) fn propagate_interface_initialization(
                 vec![]
             };
             for binding in &references {
-                let direction_free = child_module.is_direction_free_member(binding.child);
-                let written = direction_free
-                    && child_module
-                        .write_summary
-                        .writes(binding.child)
-                        .next()
-                        .is_some();
                 let (Some(parent), Some(child)) = (
                     metas.get(&binding.parent),
                     child_meta.variable_meta.get(&binding.child),
@@ -1992,40 +1986,48 @@ pub(crate) fn propagate_interface_initialization(
                 else {
                     continue;
                 };
-                for (element, child_element) in child.elements.iter().enumerate() {
-                    let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
-                    let mask = if direction_free {
-                        child_module
-                            .write_summary
-                            .driven_bits(binding.child, element)
-                    } else if inst.outputs.iter().any(|o| o.id == binding.child) {
-                        full.clone()
+                let direction_free = child_module.is_direction_free_member(binding.child);
+                let elements = child.elements.len();
+                let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
+                let (output_masks, initial_masks) = if direction_free {
+                    let summary = &child_module.write_summary;
+                    let initial = if summary.written(binding.child).next().is_some() {
+                        summary.written_masks(binding.child, elements)
                     } else {
-                        num_bigint::BigUint::default()
+                        vec![full.clone(); elements]
                     };
-                    if mask != 0u32.into() {
+                    (summary.driven_masks(binding.child, elements), initial)
+                } else if inst.outputs.iter().any(|o| o.id == binding.child) {
+                    (vec![full.clone(); elements], vec![full.clone(); elements])
+                } else {
+                    (
+                        vec![num_bigint::BigUint::default(); elements],
+                        vec![full.clone(); elements],
+                    )
+                };
+                for ((element, child_element), (output_mask, initial_mask)) in child
+                    .elements
+                    .iter()
+                    .enumerate()
+                    .zip(output_masks.into_iter().zip(initial_masks))
+                {
+                    let parent_element = &parent.elements[selection.source_start + element];
+                    if output_mask != 0u32.into() {
                         bindings.push(Binding {
-                            from: parent.elements[selection.source_start + element].clone(),
+                            from: parent_element.clone(),
                             to: child_element.clone(),
-                            mask,
+                            mask: output_mask,
                             width: child.width,
                             token: inst.token,
                         });
                     }
                     // Any initial store in the child reaches the same net,
                     // including bits with a runtime writer in the child.
-                    let mask = if written {
-                        child_module
-                            .write_summary
-                            .written_bits(binding.child, element)
-                    } else {
-                        full
-                    };
-                    if mask != 0u32.into() {
+                    if initial_mask != 0u32.into() {
                         bindings.push(Binding {
                             from: child_element.clone(),
-                            to: parent.elements[selection.source_start + element].clone(),
-                            mask,
+                            to: parent_element.clone(),
+                            mask: initial_mask,
                             width: child.width,
                             token: inst.token,
                         });
