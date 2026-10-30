@@ -9,6 +9,7 @@ use crate::lockfile::Lockfile;
 use crate::project::Project;
 use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
+use crate::sv;
 use crate::synth::Synth;
 use crate::test::Test;
 use crate::{FilelistType, MetadataError, SourceMapTarget};
@@ -53,6 +54,8 @@ pub struct Metadata {
     pub test: Test,
     #[serde(default)]
     pub synth: Synth,
+    #[serde(default)]
+    pub sv: sv::SV,
     #[serde(default)]
     pub properties: BTreeMap<String, ProjectProperty>,
     #[serde(default)]
@@ -209,6 +212,8 @@ impl Metadata {
     }
 
     pub fn publish(&mut self) -> Result<(), MetadataError> {
+        self.sv.check_publish()?;
+
         let prj_path = self.project_path();
         let git = Git::open(&prj_path)?;
         if !git.is_clean()? {
@@ -507,6 +512,43 @@ impl Metadata {
 
             let mut deps = self.lockfile.paths(&base_dst)?;
             ret.append(&mut deps);
+        }
+
+        Ok(ret)
+    }
+
+    /// Resolves SystemVerilog files and include directories of enabled
+    /// `[[sv.filesets]]`. Those of dependencies are placed before this
+    /// project's own ones. Paths written as absolute paths are returned as
+    /// absolute paths, and the others are relative to the output directory.
+    pub fn sv_sources(&mut self, include_dependencies: bool) -> Result<sv::Sources, MetadataError> {
+        let mut ret = sv::Sources::default();
+        let mut copied = Vec::new();
+
+        let out_base = self.output_dir();
+        let out_base = out_base.canonicalize().unwrap_or(out_base);
+
+        if include_dependencies {
+            self.update_lockfile()?;
+            let base_dst = self.output_dependencies_path();
+            ret.append(
+                self.lockfile
+                    .sv_sources(&base_dst, &out_base, &mut copied)?,
+            );
+        }
+
+        let base = self.project_path();
+        ret.append(self.sv.resolve(
+            &base,
+            &out_base,
+            &self.properties,
+            &self.project.name,
+            None,
+            &mut copied,
+        )?);
+
+        for path in copied {
+            self.add_generated_file(path);
         }
 
         Ok(ret)

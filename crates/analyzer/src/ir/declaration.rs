@@ -366,7 +366,7 @@ pub struct InstDeclaration {
 impl InstDeclaration {
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
         for mut process in self.assignment_processes(context) {
-            assign_table.merge_by_or_from(context, &mut process, true, true);
+            assign_table.merge_by_or(&mut process);
         }
     }
 
@@ -435,7 +435,7 @@ impl InstDeclaration {
                                 (&unknown, true, false),
                             ] {
                                 if *mask != 0u32.into() {
-                                    let _ = assign_table.insert_assign(
+                                    assign_table.insert_assign(
                                         &parent,
                                         index.clone(),
                                         mask << shift,

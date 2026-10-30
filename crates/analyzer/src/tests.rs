@@ -27,6 +27,7 @@ mod comb_loop_sparse_tests;
 mod comb_loop_summary_tests;
 mod comb_loop_tier_tests;
 mod constant_evaluation_tests;
+mod driver_check_tests;
 mod dynamic_packed_member_tests;
 mod generic_interface_port_tests;
 mod instantiation_note_tests;
@@ -1863,6 +1864,36 @@ fn multiple_assignment() {
         for i in 0..2 :g {
             always_comb {
             _a[i] = '0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA(
+        clk : input clock,
+        a0 : input logic<3>,
+        a1 : input logic<3>,
+        d0 : input logic,
+        d1 : input logic,
+    ) {
+        #[ifdef(FOO)]
+        {
+            // This block will not be evaluated
+        }
+        #[else]
+        {
+            #[allow(multiple_assign)]
+            var memory : logic[8];
+
+            always_ff {
+                memory[a0] = d0;
+            }
+            always_ff {
+                memory[a1] = d1;
             }
         }
     }

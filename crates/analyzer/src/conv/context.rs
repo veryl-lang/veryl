@@ -788,47 +788,19 @@ impl Context {
     }
 
     fn insert_error_with_note(&mut self, mut error: AnalyzerError, note: Option<InstanceNote>) {
-        let mut replaced = false;
-
-        // merge MultipleAssignment which have same identifier
-        if let AnalyzerError::MultipleAssignment {
-            identifier: ref new_ident,
-            error_locations: ref mut new_locations,
-            ..
-        } = error
-        {
-            for e in &mut self.errors.errors {
-                if let AnalyzerError::MultipleAssignment {
-                    identifier: org_ident,
-                    error_locations: org_locations,
-                    ..
-                } = e
-                    && new_ident == org_ident
-                {
-                    org_locations.append(new_locations);
-                    org_locations.sort();
-                    org_locations.dedup();
-                    replaced = true;
-                    break;
-                }
+        let existing = self
+            .errors
+            .errors
+            .iter_mut()
+            .position(|x| x.same_report(&mut error));
+        if let Some(existing) = existing {
+            // Raised without an override too, so no instance explains it.
+            if note.is_none() {
+                *self.errors.errors[existing].instance_mut() = None;
             }
-        }
-
-        if !replaced {
-            let existing = self
-                .errors
-                .errors
-                .iter_mut()
-                .position(|x| x.same_report(&mut error));
-            if let Some(existing) = existing {
-                // Raised without an override too, so no instance explains it.
-                if note.is_none() {
-                    *self.errors.errors[existing].instance_mut() = None;
-                }
-            } else {
-                *error.instance_mut() = note;
-                self.errors.errors.push(error);
-            }
+        } else {
+            *error.instance_mut() = note;
+            self.errors.errors.push(error);
         }
     }
 

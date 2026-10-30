@@ -24,7 +24,6 @@
 mod coarse;
 mod diagnostics;
 mod graph;
-mod hierarchy;
 mod model;
 mod procedure;
 mod region;
@@ -43,6 +42,7 @@ pub(crate) use procedure::{
     traced_procedure_evaluation_count, visible_source_probes, write_footprint_statement_visits,
 };
 
+use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use diagnostics::{DiagnosticReplayCache, TraceKind, check_graph};
 #[cfg(test)]
 pub(crate) use diagnostics::{
@@ -59,10 +59,7 @@ pub(crate) use graph::{
     cycle_decision_work, cycle_search_work, reset_cycle_decision_work, reset_cycle_search_work,
 };
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
-use region::{
-    ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
-    translate_position, var_reads,
-};
+use region::{BitPartition, IdxKey, NodeKey, signed_difference, translate_position};
 use ssa::{BranchId, DependencyDagNode, PathCondition, PositionDomain};
 #[cfg(test)]
 pub(crate) use ssa::{
@@ -181,7 +178,8 @@ struct ModuleMissCheck {
 impl CoarseMissCheck {
     fn enter(&mut self, module: &Module, verdict: &coarse::CoarseVerdict) -> ModuleMissCheck {
         let acyclic = verdict.proves_acyclic()
-            && hierarchy::child_modules(module)
+            && module
+                .child_modules()
                 .all(|child| self.acyclic_below.contains(&child.signature));
         if acyclic {
             self.acyclic_below.insert(module.signature.clone());
@@ -256,7 +254,8 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
         };
         let key = recording.then(|| unit::key_of(&module.signature));
         if let Some(key) = &key {
-            let children = hierarchy::child_modules(module)
+            let children = module
+                .child_modules()
                 .map(|x| unit::key_of(&x.signature))
                 .collect();
             let symbol = unit::symbol_name(module);
