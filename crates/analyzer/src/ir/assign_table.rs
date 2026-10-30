@@ -238,12 +238,12 @@ impl AssignTable {
         self.refernced
             .entry(variable.id)
             .and_modify(|x| x.add_assign(element, &mask))
-            .or_insert(ReferencedEntry::new_assign(element, array, &mask));
+            .or_insert_with(|| ReferencedEntry::new_assign(element, array, &mask));
 
         self.table
             .entry(variable.id)
             .and_modify(|x| x.add(element, &mask, token))
-            .or_insert(AssignTableEntry::new(variable, element, mask, token));
+            .or_insert_with(|| AssignTableEntry::new(variable, element, mask, token));
     }
 
     pub fn insert_reference(&mut self, variable: &Variable, index: Vec<usize>, mask: BigUint) {
