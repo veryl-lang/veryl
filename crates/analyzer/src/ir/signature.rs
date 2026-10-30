@@ -242,6 +242,42 @@ impl Signature {
         Some(sig)
     }
 
+    /// Identifies the signature across runs, where symbol IDs and tokens differ.
+    pub fn stable_key(&self) -> String {
+        let mut ret = String::new();
+        self.write_stable_key(&mut ret);
+        ret
+    }
+
+    fn write_stable_key(&self, ret: &mut String) {
+        use std::fmt::Write;
+
+        write_stable_symbol(self.symbol, ret);
+        for x in &self.full_path {
+            let _ = write!(ret, "/{x}");
+        }
+        for (name, value) in &self.parameters {
+            let _ = match value {
+                ValueVariant::Numeric(x) => write!(ret, "#{name}={x:?}"),
+                ValueVariant::NumericArray(x) => write!(ret, "#{name}={x:?}"),
+                ValueVariant::Type(x) => {
+                    let _ = write!(ret, "#{name}:");
+                    write_stable_type(x, ret);
+                    Ok(())
+                }
+                ValueVariant::Unknown => write!(ret, "#{name}?"),
+            };
+        }
+        for (name, path) in &self.generic_parameters {
+            let _ = write!(ret, "<{name}={path}>");
+        }
+        for (name, sig) in &self.modport_signatures {
+            let _ = write!(ret, "({name}=");
+            sig.write_stable_key(ret);
+            ret.push(')');
+        }
+    }
+
     pub fn to_generic_map(&self) -> Vec<GenericMap> {
         let mut ret = GenericMap::default();
 
@@ -281,6 +317,53 @@ impl fmt::Display for Signature {
         }
 
         ret.fmt(f)
+    }
+}
+
+fn write_stable_symbol(id: SymbolId, ret: &mut String) {
+    use std::fmt::Write;
+
+    let symbol = symbol_table::get(id).unwrap();
+    let _ = write!(ret, "{}::{}", symbol.namespace, symbol.token.text);
+}
+
+/// `x` as text that tells apart the types it is not equal to, across runs.
+pub fn stable_type(x: &crate::ir::Type) -> String {
+    let mut ret = String::new();
+    write_stable_type(x, &mut ret);
+    ret
+}
+
+/// The `Display` of a type leaves out what tells same-shaped types apart:
+/// the name of an enum, struct or union, the parameters of a component, and
+/// the expressions its width and array were written with.
+fn write_stable_type(x: &crate::ir::Type, ret: &mut String) {
+    use crate::ir::TypeKind;
+    use std::fmt::Write;
+
+    let _ = write!(ret, "{x}");
+    if x.is_positive {
+        ret.push('+');
+    }
+    for (mark, exprs) in [('w', x.width_expr()), ('a', x.array_expr())] {
+        for expr in exprs {
+            let _ = write!(ret, "{mark}({expr})");
+        }
+    }
+    match &x.kind {
+        TypeKind::Struct(x) => write_stable_symbol(x.id, ret),
+        TypeKind::Union(x) => write_stable_symbol(x.id, ret),
+        TypeKind::Enum(x) => write_stable_symbol(x.id, ret),
+        TypeKind::Module(x)
+        | TypeKind::Interface(x)
+        | TypeKind::Modport(x, _)
+        | TypeKind::Package(x)
+        | TypeKind::Instance(x, _) => {
+            ret.push('[');
+            x.write_stable_key(ret);
+            ret.push(']');
+        }
+        _ => (),
     }
 }
 
