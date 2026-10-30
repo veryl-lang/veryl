@@ -56,7 +56,9 @@ impl RegionWrite {
     /// Extend this region by `other` of the same key when the union is a
     /// region.
     fn coalesce(&mut self, other: &RegionWrite) -> bool {
-        if self.array == other.array
+        if self.array.contains(other.array) && self.packed.contains(other.packed) {
+            true
+        } else if self.array == other.array
             && let Some(packed) = self.packed.union(other.packed)
         {
             self.packed = packed;
@@ -183,8 +185,8 @@ struct Collector {
     extent: Extent,
     /// The latest write of each key, which the next one may extend.
     latest: HashMap<WriteKey, usize>,
-    /// Regions already recorded, which repeat in every iteration of an
-    /// enclosing loop.
+    /// The regions that started a write, which repeat in every iteration of
+    /// an enclosing loop. One per write, so it grows with the summary.
     recorded: HashSet<(WriteKey, ArraySpan, PackedSpan)>,
 }
 
@@ -221,13 +223,13 @@ impl Collector {
                 token: dst.token,
             };
             let key = (write.id, write.driving, write.extent, write.token);
-            if !self.recorded.insert((key, array, packed)) {
-                continue;
-            }
             // Successive iterations usually write adjacent regions.
             if let Some(&latest) = self.latest.get(&key)
                 && self.writes[latest].coalesce(&write)
             {
+                continue;
+            }
+            if !self.recorded.insert((key, array, packed)) {
                 continue;
             }
             self.latest.insert(key, self.writes.len());
