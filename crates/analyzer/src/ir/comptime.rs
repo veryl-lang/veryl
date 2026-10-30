@@ -10,6 +10,7 @@ use crate::literal::TypeLiteral;
 use crate::symbol::ClockDomain;
 use crate::symbol::{Direction, SymbolId};
 use crate::value::Value;
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::{Arc, LazyLock};
 use veryl_parser::resource_table::StrId;
@@ -162,6 +163,17 @@ impl PartSelectPath {
 
         for (i, x) in part_select.enumerate() {
             let has_sub_part = i != (len - 1);
+            let x = if !has_sub_part
+                && x.r#type.width.dims() == 0
+                && (!select.is_empty() || range_select.is_some())
+                && (x.r#type.is_struct_union() || x.r#type.is_enum())
+            {
+                let mut r#type = x.r#type.clone();
+                r#type.flatten_struct_union_enum();
+                Cow::Owned(PartSelect { pos: x.pos, r#type })
+            } else {
+                Cow::Borrowed(x)
+            };
             let dims = x.r#type.width.dims();
             let select_dims = select.len().min(dims);
             let remaining_dims = dims - select_dims;
