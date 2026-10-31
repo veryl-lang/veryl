@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_inline_function (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_inline_function)
+
+  × "f" can't be inlined because it has arguments
+   ╭─[../../testcases/error/invalid_inline_function.veryl:5:14]
+ 4 │     #[inline]
+ 5 │     function f (
+   ·              ┬
+   ·              ╰── Error location
+ 6 │         x: input logic,
+   ╰────
+  help:

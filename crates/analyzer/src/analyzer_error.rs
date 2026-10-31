@@ -752,6 +752,25 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_inline_function),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" can't be inlined because {kind}")]
+    InvalidInlineFunction {
+        kind: InvalidInlineFunctionKind,
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_modport_item),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2767,6 +2786,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidLogicalOperand { input, .. } => input,
             AnalyzerError::InvalidLsb { input, .. } => input,
             AnalyzerError::InvalidModifier { input, .. } => input,
+            AnalyzerError::InvalidInlineFunction { input, .. } => input,
             AnalyzerError::InvalidModportItem { input, .. } => input,
             AnalyzerError::InvalidMsb { input, .. } => input,
             AnalyzerError::InvalidNumberCharacter { input, .. } => input,
@@ -2899,6 +2919,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidLogicalOperand { input, .. } => input,
             AnalyzerError::InvalidLsb { input, .. } => input,
             AnalyzerError::InvalidModifier { input, .. } => input,
+            AnalyzerError::InvalidInlineFunction { input, .. } => input,
             AnalyzerError::InvalidModportItem { input, .. } => input,
             AnalyzerError::InvalidMsb { input, .. } => input,
             AnalyzerError::InvalidNumberCharacter { input, .. } => input,
@@ -3038,6 +3059,7 @@ impl AnalyzerError {
             AnalyzerError::UnsignedArithShift { instance, .. } => instance,
             AnalyzerError::InvalidLsb { instance, .. } => instance,
             AnalyzerError::InvalidModifier { instance, .. } => instance,
+            AnalyzerError::InvalidInlineFunction { instance, .. } => instance,
             AnalyzerError::InvalidModportItem { instance, .. } => instance,
             AnalyzerError::InvalidMsb { instance, .. } => instance,
             AnalyzerError::InvalidNumberCharacter { instance, .. } => instance,
@@ -3170,6 +3192,7 @@ impl AnalyzerError {
             AnalyzerError::UnsignedArithShift { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidLsb { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidModifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidInlineFunction { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidModportItem { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidMsb { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidNumberCharacter { instance, .. } => instance.as_ref(),
@@ -3302,6 +3325,7 @@ impl AnalyzerError {
             AnalyzerError::UnsignedArithShift { token_source, .. } => *token_source,
             AnalyzerError::InvalidLsb { token_source, .. } => *token_source,
             AnalyzerError::InvalidModifier { token_source, .. } => *token_source,
+            AnalyzerError::InvalidInlineFunction { token_source, .. } => *token_source,
             AnalyzerError::InvalidModportItem { token_source, .. } => *token_source,
             AnalyzerError::InvalidMsb { token_source, .. } => *token_source,
             AnalyzerError::InvalidNumberCharacter { token_source, .. } => *token_source,
@@ -3809,6 +3833,20 @@ impl AnalyzerError {
         AnalyzerError::InvalidModifier {
             kind: kind.to_string(),
             reason,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn invalid_inline_function(
+        kind: InvalidInlineFunctionKind,
+        identifier: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidInlineFunction {
+            kind,
+            identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -5031,6 +5069,35 @@ impl fmt::Display for InvalidModifierKind {
                 "the given type is not a single bit clock nor a single bit reset".fmt(f)
             }
             InvalidModifierKind::NetInFunction => "a function argument can't be a net type".fmt(f),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InvalidInlineFunctionKind {
+    NotInInterface,
+    HasArgument,
+    NoReturnType,
+    NotSingleReturn,
+    InterfaceLocalReference,
+    RecursiveCall,
+}
+
+impl fmt::Display for InvalidInlineFunctionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidInlineFunctionKind::NotInInterface => {
+                "it is not declared directly in an interface".fmt(f)
+            }
+            InvalidInlineFunctionKind::HasArgument => "it has arguments".fmt(f),
+            InvalidInlineFunctionKind::NoReturnType => "it has no return type".fmt(f),
+            InvalidInlineFunctionKind::NotSingleReturn => {
+                "its body is not a single return statement".fmt(f)
+            }
+            InvalidInlineFunctionKind::InterfaceLocalReference => {
+                "it refers to a type, const or param declared in the interface".fmt(f)
+            }
+            InvalidInlineFunctionKind::RecursiveCall => "it calls itself".fmt(f),
         }
     }
 }

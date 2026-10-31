@@ -199,7 +199,7 @@ impl Analyzer {
         ret.append(&mut symbol_table::apply_connect());
         // Function effects for diamond connections depend on the linked
         // modports and validated connection pairs produced above.
-        symbol_table::resolve_function();
+        ret.append(&mut symbol_table::resolve_function());
         generic_inference_table::resolve_pending();
         ret.append(&mut reference_table::apply());
         ret.append(&mut type_dag::apply());

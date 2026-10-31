@@ -139,6 +139,19 @@ pub struct Emitter {
     // ----- Modport expansion -----------------------------------------------
     modport_connections_tables: Vec<ExpandModportConnectionsTable>,
     modport_ports_table: Option<ExpandedModportPortTable>,
+
+    // ----- Inline function expansion ---------------------------------------
+    inline_contexts: Vec<InlineContext>,
+}
+
+/// Context to emit the expression of an `#[inline]` function at its call site
+#[derive(Clone)]
+struct InlineContext {
+    /// The interface where the inlined function is declared
+    interface: Namespace,
+    /// The identifier referring to the interface at the call site like `a_if` of `a_if.f()`,
+    /// and the dot following it. `None` if called inside the interface.
+    prefix: Option<(ExpressionIdentifier, Dot)>,
 }
 
 impl Default for Emitter {
@@ -202,6 +215,8 @@ impl Default for Emitter {
 
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
+
+            inline_contexts: Vec::new(),
         }
     }
 }
@@ -2970,6 +2985,232 @@ impl Emitter {
         self.align_reset();
     }
 
+    fn get_inline_function(&self, identifier: &ExpressionIdentifier) -> Option<Rc<Symbol>> {
+        let symbol = if let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) {
+            symbol
+        } else {
+            symbol_table::resolve(identifier).ok()?
+        };
+        let symbol = match &symbol.found.kind {
+            SymbolKind::Function(_) => Rc::clone(&symbol.found),
+            SymbolKind::ModportFunctionMember(x) => Rc::new(symbol_table::get(x.function)?),
+            _ => return None,
+        };
+        attribute_table::contains(&symbol.token, Attr::Inline).then_some(symbol)
+    }
+
+    /// Returns the generic map of the interface referred by `identifier` like `a_if` of `a_if.f()`
+    fn get_inline_interface_map(&self, identifier: &ExpressionIdentifier) -> Option<GenericMap> {
+        let symbol = symbol_table::resolve(identifier).ok()?;
+        let mut path = match &symbol.found.kind {
+            SymbolKind::Port(x) => match &x.r#type.kind {
+                TypeKind::UserDefined(x) => x.path.clone(),
+                _ => return None,
+            },
+            SymbolKind::Instance(x) => x.type_name.clone(),
+            _ => return None,
+        };
+
+        while !path.paths.is_empty() {
+            let (Ok(found), _) = self.resolve_generic_path(&path, Some(&symbol.found.namespace))
+            else {
+                return None;
+            };
+            match &found.found.kind {
+                SymbolKind::Interface(_) => return Some(GenericMap::default()),
+                SymbolKind::GenericInstance(_) => return found.found.generic_maps().pop(),
+                // `a_if: modport InterfaceA::slave`
+                SymbolKind::Modport(_) => {
+                    path.paths.pop();
+                }
+                _ => return None,
+            }
+        }
+
+        None
+    }
+
+    /// Returns the generic map of the given interface which is currently emitted
+    fn get_current_interface_map(&self, interface: &Symbol) -> GenericMap {
+        // The map of the function being emitted may be pushed above the map of the interface
+        self.generic_map
+            .iter()
+            .rev()
+            .flatten()
+            .find(|x| {
+                x.id.and_then(symbol_table::get).is_some_and(
+                    |x| matches!(&x.kind, SymbolKind::GenericInstance(x) if x.base == interface.id),
+                )
+            })
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn inline_types_package_name(&mut self, interface: &Symbol, map: &GenericMap) -> String {
+        let name = if map.generic() {
+            let name = map.name(true, self.build_opt.hashed_mangled_name);
+            let name = if self.build_opt.omit_project_prefix {
+                let project_name = format!("{}_", self.project_name.unwrap());
+                name.strip_prefix(&project_name)
+                    .map(|x| x.to_string())
+                    .unwrap_or(name)
+            } else {
+                name
+            };
+            name.replace("$std_", "__std_")
+        } else {
+            let context: SymbolContext = self.into();
+            format!(
+                "{}__{}",
+                namespace_string(&interface.namespace, &GenericTables::default(), &context),
+                interface.token
+            )
+        };
+        format!("{name}__inline_types")
+    }
+
+    /// Emits the call of an `#[inline]` function as its expression.
+    /// Returns false if the given function is not an `#[inline]` function.
+    fn emit_inline_function_call(&mut self, identifier: &ExpressionIdentifier) -> bool {
+        let Some(function) = self.get_inline_function(identifier) else {
+            return false;
+        };
+        let Some(interface) = function.get_parent() else {
+            return false;
+        };
+        let Some(expression) = get_inline_expression(&function) else {
+            return false;
+        };
+
+        let (prefix, map) = if let Some(last) = identifier.expression_identifier_list0.last() {
+            let mut prefix = identifier.clone();
+            prefix.expression_identifier_list0.pop();
+            let Some(map) = self.get_inline_interface_map(&prefix) else {
+                return false;
+            };
+            (Some((prefix, *last.dot.clone())), Some(map))
+        } else if let Some(context) = self.inline_contexts.last() {
+            // nested call in an inlined expression
+            (context.prefix.clone(), None)
+        } else {
+            // call inside the interface
+            (None, None)
+        };
+
+        let current_map = map
+            .clone()
+            .unwrap_or_else(|| self.get_current_interface_map(&interface));
+        let package = self.inline_types_package_name(&interface, &current_map);
+        self.str(&format!("{package}::{}_ret_t'(", function.token));
+
+        let map_pushed = map.is_some();
+        if let Some(map) = map {
+            self.push_generic_map(map);
+        }
+
+        let src_line = self.src_line;
+        let emit_package_prefix = self.emit_package_prefix;
+        self.emit_package_prefix = true;
+        self.clear_adjust_line();
+        self.inline_contexts.push(InlineContext {
+            interface: interface.inner_namespace(),
+            prefix,
+        });
+
+        self.expression(&expression);
+
+        self.inline_contexts.pop();
+        self.src_line = src_line;
+        self.emit_package_prefix = emit_package_prefix;
+
+        if map_pushed {
+            self.pop_generic_map();
+        }
+
+        self.str(")");
+        true
+    }
+
+    /// Returns the identifier prefixed by the interface identifier of the call site
+    /// if `arg` refers to a member of the interface in an inlined expression.
+    fn get_inline_member_identifier(
+        &self,
+        arg: &ExpressionIdentifier,
+    ) -> Option<ExpressionIdentifier> {
+        let context = self.inline_contexts.last()?;
+        let (prefix, dot) = context.prefix.as_ref()?;
+
+        let symbol = symbol_table::resolve(arg.scoped_identifier.as_ref()).ok()?;
+        let is_member = matches!(
+            symbol.found.kind,
+            SymbolKind::Variable(_) | SymbolKind::Function(_)
+        ) && symbol.found.namespace.matched(&context.interface);
+        if !is_member {
+            return None;
+        }
+
+        let mut ret = prefix.clone();
+        ret.expression_identifier_list0
+            .push(ExpressionIdentifierList0 {
+                dot: Box::new(dot.clone()),
+                identifier: Box::new(Identifier {
+                    identifier_token: arg.identifier().clone(),
+                }),
+                expression_identifier_list0_list: arg
+                    .expression_identifier_list
+                    .iter()
+                    .map(|x| ExpressionIdentifierList0List {
+                        select: x.select.clone(),
+                    })
+                    .collect(),
+            });
+        ret.expression_identifier_list0
+            .extend(arg.expression_identifier_list0.iter().cloned());
+        Some(ret)
+    }
+
+    fn emit_inline_types_package(
+        &mut self,
+        arg: &InterfaceDeclaration,
+        interface: &Symbol,
+        map: &GenericMap,
+    ) {
+        let functions = collect_inline_functions(arg);
+        if functions.is_empty() {
+            return;
+        }
+
+        // Emit the blank line before the interface ahead of the package
+        self.consume_adjust_line(&arg.interface.interface_token.token);
+
+        let name = self.inline_types_package_name(interface, map);
+        self.str(&format!("package {name};"));
+        self.newline_push();
+
+        let src_line = self.src_line;
+        let emit_package_prefix = self.emit_package_prefix;
+        self.emit_package_prefix = true;
+        for (i, function) in functions.iter().enumerate() {
+            let Some(ret) = &function.function_declaration_opt1 else {
+                continue;
+            };
+            if i != 0 {
+                self.newline();
+            }
+            self.clear_adjust_line();
+            self.str("typedef ");
+            self.emit_scalar_type(&ret.scalar_type, false);
+            self.str(&format!(" {}_ret_t;", function.identifier.identifier_token));
+        }
+        self.src_line = src_line;
+        self.emit_package_prefix = emit_package_prefix;
+
+        self.newline_pop();
+        self.str("endpackage");
+        self.newline();
+        self.clear_adjust_line();
+    }
+
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let SymbolKind::Modport(x) = &symbol.found.kind {
@@ -3666,6 +3907,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
+        if let Some(x) = self.get_inline_member_identifier(arg) {
+            // The prefix is an identifier of the call site, so emit it outside the inline context
+            let context = self.inline_contexts.pop();
+            self.expression_identifier(&x);
+            self.inline_contexts.extend(context);
+            return;
+        }
+
         let mut expanded_modport = None;
         if let Some(table) = self.modport_ports_table.as_ref()
             && let Some(member_identifier) = arg.expression_identifier_list0.first()
@@ -4071,8 +4320,10 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.identifier_factor_opt {
             match x.identifier_factor_opt_group.as_ref() {
                 IdentifierFactorOptGroup::FunctionCall(x) => {
-                    self.expression_identifier(&arg.expression_identifier);
-                    self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                    if !self.emit_inline_function_call(&arg.expression_identifier) {
+                        self.expression_identifier(&arg.expression_identifier);
+                        self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                    }
                 }
                 IdentifierFactorOptGroup::StructConstructor(x) => {
                     self.expression_identifier(&arg.expression_identifier);
@@ -6487,6 +6738,7 @@ impl VerylWalker for Emitter {
             }
             self.push_generic_map(map.clone());
 
+            self.emit_inline_types_package(arg, &symbol.found, map);
             self.emit_generic_instance_name_comment(map);
             self.interface(&arg.interface);
             self.space(1);
@@ -7510,4 +7762,57 @@ fn estimated_token_width(tokens: &[Token]) -> u32 {
         total += gap;
     }
     total
+}
+
+fn get_inline_expression(function: &Symbol) -> Option<Expression> {
+    let SymbolKind::Function(x) = &function.kind else {
+        return None;
+    };
+    let definition = definition_table::get(x.definition?)?;
+    let Definition::Function(definition) = definition.as_ref() else {
+        return None;
+    };
+    let [item] = definition.statement_block.statement_block_list.as_slice() else {
+        return None;
+    };
+    if let StatementBlockGroupGroup::StatementBlockItem(x) = item
+        .statement_block_group
+        .statement_block_group_group
+        .as_ref()
+        && let StatementBlockItem::Statement(x) = x.statement_block_item.as_ref()
+        && let Statement::ReturnStatement(x) = x.statement.as_ref()
+    {
+        Some(*x.return_statement.expression.clone())
+    } else {
+        None
+    }
+}
+
+fn collect_inline_functions(arg: &InterfaceDeclaration) -> Vec<FunctionDeclaration> {
+    fn collect(group: &InterfaceGroup, ret: &mut Vec<FunctionDeclaration>) {
+        match group.interface_group_group.as_ref() {
+            InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
+                for x in &x.interface_group_group_list {
+                    collect(&x.interface_group, ret);
+                }
+            }
+            InterfaceGroupGroup::InterfaceItem(x) => {
+                if let InterfaceItem::GenerateItem(x) = x.interface_item.as_ref()
+                    && let GenerateItem::FunctionDeclaration(x) = x.generate_item.as_ref()
+                    && attribute_table::contains(
+                        &x.function_declaration.identifier.identifier_token.token,
+                        Attr::Inline,
+                    )
+                {
+                    ret.push(*x.function_declaration.clone());
+                }
+            }
+        }
+    }
+
+    let mut ret = Vec::new();
+    for x in &arg.interface_declaration_list {
+        collect(&x.interface_group, &mut ret);
+    }
+    ret
 }

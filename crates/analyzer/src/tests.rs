@@ -2980,6 +2980,413 @@ fn invalid_modport_item() {
 }
 
 #[test]
+fn invalid_inline_function() {
+    use crate::analyzer_error::InvalidInlineFunctionKind;
+
+    let has_kind = |errors: &[AnalyzerError], kind: InvalidInlineFunctionKind| {
+        errors.iter().any(|e| {
+            matches!(
+                e,
+                AnalyzerError::InvalidInlineFunction { kind: x, .. } if *x == kind
+            )
+        })
+    };
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        var b: logic;
+        #[inline]
+        function f -> logic {
+            return a && b;
+        }
+        #[inline]
+        function g() -> logic {
+            return f() && a;
+        }
+        function h -> logic {
+            return a;
+        }
+        #[inline]
+        function i -> logic {
+            return h() && b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    package PackageA {
+        type T = logic<8>;
+        const C: u32 = 1;
+    }
+    proto package ProtoPackageA {
+        type T;
+    }
+    package PackageB for ProtoPackageA {
+        type T = logic<4>;
+    }
+    interface InterfaceA::<PKG: ProtoPackageA> {
+        var a: PackageA::T;
+        var b: PKG::T;
+        #[inline]
+        function f -> PackageA::T {
+            return a + PackageA::C;
+        }
+        #[inline]
+        function g -> PKG::T {
+            return b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            return a;
+        }
+        assign a = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotInInterface),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    package PackageA {
+        #[inline]
+        function f -> logic {
+            return 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotInInterface),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA #(
+        param P: bit = 1,
+    ) {
+        var a: logic;
+        if P :g {
+            #[inline]
+            function f -> logic {
+                return a;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotInInterface),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        #[inline]
+        function f(x: input logic) -> logic {
+            return x;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::HasArgument),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f {
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NoReturnType),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            if a {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            let x: logic = a;
+            return x;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            const X: u32 = 1;
+            return a == X;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            var x: logic;
+            x = a;
+            return x;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    // Type declared in the interface, referred in the return type
+    let code = r#"
+    interface InterfaceA {
+        type T = logic<8>;
+        var a: logic<8>;
+        #[inline]
+        function f -> T {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Type declared in the interface, referred in the expression
+    let code = r#"
+    interface InterfaceA {
+        type T = logic<8>;
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<8> {
+            return a as T;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Const declared in the interface, referred in the return type
+    let code = r#"
+    interface InterfaceA {
+        const C: u32 = 8;
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<C> {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Const declared in the interface, referred in the expression
+    let code = r#"
+    interface InterfaceA {
+        const C: u32 = 1;
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<8> {
+            return a + C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Param of the interface, referred in the return type
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 8,
+    ) {
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<W> {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Param of the interface, referred in the expression
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 1,
+    ) {
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<8> {
+            return a + W;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Self recursion
+    let code = r#"
+    interface InterfaceA {
+        #[inline]
+        function f -> u32 {
+            return f();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::RecursiveCall),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            return a && f();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::RecursiveCall),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    package PackageA {
+        function g(x: input logic) -> logic {
+            return x;
+        }
+    }
+    interface InterfaceA {
+        #[inline]
+        function f -> logic {
+            return PackageA::g(f());
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::RecursiveCall),
+        "{errors:?}"
+    );
+
+    // Mutual recursion is reported as a cyclic dependency
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            return g() && a;
+        }
+        #[inline]
+        function g -> logic {
+            return f();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CyclicTypeDependency { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn invalid_port_default_value() {
     let code = r#"
     module ModuleA (
@@ -3572,6 +3979,22 @@ fn mismatch_attribute_args() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::MismatchAttributeArgs { .. }))
     );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline(foo)]
+        function f -> logic {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAttributeArgs { .. }
+    ));
 }
 
 #[test]

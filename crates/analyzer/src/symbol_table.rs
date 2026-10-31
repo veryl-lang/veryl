@@ -3571,9 +3571,9 @@ pub fn resolve_user_defined() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
 }
 
-pub fn resolve_function() {
+pub fn resolve_function() -> Vec<AnalyzerError> {
     let list = SYMBOL_TABLE.with(|f| f.borrow().get_function_symbols());
-    function::resolve_function(&list);
+    function::resolve_function(&list)
 }
 
 pub fn resolve_enum() -> Vec<AnalyzerError> {
