@@ -756,26 +756,26 @@ impl Statement {
                     | TbMethodKind::RandomGetSeed { ret } => ret.as_ref().map(|(id, _)| *id),
                     _ => None,
                 };
-                if let Some(var) = ret_id.and_then(|id| variables.variables.get(&id)) {
-                    if let Some(&current) = var.current_values.first() {
-                        let in_ff = (ff_base as usize..ff_base as usize + ff_len)
-                            .contains(&(current as usize));
-                        let dst = if in_ff {
-                            var.next_values.first().copied().unwrap_or(current)
-                        } else {
-                            current
-                        };
-                        let ff_log_offset =
-                            in_ff.then(|| (current as usize - ff_base as usize) as u32);
-                        *ret_binding = Some(TbReturnBinding {
-                            dst,
-                            width: var.width,
-                            native_bytes: var.native_bytes,
-                            use_4state,
-                            ff_log_offset,
-                            ff_is_packed: in_ff && dst == current,
-                        });
-                    }
+                if let Some(var) = ret_id.and_then(|id| variables.variables.get(&id))
+                    && let Some(&current) = var.current_values.first()
+                {
+                    let in_ff = (ff_base as usize..ff_base as usize + ff_len)
+                        .contains(&(current as usize));
+                    let dst = if in_ff {
+                        var.next_values.first().copied().unwrap_or(current)
+                    } else {
+                        current
+                    };
+                    let ff_log_offset =
+                        in_ff.then(|| (current as usize - ff_base as usize) as u32);
+                    *ret_binding = Some(TbReturnBinding {
+                        dst,
+                        width: var.width,
+                        native_bytes: var.native_bytes,
+                        use_4state,
+                        ff_log_offset,
+                        ff_is_packed: in_ff && dst == current,
+                    });
                 }
             }
             Statement::If(x) => {
