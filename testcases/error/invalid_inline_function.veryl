@@ -1,0 +1,10 @@
+interface invalid_inline_function {
+    var a: logic;
+
+    #[inline]
+    function f (
+        x: input logic,
+    ) -> logic {
+        return a && x;
+    }
+}
