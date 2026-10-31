@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_modport_dependency (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_modport_dependency)
+
+  × "data" referred by function "set_data" is assigned but not exported as output or inout by modport "master"
+    ╭─[../../testcases/error/missing_modport_dependency_not_writable.veryl:12:9]
+ 11 │         data    : input ,
+ 12 │         set_data: import,
+    ·         ────┬───
+    ·             ╰── Error location
+ 13 │     }
+    ╰────
+  help: export "data" by modport "master" with the required direction

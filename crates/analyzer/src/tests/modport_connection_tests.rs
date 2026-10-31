@@ -173,7 +173,7 @@ fn modport_connection_imported_function_preserves_capture_binding() {
         interface Bus {
             var data: logic;
             function read () -> logic { return data; }
-            modport mp { read: import, }
+            modport mp { data: input, read: import, }
         }
         module Reader (bus: modport Bus::mp, o: output logic) {
             assign o = bus.read();

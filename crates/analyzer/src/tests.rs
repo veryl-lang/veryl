@@ -2980,6 +2980,290 @@ fn invalid_modport_item() {
 }
 
 #[test]
+fn missing_modport_dependency() {
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+        var data : logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        function set_data(x: input logic) {
+            data = x;
+        }
+
+        modport mp {
+            ready   : input ,
+            valid   : input ,
+            data    : output,
+            ack     : import,
+            set_data: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // variables assigned in functions must be exported as writable
+    let code = r#"
+    interface InterfaceA {
+        var data: logic;
+
+        function set_data(x: input logic) {
+            data = x;
+        }
+
+        modport mp {
+            data    : input ,
+            set_data: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var data: tri logic;
+
+        function set_data(x: input logic) {
+            data = x;
+        }
+
+        modport mp {
+            data    : inout ,
+            set_data: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport mp {
+            ack: import,
+        }
+    }
+    module ModuleA (
+        bus: modport InterfaceA::mp,
+        o  : output logic          ,
+    ) {
+        assign o = bus.ack();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport mp {
+            ready: input ,
+            ack  : import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    // variables referenced through functions called in the same interface
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function is_ready() -> logic {
+            return ready;
+        }
+
+        function ack() -> logic {
+            return is_ready() && valid;
+        }
+
+        modport mp {
+            valid: input ,
+            ack  : import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function is_ready() -> logic {
+            return ready;
+        }
+
+        function ack() -> logic {
+            return is_ready() && valid;
+        }
+
+        modport mp {
+            ready: input ,
+            valid: input ,
+            ack  : import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // function arguments, local variables, parameters and constants are not interface variables
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 8,
+    ) {
+        const C: logic<W> = 1;
+
+        function f(x: input logic<W>) -> logic<W> {
+            var y: logic<W>;
+            y = x + C;
+            return y;
+        }
+
+        modport mp {
+            f: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // functions not exported by the modport are not checked
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport mp {
+            valid: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // variables exported by modport default
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport master {
+            ready: input ,
+            valid: input ,
+            ack  : import,
+        }
+
+        modport monitor {
+            ..same(master)
+        }
+
+        modport all_input {
+            ack: import,
+            ..input
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport master {
+            ready: input ,
+            ack  : import,
+        }
+
+        modport monitor {
+            ..same(master)
+        }
+    }
+    "#;
+
+    // members copied by `..same` are reported only at the original modport
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    let AnalyzerError::MissingModportDependency { error_location, .. } = &errors[0] else {
+        panic!("{errors:?}");
+    };
+    let offset = error_location.offset();
+    assert_eq!(&code[offset..offset + error_location.len()], "ack");
+    assert!(offset > code.find("modport master").unwrap());
+    assert!(offset < code.find("modport monitor").unwrap());
+
+    let code = r#"
+    proto interface ProtoA {
+        function ack() -> logic;
+        modport mp {
+            ack: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn invalid_port_default_value() {
     let code = r#"
     module ModuleA (
