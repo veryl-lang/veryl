@@ -1,0 +1,95 @@
+proto package ProtoPkg98 {
+    type Data;
+}
+
+package Pkg98::<W: u32> for ProtoPkg98 {
+    type Data = logic<W>;
+}
+
+alias package Pkg98A = Pkg98::<8>;
+
+interface Interface98::<PKG: ProtoPkg98> {
+    var ready: logic    ;
+    var valid: logic    ;
+    var data : PKG::Data;
+
+    #[inline]
+    function ack () -> logic {
+        return ready && valid;
+    }
+
+    function is_zero () -> logic {
+        return data == 0;
+    }
+
+    #[inline]
+    function zero_ack () -> logic {
+        return ack() && is_zero();
+    }
+
+    #[inline]
+    function get_data () -> PKG::Data {
+        return data;
+    }
+
+    modport master {
+        ready   : input ,
+        valid   : output,
+        data    : output,
+        ack     : import,
+        is_zero : import,
+        zero_ack: import,
+        get_data: import,
+    }
+
+    modport slave {
+        ack     : import,
+        is_zero : import,
+        zero_ack: import,
+        get_data: import,
+        ..converse(master)
+    }
+
+    let _ack: logic = ack();
+}
+
+module Module98A (
+    i_clk  : input   clock                       ,
+    i_rst_n: input   reset                       ,
+    slv_if : modport Interface98::<Pkg98A>::slave,
+    o_data : output  Pkg98A::Data                ,
+) {
+    assign slv_if.ready = 1;
+
+    always_ff {
+        if_reset {
+            o_data = 0;
+        } else if slv_if.zero_ack() {
+            o_data = 0;
+        } else if slv_if.ack() {
+            o_data = slv_if.get_data();
+        }
+    }
+}
+
+module Module98B (
+    i_clk  : input  clock           ,
+    i_rst_n: input  reset           ,
+    o_data : output Pkg98A::Data [2],
+) {
+    inst bus_if: Interface98::<Pkg98A> [2];
+
+    for i in 0..2 :g {
+        assign bus_if[i].valid = 1;
+        assign bus_if[i].data  = i;
+
+        inst u: Module98A (
+            i_clk             ,
+            i_rst_n           ,
+            slv_if : bus_if[i],
+            o_data : o_data[i],
+        );
+    }
+
+    let _ack: logic = bus_if[0].ack();
+}
