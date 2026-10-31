@@ -1,0 +1,20 @@
+interface missing_modport_dependency_if {
+    var ready: logic;
+    var valid: logic;
+
+    function ack () -> logic {
+        return ready && valid;
+    }
+
+    modport slave {
+        valid: input ,
+        ack  : import,
+    }
+}
+
+module missing_modport_dependency (
+    bus: modport missing_modport_dependency_if::slave,
+    o  : output  logic                               ,
+) {
+    assign o = bus.ack();
+}

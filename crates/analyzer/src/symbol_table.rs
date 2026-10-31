@@ -1,6 +1,7 @@
 mod connect;
 mod r#enum;
 mod function;
+mod modport;
 mod msb;
 
 use crate::analyzer_error::DuplicatedIdentifierKind;
@@ -2088,6 +2089,7 @@ impl SymbolTable {
             self.link_modport_members(*modport, &members);
         }
         self.link_modports(if_symbol, &members, &modports, errors);
+        self.check_modport_function(&modports, errors);
     }
 
     fn collect_interface_members(
