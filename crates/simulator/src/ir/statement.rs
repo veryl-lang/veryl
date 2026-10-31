@@ -395,6 +395,19 @@ pub enum TbMethodKind {
     },
 }
 
+/// Bound destination for a testbench method return used in an event block.
+/// The testbench driver resolves return `VarId`s through `Simulator`; event
+/// statements instead need a direct pointer and FF write-log metadata.
+#[derive(Clone, Copy)]
+pub struct TbReturnBinding {
+    pub dst: *mut u8,
+    pub width: usize,
+    pub native_bytes: usize,
+    pub use_4state: bool,
+    pub ff_log_offset: Option<u32>,
+    pub ff_is_packed: bool,
+}
+
 /// Pointer-bound form of [`ProtoComponentArg`].
 #[derive(Clone)]
 pub enum ComponentArg {
@@ -465,6 +478,7 @@ pub enum Statement {
     TbMethodCall {
         inst: StrId,
         method: TbMethodKind,
+        ret_binding: Option<TbReturnBinding>,
     },
 }
 
@@ -662,7 +676,41 @@ impl Statement {
                 x.eval_step(mask_cache);
                 ControlFlow::Continue
             }
-            Statement::TbMethodCall { .. } => ControlFlow::Continue,
+            Statement::TbMethodCall {
+                inst,
+                method,
+                ret_binding,
+            } => {
+                match method {
+                    TbMethodKind::RandomSeed { value } => {
+                        let seed = value.eval(mask_cache).payload_u64();
+                        crate::random_table::seed_handle(*inst, seed);
+                    }
+                    TbMethodKind::RandomGet { width, signed, ret } => {
+                        let value = crate::random_table::get(*inst, *width, *signed);
+                        store_tb_return(ret_binding, ret, value);
+                    }
+                    TbMethodKind::RandomGetRange {
+                        min,
+                        max,
+                        width,
+                        signed,
+                        ret,
+                    } => {
+                        let min = min.eval(mask_cache).payload_u64();
+                        let max = max.eval(mask_cache).payload_u64();
+                        let value =
+                            crate::random_table::get_range(*inst, min, max, *width, *signed);
+                        store_tb_return(ret_binding, ret, value);
+                    }
+                    TbMethodKind::RandomGetSeed { ret } => {
+                        let seed = crate::random_table::get_seed_handle(*inst);
+                        store_tb_return(ret_binding, ret, Value::new(seed, 64, false));
+                    }
+                    _ => {}
+                }
+                ControlFlow::Continue
+            }
         }
     }
 
@@ -686,6 +734,111 @@ impl Statement {
             Statement::SystemFunctionCall(x) => x.gather_variable(inputs),
             Statement::TbMethodCall { .. } => (),
         }
+    }
+
+    /// Resolve random-method return variables after event statements have
+    /// been bound to their owning module's storage.
+    pub fn bind_tb_return(
+        &mut self,
+        variables: &crate::ir::variable::ModuleVariables,
+        ff_base: *mut u8,
+        ff_len: usize,
+        use_4state: bool,
+    ) {
+        match self {
+            Statement::TbMethodCall {
+                method,
+                ret_binding,
+                ..
+            } => {
+                let ret_id = match method {
+                    TbMethodKind::RandomGet { ret, .. }
+                    | TbMethodKind::RandomGetRange { ret, .. }
+                    | TbMethodKind::RandomGetSeed { ret } => ret.as_ref().map(|(id, _)| *id),
+                    _ => None,
+                };
+                if let Some(var) = ret_id.and_then(|id| variables.variables.get(&id))
+                    && let Some(&current) = var.current_values.first()
+                {
+                    let in_ff = (ff_base as usize..ff_base as usize + ff_len)
+                        .contains(&(current as usize));
+                    let dst = if in_ff {
+                        var.next_values.first().copied().unwrap_or(current)
+                    } else {
+                        current
+                    };
+                    let ff_log_offset =
+                        in_ff.then(|| (current as usize - ff_base as usize) as u32);
+                    *ret_binding = Some(TbReturnBinding {
+                        dst,
+                        width: var.width,
+                        native_bytes: var.native_bytes,
+                        use_4state,
+                        ff_log_offset,
+                        ff_is_packed: in_ff && dst == current,
+                    });
+                }
+            }
+            Statement::If(x) => {
+                for stmt in x.true_side.iter_mut().chain(&mut x.false_side) {
+                    stmt.bind_tb_return(variables, ff_base, ff_len, use_4state);
+                }
+            }
+            Statement::Case(x) => {
+                for arm in &mut x.arms {
+                    for stmt in &mut arm.body {
+                        stmt.bind_tb_return(variables, ff_base, ff_len, use_4state);
+                    }
+                }
+                for stmt in &mut x.default {
+                    stmt.bind_tb_return(variables, ff_base, ff_len, use_4state);
+                }
+            }
+            Statement::For(x) => {
+                for stmt in &mut x.body {
+                    stmt.bind_tb_return(variables, ff_base, ff_len, use_4state);
+                }
+            }
+            Statement::SequentialBlock(body) => {
+                for stmt in body {
+                    stmt.bind_tb_return(variables, ff_base, ff_len, use_4state);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn store_tb_return(
+    binding: &Option<TbReturnBinding>,
+    ret: &Option<(VarId, RetWidthCheck)>,
+    mut value: Value,
+) {
+    if ret.is_none() {
+        return;
+    }
+    let Some(binding) = binding else {
+        return;
+    };
+    value.trunc(binding.width);
+    if !binding.ff_is_packed {
+        unsafe {
+            write_native_value(
+                binding.dst,
+                binding.native_bytes,
+                binding.use_4state,
+                &value,
+            );
+        }
+    }
+    if let Some(offset) = binding.ff_log_offset {
+        emit_ff_log(
+            &value,
+            offset,
+            binding.native_bytes,
+            binding.use_4state,
+            None,
+        );
     }
 }
 
@@ -2987,6 +3140,7 @@ impl ProtoStatement {
                     Statement::TbMethodCall {
                         inst: *inst,
                         method,
+                        ret_binding: None,
                     }
                 }
                 &ProtoStatement::HierAssign(_) => {
