@@ -287,8 +287,11 @@ fn eval_range_inner(
             &range.into(),
         ));
     }
-    let beg = if beg_comptime.is_const {
-        let value = beg_comptime.get_value()?;
+    // A const bound may still have no value, e.g. a proto package constant
+    // seen from inside a generic; it stays an expression to evaluate later.
+    let beg = if beg_comptime.is_const
+        && let Ok(value) = beg_comptime.get_value()
+    {
         // A strictly negative bound (signed value <= 0, nonzero payload)
         // would wrap through to_usize into a huge unsigned ForBound.
         if value.is_semantically_not_positive() && value.is_positive() {
@@ -314,8 +317,9 @@ fn eval_range_inner(
                 &range.into(),
             ));
         }
-        let end = if end_comptime.is_const {
-            let value = end_comptime.get_value()?;
+        let end = if end_comptime.is_const
+            && let Ok(value) = end_comptime.get_value()
+        {
             if value.is_semantically_not_positive() && value.is_positive() {
                 let token: TokenRange = range.into();
                 context.insert_error(AnalyzerError::invalid_for_range(
@@ -1029,7 +1033,21 @@ fn insert_const_variable(
     comptime: Comptime,
     values: Vec<Value>,
 ) {
+    let token = comptime.token;
     let id = context.insert_var_path(dst.path.clone(), comptime);
+
+    // Without member paths, `X[i].member` falls back to the symbol route, which
+    // re-evaluates the declared type outside the component and loses its
+    // earlier parameters.
+    for x in r#type.expand_struct_union(&dst.path, &[], None) {
+        let r#type = x.part_select.last().unwrap().r#type.clone();
+        let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
+        comptime.is_const = true;
+        let path = x.path.clone();
+        comptime.part_select = Some(x);
+        context.insert_var_path_with_id(path, id, comptime);
+    }
+
     let array_limit = context.config.evaluate_array_limit;
     let variable = Variable::new(
         id,
@@ -1236,17 +1254,22 @@ fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression)
     } else {
         let mut specialized = Some(expr.clone());
         for (id, range) in context.for_ranges.clone() {
-            let Some(iterations) = range.eval_iter(context) else {
-                continue;
-            };
-            let Some(iteration) = iterations.first() else {
-                continue;
+            // A const bound without a value yet, like a proto package constant
+            // inside a generic, still makes the iterator elaborative; any value
+            // shows whether the rest is.
+            let iteration = match range.eval_iter(context) {
+                Some(iterations) => match iterations.first() {
+                    Some(x) => *x,
+                    None => continue,
+                },
+                None if range.has_const_bounds() => 0,
+                None => continue,
             };
             let variable = &context.variables[&id];
             let Some(width) = variable.r#type.total_width() else {
                 continue;
             };
-            let value = Value::new(*iteration as u64, width, variable.r#type.signed);
+            let value = Value::new(iteration as u64, width, variable.r#type.signed);
             specialized = specialized
                 .and_then(|expr| ir::peel::specialize_expression(context, &expr, id, value));
         }
@@ -1420,47 +1443,46 @@ pub fn eval_type(
     let mut signed = false;
     let mut is_positive = false;
 
-    // The `var_paths` shortcut below turns a constant into a width, which is what
-    // makes `x as W` work -- so a variable position has to be rejected ahead of it.
-    let resolved = if matches!(pos, TypePosition::Variable) {
-        let resolved = context.resolve_path(path.clone());
-        if let Ok(symbol) = symbol_table::resolve(&resolved)
-            && !symbol.found.is_variable_type()
-        {
-            context.insert_error(AnalyzerError::mismatch_type(
-                MismatchTypeKind::SymbolKind {
-                    name: symbol.found.token.to_string(),
-                    expected: "enum, union, struct or typedef".to_string(),
-                    actual: symbol.found.kind.to_kind_name(),
-                },
-                &path.range,
-            ));
-        }
-        Some(resolved)
+    let (resolved, mapped) = context.resolve_path_mapped(path.clone());
+    let var_path = if mapped {
+        resolved.to_var_path()
     } else {
-        None
+        path.to_var_path()
     };
 
-    let non_const_cast = matches!(pos, TypePosition::Cast)
-        && path
-            .to_var_path()
-            .is_some_and(|x| context.var_paths.get(&x).is_some_and(|x| !x.1.is_const));
-    if non_const_cast {
-        let resolved = context.resolve_path(path.clone());
-        if let Ok(symbol) = symbol_table::resolve(&resolved) {
-            context.insert_error(AnalyzerError::mismatch_type(
-                MismatchTypeKind::SymbolKind {
-                    name: symbol.found.token.to_string(),
-                    expected: "enum, union, struct, typedef or integer constant".to_string(),
-                    actual: symbol.found.kind.to_kind_name(),
-                },
-                &path.range,
-            ));
-        }
+    // The `var_paths` shortcut below turns a constant into a width, which is what
+    // makes `x as W` work -- so a variable position has to be rejected ahead of it.
+    if matches!(pos, TypePosition::Variable)
+        && let Ok(symbol) = symbol_table::resolve(&resolved)
+        && !symbol.found.is_variable_type()
+    {
+        context.insert_error(AnalyzerError::mismatch_type(
+            MismatchTypeKind::SymbolKind {
+                name: symbol.found.token.to_string(),
+                expected: "enum, union, struct or typedef".to_string(),
+                actual: symbol.found.kind.to_kind_name(),
+            },
+            &path.range,
+        ));
     }
 
-    let kind = if let Some(x) = path.to_var_path()
-        && let Some(x) = context.var_paths.get(&x)
+    let non_const_cast = matches!(pos, TypePosition::Cast)
+        && var_path
+            .as_ref()
+            .is_some_and(|x| context.var_paths.get(x).is_some_and(|x| !x.1.is_const));
+    if non_const_cast && let Ok(symbol) = symbol_table::resolve(&resolved) {
+        context.insert_error(AnalyzerError::mismatch_type(
+            MismatchTypeKind::SymbolKind {
+                name: symbol.found.token.to_string(),
+                expected: "enum, union, struct, typedef or integer constant".to_string(),
+                actual: symbol.found.kind.to_kind_name(),
+            },
+            &path.range,
+        ));
+    }
+
+    let kind = if let Some(x) = &var_path
+        && let Some(x) = context.var_paths.get(x)
     {
         match &x.1.value {
             ValueVariant::Type(x) => {
@@ -1496,7 +1518,7 @@ pub fn eval_type(
             _ => ir::TypeKind::Unknown,
         }
     } else {
-        let mut path = resolved.unwrap_or_else(|| context.resolve_path(path.clone()));
+        let mut path = resolved;
         // Before unaliasing: a declared alias is not a generic reference here.
         check_generic_refereence(context, &path);
 
@@ -2678,7 +2700,7 @@ fn eval_factor_path_inner(
 ) -> IrResult<ir::Factor> {
     let (path, select, _) = var_path.into();
 
-    let mut generic_path = context.resolve_path(symbol_path);
+    let (mut generic_path, mapped) = context.resolve_path_mapped(symbol_path);
     // Before unaliasing: a declared alias is not a generic reference here.
     check_generic_refereence(context, &generic_path);
     generic_path.unalias(None);
@@ -2695,6 +2717,8 @@ fn eval_factor_path_inner(
         && let Some((var_id, comptime)) = context.find_path(&path)
     {
         Some((var_id, comptime))
+    } else if mapped {
+        None
     } else {
         context.find_path(&path)
     };
@@ -5264,6 +5288,29 @@ pub fn check_compatibility(
             &src.r#type.to_string(),
             &dst.to_string(),
             kind,
+            token,
+            &[],
+        ));
+    }
+}
+
+/// Report a struct or union bound to a function argument of another struct or
+/// union type. The rest of `check_compatibility` is not applied to arguments,
+/// but such a value would be silently truncated or zero-extended.
+pub fn check_function_arg_aggregate(
+    context: &mut Context,
+    dst: &ir::Type,
+    src: &ir::Type,
+    token: &TokenRange,
+) {
+    if let Some(dst_id) = dst.kind.aggregate_id()
+        && let Some(src_id) = src.kind.aggregate_id()
+        && dst_id != src_id
+    {
+        context.insert_error(AnalyzerError::mismatch_assignment(
+            &src.to_string(),
+            &dst.to_string(),
+            MismatchAssignmentKind::Normal,
             token,
             &[],
         ));

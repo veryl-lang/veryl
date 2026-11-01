@@ -142,9 +142,14 @@ struct LookupCandidate {
 /// Resolves the candidates gathered within one scope (one precedence tier).
 /// Ambiguous when two distinct definition sites could be active together;
 /// otherwise picks the deepest binding (last wins ties) among generic clones
-/// and ifdef variants. When `prefer_container` (a non-final path segment), a
-/// container outranks a deeper same-named leaf.
-fn resolve_tier(candidates: &[LookupCandidate], prefer_container: bool) -> LexicalLookup {
+/// and ifdef variants, preferring the ifdef variant enabled by `defines`. When
+/// `prefer_container` (a non-final path segment), a container outranks a
+/// deeper same-named leaf.
+fn resolve_tier(
+    candidates: &[LookupCandidate],
+    prefer_container: bool,
+    defines: &HashSet<StrId>,
+) -> LexicalLookup {
     let mut distinct: Vec<&LookupCandidate> = Vec::new();
     for candidate in candidates {
         if !distinct.iter().any(|x| x.site == candidate.site) {
@@ -161,7 +166,13 @@ fn resolve_tier(candidates: &[LookupCandidate], prefer_container: bool) -> Lexic
         return LexicalLookup::Ambiguous;
     }
 
-    let rank = |c: &LookupCandidate| (prefer_container && c.can_have_member, c.depth);
+    let rank = |c: &LookupCandidate| {
+        (
+            prefer_container && c.can_have_member,
+            c.define_context.is_active(defines),
+            c.depth,
+        )
+    };
     let mut best = &candidates[0];
     for candidate in &candidates[1..] {
         if rank(candidate) >= rank(best) {
@@ -205,6 +216,8 @@ pub struct SymbolTable {
     sv_shadows: Vec<Symbol>,
     suppress_cache_clear: bool,
     skip_generic_args: bool,
+    /// Defines that select among mutually exclusive ifdef variants of a name.
+    defines: HashSet<StrId>,
 }
 
 impl SymbolTable {
@@ -908,7 +921,7 @@ impl SymbolTable {
             candidates.extend(scope::locals_get(inner, name));
         }
 
-        let mut max_depth = 0;
+        let mut max_rank = (false, 0);
         let mut found = None;
         for id in candidates {
             let Some(symbol) = self.symbol_table.get(&id) else {
@@ -919,9 +932,13 @@ impl SymbolTable {
                     && !context
                         .define_context
                         .exclusive(&symbol.namespace.define_context));
-            if matched && symbol.namespace.depth() >= max_depth {
+            let rank = (
+                symbol.namespace.define_context.is_active(&self.defines),
+                symbol.namespace.depth(),
+            );
+            if matched && rank >= max_rank {
                 found = Some(symbol);
-                max_depth = symbol.namespace.depth();
+                max_rank = rank;
             }
         }
 
@@ -1007,7 +1024,7 @@ impl SymbolTable {
             }
             if !tier.is_empty()
                 && let Some(result) = self.container_or_stash(
-                    resolve_tier(&tier, prefer_container),
+                    resolve_tier(&tier, prefer_container, &self.defines),
                     prefer_container,
                     &mut fallback,
                 )
@@ -1035,7 +1052,7 @@ impl SymbolTable {
             }
             if !tier.is_empty()
                 && let Some(result) = self.container_or_stash(
-                    resolve_tier(&tier, prefer_container),
+                    resolve_tier(&tier, prefer_container, &self.defines),
                     prefer_container,
                     &mut fallback,
                 )
@@ -1063,7 +1080,7 @@ impl SymbolTable {
             }
             if !tier.is_empty()
                 && let Some(result) = self.container_or_stash(
-                    resolve_tier(&tier, prefer_container),
+                    resolve_tier(&tier, prefer_container, &self.defines),
                     prefer_container,
                     &mut fallback,
                 )
@@ -3621,6 +3638,21 @@ pub fn restore_fragment(fragment: SymbolTableFragment) -> Result<(), Box<Symbol>
     let ret = SYMBOL_TABLE.with(|f| f.borrow_mut().restore_fragment(fragment));
     clear_resolve_caches();
     ret
+}
+
+/// Sets the defines that pick the active variant of an ifdef-ed declaration.
+pub fn set_defines(defines: &HashSet<StrId>) {
+    let changed = SYMBOL_TABLE.with(|f| {
+        let mut table = f.borrow_mut();
+        let changed = table.defines != *defines;
+        if changed {
+            table.defines = defines.clone();
+        }
+        changed
+    });
+    if changed {
+        clear_resolve_caches();
+    }
 }
 
 pub fn clear() {

@@ -1,7 +1,9 @@
 use crate::backend::inst::{ReuseOutcome, try_compile_inst_chunks};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::derived_clock::EdgeCandidate;
-use crate::ir::expression::{ExpressionContext, build_dynamic_write_select};
+use crate::ir::expression::{
+    ExpressionContext, build_dynamic_write_select, dynamic_ranges_contain,
+};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{
     BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
@@ -517,44 +519,69 @@ fn stable_topo_sort_impl(
         }
     }
     // A split If can read a temporary only in the branch which first writes
-    // it. Correlate identical static guards, but not an arbitrary predicate:
-    // its storage must remain unchanged from the writer through the reader.
-    type GuardKey = (VarOffset, BitRange, usize, usize, ExpressionContext);
-    fn static_guard(expr: &ProtoExpression) -> Option<GuardKey> {
-        match expr {
-            ProtoExpression::Variable {
-                var_offset,
-                select,
-                dynamic_select: None,
-                width,
-                var_full_width,
-                expr_context,
-            } => Some((*var_offset, *select, *width, *var_full_width, *expr_context)),
-            _ => None,
-        }
-    }
+    // it. Correlate identical guards whose storage remains unchanged from the
+    // writer through the reader, so both pieces take the same branch.
     let guarded_write_spans = |writer_idx: usize, reader_idx: usize, key: &VarOffset| {
         let (ProtoStatement::If(writer), ProtoStatement::If(reader)) =
             (&statements[writer_idx], &statements[reader_idx])
         else {
             return Vec::new();
         };
-        let Some(guard) = writer.cond.as_ref().and_then(static_guard) else {
+        let (Some(guard), Some(other)) = (writer.cond.as_ref(), reader.cond.as_ref()) else {
             return Vec::new();
         };
-        if reader.cond.as_ref().and_then(static_guard) != Some(guard)
-            || guard.0 == *key
+        if !guard.same_structure(other) {
+            return Vec::new();
+        }
+        // A runtime index reads every element of its array, but the offset
+        // gather names only the first and last, so test its whole span.
+        let mut guard_reads = Vec::new();
+        guard.gather_variable_offsets(&mut guard_reads);
+        let mut guard_ranges = Vec::new();
+        guard.gather_dynamic_read_ranges(&mut guard_ranges);
+        if guard_ranges.iter().any(|&(_, _, stride, _)| stride <= 0) {
+            return Vec::new();
+        }
+        let guard_reads_offset =
+            |o: &VarOffset| guard_reads.contains(o) || dynamic_ranges_contain(&guard_ranges, *o);
+        let mut write_spans = Vec::new();
+        for s in &statements[writer_idx..=reader_idx] {
+            s.gather_dynamic_write_spans(&mut write_spans);
+        }
+        let span_hits_guard = |&(base, stride, n): &(VarOffset, isize, usize)| {
+            let end = base.raw().saturating_add(stride.saturating_mul(n as isize));
+            stride <= 0
+                || guard_ranges.iter().any(|&(is_ff, b, st, m)| {
+                    is_ff == base.is_ff()
+                        && b < end
+                        && base.raw() < b.saturating_add(st.saturating_mul(m as isize))
+                })
+                || guard_reads
+                    .iter()
+                    .any(|o| dynamic_ranges_contain(&[(base.is_ff(), base.raw(), stride, n)], *o))
+        };
+        if guard_reads_offset(key)
             || stmt_outputs[writer_idx..=reader_idx]
                 .iter()
-                .any(|outputs| outputs.contains(&guard.0))
+                .any(|outputs| outputs.iter().any(guard_reads_offset))
+            || write_spans.iter().any(span_hits_guard)
         {
             return Vec::new();
         }
-        // An empty opposite arm makes every read of key conditional on this
-        // one guard value. A read in the condition itself was excluded above.
-        let body = match (reader.true_side.is_empty(), reader.false_side.is_empty()) {
-            (false, true) => &writer.true_side,
-            (true, false) => &writer.false_side,
+        // An opposite arm not reading key makes every read of it conditional
+        // on this one guard value. A read in the condition itself was
+        // excluded above.
+        let reads_key = |side: &[ProtoStatement]| {
+            side.iter().any(|s| {
+                let (mut ins, mut outs, mut ranges) = (Vec::new(), Vec::new(), Vec::new());
+                s.gather_variable_offsets(&mut ins, &mut outs);
+                s.gather_dynamic_read_ranges(&mut ranges);
+                ins.contains(key) || dynamic_ranges_contain(&ranges, *key)
+            })
+        };
+        let body = match (reads_key(&reader.true_side), reads_key(&reader.false_side)) {
+            (true, false) => &writer.true_side,
+            (false, true) => &writer.false_side,
             _ => return Vec::new(),
         };
         body.iter()
@@ -2731,7 +2758,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // No assignment statement here to size the literal.
             size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
             let element = &child_meta.elements[0];
-            all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+            let assign = ProtoStatement::Assign(ProtoAssignStatement {
                 dst: element.current,
                 dst_width: child_meta.width,
                 select: None,
@@ -2741,7 +2768,19 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 dst_ff_current_offset: 0, // not FF
                 comb_direct: false,
                 token: TokenRange::default(),
-            }));
+            });
+            // A function call in the connection is inlined into pending
+            // statements, which must run before the port is assigned; left
+            // pending, they are flushed into whatever block converts next.
+            // They form one block like a `let`, so the function's sequential
+            // reassignments keep their order when statements are sorted.
+            if context.pending_statements.is_empty() {
+                all_comb_statements.push(assign);
+            } else {
+                let mut block = std::mem::take(&mut context.pending_statements);
+                block.push(assign);
+                all_comb_statements.push(ProtoStatement::SequentialBlock(block));
+            }
         }
 
         // Output ports: child port var → parent dst.  A concat destructure

@@ -260,6 +260,14 @@ fn pass1_phase(
         .flatten();
 
     let analyzer = Analyzer::new(metadata);
+    // Name resolution from pass1 on picks among ifdef variants by the defines.
+    veryl_analyzer::symbol_table::set_defines(
+        &opts
+            .defines
+            .iter()
+            .map(|x| resource_table::insert_str(x))
+            .collect(),
+    );
 
     for path in paths {
         info!("Processing file ({})", path.src.to_string_lossy());

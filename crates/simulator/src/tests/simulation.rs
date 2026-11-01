@@ -693,6 +693,112 @@ fn ff_read_as_index_from_other_block() {
 }
 
 #[test]
+fn function_call_in_instance_port_is_not_delayed() {
+    // The inlined call must run before the child port is assigned, not in
+    // the parent's next block (here the always_ff, a cycle late).
+    let code = r#"
+    module Child (
+        clk: input  clock,
+        rst: input  reset,
+        i_x: input  logic,
+        o_q: output logic,
+    ) {
+        always_ff {
+            if_reset {
+                o_q = 0;
+            } else {
+                o_q = i_x;
+            }
+        }
+    }
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        q  : output logic,
+        e  : output logic,
+    ) {
+        function is_one (
+            k: input logic<3>,
+        ) -> logic {
+            return k == 3'd1;
+        }
+        var k: logic<3>;
+        inst u: Child (clk, rst, i_x: is_one(k), o_q: q);
+        always_ff {
+            if_reset {
+                k = 0;
+                e = 0;
+            } else {
+                k = k + 3;
+                e = is_one(k);
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        for _ in 0..16 {
+            sim.step(&clk);
+            assert_eq!(sim.get("q"), sim.get("e"), "config={config:?}");
+        }
+    }
+}
+
+#[test]
+fn function_reassigning_a_local_in_instance_port_through_child_loop() {
+    // The connection reads a child output and feeds a child input, so the
+    // instance's statements are sorted one by one; the inlined body must
+    // still run its reassignments of `z` in order.
+    let code = r#"
+    module Child (
+        i_k: input  logic<4>,
+        o_a: output logic<4>,
+        i_d: input  logic<8>,
+        o_q: output logic<8>,
+    ) {
+        assign o_a = i_k ^ 4'h5;
+        assign o_q = i_d;
+    }
+    module Top (
+        k: input  logic<4>,
+        q: output logic<8>,
+        e: output logic<8>,
+    ) {
+        function g (
+            x: input logic<4>,
+        ) -> logic<8> {
+            var z: logic<8>;
+            z = {x, x} + 8'h15;
+            z = (z ^ (z >> 3)) * 8'h2b;
+            z = (z ^ (z >> 2)) * 8'h4d;
+            return z;
+        }
+        var a: logic<4>;
+        inst u: Child (i_k: k, o_a: a, i_d: g(a), o_q: q);
+        assign e = g(k ^ 4'h5);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for k in 0..16 {
+            sim.set("k", Value::new(k, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("q"), sim.get("e"), "k={k} config={config:?}");
+        }
+    }
+}
+
+#[test]
 fn ff_read_as_system_function_arg_from_other_block() {
     let code = r#"
     module Top (
@@ -6513,6 +6619,65 @@ fn function_call_with_output() {
 }
 
 #[test]
+fn function_call_with_array_output() {
+    let code = r#"
+    module Top (
+        a   : input  logic<4>,
+        o0  : output logic<4>,
+        o1  : output logic<4>,
+        o2  : output logic<4>,
+        o3  : output logic<4>,
+        q0  : output logic<4>,
+        q1  : output logic<4>,
+    ) {
+        function split (
+            x: input  logic<4>    ,
+            c: output logic<4> [2],
+        ) {
+            c[0] = x;
+            c[1] = ~x;
+        }
+
+        var w: logic<4> [2, 2];
+        var r: logic<4> [2];
+
+        always_comb {
+            split(a, w[0]);
+            split(a + 4'd1, w[1]);
+        }
+
+        always_comb {
+            split(a - 4'd1, r);
+        }
+
+        assign o0 = w[0][0];
+        assign o1 = w[0][1];
+        assign o2 = w[1][0];
+        assign o3 = w[1][1];
+        assign q0 = r[0];
+        assign q1 = r[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(5, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o0").unwrap(), Value::new(5, 4, false));
+        assert_eq!(sim.get("o1").unwrap(), Value::new(10, 4, false));
+        assert_eq!(sim.get("o2").unwrap(), Value::new(6, 4, false));
+        assert_eq!(sim.get("o3").unwrap(), Value::new(9, 4, false));
+        assert_eq!(sim.get("q0").unwrap(), Value::new(4, 4, false));
+        assert_eq!(sim.get("q1").unwrap(), Value::new(11, 4, false));
+    }
+}
+
+#[test]
 fn function_call_nested() {
     let code = r#"
     module Top (
@@ -8184,6 +8349,48 @@ fn interface_parameter_override() {
         let wide = sim.get("out_wide").unwrap();
         assert_eq!(narrow, Value::new(0x00FF, 16, false));
         assert_eq!(wide, Value::new(0xFFFF, 16, false));
+    }
+}
+
+#[test]
+fn always_ff_under_inactive_ifdef_is_dropped() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        o  : output logic,
+    ) {
+        #[ifdef(CHK)]
+        {
+            var q: logic;
+            always_ff {
+                if_reset {
+                    q = 0;
+                } else {
+                    q = 1;
+                }
+            }
+            assign o = q;
+        }
+        #[ifndef(CHK)]
+        assign o = 0;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0, 1, false),
+            "config={config:?}"
+        );
     }
 }
 
@@ -19129,6 +19336,130 @@ fn constant_loop_lowering_keeps_an_over_budget_loop() {
 }
 
 /// Outside reset an `always_ff` loop is logic, like a comb loop.
+/// Read as runtime values, the `let` node numbers would make every node
+/// access a runtime index over the whole array, and the two calls sharing the
+/// function's scratch would look like they need another settle pass.
+#[test]
+fn constant_loop_lowering_reads_a_let_of_an_iteration_as_its_constant() {
+    let code = r#"
+    module Top (
+        a0: input  logic<4> ,
+        a1: input  logic<4> ,
+        t : input  logic<12>,
+        fa: input  logic<4> ,
+        o0: output logic<4> ,
+        o1: output logic<4> ,
+        fy: output logic<4> ,
+    ) {
+        function oldest (
+            v  : input logic<4>    ,
+            age: input logic<3> [4],
+        ) -> logic<4> {
+            var hv: logic    [8];
+            var ht: logic<3> [8];
+            var hi: logic<2> [8];
+            var r : logic<4>    ;
+            for i in 0..4 {
+                let leaf: u32 = 4 + i;
+                hv[leaf] = v[i];
+                ht[leaf] = age[i];
+                hi[leaf] = i;
+            }
+            for j in 1..4 {
+                let n    : u32   = 4 - j;
+                let right: logic = hv[2 * n + 1] && (!hv[2 * n] || ht[2 * n + 1] <: ht[2 * n]);
+                hv[n] = hv[2 * n] || hv[2 * n + 1];
+                ht[n] = if right ? ht[2 * n + 1] : ht[2 * n];
+                hi[n] = if right ? hi[2 * n + 1] : hi[2 * n];
+            }
+            for i in 0..4 {
+                r[i] = hv[1] && hi[1] == i;
+            }
+            return r;
+        }
+        var age: logic<3> [4];
+        var a  : logic<4> [2];
+        var o  : logic<4> [2];
+        always_comb {
+            for i in 0..4 {
+                age[i] = t[3 * i+:3];
+            }
+        }
+        assign a[0] = a0;
+        assign a[1] = a1;
+        always_comb {
+            for i in 0..2 {
+                var req: logic<4>;
+                for e in 0..4 {
+                    req[e] = a[i][e];
+                }
+                o[i] = oldest(req, age);
+            }
+        }
+        assign o0 = o[0];
+        assign o1 = o[1];
+        // A block reassigning a variable is not kept whole, so the
+        // statements above are ordered one by one.
+        var ft : logic<4>;
+        var fx : logic<4>;
+        var fx2: logic<4>;
+        always_comb {
+            ft = fa;
+            fx = ft;
+            ft = ~fa;
+            fy = ft ^ fx2;
+        }
+        always_comb {
+            fx2 = fx + 1;
+        }
+    }
+    "#;
+    let oldest = |v: u64, t: u64| -> u64 {
+        let age = |i: u64| (t >> (3 * i)) & 7;
+        (0..4)
+            .filter(|&i| v >> i & 1 == 1)
+            .min_by_key(|&i| (age(i), i))
+            .map_or(0, |i| 1 << i)
+    };
+    for config in [
+        Config::default(),
+        Config {
+            use_jit: true,
+            ..Default::default()
+        },
+    ] {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (a0, a1, t, fa) in [
+            (0b0110u64, 0b1001u64, 0o0123u64, 3u64),
+            (0b1111, 0b0000, 0o3210, 9),
+            (0b1010, 0b0111, 0o7777, 15),
+            (0b0001, 0b1100, 0o0516, 0),
+        ] {
+            sim.set("a0", Value::new(a0, 4, false));
+            sim.set("a1", Value::new(a1, 4, false));
+            sim.set("t", Value::new(t, 12, false));
+            sim.set("fa", Value::new(fa, 4, false));
+            let get = |sim: &mut Simulator, name: &str| sim.get(name).unwrap().payload_u64();
+            assert_eq!(
+                get(&mut sim, "o0"),
+                oldest(a0, t),
+                "{config:?} {a0:b} {t:o}"
+            );
+            assert_eq!(
+                get(&mut sim, "o1"),
+                oldest(a1, t),
+                "{config:?} {a1:b} {t:o}"
+            );
+            assert_eq!(
+                get(&mut sim, "fy"),
+                !fa & 0xf ^ ((fa + 1) & 0xf),
+                "{config:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn constant_loop_lowering_unrolls_an_over_budget_loop_outside_reset() {
     let code = r#"
@@ -19569,7 +19900,7 @@ fn assert_matches_runtime_loop_allowing(
     allow: Allowed,
 ) {
     let analyze =
-        |code: &str, config: &Config| analyze_top_inner(code, config, "Top", allow).unwrap();
+        |code: &str, config: &Config| analyze_top_inner(code, config, "Top", allow, &[]).unwrap();
     for config in Config::all().into_iter().filter(configs) {
         let mut sim = Simulator::new(analyze(code, &config), None);
         let mut reference = Simulator::new(analyze(control, &config), None);
@@ -28039,6 +28370,50 @@ fn ff_outside_comb_reach_advances_under_a_constant_comb() {
 }
 
 #[test]
+fn event_display_prints_once_under_validation() {
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+    ) {
+        always_ff (clk) {
+            if a == 8'd7 {
+                $display("hit a=%h o=%h", a, o);
+            }
+            o = a;
+        }
+    }
+    "#;
+
+    let mut configs = Config::all();
+    if crate::tests::aot_c_loads() {
+        configs.push(aot_native_validate_config());
+    }
+    let mut seen: Option<String> = None;
+    for config in configs {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        for a in [5u64, 7, 7, 9] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&clk);
+        }
+        let output = output_buffer::take();
+        assert_eq!(
+            output.matches("hit a=07").count(),
+            2,
+            "config={config:?} output={output:?}"
+        );
+        match &seen {
+            None => seen = Some(output),
+            Some(first) => assert_eq!(&output, first, "config={config:?}"),
+        }
+    }
+}
+
+#[test]
 fn comb_display_output_matches_across_backends() {
     // `$display` inside an `always_comb` is a side effect in a place the comb
     // backends may otherwise reorder or skip.  The dataflow plan keeps a cell
@@ -28097,6 +28472,96 @@ fn comb_display_output_matches_across_backends() {
         let output = output_buffer::take();
         assert!(
             output.contains("hit a=07 t=08"),
+            "config={config:?} output={output:?}"
+        );
+        match &seen {
+            None => seen = Some(output),
+            Some(first) => assert_eq!(&output, first, "config={config:?}"),
+        }
+    }
+}
+
+#[test]
+fn event_display_of_wide_args_keeps_the_event_aot_native() {
+    // A print argument wider than 64 bits must keep the clock event on AOT-C
+    // and print as the other backends do.
+    let code = r#"
+    module Top (
+        clk: input  clock    ,
+        rst: input  reset    ,
+        a  : input  logic<64>,
+        b  : input  logic<64>,
+        o  : output logic<64>,
+    ) {
+        var q: logic<64>;
+        var s: signed logic<100>;
+        var w: logic<200>;
+        always_ff (clk, rst) {
+            if_reset {
+                q = 0;
+                s = 0;
+                w = 0;
+            } else {
+                if a[0] {
+                    $write("c=%h ", {b, a});
+                    if a[1] {
+                        $write("w=%h ", w);
+                    }
+                    $display("s=%d q=%h", s, q);
+                }
+                q = q + a;
+                s = 0 - {36'd0, a};
+                w = {b, a, b[7:0], a};
+            }
+        }
+        assign o = q;
+    }
+    "#;
+
+    if crate::tests::aot_c_loads() {
+        let ir = analyze(code, &aot_native_validate_config());
+        let missing: Vec<_> = ir
+            .event_statements
+            .keys()
+            .filter(|e| matches!(e, Event::Clock(..)) && !ir.whole_events.contains_key(e))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "clock event not AOT-C-native: {missing:?}"
+        );
+    }
+
+    // The validated run prints through Cranelift, so the AOT-C print is
+    // only compared by the unvalidated one.
+    let mut configs = Config::all();
+    if crate::tests::aot_c_loads() {
+        configs.push(Config {
+            aot_c_validate: false,
+            ..aot_native_validate_config()
+        });
+        configs.push(aot_native_validate_config());
+    }
+    let mut seen: Option<String> = None;
+    for config in configs {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for (a, b) in [
+            (0x8000_0000_0000_0003u64, 0x1122_3344_5566_7788u64),
+            (0xffff_ffff_ffff_fffb, 0xdead_beef_0000_0001),
+            (0x0000_0000_0000_0002, 0xffff_ffff_ffff_ffff),
+            (0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210),
+        ] {
+            sim.set("a", Value::new(a, 64, false));
+            sim.set("b", Value::new(b, 64, false));
+            sim.step(&clk);
+        }
+        let output = output_buffer::take();
+        assert!(
+            output.contains("c=11223344556677888000000000000003 "),
             "config={config:?} output={output:?}"
         );
         match &seen {
@@ -30855,6 +31320,95 @@ fn an_unpacked_array_parameter_element_sizes_a_child() {
             config.use_jit,
             config.use_4state,
         );
+    }
+}
+
+/// Each iteration rewrites its temporaries before reading them: `k` under
+/// the guard it is read under, `s` bit by bit.  The next iteration's writes
+/// come later in the pass but never reach those reads.
+#[test]
+fn loop_temporaries_rewritten_each_iteration_settle_in_one_pass() {
+    let code = r#"
+    module Top (
+        x : input  logic<32>,
+        fa: input  logic<4> ,
+        y : output logic<32>,
+        z : output logic<4> ,
+        fy: output logic<4> ,
+    ) {
+        always_comb {
+            for l in 0..4 {
+                let kind: logic<4> = x[8 * l+:4];
+                if kind <: 5 || kind >= 12 {
+                    let k: logic<4> = x[8 * l + 4+:4] ^ kind;
+                    y[8 * l+:8] = {k, k + 4'd1};
+                } else {
+                    y[8 * l+:8] = {kind, 4'd0};
+                }
+            }
+        }
+        always_comb {
+            for e in 0..4 {
+                var s: logic<4>;
+                for w in 0..4 {
+                    s[w] = x[8 * w + e];
+                }
+                z[e] = |s;
+            }
+        }
+        // A block reassigning a variable is not kept whole, so the
+        // statements above are ordered one by one.
+        var ft : logic<4>;
+        var fx : logic<4>;
+        var fx2: logic<4>;
+        always_comb {
+            ft = fa;
+            fx = ft;
+            ft = ~fa;
+            fy = ft ^ fx2;
+        }
+        always_comb {
+            fx2 = fx + 1;
+        }
+    }
+    "#;
+    let expect = |x: u64| -> (u64, u64) {
+        let mut y = 0;
+        let mut z = 0;
+        for l in 0..4 {
+            let kind = (x >> (8 * l)) & 0xf;
+            let byte = if !(5..12).contains(&kind) {
+                let k = ((x >> (8 * l + 4)) & 0xf) ^ kind;
+                (k << 4) | ((k + 1) & 0xf)
+            } else {
+                kind << 4
+            };
+            y |= byte << (8 * l);
+        }
+        for e in 0..4 {
+            if (0..4).any(|w| x >> (8 * w + e) & 1 == 1) {
+                z |= 1 << e;
+            }
+        }
+        (y, z)
+    };
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        assert_eq!(ir.required_comb_passes, 1, "{config:?}");
+        let mut sim = Simulator::new(ir, None);
+        for x in [
+            0x0000_0000u64,
+            0x1234_5678,
+            0xc3a5_0f1e,
+            0x8888_0001,
+            0xffff_ffff,
+        ] {
+            sim.set("x", Value::new(x, 32, false));
+            sim.set("fa", Value::new(x & 0xf, 4, false));
+            let (y, z) = expect(x);
+            assert_eq!(sim.get("y").unwrap().payload_u64(), y, "{config:?} {x:x}");
+            assert_eq!(sim.get("z").unwrap().payload_u64(), z, "{config:?} {x:x}");
+        }
     }
 }
 
@@ -35388,6 +35942,44 @@ fn folded_const_select_keeps_its_sign() {
 }
 
 #[test]
+fn overridden_param_default_not_evaluated() {
+    let code = r#"
+    module Sub #(
+        param N  : u32          = 1      ,
+        param TBL: logic<8> [N] = '{8'd0},
+    ) (
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        assign y0 = TBL[0];
+        assign y1 = TBL[N - 1];
+    }
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        const T: logic<8> [2] = '{8'd1, 8'd2};
+        inst u: Sub #(
+            N  : 2,
+            TBL: T,
+        ) (
+            y0,
+            y1,
+        );
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0, 8, false))],
+        &[
+            ("y0", Value::new(1, 8, false)),
+            ("y1", Value::new(2, 8, false)),
+        ],
+    );
+}
+
+#[test]
 fn runtime_for_bound_keeps_its_type() {
     // `j < N` compares unsigned when `N` is unsigned, so a negative start
     // runs no iteration; a bound is evaluated at the 32-bit `int` width, so
@@ -37964,6 +38556,377 @@ fn a_field_write_after_a_runtime_index_write_to_its_element_merges_with_it() {
             sim.get("q").unwrap(),
             Value::new(0xa5, 8, false),
             "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn struct_member_of_param_array_sized_by_earlier_param() {
+    let code = r#"
+    package pk {
+        struct Region {
+            base: logic<32>,
+            mask: logic<8> ,
+        }
+    }
+    module Top #(
+        param N: u32            = 2,
+        param W: pk::Region [N] = '{
+            pk::Region'{ base: 32'h11, mask: 8'h22 },
+            pk::Region'{ base: 32'h33, mask: 8'h44 }
+        },
+    ) (
+        i: input  logic    ,
+        o: output logic<32>,
+        m: output logic<8> ,
+    ) {
+        assign o = W[i].base;
+        assign m = W[1].mask;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (i, exp) in [(0, 0x11), (1, 0x33)] {
+            sim.set("i", Value::new(i, 1, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("o").unwrap(), Value::new(exp, 32, false));
+            assert_eq!(sim.get("m").unwrap(), Value::new(0x44, 8, false));
+        }
+    }
+}
+
+#[test]
+fn ifdef_package_items_follow_defines() {
+    let code = r#"
+    package pk {
+        #[ifdef(SEL_A)]
+        const C: u32 = 2;
+        #[elsif(SEL_B)]
+        const C: u32 = 4;
+        #[else]
+        const C: u32 = 14;
+
+        #[ifdef(SEL_A)]
+        type T = logic<8>;
+        #[else]
+        type T = logic<4>;
+
+        #[ifdef(SEL_A)]
+        function f () -> logic<8> {
+            return 8'd200;
+        }
+        #[else]
+        function f () -> logic<8> {
+            return 8'd7;
+        }
+    }
+    module Top (
+        c: output logic<8>,
+        t: output logic<8>,
+        r: output logic<8>,
+    ) {
+        var x: pk::T;
+        assign x = '1;
+        assign c = pk::C;
+        assign t = x;
+        assign r = pk::f();
+    }
+    "#;
+
+    for (defines, exp) in [
+        (&[][..], [14, 15, 7]),
+        (&["SEL_A"][..], [2, 255, 200]),
+        (&["SEL_B"][..], [4, 15, 7]),
+    ] {
+        for config in Config::all() {
+            let ir = analyze_with_defines(code, &config, defines);
+            let mut sim = Simulator::new(ir, None);
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (name, exp) in ["c", "t", "r"].iter().zip(exp) {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(exp, 8, false),
+                    "{name} defines={defines:?} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_in_function() {
+    let code = r#"
+    package Pkg {
+        function w (n: input u32) -> u32 {
+            return $clog2(n);
+        }
+    }
+
+    module Top (
+        a : input  u32     ,
+        b : input  u64     ,
+        c : input  logic<8>,
+        o0: output u32     ,
+        o1: output u32     ,
+        o2: output u32     ,
+        o3: output logic   ,
+        o4: output u32     ,
+        o5: output logic<8>,
+    ) {
+        function wide (n: input u64) -> u32 {
+            return $clog2(n);
+        }
+
+        function one (x: input logic<8>) -> logic {
+            return $onehot(x);
+        }
+
+        function width (x: input logic<8>) -> u32 {
+            return $bits(x) + $size(x);
+        }
+
+        function pick (x: input logic<8>) -> logic<8> {
+            var r: logic<8> [8];
+            r = '{default: 0};
+            let k: u32 = Pkg::w(5);
+            r[k] = x;
+            return r[3];
+        }
+
+        assign o0 = Pkg::w(a);
+        assign o1 = Pkg::w(7);
+        assign o2 = wide(b);
+        assign o3 = one(c);
+        assign o4 = width(c);
+        assign o5 = pick(c);
+    }
+    "#;
+
+    let clog2 = |n: u64| {
+        if n <= 1 {
+            0
+        } else {
+            64 - (n - 1).leading_zeros() as u64
+        }
+    };
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (a, b, c) in [
+            (0u64, 0u64, 0u64),
+            (1, 1, 1),
+            (2, 2, 4),
+            (5, 1 << 40, 6),
+            (1 << 31, (1 << 40) + 1, 128),
+            (u32::MAX as u64, u64::MAX, 255),
+        ] {
+            sim.set("a", Value::new(a, 32, false));
+            sim.set("b", Value::new(b, 64, false));
+            sim.set("c", Value::new(c, 8, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            assert_eq!(sim.get("o0").unwrap(), Value::new(clog2(a), 32, false));
+            assert_eq!(sim.get("o1").unwrap(), Value::new(3, 32, false));
+            assert_eq!(sim.get("o2").unwrap(), Value::new(clog2(b), 32, false));
+            let onehot = (c.count_ones() == 1) as u64;
+            assert_eq!(sim.get("o3").unwrap(), Value::new(onehot, 1, false));
+            assert_eq!(sim.get("o4").unwrap(), Value::new(16, 32, false));
+            assert_eq!(sim.get("o5").unwrap(), Value::new(c, 8, false));
+        }
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_evaluates_it_once() {
+    let code = r#"
+    module Top (
+        o0: output u32     ,
+        c0: output logic<4>,
+        o1: output logic   ,
+        c1: output logic<4>,
+    ) {
+        var cnt: logic<4>;
+
+        function next () -> logic<4> {
+            cnt += 1;
+            return cnt;
+        }
+
+        function clog2_next () -> u32 {
+            return $clog2(next());
+        }
+
+        function onehot_next () -> logic {
+            return $onehot(next());
+        }
+
+        always_comb {
+            cnt = 1;
+            o0  = clog2_next();
+            c0  = cnt;
+            cnt = 1;
+            o1  = onehot_next();
+            c1  = cnt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o0").unwrap(),
+            Value::new(1, 32, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("c0").unwrap(),
+            Value::new(2, 4, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o1").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("c1").unwrap(),
+            Value::new(2, 4, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_keeps_signed_clog2() {
+    let code = r#"
+    module Top (
+        a: input  u32  ,
+        o: output logic,
+    ) {
+        function negative (x: input u32) -> logic {
+            return $clog2(x) <: -1;
+        }
+
+        assign o = negative(a);
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for a in [0, 1, 8, u32::MAX as u64] {
+            sim.set("a", Value::new(a, 32, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("o").unwrap(), Value::new(0, 1, false), "{config:?}");
+        }
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_follows_four_state_rules() {
+    let code = r#"
+    module Top (
+        a : input  logic<4>,
+        o0: output u32     ,
+        o1: output logic   ,
+    ) {
+        function c (x: input logic<4>) -> u32 {
+            return $clog2(x);
+        }
+
+        function h (x: input logic<4>) -> logic {
+            return $onehot(x);
+        }
+
+        assign o0 = c(a);
+        assign o1 = h(a);
+    }
+    "#;
+
+    for config in Config::all().into_iter().filter(|c| c.use_4state) {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        // (payload, x/z mask, $onehot): $clog2 is all x whenever a bit is.
+        for (payload, mask, onehot) in [
+            (0b1001, 0b0100, 0),
+            (0b0001, 0b0100, 1),
+            (0b0000, 0b0100, 0),
+            (0b0000, 0b1111, 0),
+        ] {
+            sim.set("a", Value::from_u128(payload, mask, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o0").unwrap(),
+                Value::from_u128(0, 0xffff_ffff, 32, false),
+                "{config:?} {payload:#b}/{mask:#b}"
+            );
+            assert_eq!(
+                sim.get("o1").unwrap(),
+                Value::new(onehot, 1, false),
+                "{config:?} {payload:#b}/{mask:#b}"
+            );
+        }
+        sim.set("a", Value::new(0b0100, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o0").unwrap(),
+            Value::new(2, 32, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o1").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn constant_index_past_end_in_untaken_arm() {
+    let code = r#"
+    module Top (
+        x : input  logic<8>,
+        w2: output logic<16>,
+        w3: output logic<16>,
+    ) {
+        const N: u32 = 4;
+        var a: logic<8>  [N];
+        var w: logic<16> [N];
+        always_comb {
+            for h in 0..N {
+                a[h] = x + h;
+            }
+            for h in 0..N {
+                w[h] = {if h + 1 <: N ? a[h + 1] : 8'd0, a[h]};
+            }
+        }
+        assign w2 = w[2];
+        assign w3 = w[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("x", Value::new(0x10, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("w2").unwrap(),
+            Value::new(0x1312, 16, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("w3").unwrap(),
+            Value::new(0x0013, 16, false),
+            "config={config:?}"
         );
     }
 }

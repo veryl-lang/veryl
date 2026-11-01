@@ -160,6 +160,12 @@ impl TypeDag {
                             continue;
                         }
 
+                        // A global function is emitted into its caller, which
+                        // records a call-site argument as its own dependency.
+                        if symbol.is_global_function() && !Self::is_written_in(&symbol, arg_path) {
+                            continue;
+                        }
+
                         let arg_namespace = Self::get_arg_namespace(&symbol, arg_path);
 
                         // insert edge between given generic arg and base symbol
@@ -183,6 +189,13 @@ impl TypeDag {
 
         symbol_table::resume_cache_clear();
         self.errors.drain(..).map(|x| x.into()).collect()
+    }
+
+    fn is_written_in(symbol: &Symbol, path: &GenericSymbolPath) -> bool {
+        path.paths
+            .first()
+            .and_then(|x| Namespace::from_token(x.base))
+            .is_some_and(|x| x.included(&symbol.inner_namespace()))
     }
 
     fn get_arg_namespace(base_symbol: &Symbol, path: &GenericSymbolPath) -> Namespace {

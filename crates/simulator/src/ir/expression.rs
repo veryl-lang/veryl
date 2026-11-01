@@ -931,15 +931,7 @@ impl ProtoExpression {
     pub fn reads_offset(&self, off: VarOffset) -> bool {
         let mut ranges: Vec<(bool, isize, isize, usize)> = Vec::new();
         self.gather_dynamic_read_ranges(&mut ranges);
-        let raw = off.raw();
-        let in_span = ranges.iter().any(|&(is_ff, base, stride, num_elements)| {
-            is_ff == off.is_ff()
-                && stride > 0
-                && raw >= base
-                && raw < base.saturating_add(stride.saturating_mul(num_elements as isize))
-                && (raw - base) % stride == 0
-        });
-        if in_span {
+        if dynamic_ranges_contain(&ranges, off) {
             return true;
         }
         // Everything else — plain reads, index sub-expressions, and the
@@ -1059,6 +1051,19 @@ impl ProtoExpression {
             }
         }
     }
+}
+
+/// Whether `off` is an element of one of `ranges`, as recorded by
+/// `gather_dynamic_read_ranges`.
+pub fn dynamic_ranges_contain(ranges: &[(bool, isize, isize, usize)], off: VarOffset) -> bool {
+    let raw = off.raw();
+    ranges.iter().any(|&(is_ff, base, stride, num_elements)| {
+        is_ff == off.is_ff()
+            && stride > 0
+            && raw >= base
+            && raw < base.saturating_add(stride.saturating_mul(num_elements as isize))
+            && (raw - base) % stride == 0
+    })
 }
 
 /// Dynamic bit selection for packed arrays / part-selects.
@@ -1265,6 +1270,195 @@ impl std::hash::Hash for ProtoHierVariable {
 }
 
 impl ProtoExpression {
+    /// Whether both trees compute the same value from the same storage.  A
+    /// hierarchical reference is resolved before any caller can ask, so it
+    /// never compares equal.
+    pub fn same_structure(&self, other: &ProtoExpression) -> bool {
+        fn same_dyn(a: &Option<ProtoDynamicBitSelect>, b: &Option<ProtoDynamicBitSelect>) -> bool {
+            match (a, b) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_structure(b),
+                _ => false,
+            }
+        }
+        match (self, other) {
+            (
+                ProtoExpression::Resize {
+                    x,
+                    width,
+                    sign_extend,
+                    expr_context,
+                },
+                ProtoExpression::Resize {
+                    x: x2,
+                    width: width2,
+                    sign_extend: sign_extend2,
+                    expr_context: expr_context2,
+                },
+            ) => {
+                width == width2
+                    && sign_extend == sign_extend2
+                    && expr_context == expr_context2
+                    && x.same_structure(x2)
+            }
+            (
+                ProtoExpression::Variable {
+                    var_offset,
+                    select,
+                    dynamic_select,
+                    width,
+                    var_full_width,
+                    expr_context,
+                },
+                ProtoExpression::Variable {
+                    var_offset: var_offset2,
+                    select: select2,
+                    dynamic_select: dynamic_select2,
+                    width: width2,
+                    var_full_width: var_full_width2,
+                    expr_context: expr_context2,
+                },
+            ) => {
+                var_offset == var_offset2
+                    && select == select2
+                    && width == width2
+                    && var_full_width == var_full_width2
+                    && expr_context == expr_context2
+                    && same_dyn(dynamic_select, dynamic_select2)
+            }
+            (
+                ProtoExpression::Value {
+                    value,
+                    width,
+                    expr_context,
+                },
+                ProtoExpression::Value {
+                    value: value2,
+                    width: width2,
+                    expr_context: expr_context2,
+                },
+            ) => value == value2 && width == width2 && expr_context == expr_context2,
+            (
+                ProtoExpression::Unary {
+                    op,
+                    x,
+                    width,
+                    expr_context,
+                },
+                ProtoExpression::Unary {
+                    op: op2,
+                    x: x2,
+                    width: width2,
+                    expr_context: expr_context2,
+                },
+            ) => {
+                op == op2
+                    && width == width2
+                    && expr_context == expr_context2
+                    && x.same_structure(x2)
+            }
+            (
+                ProtoExpression::Binary {
+                    x,
+                    op,
+                    y,
+                    width,
+                    expr_context,
+                },
+                ProtoExpression::Binary {
+                    x: x2,
+                    op: op2,
+                    y: y2,
+                    width: width2,
+                    expr_context: expr_context2,
+                },
+            ) => {
+                op == op2
+                    && width == width2
+                    && expr_context == expr_context2
+                    && x.same_structure(x2)
+                    && y.same_structure(y2)
+            }
+            (
+                ProtoExpression::Concatenation {
+                    elements,
+                    width,
+                    expr_context,
+                },
+                ProtoExpression::Concatenation {
+                    elements: elements2,
+                    width: width2,
+                    expr_context: expr_context2,
+                },
+            ) => {
+                width == width2
+                    && expr_context == expr_context2
+                    && elements.len() == elements2.len()
+                    && elements
+                        .iter()
+                        .zip(elements2)
+                        .all(|((e, r, w), (e2, r2, w2))| r == r2 && w == w2 && e.same_structure(e2))
+            }
+            (
+                ProtoExpression::Ternary {
+                    cond,
+                    true_expr,
+                    false_expr,
+                    width,
+                    expr_context,
+                },
+                ProtoExpression::Ternary {
+                    cond: cond2,
+                    true_expr: true_expr2,
+                    false_expr: false_expr2,
+                    width: width2,
+                    expr_context: expr_context2,
+                },
+            ) => {
+                width == width2
+                    && expr_context == expr_context2
+                    && cond.same_structure(cond2)
+                    && true_expr.same_structure(true_expr2)
+                    && false_expr.same_structure(false_expr2)
+            }
+            (
+                ProtoExpression::DynamicVariable {
+                    base_offset,
+                    stride,
+                    element_native_bytes,
+                    index_expr,
+                    num_elements,
+                    select,
+                    dynamic_select,
+                    width,
+                    expr_context,
+                },
+                ProtoExpression::DynamicVariable {
+                    base_offset: base_offset2,
+                    stride: stride2,
+                    element_native_bytes: element_native_bytes2,
+                    index_expr: index_expr2,
+                    num_elements: num_elements2,
+                    select: select2,
+                    dynamic_select: dynamic_select2,
+                    width: width2,
+                    expr_context: expr_context2,
+                },
+            ) => {
+                base_offset == base_offset2
+                    && stride == stride2
+                    && element_native_bytes == element_native_bytes2
+                    && num_elements == num_elements2
+                    && select == select2
+                    && width == width2
+                    && expr_context == expr_context2
+                    && index_expr.same_structure(index_expr2)
+                    && same_dyn(dynamic_select, dynamic_select2)
+            }
+            _ => false,
+        }
+    }
+
     /// Adjust all embedded byte offsets by the given deltas.
     /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
     pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
@@ -3136,6 +3330,23 @@ pub(crate) fn packed_range_row_type(
 }
 
 impl ProtoDynamicBitSelect {
+    fn same_structure(&self, other: &ProtoDynamicBitSelect) -> bool {
+        let ProtoDynamicBitSelect {
+            low_adjust,
+            row_elements,
+            index_expr,
+            elem_width,
+            window,
+            num_elements,
+        } = self;
+        *low_adjust == other.low_adjust
+            && *row_elements == other.row_elements
+            && *elem_width == other.elem_width
+            && *window == other.window
+            && *num_elements == other.num_elements
+            && index_expr.same_structure(&other.index_expr)
+    }
+
     pub(crate) fn storage_width(&self) -> usize {
         let elements = self.row_elements.map_or(self.num_elements, |row| {
             self.num_elements / ((row + self.low_adjust).next_power_of_two()) * row
@@ -3255,6 +3466,131 @@ pub(crate) fn array_slice_elements(
         elements.push(Conv::conv(context, &element)?);
     }
     Ok(Some(elements))
+}
+
+/// `$clog2(x)` and `$onehot(x)` of an argument known only at run time, as a
+/// balanced sum of per-bit terms over a single read of the argument, so a wide
+/// argument neither repeats its side effects nor builds a deep expression.
+/// `$clog2` counts the powers of two below `x`, so an x/z bit makes the sum
+/// all x; `$onehot` counts only the bits that are 1 (IEEE 1800-2023 20.9).
+fn lower_runtime_system_function(
+    context: &mut Context,
+    call: &air::SystemFunctionCall,
+    input: &air::Expression,
+) -> Result<ProtoExpression, SimulatorError> {
+    let unsupported = || SimulatorError::unsupported_description(&call.comptime.token);
+    let arg_width = input
+        .comptime()
+        .r#type
+        .total_width()
+        .filter(|&w| w > 0)
+        .ok_or_else(unsupported)?;
+    let unsigned = |width| ExpressionContext {
+        width,
+        signed: false,
+    };
+    let arg: ProtoExpression = Conv::conv(context, input)?;
+    let (var_offset, var_full_width) = match arg {
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width,
+            var_full_width,
+            ..
+        } if width == arg_width => (var_offset, var_full_width),
+        arg => {
+            let arg = resize_to_width(arg, arg_width, unsigned(arg_width));
+            match snapshot_expression(context, arg) {
+                ProtoExpression::Variable { var_offset, .. } => (var_offset, arg_width),
+                _ => unreachable!(),
+            }
+        }
+    };
+    let bit = |i: usize| ProtoExpression::Variable {
+        var_offset,
+        select: Some((i, i)),
+        dynamic_select: None,
+        width: 1,
+        var_full_width,
+        expr_context: unsigned(1),
+    };
+    let whole = || ProtoExpression::Variable {
+        var_offset,
+        select: None,
+        dynamic_select: None,
+        width: arg_width,
+        var_full_width,
+        expr_context: unsigned(arg_width),
+    };
+    let value = |payload: BigUint, width: usize| ProtoExpression::Value {
+        value: Value::new_biguint(payload, width, false),
+        width,
+        expr_context: unsigned(width),
+    };
+    let binary = |x, op, y, expr_context: ExpressionContext| ProtoExpression::Binary {
+        x: Box::new(x),
+        op,
+        y: Box::new(y),
+        width: expr_context.width,
+        expr_context,
+    };
+    let count = ExpressionContext {
+        width: 32,
+        signed: true,
+    };
+    let terms: Vec<ProtoExpression> = match &call.kind {
+        air::SystemFunctionKind::Clog2(_) => (0..arg_width)
+            .map(|k| {
+                let above = value(BigUint::one() << k, arg_width);
+                binary(whole(), Op::Greater, above, unsigned(1))
+            })
+            .collect(),
+        air::SystemFunctionKind::Onehot(_) if context.config.use_4state => (0..arg_width)
+            .map(|i| binary(value(BigUint::ZERO, 1), Op::NeWildcard, bit(i), unsigned(1)))
+            .collect(),
+        air::SystemFunctionKind::Onehot(_) => (0..arg_width).map(bit).collect(),
+        _ => return Err(unsupported()),
+    };
+    let mut sums: Vec<ProtoExpression> = terms
+        .into_iter()
+        .map(|term| resize_to_width(term, 32, count))
+        .collect();
+    while sums.len() > 1 {
+        let mut next = Vec::with_capacity(sums.len().div_ceil(2));
+        let mut it = sums.into_iter();
+        while let Some(x) = it.next() {
+            next.push(match it.next() {
+                Some(y) => binary(x, Op::Add, y, count),
+                None => x,
+            });
+        }
+        sums = next;
+    }
+    let sum = sums.pop().unwrap();
+    let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+    Ok(match call.kind {
+        air::SystemFunctionKind::Clog2(_) => ProtoExpression::Resize {
+            x: Box::new(sum),
+            width: 32,
+            sign_extend: true,
+            expr_context,
+        },
+        _ => {
+            let one = ProtoExpression::Value {
+                value: Value::new(1, 32, true),
+                width: 32,
+                expr_context: count,
+            };
+            let onehot = binary(sum, Op::Eq, one, unsigned(1));
+            ProtoExpression::Resize {
+                x: Box::new(onehot),
+                width: 1,
+                sign_extend: false,
+                expr_context,
+            }
+        }
+    })
 }
 
 impl Conv<&air::Expression> for ProtoExpression {
@@ -3408,6 +3744,22 @@ impl Conv<&air::Expression> for ProtoExpression {
                     if let Some(idx_vals) = const_index {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(id).unwrap();
+                        // A constant index past the end can sit in an arm that
+                        // is never taken, e.g. `if i + 1 <: N ? a[i + 1] : 0`
+                        // in an unrolled loop; it reads like a dynamic one.
+                        let out_of_range = meta
+                            .r#type
+                            .array
+                            .iter()
+                            .zip(&idx_vals)
+                            .any(|(dim, i)| dim.is_some_and(|dim| *i >= dim));
+                        if out_of_range {
+                            return Ok(ProtoExpression::Value {
+                                value: out_of_range_read(width, expr_context.signed, use_4state),
+                                width,
+                                expr_context,
+                            });
+                        }
                         let index = meta.r#type.array.calc_index(&idx_vals).ok_or_else(|| {
                             SimulatorError::unsupported_description(&comptime.token)
                         })?;
@@ -3548,6 +3900,16 @@ impl Conv<&air::Expression> for ProtoExpression {
                     // `veryl build` and Verilator all accept. Evaluate it,
                     // and report an unsupported description rather than
                     // panicking when it will not evaluate.
+                    //
+                    // A function body is shared by every caller, so an
+                    // argument constant at only some call sites is a runtime
+                    // value here; evaluating it would read a stale binding.
+                    air::SystemFunctionKind::Clog2(input)
+                    | air::SystemFunctionKind::Onehot(input)
+                        if !input.0.comptime().is_const =>
+                    {
+                        lower_runtime_system_function(context, call, &input.0)
+                    }
                     _ => {
                         let scope = context.scope();
                         let value = call.eval_value(&mut scope.analyzer_context);

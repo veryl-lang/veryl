@@ -49,6 +49,14 @@ use veryl_parser::veryl_token::Token;
 
 impl Conv<&GenerateItem> for ir::DeclarationBlock {
     fn conv(context: &mut Context, value: &GenerateItem) -> IrResult<Self> {
+        // Not every declaration kind checks this itself: an inactive
+        // `always_ff` would otherwise keep its clock and reset without a body.
+        let range: TokenRange = value.into();
+        let define_context: DefineContext = range.beg.into();
+        if !define_context.is_active(&context.config.defines) {
+            return Ok(ir::DeclarationBlock::default());
+        }
+
         match value {
             GenerateItem::LetDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
                 context,
@@ -444,8 +452,15 @@ impl Conv<&WithParameterItem> for () {
 
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
 
-            // parameter default value
-            let expr = if context.is_affiliated(Affiliation::ProtoModule) {
+            let overridden = context
+                .get_override(&symbol.found.namespace, &path)
+                .cloned();
+
+            // The default is sized by the parameters as overridden, so a default
+            // that fits only the default shape must not be evaluated when unused.
+            let mut expr = if let Some(expr) = overridden {
+                expr
+            } else if context.is_affiliated(Affiliation::ProtoModule) {
                 let comptime = Comptime::create_unknown(token);
                 let expr = ir::Expression::Term(Box::new(ir::Factor::Unknown(comptime.clone())));
                 (comptime, expr)
@@ -460,12 +475,6 @@ impl Conv<&WithParameterItem> for () {
 
                 eval_expr(context, Some(r#type.clone()), expr, false)?
             };
-
-            // Get overridden parameter if it exists
-            let mut expr = context
-                .get_override(&symbol.found.namespace, &path)
-                .cloned()
-                .unwrap_or(expr);
 
             let dst = ir::AssignDestination {
                 id: VarId::default(),

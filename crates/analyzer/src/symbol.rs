@@ -1528,7 +1528,22 @@ impl Type {
     }
 
     pub fn is_compatible(&self, other: &Type) -> bool {
-        self.to_string() == other.to_string()
+        // The same user-defined type can be spelled through different paths,
+        // e.g. `T` brought in by `import pkg::*` and `pkg::T`, and the same
+        // spelling can name different symbols, so names are compared by what
+        // they resolve to in their own scopes.
+        let (TypeKind::UserDefined(x), TypeKind::UserDefined(y)) = (&self.kind, &other.kind) else {
+            return self.to_string() == other.to_string();
+        };
+        if !is_same_generic_path(&x.path, &y.path) {
+            return false;
+        }
+
+        let mut x = self.clone();
+        let mut y = other.clone();
+        x.kind = TypeKind::Inferred;
+        y.kind = TypeKind::Inferred;
+        x.to_string() == y.to_string()
     }
 
     pub fn has_modifier(&self, kind: &TypeModifierKind) -> bool {
@@ -1995,6 +2010,71 @@ impl From<&syntax_tree::TypeModifier> for TypeModifier {
             token: token.clone(),
         }
     }
+}
+
+fn is_same_generic_path(x: &GenericSymbolPath, y: &GenericSymbolPath) -> bool {
+    if x.kind != y.kind {
+        return false;
+    }
+    if !x.is_resolvable() {
+        return match (x.to_literal(), y.to_literal()) {
+            (Some(x), Some(y)) => x == y,
+            _ => x.to_string() == y.to_string(),
+        };
+    }
+
+    let resolve = |x: &GenericSymbolPath| {
+        let head = x.paths.first()?;
+        let path = SymbolPathNamespace::from_token(x.generic_path(), head.base.id);
+        symbol_table::resolve(path).ok().map(|x| x.found.clone())
+    };
+    let (Some(a), Some(b)) = (resolve(x), resolve(y)) else {
+        return false;
+    };
+    let is_generic = |x: &Symbol| {
+        matches!(
+            x.kind,
+            SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
+        )
+    };
+    // A generic parameter is local to each declaration, so only its spelling
+    // can be compared.
+    if is_generic(&a) || is_generic(&b) {
+        return is_generic(&a) && is_generic(&b) && x.to_string() == y.to_string();
+    }
+    if a.id != b.id && !is_proto_member_pair(&a, &b) && !is_proto_member_pair(&b, &a) {
+        return false;
+    }
+
+    let x_args: Vec<_> = x.paths.iter().flat_map(|x| &x.arguments).collect();
+    let y_args: Vec<_> = y.paths.iter().flat_map(|x| &x.arguments).collect();
+    x_args.len() == y_args.len()
+        && x_args
+            .iter()
+            .zip(&y_args)
+            .all(|(x, y)| is_same_generic_path(x, y))
+}
+
+// A member of a proto package stands for the same-named member of the package
+// implementing it.
+fn is_proto_member_pair(proto_member: &Symbol, member: &Symbol) -> bool {
+    if proto_member.token.text != member.token.text {
+        return false;
+    }
+    let (Some(proto), Some(package)) = (proto_member.get_parent(), member.get_parent()) else {
+        return false;
+    };
+    let (SymbolKind::Package(x), SymbolKind::Package(y)) = (&proto.kind, &package.kind) else {
+        return false;
+    };
+    if !x.is_proto {
+        return false;
+    }
+    let Some(implemented) = &y.proto else {
+        return false;
+    };
+    symbol_table::resolve((&implemented.generic_path(), &package.namespace))
+        .is_ok_and(|x| x.found.id == proto.id)
 }
 
 impl fmt::Display for TypeModifier {

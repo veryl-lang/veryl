@@ -127,6 +127,11 @@ pub struct Context {
     /// evaluator walks straight past it and the LAST `return` wins.
     pub function_ret_var: Option<VarId>,
     pub function_returned: bool,
+    /// Set when the function being constant-evaluated reached a branch or
+    /// loop whose condition or bound is unknown, or a write it could not
+    /// perform. Skipping that code leaves stale values behind, so the call
+    /// result is unknown too.
+    pub function_indeterminate: bool,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -689,19 +694,31 @@ impl Context {
         }
     }
 
-    pub fn resolve_path(&self, mut path: GenericSymbolPath) -> GenericSymbolPath {
-        let Some((scope, define_context)) = scope::token_scope(path.paths[0].base.id) else {
-            return path;
-        };
-        path.resolve_imported(scope, &define_context, None);
-        self.apply_generic_maps(&mut path);
-        path
+    pub fn resolve_path(&self, path: GenericSymbolPath) -> GenericSymbolPath {
+        self.resolve_path_mapped(path).0
     }
 
-    pub fn apply_generic_maps(&self, path: &mut GenericSymbolPath) {
+    /// Like `resolve_path`, also telling whether a generic map replaced the
+    /// head. A replaced name must not be looked up as a variable: in an inlined
+    /// function body it would find a same-named variable of the caller.
+    pub fn resolve_path_mapped(&self, mut path: GenericSymbolPath) -> (GenericSymbolPath, bool) {
+        let Some((scope, define_context)) = scope::token_scope(path.paths[0].base.id) else {
+            return (path, false);
+        };
+        path.resolve_imported(scope, &define_context, None);
+        let mapped = self.apply_generic_maps(&mut path);
+        (path, mapped)
+    }
+
+    /// Returns whether a generic map replaced the head of `path`.
+    pub fn apply_generic_maps(&self, path: &mut GenericSymbolPath) -> bool {
+        let mut mapped = false;
         for map in self.generic_maps.iter().rev() {
+            let head = path.paths[0].base();
+            mapped |= map.iter().any(|x| x.map.contains_key(&head));
             path.apply_map(map);
         }
+        mapped
     }
 
     pub fn insert_var_path(&mut self, path: VarPath, value: Comptime) -> VarId {

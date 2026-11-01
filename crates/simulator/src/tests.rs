@@ -105,7 +105,12 @@ impl Allowed {
 
 #[track_caller]
 fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, Allowed::Nothing)
+    analyze_top_inner(code, config, top, Allowed::Nothing, &[])
+}
+
+#[track_caller]
+fn analyze_with_defines(code: &str, config: &Config, defines: &[&str]) -> Ir {
+    analyze_top_inner(code, config, "Top", Allowed::Nothing, defines).unwrap()
 }
 
 /// The analyzer IR itself, for the tests that build more than one top out of
@@ -140,7 +145,7 @@ fn analyze_top_allowing_comb_loop(
     config: &Config,
     top: &str,
 ) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, Allowed::CombLoop)
+    analyze_top_inner(code, config, top, Allowed::CombLoop, &[])
 }
 
 /// For the tests targeting a port connection the analyzer already reports, at
@@ -151,7 +156,7 @@ fn analyze_top_allowing_mismatch_assignment(
     config: &Config,
     top: &str,
 ) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, Allowed::MismatchAssignment)
+    analyze_top_inner(code, config, top, Allowed::MismatchAssignment, &[])
 }
 
 #[track_caller]
@@ -160,6 +165,7 @@ fn analyze_top_inner(
     config: &Config,
     top: &str,
     allow: Allowed,
+    defines: &[&str],
 ) -> Result<Ir, SimulatorError> {
     symbol_table::clear();
 
@@ -167,6 +173,11 @@ fn analyze_top_inner(
     let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
+    context.config.defines = defines
+        .iter()
+        .map(|x| veryl_parser::resource_table::insert_str(x))
+        .collect();
+    symbol_table::set_defines(&context.config.defines);
 
     let mut errors = vec![];
     let mut ir = air::Ir::default();

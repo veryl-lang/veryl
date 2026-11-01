@@ -1,6 +1,6 @@
 use crate::ir::declaration::stable_topo_sort_with_blocks;
 use crate::ir::{
-    ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
+    ExpressionContext, Op, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
     ProtoIfStatement, ProtoStatement, VarOffset,
 };
 
@@ -9,6 +9,10 @@ const TEMP: VarOffset = VarOffset::Comb(24);
 const OUTPUT: VarOffset = VarOffset::Comb(32);
 const INPUT: VarOffset = VarOffset::Comb(40);
 const OTHER: VarOffset = VarOffset::Comb(48);
+const MASK: VarOffset = VarOffset::Comb(56);
+// Three 8-byte elements at 64, 72 and 80.
+const ARRAY: VarOffset = VarOffset::Comb(64);
+const MIDDLE: VarOffset = VarOffset::Comb(72);
 
 fn read(var_offset: VarOffset) -> ProtoExpression {
     ProtoExpression::Variable {
@@ -192,6 +196,131 @@ fn reading_the_guard_itself_is_not_covered_by_its_body() {
         branch(TEMP, vec![assign(TEMP, INPUT)], true),
         branch(TEMP, vec![assign(OUTPUT, TEMP)], true),
         branch(OTHER, vec![assign(TEMP, OTHER)], true),
+    ];
+    assert_ne!(hint(statements), Some(1));
+}
+
+fn context() -> ExpressionContext {
+    ExpressionContext {
+        width: 8,
+        signed: false,
+    }
+}
+
+fn read_element(index: VarOffset) -> ProtoExpression {
+    ProtoExpression::DynamicVariable {
+        base_offset: ARRAY,
+        stride: 8,
+        element_native_bytes: 8,
+        index_expr: Box::new(read(index)),
+        num_elements: 3,
+        select: None,
+        dynamic_select: None,
+        width: 8,
+        expr_context: context(),
+    }
+}
+
+fn masked_guard() -> ProtoExpression {
+    ProtoExpression::Binary {
+        x: Box::new(read(GUARD)),
+        op: Op::BitAnd,
+        y: Box::new(read(MASK)),
+        width: 8,
+        expr_context: context(),
+    }
+}
+
+fn guarded(cond: ProtoExpression, true_side: Vec<ProtoStatement>) -> ProtoStatement {
+    ProtoStatement::If(ProtoIfStatement {
+        cond: Some(cond),
+        true_side,
+        false_side: vec![],
+    })
+}
+
+#[test]
+fn compound_guard_covers_until_an_input_is_rewritten() {
+    let compound = || {
+        vec![
+            guarded(masked_guard(), vec![assign(TEMP, INPUT)]),
+            guarded(masked_guard(), vec![assign(OUTPUT, TEMP)]),
+            branch(OTHER, vec![assign(TEMP, OTHER)], true),
+        ]
+    };
+    assert_eq!(hint(compound()), Some(1));
+
+    let mut statements = compound();
+    statements.insert(1, assign(MASK, OTHER));
+    assert_ne!(hint(statements), Some(1));
+
+    let mut statements = compound();
+    let ProtoStatement::If(conditional) = &mut statements[0] else {
+        unreachable!()
+    };
+    conditional.true_side.push(assign(MASK, OTHER));
+    assert_ne!(hint(statements), Some(1));
+}
+
+#[test]
+fn guard_with_another_operand_does_not_prove_cover() {
+    let mut statements = pieces(true);
+    statements[1] = guarded(masked_guard(), vec![assign(OUTPUT, TEMP)]);
+    assert_ne!(hint(statements), Some(1));
+}
+
+#[test]
+fn runtime_indexed_guard_covers_until_any_element_is_rewritten() {
+    let pieces = |between: Vec<ProtoStatement>| {
+        let mut statements = vec![guarded(read_element(OTHER), vec![assign(TEMP, INPUT)])];
+        statements.extend(between);
+        statements.push(guarded(read_element(OTHER), vec![assign(OUTPUT, TEMP)]));
+        statements.push(branch(OTHER, vec![assign(TEMP, OTHER)], true));
+        statements
+    };
+    assert_eq!(hint(pieces(vec![])), Some(1));
+    // The middle element is not one of the two the offset gather names.
+    assert_ne!(hint(pieces(vec![assign(MIDDLE, INPUT)])), Some(1));
+    assert_ne!(
+        hint(pieces(vec![ProtoStatement::AssignDynamic(
+            ProtoAssignDynamicStatement {
+                dst_base: ARRAY,
+                dst_stride: 8,
+                dst_num_elements: 3,
+                dst_index_expr: read(INPUT),
+                dst_width: 8,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: read(INPUT),
+                dst_ff_current_base_offset: 0,
+                comb_direct: false,
+            }
+        )])),
+        Some(1)
+    );
+}
+
+#[test]
+fn opposite_arm_runtime_index_reads_the_temporary() {
+    let statements = vec![
+        branch(GUARD, vec![assign(MIDDLE, INPUT)], true),
+        ProtoStatement::If(ProtoIfStatement {
+            cond: Some(read(GUARD)),
+            true_side: vec![assign(OUTPUT, MIDDLE)],
+            false_side: vec![ProtoStatement::Assign(ProtoAssignStatement {
+                dst: OUTPUT,
+                dst_width: 8,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: read_element(OTHER),
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: Default::default(),
+            })],
+        }),
+        branch(OTHER, vec![assign(MIDDLE, OTHER)], true),
     ];
     assert_ne!(hint(statements), Some(1));
 }

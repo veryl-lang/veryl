@@ -534,6 +534,22 @@ impl Expression {
                     || y.comptime().r#type.is_string()
                     || z.comptime().r#type.is_string();
                 let x = x.eval_value(context)?;
+                if let Some(cond) = x.truth() {
+                    let (taken, untaken) = if cond { (y, z) } else { (z, y) };
+
+                    // Only the taken arm has to be evaluable: the other one may be
+                    // what the condition guards against, e.g. `i <: N ? a[i] : 0`.
+                    let ret = taken.eval_value(context)?;
+                    // An unevaluable untaken arm still sizes the result by its type.
+                    let untaken_width = untaken.eval_value(context).map_or_else(
+                        || untaken.comptime().r#type.total_width().unwrap_or(0),
+                        |x| x.width(),
+                    );
+                    let width = ret.width().max(untaken_width).max(context_width);
+                    let mut ret = ret.expand(width, signed).into_owned();
+                    ret.set_signed(signed);
+                    return Some(ret);
+                }
                 let y = y.eval_value(context)?;
                 let z = z.eval_value(context)?;
                 if non_integral {

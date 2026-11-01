@@ -2609,6 +2609,71 @@ endmodule
 }
 
 #[test]
+fn generic_package_global_function_reached_only_by_import() {
+    // The package instance is reached only through an import, whose scope
+    // also sees `W`.
+    let code = r#"function FuncA::<W: u32, N: u32> (
+    a: input logic<W>,
+) -> logic<W> {
+    return a + N;
+}
+proto package ProtoPkgA {
+    const N: u32;
+}
+package PkgA for ProtoPkgA {
+    const N: u32 = 3;
+}
+package PkgB::<P: ProtoPkgA> {
+    const W: u32 = 4;
+    function FuncB (
+        a: input logic<W>,
+    ) -> logic<W> {
+        return FuncA::<W, P::N>(a);
+    }
+}
+module ModuleA {
+    import PkgB::<PkgA>::*;
+    let _a: logic<W> = 0;
+}
+"#;
+
+    let expect = r#"
+
+
+package prj_PkgA;
+    localparam int unsigned N = 3;
+endpackage
+package prj___PkgB__PkgA;
+    localparam int unsigned W = 4;
+    function automatic logic [W-1:0] FuncB(
+        input var logic [W-1:0] a
+    ) ;
+        return __FuncA__W__PkgA_N(a);
+    endfunction
+
+    function automatic logic [W-1:0] __FuncA__W__PkgA_N(
+        input var logic [W-1:0] a
+    ) ;
+        return a + prj_PkgA::N;
+    endfunction
+endpackage
+module prj_ModuleA;
+    import prj___PkgB__PkgA::*;
+
+    logic [W-1:0] _a; always_comb _a = 0;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn boolean_literal_as_generic_arg() {
     let code = r#"module ModuleA::<A: lbool> {
     let _a: lbool = A;

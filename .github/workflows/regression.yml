@@ -196,7 +196,7 @@ jobs:
 
   std:
     needs: build-veryl
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
@@ -253,7 +253,7 @@ jobs:
 
   cocotb:
     needs: build-veryl
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4

@@ -8,6 +8,7 @@ use crate::conv::utils::{
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{self, IrResult, VarKind, VarPath, Variable};
+use crate::namespace::DefineContext;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use crate::{HashMap, ir_error};
@@ -42,6 +43,14 @@ impl Conv<&Veryl> for ir::Ir {
                 x.description_group.as_ref().into()
             };
             for item in &items {
+                // An item behind an inactive `#[ifdef]` keeps its symbols, but
+                // its body has been compiled out and must not be analyzed.
+                let range: TokenRange = (*item).into();
+                let define_context: DefineContext = range.beg.into();
+                if !define_context.is_active(&context.config.defines) {
+                    continue;
+                }
+
                 // ignore IrError of generic top-level components
                 let in_generic = context.in_generic;
                 if item.is_generic() {

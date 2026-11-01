@@ -1407,6 +1407,15 @@ impl TypeKind {
         matches!(self, TypeKind::F32 | TypeKind::F64)
     }
 
+    /// The defining symbol of a struct or union type.
+    pub fn aggregate_id(&self) -> Option<SymbolId> {
+        match self {
+            TypeKind::Struct(x) => Some(x.id),
+            TypeKind::Union(x) => Some(x.id),
+            _ => None,
+        }
+    }
+
     pub fn signature(&self) -> Option<Signature> {
         match self {
             TypeKind::Module(x)

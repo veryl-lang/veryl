@@ -112,6 +112,14 @@ impl ForRange {
         (start, end)
     }
 
+    pub fn has_const_bounds(&self) -> bool {
+        let (start, end) = self.bounds();
+        [start, end].into_iter().all(|bound| match bound {
+            ForBound::Const(..) => true,
+            ForBound::Expression(x) => x.comptime().is_const,
+        })
+    }
+
     pub fn bounds_mut(&mut self) -> (&mut ForBound, &mut ForBound) {
         let (ForRange::Forward { start, end, .. }
         | ForRange::Reverse { start, end, .. }
@@ -482,9 +490,9 @@ impl Statement {
                             }
                         }
                     }
-                } else if context.comptime_for_overflow.is_none()
-                    && x.range.is_over_size_limit(context)
-                {
+                } else if !x.range.is_over_size_limit(context) {
+                    context.function_indeterminate = true;
+                } else if context.comptime_for_overflow.is_none() {
                     // Over-limit range: skipping the body would fold the const
                     // to its pre-loop value. The eval path swallows errors, so
                     // record it here for analyzer.rs to surface.
@@ -494,6 +502,11 @@ impl Statement {
             }
             Statement::SystemFunctionCall(_) => ControlFlow::Continue,
             Statement::FunctionCall(x) => {
+                // Output arguments are not written back, so their bindings
+                // would keep their previous values.
+                if !x.outputs.is_empty() {
+                    context.function_indeterminate = true;
+                }
                 x.eval_value(context);
                 ControlFlow::Continue
             }
@@ -1008,9 +1021,10 @@ impl AssignStatement {
                     variable.set_value(&index, value, range);
                 }
             }
-        } else if let Some(value) = self.expr.eval_value(context) {
+        } else {
             // TODO multiple dst
-            if let Some(index) = self.dst[0].index.eval_value(context)
+            let written = if let Some(value) = self.expr.eval_value(context)
+                && let Some(index) = self.dst[0].index.eval_value(context)
                 && let Some((beg, end)) =
                     self.dst[0]
                         .select
@@ -1018,6 +1032,13 @@ impl AssignStatement {
                 && let Some(variable) = context.variable_mut(&self.dst[0].id)
             {
                 variable.set_value(&index, value, Some((beg, end)));
+                true
+            } else {
+                false
+            };
+            // A skipped write leaves the destination at its previous value.
+            if !written {
+                context.function_indeterminate = true;
             }
         }
         // `return expr;` lowers to an assignment to the function's return
@@ -1110,6 +1131,8 @@ impl IfStatement {
                     }
                 }
             }
+        } else {
+            context.function_indeterminate = true;
         }
         ControlFlow::Continue
     }
@@ -1431,6 +1454,7 @@ impl CasePattern {
 impl CaseStatement {
     pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
         let Some(tgt) = self.case_target.eval_value(context) else {
+            context.function_indeterminate = true;
             return ControlFlow::Continue;
         };
         for arm in &self.arms {
@@ -1455,6 +1479,7 @@ impl CaseStatement {
                 return ControlFlow::Continue;
             }
             if undecided {
+                context.function_indeterminate = true;
                 return ControlFlow::Continue;
             }
         }

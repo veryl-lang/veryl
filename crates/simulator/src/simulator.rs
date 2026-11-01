@@ -2119,12 +2119,15 @@ impl Simulator {
 
         // Whole-event backend, then capture its pushed entries + ff/comb.
         // A compared dispatch ran the artifact, so it counts; an off-stride
-        // cycle returned above and stays uncounted.
+        // cycle returned above and stays uncounted.  The Cranelift rerun
+        // below prints what the event prints, so this run stays silent.
         let mut marks = marked.then(|| self.ir.dataflow_dirty.borrow().clone());
+        let mute = crate::output_buffer::Mute::begin();
         let outcome = match marks.as_mut() {
             Some(m) => whole.try_dispatch_delta(ff_ptr, comb_ptr, log_ptr, m.as_mut_ptr() as isize),
             None => whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
         };
+        drop(mute);
         if matches!(outcome, DispatchOutcome::NotReady) {
             self.ir.whole_event_dispatch[1].fetch_add(1, Ordering::Relaxed);
             if !self

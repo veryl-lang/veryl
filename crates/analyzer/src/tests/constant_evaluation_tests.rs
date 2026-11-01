@@ -641,3 +641,61 @@ fn part_select_width_accepts_elaboration_constants_with_unknown_values() {
         assert!(analyze(&code).is_empty(), "{width}");
     }
 }
+
+#[test]
+fn generic_argument_is_not_shadowed_by_a_caller_variable() {
+    let code = r#"
+package Pkg {
+    const W: u32 = 2;
+}
+function get::<N: u32> () -> u32 {
+    return N;
+}
+function cast::<N: u32> () -> u32 {
+    return 32'hff as N;
+}
+module Top (
+    o: output u32,
+) {
+    const N: u32 = 4;
+    const A: u32 = get::<Pkg::W>();
+    const B: u32 = get::<2>();
+    const C: u32 = cast::<Pkg::W>();
+    assign o = A + B + C;
+}
+"#;
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+    errors.extend(Analyzer::analyze_post_pass1());
+    errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.extend(Analyzer::analyze_post_pass2(&ir));
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    let module = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            Component::Module(x) if x.name.to_string() == "Top" => Some(x),
+            _ => None,
+        })
+        .unwrap();
+    for (name, expected) in [("A", 2), ("B", 2), ("C", 3)] {
+        let var = module
+            .variables
+            .values()
+            .find(|x| x.path.to_string() == name)
+            .unwrap();
+        assert_eq!(
+            var.get_value(&[0]),
+            Some(&Value::new(expected, 32, false)),
+            "{name}\n{ir}"
+        );
+    }
+}

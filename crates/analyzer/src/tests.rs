@@ -137,6 +137,7 @@ fn analyze_with_defines(code: &str, defines: &[&str]) -> Vec<AnalyzerError> {
         .iter()
         .map(|x| resource_table::insert_str(x))
         .collect();
+    symbol_table::set_defines(&context.config.defines);
     let mut ir = Ir::default();
 
     let mut errors = vec![];
@@ -1311,6 +1312,36 @@ fn cyclic_file_dependency() {
         errors[0],
         AnalyzerError::CyclicFileDependency { .. }
     ));
+}
+
+#[test]
+fn global_generic_function_argument_is_not_a_file_dependency() {
+    let inputs = vec![
+        r#"
+        package a_pkg {
+          function w (n: input u32) -> u32 {
+            return n + 1;
+          }
+        }
+        function g::<W: u32> (a: input logic<W>) -> logic {
+          return a[W - 1];
+        }
+        "#,
+        r#"
+        package b_pkg {
+          const X: u32 = a_pkg::w(3);
+          function h (a: input logic<X>) -> logic {
+            return g::<X>(a);
+          }
+        }
+        module b_module (a: input logic<4>, o: output logic) {
+          assign o = g::<b_pkg::X>(a);
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -4462,6 +4493,94 @@ fn incompat_proto() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    // A type named through an import is the same type as its qualified name.
+    let code = r#"
+    package TypePkg {
+        type T = logic<4>;
+        type U = logic<4>;
+    }
+    proto package ProtoPkg {
+        const A: TypePkg::T;
+        type B = TypePkg::T;
+        function f (a: input TypePkg::T) -> TypePkg::T;
+    }
+    package Pkg for ProtoPkg {
+        import TypePkg::*;
+        const A: T = 4'd3;
+        type B = T;
+        function f (a: input T) -> T {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    package TypePkg {
+        type T = logic<4>;
+        type U = logic<4>;
+    }
+    proto package ProtoPkg {
+        const A: TypePkg::T;
+    }
+    package Pkg for ProtoPkg {
+        import TypePkg::*;
+        const A: U = 4'd3;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    // Generic arguments spelled the same can name different symbols.
+    let code = r#"
+    package A { const W: u32 = 4; }
+    package B { const W: u32 = 8; }
+    package G::<N: u32> { type S = logic<N>; }
+    proto package ProtoPkg {
+        import A::*;
+        const C: G::<W>::S;
+    }
+    package Pkg for ProtoPkg {
+        import B::*;
+        const C: prj::G::<W>::S = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    package A { const W: u32 = 4; }
+    package G::<N: u32> { type S = logic<N>; }
+    proto package ProtoPkg {
+        const C: G::<A::W>::S;
+    }
+    package Pkg for ProtoPkg {
+        import A::*;
+        const C: G::<W>::S = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    proto package ProtoPkg {
+        struct Foo { foo: u32, }
+        const FOO: Foo;
+    }
+    package Pkg::<V: u32> for ProtoPkg {
+        struct Foo { foo: u32, }
+        const FOO: Foo = Foo'{foo: V};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -5756,6 +5875,111 @@ fn array_slice_shape_mismatch() {
             ..
         }
     ));
+}
+
+#[test]
+fn mismatch_function_arg_struct_type() {
+    let code = r#"
+    package PackageA {
+        struct StructA {
+            x: logic<8>,
+            y: logic<4>,
+        }
+        struct StructB {
+            x: logic<8>,
+        }
+        type AliasB = StructB;
+        function FuncA (
+            b: input StructB,
+        ) -> logic {
+            return b.x[0];
+        }
+        function FuncB (
+            a: input  StructA,
+            b: output StructB,
+        ) {
+            b = a.x as StructB;
+        }
+    }
+    module ModuleA (
+        i_a: input  PackageA::StructA,
+        o_x: output logic,
+    ) {
+        assign o_x = PackageA::FuncA(i_a);
+    }
+    module ModuleB (
+        i_a: input  PackageA::StructA,
+        o_a: output PackageA::StructA,
+    ) {
+        always_comb {
+            PackageA::FuncB(i_a, o_a);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(
+        errors
+            .iter()
+            .all(|e| matches!(e, AnalyzerError::MismatchAssignment { .. })),
+        "{errors:?}"
+    );
+
+    // The same struct, through an alias, a member, a plain logic value or a
+    // generic package, still binds.
+    let code = r#"
+    package PackageA::<W: u32> {
+        struct StructB {
+            x: logic<W>,
+        }
+        type AliasB = StructB;
+        struct StructA {
+            b: StructB,
+            y: logic<4>,
+        }
+        function FuncA (
+            b: input AliasB,
+        ) -> logic {
+            return b.x[0];
+        }
+        function FuncB (
+            b: output StructB,
+        ) {
+            b = 0;
+        }
+    }
+    module ModuleA::<W: u32> (
+        i_a: input  PackageA::<W>::StructA,
+        i_b: input  PackageA::<W>::StructB,
+        i_l: input  logic<W>,
+        o_x: output logic<4>,
+        o_b: output PackageA::<W>::AliasB,
+    ) {
+        var s: PackageA::<W>::StructA;
+        always_comb {
+            s      = i_a;
+            o_x[0] = PackageA::<W>::FuncA(i_a.b);
+            o_x[1] = PackageA::<W>::FuncA(i_b);
+            o_x[2] = PackageA::<W>::FuncA(i_l);
+            o_x[3] = PackageA::<W>::FuncA(i_a.b as PackageA::<W>::StructB);
+            PackageA::<W>::FuncB(o_b);
+            PackageA::<W>::FuncB(s.b);
+        }
+    }
+    module ModuleB (
+        i_a: input  PackageA::<8>::StructA,
+        i_b: input  PackageA::<8>::StructB,
+        i_l: input  logic<8>,
+        o_x: output logic<4>,
+        o_b: output PackageA::<8>::StructB,
+    ) {
+        inst u: ModuleA::<8> (i_a, i_b, i_l, o_x, o_b);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -7122,6 +7346,32 @@ fn duplicate_enum_variant() {
 }
 
 #[test]
+fn struct_array_param_member_reference() {
+    let code = r#"
+    package PackageA {
+        struct Region {
+            base: logic<32>,
+        }
+    }
+    module ModuleA #(
+        param N: u32                  = 2,
+        param W: PackageA::Region [N] = '{0, 0},
+        param X: PackageA::Region [N] = '{
+            PackageA::Region'{ base: 1 },
+            PackageA::Region'{ base: 2 }
+        },
+    ) (
+        o: output logic,
+    ) {
+        assign o = W[0].base == X[1].base;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn invisible_identifier() {
     let code = r#"
     package Pkg::<A: u32> {}
@@ -7750,6 +8000,35 @@ fn undefined_identifier() {
 }
 
 #[test]
+fn overridden_param_default_not_evaluated() {
+    let code = r#"
+    module ModuleA #(
+        param N  : u32         = 1      ,
+        param TBL: logic<8> [N] = '{8'd0},
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = TBL[N - 1];
+    }
+
+    module ModuleB (
+        o: output logic<8>,
+    ) {
+        const T: logic<8> [2] = '{8'd1, 8'd2};
+        inst u: ModuleA #(
+            N  : 2,
+            TBL: T,
+        ) (
+            o,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn referring_before_definition() {
     let code = r#"
     module ModuleA {
@@ -8299,6 +8578,35 @@ fn referring_before_definition() {
             .iter()
             .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
     );
+}
+
+#[test]
+fn inactive_ifdef_module_is_not_analyzed() {
+    let code = r#"
+    #[ifdef(FOO)]
+    module ModuleA (
+        clk: input  clock,
+        rst: input  reset,
+        i_a: input  logic,
+        o_a: output logic,
+    ) {
+        var q: logic;
+        always_ff {
+            if_reset {
+                q = 0;
+            } else {
+                q = i_a;
+            }
+        }
+        assign o_a = q;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let errors = analyze_with_defines(code, &["FOO"]);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -10588,6 +10896,31 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    // An array output argument assigns every element it binds.
+    let code = r#"
+    module ModuleA (
+        x: input  logic<2>       ,
+        o: output logic<2> [2]   ,
+        p: output logic<2> [2, 2],
+    ) {
+        function f (
+            a: input  logic<2>    ,
+            c: output logic<2> [2],
+        ) {
+            c[0] = a;
+            c[1] = ~a;
+        }
+        always_comb {
+            f(x, o);
+            f(x, p[0]);
+            f(x, p[1]);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -23223,6 +23556,60 @@ fn concatenation_assignment_contributes_function_effects() {
 }
 
 #[test]
+fn ifdef_package_function_resolves_to_active_variant() {
+    let code = r#"
+    package PackageA {
+        #[ifdef(FEATURE)]
+        function f () -> logic<8> {
+            return 1;
+        }
+        #[else]
+        function f () -> logic<8> {
+            return 2;
+        }
+    }
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        assign o = PackageA::f();
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(errors.is_empty());
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn ifdef_struct_member_resolves_to_active_variant_before_pass2() {
+    // `s.b` is resolved when references are applied after pass1.
+    let code = r#"
+    package PackageA {
+        #[ifdef(FEATURE)]
+        struct S {
+            b: logic<8>,
+        }
+        #[else]
+        struct S {
+            a: logic<8>,
+        }
+    }
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        var s: PackageA::S;
+        assign s.b = 1;
+        assign o   = s.b;
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn inactive_function_writes_do_not_contribute_effects() {
     let code = r#"
     module ModuleA (
@@ -23915,6 +24302,167 @@ fn zero_size() {
     let errors = analyze(code);
     assert!(
         matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn zero_size_from_proto_const_dependent_function() {
+    // Proto constants have no value inside a generic, so these functions must
+    // not fold to their initial value.
+    let code = r#"
+    proto package ProtoA {
+        const W: u32;
+        const T: u32 [W];
+    }
+    package PackageA for ProtoA {
+        const W: u32     = 2;
+        const T: u32 [W] = '{1, 1};
+    }
+    package PackageB::<CFG: ProtoA> {
+        function count () -> u32 {
+            var c: u32;
+            c = 0;
+            for p in 0..CFG::W {
+                c += CFG::T[p];
+            }
+            return c;
+        }
+        function select () -> u32 {
+            var c: u32;
+            c = 0;
+            if CFG::W == 2 {
+                c = 1;
+            }
+            return c;
+        }
+        const N: u32 = count();
+        const M: u32 = select();
+    }
+    module ModuleA::<CFG: ProtoA> (
+        i_a: input  logic [PackageB::<CFG>::N],
+        o_a: output logic [PackageB::<CFG>::N],
+        i_b: input  logic [PackageB::<CFG>::M],
+        o_b: output logic [PackageB::<CFG>::M],
+    ) {
+        assign o_a = i_a;
+        assign o_b = i_b;
+    }
+    module ModuleB (
+        i_a: input  logic [2],
+        o_a: output logic [2],
+        i_b: input  logic [1],
+        o_b: output logic [1],
+    ) {
+        inst u: ModuleA::<PackageA> (i_a, o_a, i_b, o_b);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn reset_value_from_iterator_over_proto_const_range() {
+    let code = r#"
+    proto package ProtoA {
+        const N: u32;
+    }
+    package PackageA for ProtoA {
+        const N: u32 = 4;
+    }
+    module ModuleA::<CFG: ProtoA> (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        var q: logic<8> [CFG::N];
+        always_ff {
+            if_reset {
+                for i in 0..CFG::N {
+                    q[i] = (32 + i) as 8;
+                }
+            }
+        }
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        inst u: ModuleA::<PackageA> (clk, rst);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnevaluableValue { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn zero_size_from_unevaluable_assignment_in_function() {
+    let code = r#"
+    proto package ProtoA {
+        const W: u32;
+    }
+    package PackageA for ProtoA {
+        const W: u32 = 2;
+    }
+    package PackageB::<CFG: ProtoA> {
+        function width () -> u32 {
+            var c: u32;
+            c = 0;
+            c = CFG::W;
+            return c;
+        }
+        const N: u32 = width();
+    }
+    module ModuleA::<CFG: ProtoA> (
+        i_a: input  logic [PackageB::<CFG>::N],
+        o_a: output logic [PackageB::<CFG>::N],
+    ) {
+        assign o_a = i_a;
+    }
+    module ModuleB (
+        i_a: input  logic [2],
+        o_a: output logic [2],
+    ) {
+        inst u: ModuleA::<PackageA> (i_a, o_a);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Output arguments of a nested call are not written back either.
+    let code = r#"
+    package PackageC {
+        function g (a: input u32, b: output u32) {
+            b = a;
+        }
+        function f () -> u32 {
+            var c: u32;
+            c = 0;
+            g(5, c);
+            return c;
+        }
+        const N: u32 = f();
+    }
+    module ModuleC (
+        i_a: input  logic [PackageC::N],
+        o_a: output logic [PackageC::N],
+    ) {
+        assign o_a = i_a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ZeroSize { .. })),
         "{errors:?}"
     );
 }

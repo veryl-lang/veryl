@@ -247,6 +247,7 @@ impl Analyzer {
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
+        symbol_table::set_defines(&context.config.defines);
         context.config.retain_component_body = ir.is_some();
         context.in_dependency = context
             .project_name()

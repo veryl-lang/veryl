@@ -5770,6 +5770,7 @@ pub(crate) fn lower_function_loops(
                 &mut body.statements,
                 usize::MAX,
                 false,
+                true,
             );
         }
     }
@@ -5792,6 +5793,7 @@ pub(crate) fn peeled_declarations(
         src,
         &mut declarations,
         4096,
+        true,
         true,
     );
     let peeled =
