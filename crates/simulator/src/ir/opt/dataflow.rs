@@ -27,7 +27,7 @@ use super::owners::{OwnerInputs, has_side_effects};
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::ProtoStatement;
-use crate::ir::variable::VarOffset;
+use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes};
 use crate::{HashMap, HashSet};
 
 /// `VERYL_DATAFLOW_DIAG=1`, read once: the runtime asks on hot paths.
@@ -571,8 +571,8 @@ impl StmtIo {
     }
 }
 
-/// `None` when a statement falls outside what the plan can track: an access
-/// outside every owner span or a side effect.
+/// `None` when a statement falls outside what the plan can track: a side
+/// effect, or storage no owner span covers whose writes cannot be bounded.
 fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>> {
     // A byte must belong to one span, or a writer would mark the readers of
     // one span while a reader of the same bytes is keyed on another.  Owner
@@ -597,6 +597,8 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
     let mut ins: Vec<VarOffset> = Vec::new();
     let mut outs: Vec<VarOffset> = Vec::new();
     let mut io = Vec::with_capacity(stmts.len());
+    // Comb bytes outside every owner span, as `(offset, statement, write)`.
+    let mut untracked: Vec<(usize, usize, bool)> = Vec::new();
     for (i, s) in stmts.iter().enumerate() {
         let effect = has_side_effects(s);
         if effect && !output_effects_only(s) {
@@ -618,9 +620,7 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             match o {
                 VarOffset::Comb(off) if *off >= 0 => match span_in(*off as usize) {
                     Some(sp) => x.out_comb.push(sp),
-                    None => {
-                        return bail(format_args!("statement {i} writes untracked comb {off:#x}"));
-                    }
+                    None => untracked.push((*off as usize, i, true)),
                 },
                 VarOffset::Ff(off) if *off >= 0 => {
                     let off = *off as usize;
@@ -651,9 +651,7 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             match o {
                 VarOffset::Comb(off) if *off >= 0 => match span_in(*off as usize) {
                     Some(sp) => x.in_comb.push(sp),
-                    None => {
-                        return bail(format_args!("statement {i} reads untracked comb {off:#x}"));
-                    }
+                    None => untracked.push((*off as usize, i, false)),
                 },
                 VarOffset::Ff(off) if *off >= 0 => match inputs.ff_owner.span(*off as usize) {
                     Some(sp) => x.in_ff.push(sp),
@@ -673,6 +671,79 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             v.dedup();
         }
         io.push(x);
+    }
+    // Storage no variable owns, such as an operand a selected write evaluates
+    // once, gets a span of its own over the bytes its writers store, so it
+    // joins the plan as a variable would.  Plans are 2-state, so there is no
+    // X/Z half to cover.
+    untracked.sort_unstable();
+    let starts: Vec<usize> = untracked.iter().map(|&(off, _, _)| off).collect();
+    // Per writing statement, the widest store to each comb offset, gathered
+    // once: an unrolled loop writes many such offsets from one block.
+    let mut stored: HashMap<usize, Option<HashMap<isize, usize>>> = HashMap::default();
+    let mut bits = Vec::new();
+    for group in untracked.chunk_by(|a, b| a.0 == b.0) {
+        let off = group[0].0;
+        let mut width: Option<usize> = None;
+        for &(_, i, _) in group.iter().filter(|&&(_, _, w)| w) {
+            let widths = stored.entry(i).or_insert_with(|| {
+                bits.clear();
+                write_bits(&stmts[i], &mut bits).then(|| {
+                    let mut m: HashMap<isize, usize> = HashMap::default();
+                    for &(dst, _, hi) in &bits {
+                        if let VarOffset::Comb(d) = dst {
+                            let e = m.entry(d).or_insert(0);
+                            *e = (*e).max(hi + 1);
+                        }
+                    }
+                    m
+                })
+            });
+            let w = widths
+                .as_ref()
+                .and_then(|m| m.get(&(off as isize)).copied());
+            let Some(w) = w else {
+                return bail(format_args!(
+                    "statement {i} writes untracked comb {off:#x} of no bounded width"
+                ));
+            };
+            width = Some(width.map_or(w, |x| x.max(w)));
+        }
+        let next = merged[merged.partition_point(|&(s, _)| s <= off)..]
+            .first()
+            .map_or(usize::MAX, |&(s, _)| s)
+            .min(
+                starts[starts.partition_point(|&s| s <= off)..]
+                    .first()
+                    .copied()
+                    .unwrap_or(usize::MAX),
+            );
+        let writer = group.iter().find(|&&(_, _, w)| w).map(|&(_, i, _)| i);
+        let span = match (writer, width) {
+            (Some(i), Some(w)) => {
+                let span = (off, off + calc_native_bytes(w));
+                if span.1 > next {
+                    return bail(format_args!(
+                        "statement {i} writes untracked comb {off:#x} over a claimed byte"
+                    ));
+                }
+                span
+            }
+            _ => {
+                let i = group[0].1;
+                return bail(format_args!("statement {i} reads untracked comb {off:#x}"));
+            }
+        };
+        for &(_, i, w) in group {
+            let v = if w {
+                &mut io[i].out_comb
+            } else {
+                &mut io[i].in_comb
+            };
+            if let Err(k) = v.binary_search(&span) {
+                v.insert(k, span);
+            }
+        }
     }
     Some(io)
 }
@@ -1873,6 +1944,38 @@ mod tests {
             }
         }
         assert!(checked > 0, "one cell holds everything: {:?}", p.cells);
+    }
+
+    #[test]
+    fn storage_no_variable_owns_is_planned_through_its_writers() {
+        // Byte 64 lies past every variable, as an operand evaluated once
+        // before a selected write does; each unrolled copy writes it again.
+        let (x, b, scratch) = (0, 8, 64);
+        let stmts = vec![
+            assign(scratch, x),
+            assign(b, scratch),
+            assign(scratch, x),
+            assign(b, scratch),
+        ];
+        let p = plan(&stmts, &inputs(2)).expect("plannable");
+        assert!(p.written.contains(&(64, 65)), "{:?}", p.written);
+
+        // Read with no writer, nothing defines its value.
+        assert!(plan(&[assign(b, scratch)], &inputs(2)).is_none());
+
+        // A writer whose bytes run into a variable cannot be given a span.
+        let wide = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(4),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: cvar(x),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: TokenRange::default(),
+        });
+        assert!(plan(&[wide, assign(b, 4)], &inputs(2)).is_none());
     }
 
     #[test]
