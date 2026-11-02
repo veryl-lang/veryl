@@ -1488,6 +1488,9 @@ fn multidimensional_struct_array_select() {
         dynamic: output logic<16>,
         looped: output logic<96>,
         written: output logic<96>,
+        member: output logic<8>,
+        dyn_member: output logic<8>,
+        unioned: output logic<64>,
     ) {
         struct s_t {
             hdr : logic<8>,
@@ -1496,6 +1499,15 @@ fn multidimensional_struct_array_select() {
         var a: s_t<2, 3>;
         var g: s_t<2, 3>;
         var d: s_t<2, 3>;
+        union u_t {
+            x: logic<16>,
+            y: logic<16>,
+        }
+        var u: u_t<2, 2>;
+        always_comb {
+            u          = '0;
+            u[1][1].y  = 16'h4444;
+        }
         always_comb {
             a       = '0;
             a[1][2] = 16'h1222;
@@ -1514,6 +1526,9 @@ fn multidimensional_struct_array_select() {
         assign dynamic = a[0][i];
         assign looped  = g;
         assign written = d;
+        assign member     = a[1][2].hdr;
+        assign dyn_member = a[0][i].body;
+        assign unioned    = u;
     }
     "#;
     for config in Config::all() {
@@ -1544,6 +1559,21 @@ fn multidimensional_struct_array_select() {
         assert_eq!(
             sim.get("written").unwrap(),
             Value::from_str("96'h000033330000000000000000").unwrap(),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("member").unwrap(),
+            Value::new(0x12, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("dyn_member").unwrap(),
+            Value::new(0x11, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("unioned").unwrap(),
+            Value::from_str("64'h4444000000000000").unwrap(),
             "{config:?}"
         );
     }
