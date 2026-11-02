@@ -1389,7 +1389,6 @@ impl TypeKind {
             | TypeKind::Type
             | TypeKind::String
             | TypeKind::Unknown
-            | TypeKind::SystemVerilog
             | TypeKind::Module(_)
             | TypeKind::Interface(_)
             | TypeKind::Modport(_, _)
@@ -1399,7 +1398,7 @@ impl TypeKind {
             TypeKind::Union(x) => x.width(),
             TypeKind::Struct(x) => x.width(),
             TypeKind::Enum(x) => x.width(),
-            TypeKind::Void => None,
+            TypeKind::SystemVerilog | TypeKind::Void => None,
         }
     }
 
