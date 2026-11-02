@@ -1532,18 +1532,21 @@ impl Type {
         // e.g. `T` brought in by `import pkg::*` and `pkg::T`, and the same
         // spelling can name different symbols, so names are compared by what
         // they resolve to in their own scopes.
-        let (TypeKind::UserDefined(x), TypeKind::UserDefined(y)) = (&self.kind, &other.kind) else {
-            return self.to_string() == other.to_string();
+        let is_same_kind = match (&self.kind, &other.kind) {
+            (TypeKind::UserDefined(x), TypeKind::UserDefined(y)) => {
+                is_same_generic_path(&x.path, &y.path)
+            }
+            (x, y) => x.to_string() == y.to_string(),
         };
-        if !is_same_generic_path(&x.path, &y.path) {
-            return false;
-        }
-
-        let mut x = self.clone();
-        let mut y = other.clone();
-        x.kind = TypeKind::Inferred;
-        y.kind = TypeKind::Inferred;
-        x.to_string() == y.to_string()
+        is_same_kind
+            && self.modifier.len() == other.modifier.len()
+            && self
+                .modifier
+                .iter()
+                .zip(&other.modifier)
+                .all(|(x, y)| x.to_string() == y.to_string())
+            && is_same_expressions(&self.width, &other.width)
+            && is_same_expressions(&self.array, &other.array)
     }
 
     pub fn has_modifier(&self, kind: &TypeModifierKind) -> bool {
@@ -2055,25 +2058,25 @@ fn is_same_generic_path(x: &GenericSymbolPath, y: &GenericSymbolPath) -> bool {
             .all(|(x, y)| is_same_generic_path(x, y))
 }
 
-// A member of a proto package stands for the same-named member of the package
-// implementing it.
+// A member of a proto package (or a parameter of a proto module/interface)
+// stands for the same-named one of the component implementing it.
 fn is_proto_member_pair(proto_member: &Symbol, member: &Symbol) -> bool {
     if proto_member.token.text != member.token.text {
         return false;
     }
-    let (Some(proto), Some(package)) = (proto_member.get_parent(), member.get_parent()) else {
+    let (Some(proto), Some(actual)) = (proto_member.get_parent(), member.get_parent()) else {
         return false;
     };
-    let (SymbolKind::Package(x), SymbolKind::Package(y)) = (&proto.kind, &package.kind) else {
+    let implemented = match (&proto.kind, &actual.kind) {
+        (SymbolKind::Package(x), SymbolKind::Package(y)) if x.is_proto => &y.proto,
+        (SymbolKind::Module(x), SymbolKind::Module(y)) if x.is_proto => &y.proto,
+        (SymbolKind::Interface(x), SymbolKind::Interface(y)) if x.is_proto => &y.proto,
+        _ => return false,
+    };
+    let Some(implemented) = implemented else {
         return false;
     };
-    if !x.is_proto {
-        return false;
-    }
-    let Some(implemented) = &y.proto else {
-        return false;
-    };
-    symbol_table::resolve((&implemented.generic_path(), &package.namespace))
+    symbol_table::resolve((&implemented.generic_path(), &actual.namespace))
         .is_ok_and(|x| x.found.id == proto.id)
 }
 
@@ -2087,13 +2090,66 @@ impl fmt::Display for TypeModifier {
     }
 }
 
-impl fmt::Display for Type {
+fn is_same_expressions(x: &[syntax_tree::Expression], y: &[syntax_tree::Expression]) -> bool {
+    x.len() == y.len()
+        && x.iter().zip(y).all(|(x, y)| {
+            let x = ExpressionItemCollector::collect(x);
+            let y = ExpressionItemCollector::collect(y);
+            x.len() == y.len()
+                && x.iter().zip(&y).all(|(x, y)| match (x, y) {
+                    (ExpressionItem::Token(x), ExpressionItem::Token(y)) => x == y,
+                    (ExpressionItem::Path(x), ExpressionItem::Path(y)) => {
+                        is_same_generic_path(x, y)
+                    }
+                    _ => false,
+                })
+        })
+}
+
+enum ExpressionItem {
+    Token(StrId),
+    Path(GenericSymbolPath),
+}
+
+/// Collects tokens and paths of an expression in order
+/// so that paths can be compared by what they resolve to.
+#[derive(Default)]
+struct ExpressionItemCollector {
+    items: Vec<ExpressionItem>,
+}
+
+impl ExpressionItemCollector {
+    fn collect(expression: &syntax_tree::Expression) -> Vec<ExpressionItem> {
+        let mut collector = Self::default();
+        collector.expression(expression);
+        collector.items
+    }
+}
+
+impl VerylWalker for ExpressionItemCollector {
+    fn veryl_token(&mut self, arg: &VerylToken) {
+        self.items.push(ExpressionItem::Token(arg.token.text));
+    }
+
+    fn scoped_identifier(&mut self, arg: &syntax_tree::ScopedIdentifier) {
+        if symbol_table::resolve(arg).is_ok() {
+            self.items.push(ExpressionItem::Path(arg.into()));
+        } else {
+            // A path not found in the symbol table (e.g. system functions)
+            // is compared as written.
+            let mut stringifier = Stringifier::new();
+            stringifier.scoped_identifier(arg);
+            for x in stringifier.ids() {
+                self.items.push(ExpressionItem::Token(*x));
+            }
+        }
+    }
+}
+
+impl fmt::Display for TypeKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
-        for x in &self.modifier {
-            text.push_str(&x.to_string());
-        }
-        match &self.kind {
+        match self {
             TypeKind::Clock => text.push_str("clock"),
             TypeKind::ClockPosedge => text.push_str("clock posedge"),
             TypeKind::ClockNegedge => text.push_str("clock negedge"),
@@ -2135,6 +2191,17 @@ impl fmt::Display for Type {
             TypeKind::Any => text.push_str("any"),
             TypeKind::Inferred => text.push('_'),
         }
+        text.fmt(f)
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+        for x in &self.modifier {
+            text.push_str(&x.to_string());
+        }
+        text.push_str(&self.kind.to_string());
         if !self.width.is_empty() {
             text.push('<');
             for (i, x) in self.width.iter().enumerate() {
