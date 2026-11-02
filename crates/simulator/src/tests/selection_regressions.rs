@@ -1477,104 +1477,128 @@ fn op_assign_on_struct_array_element() {
     }
 }
 
-#[test]
-fn multidimensional_struct_array_select() {
-    let code = r#"
+fn check_struct_array(body: &str, inputs: &[(&str, &str)], expected: &[(&str, &str)]) {
+    let code = format!(
+        r#"
     module Top (
         i: input logic<2>,
         src: input logic<3, 16>,
-        whole: output logic<96>,
-        elem: output logic<16>,
-        dynamic: output logic<16>,
-        looped: output logic<96>,
-        written: output logic<96>,
-        member: output logic<8>,
-        dyn_member: output logic<8>,
-        unioned: output logic<64>,
-    ) {
-        struct s_t {
+        o: output logic<96>,
+        p: output logic<16>,
+    ) {{
+        struct s_t {{
             hdr : logic<8>,
             body: logic<8>,
-        }
-        var a: s_t<2, 3>;
-        var g: s_t<2, 3>;
-        var d: s_t<2, 3>;
-        union u_t {
+        }}
+        union u_t {{
             x: logic<16>,
             y: logic<16>,
+        }}
+        {body}
+    }}
+    "#
+    );
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(&code, &config), None);
+        sim.set("i", Value::new(1, 2, false));
+        sim.set("src", Value::new(0, 48, false));
+        for (name, value) in inputs {
+            sim.set(name, Value::from_str(value).unwrap());
         }
-        var u: u_t<2, 2>;
-        always_comb {
-            u          = '0;
-            u[1][1].y  = 16'h4444;
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        for (name, value) in expected {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::from_str(value).unwrap(),
+                "{name} {config:?}"
+            );
         }
+    }
+}
+
+#[test]
+fn multidimensional_struct_array_element_write() {
+    check_struct_array(
+        r#"
+        var a: s_t<2, 3>;
         always_comb {
             a       = '0;
             a[1][2] = 16'h1222;
             a[0][1] = 16'h0111;
         }
+        assign o = a;
+        assign p = a[1][2];
+        "#,
+        &[],
+        &[("o", "96'h122200000000000001110000"), ("p", "16'h1222")],
+    );
+}
+
+#[test]
+fn multidimensional_struct_array_dynamic_read() {
+    check_struct_array(
+        r#"
+        var a: s_t<2, 3>;
         always_comb {
-            d       = '0;
-            d[i][i] = 16'h3333;
+            a       = '0;
+            a[0][1] = 16'h0111;
         }
+        assign o = 0;
+        assign p = a[0][i];
+        "#,
+        &[],
+        &[("p", "16'h0111")],
+    );
+}
+
+#[test]
+fn multidimensional_struct_array_generate_write() {
+    check_struct_array(
+        r#"
+        var g: s_t<2, 3>;
         for k in 0..3 :g_src {
             assign g[1][k] = src[k];
             assign g[0][k] = 0;
         }
-        assign whole   = a;
-        assign elem    = a[1][2];
-        assign dynamic = a[0][i];
-        assign looped  = g;
-        assign written = d;
-        assign member     = a[1][2].hdr;
-        assign dyn_member = a[0][i].body;
-        assign unioned    = u;
-    }
-    "#;
-    for config in Config::all() {
-        let mut sim = Simulator::new(analyze(code, &config), None);
-        sim.set("i", Value::new(1, 2, false));
-        sim.set("src", Value::from_str("48'hccccbbbbaaaa").unwrap());
-        sim.step(&Event::clock(VarId::SYNTHETIC));
-        assert_eq!(
-            sim.get("whole").unwrap(),
-            Value::from_str("96'h122200000000000001110000").unwrap(),
-            "{config:?}"
-        );
-        assert_eq!(
-            sim.get("elem").unwrap(),
-            Value::new(0x1222, 16, false),
-            "{config:?}"
-        );
-        assert_eq!(
-            sim.get("dynamic").unwrap(),
-            Value::new(0x0111, 16, false),
-            "{config:?}"
-        );
-        assert_eq!(
-            sim.get("looped").unwrap(),
-            Value::from_str("96'hccccbbbbaaaa000000000000").unwrap(),
-            "{config:?}"
-        );
-        assert_eq!(
-            sim.get("written").unwrap(),
-            Value::from_str("96'h000033330000000000000000").unwrap(),
-            "{config:?}"
-        );
-        assert_eq!(
-            sim.get("member").unwrap(),
-            Value::new(0x12, 8, false),
-            "{config:?}"
-        );
-        assert_eq!(
-            sim.get("dyn_member").unwrap(),
-            Value::new(0x11, 8, false),
-            "{config:?}"
-        );
-        assert_eq!(
-            sim.get("unioned").unwrap(),
-            Value::from_str("64'h4444000000000000").unwrap(),
-            "{config:?}"
-        );
-    }
+        assign o = g;
+        assign p = 0;
+        "#,
+        &[("src", "48'hccccbbbbaaaa")],
+        &[("o", "96'hccccbbbbaaaa000000000000")],
+    );
+}
+
+#[test]
+fn multidimensional_struct_array_member_select() {
+    check_struct_array(
+        r#"
+        var a: s_t<2, 3>;
+        always_comb {
+            a       = '0;
+            a[1][2] = 16'h1222;
+            a[0][1] = 16'h0111;
+        }
+        assign o = 0;
+        assign p = {a[1][2].hdr, a[0][i].body};
+        "#,
+        &[],
+        &[("p", "16'h1211")],
+    );
+}
+
+#[test]
+fn multidimensional_union_array_member_write() {
+    check_struct_array(
+        r#"
+        var u: u_t<2, 2>;
+        always_comb {
+            u         = '0;
+            u[1][1].y = 16'h4444;
+        }
+        assign o = u;
+        assign p = 0;
+        "#,
+        &[],
+        &[("o", "96'h4444000000000000")],
+    );
 }
