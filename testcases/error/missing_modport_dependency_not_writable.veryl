@@ -1,0 +1,14 @@
+interface missing_modport_dependency_not_writable_if {
+    var data: logic;
+
+    function set_data (
+        x: input logic,
+    ) {
+        data = x;
+    }
+
+    modport master {
+        data    : input ,
+        set_data: import,
+    }
+}

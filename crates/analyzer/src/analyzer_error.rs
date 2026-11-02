@@ -1600,6 +1600,27 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(missing_modport_dependency),
+        help("export \"{identifier}\" by modport \"{modport}\" with the required direction"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" referred by function \"{function}\" {kind} modport \"{modport}\"")]
+    MissingModportDependency {
+        kind: MissingModportDependencyKind,
+        function: String,
+        identifier: String,
+        modport: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(missing_port),
         help("add \"{port}\" port"),
@@ -2800,6 +2821,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { input, .. } => input,
             AnalyzerError::MissingDefaultArgument { input, .. } => input,
             AnalyzerError::MissingIfReset { input, .. } => input,
+            AnalyzerError::MissingModportDependency { input, .. } => input,
             AnalyzerError::MissingPort { input, .. } => input,
             AnalyzerError::MissingResetSignal { input, .. } => input,
             AnalyzerError::MissingResetStatement { input, .. } => input,
@@ -2932,6 +2954,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { input, .. } => input,
             AnalyzerError::MissingDefaultArgument { input, .. } => input,
             AnalyzerError::MissingIfReset { input, .. } => input,
+            AnalyzerError::MissingModportDependency { input, .. } => input,
             AnalyzerError::MissingPort { input, .. } => input,
             AnalyzerError::MissingResetSignal { input, .. } => input,
             AnalyzerError::MissingResetStatement { input, .. } => input,
@@ -3081,6 +3104,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { instance, .. } => instance,
             AnalyzerError::MissingDefaultArgument { instance, .. } => instance,
             AnalyzerError::MissingIfReset { instance, .. } => instance,
+            AnalyzerError::MissingModportDependency { instance, .. } => instance,
             AnalyzerError::GenericInferenceFailed { instance, .. } => instance,
             AnalyzerError::TypeInferenceConflict { instance, .. } => instance,
             AnalyzerError::TypeInferenceNotSupported { instance, .. } => instance,
@@ -3213,6 +3237,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { instance, .. } => instance.as_ref(),
             AnalyzerError::MissingDefaultArgument { instance, .. } => instance.as_ref(),
             AnalyzerError::MissingIfReset { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingModportDependency { instance, .. } => instance.as_ref(),
             AnalyzerError::GenericInferenceFailed { instance, .. } => instance.as_ref(),
             AnalyzerError::TypeInferenceConflict { instance, .. } => instance.as_ref(),
             AnalyzerError::TypeInferenceNotSupported { instance, .. } => instance.as_ref(),
@@ -3345,6 +3370,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { token_source, .. } => *token_source,
             AnalyzerError::MissingDefaultArgument { token_source, .. } => *token_source,
             AnalyzerError::MissingIfReset { token_source, .. } => *token_source,
+            AnalyzerError::MissingModportDependency { token_source, .. } => *token_source,
             AnalyzerError::GenericInferenceFailed { token_source, .. } => *token_source,
             AnalyzerError::TypeInferenceConflict { token_source, .. } => *token_source,
             AnalyzerError::TypeInferenceNotSupported { token_source, .. } => *token_source,
@@ -4326,6 +4352,24 @@ impl AnalyzerError {
             instance: None,
         }
     }
+    pub fn missing_modport_dependency(
+        kind: MissingModportDependencyKind,
+        function: &str,
+        identifier: &str,
+        modport: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::MissingModportDependency {
+            kind,
+            function: function.into(),
+            identifier: identifier.into(),
+            modport: modport.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
     pub fn missing_port(name: &str, port: &str, token: &TokenRange) -> Self {
         AnalyzerError::MissingPort {
             name: name.to_string(),
@@ -5046,6 +5090,23 @@ impl fmt::Display for InvalidModportItemKind {
         match self {
             InvalidModportItemKind::Function => "function".fmt(f),
             InvalidModportItemKind::Variable => "variable".fmt(f),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MissingModportDependencyKind {
+    NotExported,
+    NotWritable,
+}
+
+impl fmt::Display for MissingModportDependencyKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MissingModportDependencyKind::NotExported => "is not exported by".fmt(f),
+            MissingModportDependencyKind::NotWritable => {
+                "is assigned but not exported as output or inout by".fmt(f)
+            }
         }
     }
 }

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_modport_dependency (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_modport_dependency)
+
+  × "ready" referred by function "ack" is not exported by modport "slave"
+    ╭─[../../testcases/error/missing_modport_dependency.veryl:11:9]
+ 10 │         valid: input ,
+ 11 │         ack  : import,
+    ·         ─┬─
+    ·          ╰── Error location
+ 12 │     }
+    ╰────
+  help: export "ready" by modport "slave" with the required direction
