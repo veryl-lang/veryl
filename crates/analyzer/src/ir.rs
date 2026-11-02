@@ -25,7 +25,6 @@ mod variable;
 mod width_expr;
 mod write_count;
 mod write_summary;
-pub(crate) use assign_table::AssignTable;
 pub use assign_table::{AssignTableEntry, ReferencedEntry};
 pub use comptime::{
     Comptime, ExpressionContext, InstanceKind, MemberSelectDomain, PartSelectPath, Type, TypeKind,
