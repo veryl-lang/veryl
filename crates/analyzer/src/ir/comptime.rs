@@ -82,11 +82,16 @@ impl PartSelectPath {
 
         let mut consumed_dims = 0;
         let mut containing_part = None;
+        let last = self.part_select.len();
         for (part, r#type) in std::iter::once(&self.base)
             .chain(self.part_select.iter().map(|part| &part.r#type))
             .enumerate()
         {
-            consumed_dims += r#type.width.dims();
+            consumed_dims += if part == last && (r#type.is_struct_union() || r#type.is_enum()) {
+                member_select_type(r#type).width.dims()
+            } else {
+                r#type.width.dims()
+            };
             if prefix_len < consumed_dims {
                 containing_part = Some(part);
                 break;
@@ -460,6 +465,24 @@ fn repeatable_coordinate(expression: &Expression) -> bool {
         }
         _ => false,
     }
+}
+
+fn member_select_type(r#type: &Type) -> Type {
+    let mut r#type = r#type.clone();
+    if r#type.is_enum() {
+        r#type.flatten_struct_union_enum();
+    } else {
+        let mut dims = r#type.width.as_slice().to_vec();
+        dims.push(r#type.kind.width());
+        r#type.kind = if r#type.is_2state() {
+            TypeKind::Bit
+        } else {
+            TypeKind::Logic
+        };
+        r#type.signed = false;
+        r#type.set_concrete_width(Shape::new(dims));
+    }
+    r#type
 }
 
 fn const_usize(context: &mut Context, x: &Expression) -> Option<usize> {
