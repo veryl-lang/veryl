@@ -434,7 +434,6 @@ impl FunctionCall {
                         dst.comptime.member_select_domain,
                     ) {
                         let mask = ValueBigUint::gen_mask_range(beg, end);
-                        let dynamic = !dst.index.is_const() || !dst.select.is_const_with_range();
                         for i in first..=last {
                             let Some(index) =
                                 VarIndex::from_index(i, &variable.r#type.array).eval_value(context)
@@ -445,8 +444,6 @@ impl FunctionCall {
                                 &variable,
                                 index,
                                 mask.clone(),
-                                dynamic,
-                                dynamic,
                                 self.comptime.token,
                             );
                         }

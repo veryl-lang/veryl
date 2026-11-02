@@ -2480,6 +2480,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.parameters.push(Vec::new());
                 self.ports.push(Vec::new());
                 self.reference_candidates.push(Vec::new());
+                self.apply_file_scope_import();
             }
             HandlerPoint::After => {
                 self.pop_namespace();
