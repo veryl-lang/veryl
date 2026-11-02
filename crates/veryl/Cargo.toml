@@ -35,7 +35,7 @@ log                 = {workspace = true}
 mdbook-driver       = {workspace = true}
 mdbook-preprocessor = {workspace = true}
 miette              = {workspace = true}
-mimalloc            = "0.1"
+mimalloc            = {workspace = true}
 once_cell           = {workspace = true}
 pulldown-cmark      = {workspace = true}
 regex               = {workspace = true}
