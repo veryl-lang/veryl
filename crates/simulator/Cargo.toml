@@ -46,7 +46,7 @@ wasmtime         = {version = "50.0.0", default-features = false, features = ["r
 
 [dev-dependencies]
 criterion       = {workspace = true}
-mimalloc        = "0.1"
+mimalloc        = {workspace = true}
 veryl-component = {version = "0.1.2", path = "../component"}
 wellen          = "0.25.5"
 
