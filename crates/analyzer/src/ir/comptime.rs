@@ -169,13 +169,13 @@ impl PartSelectPath {
         for (i, x) in part_select.enumerate() {
             let has_sub_part = i != (len - 1);
             let x = if !has_sub_part
-                && x.r#type.width.dims() == 0
-                && (!select.is_empty() || range_select.is_some())
+                && select.len() + usize::from(range_select.is_some()) > x.r#type.width.dims()
                 && (x.r#type.is_struct_union() || x.r#type.is_enum())
             {
-                let mut r#type = x.r#type.clone();
-                r#type.flatten_struct_union_enum();
-                Cow::Owned(PartSelect { pos: x.pos, r#type })
+                Cow::Owned(PartSelect {
+                    pos: x.pos,
+                    r#type: member_select_type(&x.r#type),
+                })
             } else {
                 Cow::Borrowed(x)
             };

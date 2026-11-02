@@ -1766,3 +1766,101 @@ fn select_range_on_enum_typed_member_read() {
         );
     }
 }
+
+#[test]
+fn select_range_on_struct_array_typed_member_read() {
+    let code = r#"
+    module Top (
+        i: input  logic<19>,
+        o: output logic<4>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic ,
+            flit: f_t<2>,
+        }
+        var b: c_t;
+        assign b = i;
+        assign o = b.flit[1][3:0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x0356cd, 19, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xb, 4, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_range_on_struct_array_typed_member_write() {
+    let code = r#"
+    module Top (
+        o: output logic<19>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic ,
+            flit: f_t<2>,
+        }
+        var r: c_t;
+        always_comb {
+            r = '0;
+            r.flit[1][3:0] = 4'h5;
+        }
+        assign o = r;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x00a00, 19, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_bit_on_struct_array_typed_member_write() {
+    let code = r#"
+    module Top (
+        o: output logic<19>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic ,
+            flit: f_t<2>,
+        }
+        var s: c_t;
+        always_comb {
+            s = '0;
+            s.flit[1][3] = 1;
+        }
+        assign o = s;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x01000, 19, false),
+            "{config:?}"
+        );
+    }
+}
