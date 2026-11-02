@@ -26516,3 +26516,27 @@ mod value_regressions;
 mod layout_regressions;
 
 mod member_prefix_regressions;
+
+#[test]
+fn op_assign_on_multidimensional_struct_array_element() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<16>,
+    ) {
+        struct s_t {
+            hdr : logic<8>,
+            body: logic<8>,
+        }
+        var b: s_t<2, 3>;
+        always_comb {
+            b       = '0;
+            b[1][2] = 16'h1220;
+            b[1][2] |= 16'h0002;
+        }
+        assign o = b[1][2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
