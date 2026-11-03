@@ -920,19 +920,27 @@ impl HierarchicalIdentifier {
     }
 }
 
+impl StatementBlockItem {
+    pub fn is_declaration(&self) -> bool {
+        matches!(
+            self,
+            StatementBlockItem::VarDeclaration(_)
+                | StatementBlockItem::ConstDeclaration(_)
+                | StatementBlockItem::GenDeclaration(_)
+        )
+    }
+}
+
 impl AlwaysFfDeclaration {
     pub fn has_if_reset(&self) -> bool {
-        let x = self.statement_block.statement_block_list.first();
-        if x.is_none() {
-            return false;
-        }
+        let items: Vec<_> = self.statement_block.as_ref().into();
+        let x = items.into_iter().find(|x| !x.is_declaration());
 
-        let x: Vec<_> = x.unwrap().statement_block_group.as_ref().into();
-        if let Some(StatementBlockItem::Statement(x)) = x.first() {
-            return matches!(*x.statement, Statement::IfResetStatement(_));
+        if let Some(StatementBlockItem::Statement(x)) = x {
+            matches!(*x.statement, Statement::IfResetStatement(_))
+        } else {
+            false
         }
-
-        false
     }
 
     pub fn has_explicit_clock(&self) -> bool {
