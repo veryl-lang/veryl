@@ -22617,6 +22617,36 @@ fn for_step_with_bits_of_sv_reference() {
 }
 
 #[test]
+fn logical_operand_with_sv_reference() {
+    let code = r#"
+    module ModuleA (
+        o: output logic,
+    ) {
+        always_comb {
+            o = 0;
+            if $sv::FLAG {
+                o = 1;
+            } else if $sv::FLAG {
+                o = 1;
+            }
+        }
+
+        let _a: logic = !$sv::FLAG;
+        let _b: logic = $sv::FLAG && true;
+        let _c: logic = if $sv::FLAG ? 1'b1 : 1'b0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidLogicalOperand { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn negative_for_range() {
     use crate::analyzer_error::InvalidForRangeKind;
     // A negative const range bound wraps through to_usize into a huge

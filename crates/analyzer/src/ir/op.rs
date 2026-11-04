@@ -242,7 +242,7 @@ impl Op {
         }
 
         // logical operand should be 1-bit
-        if (self == &Op::LogicNot) && !x.r#type.is_binary() {
+        if (self == &Op::LogicNot) && !x.r#type.may_be_binary() {
             self.invalid_logical_operand(context, x);
         }
 
@@ -304,10 +304,10 @@ impl Op {
 
         // logical operand should be 1-bit
         if matches!(self, Op::LogicAnd | Op::LogicOr) {
-            if !x.r#type.is_binary() {
+            if !x.r#type.may_be_binary() {
                 self.invalid_logical_operand(context, x);
             }
-            if !y.r#type.is_binary() {
+            if !y.r#type.may_be_binary() {
                 self.invalid_logical_operand(context, y);
             }
         }
@@ -480,7 +480,7 @@ impl Op {
         }
 
         // condition should be 1-bit
-        if !x.r#type.is_binary() {
+        if !x.r#type.may_be_binary() {
             self.invalid_logical_operand(context, x);
         }
 

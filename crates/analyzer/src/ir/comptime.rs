@@ -851,6 +851,11 @@ impl Type {
         self.total_width() == Some(1)
     }
 
+    /// The width of a `$sv` type is unknown, so it may be 1-bit.
+    pub fn may_be_binary(&self) -> bool {
+        self.is_binary() || self.is_systemverilog()
+    }
+
     pub fn is_struct(&self) -> bool {
         matches!(&self.kind, TypeKind::Struct(_))
     }
