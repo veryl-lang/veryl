@@ -4300,7 +4300,7 @@ pub fn prepare_event(
     DF_FF_UNCOVERED_WHY.with(|c| c.set([0; 2]));
     DF_LOCAL_WORDS.with(|n| n.set(0));
     let Some(src) = emit_event_function(stmts, skip_unchanged, gates) else {
-        index_declined_event(input);
+        index_declined("event", input);
         return None;
     };
     #[cfg(test)]
@@ -4322,16 +4322,17 @@ pub fn prepare_event(
 }
 
 /// Fingerprint of everything `emit_event_function` reads: the statements and
-/// gates, the dataflow marks and localization the caller set on this thread,
-/// the `VERYL_` environment, the version and the running binary.  Equal fingerprints emit
-/// equal sources, so a source's `.so` can be found without emitting it.
-fn event_input_key(stmts: &[ProtoStatement], skip_unchanged: bool, gates: &[EventGate]) -> u128 {
+/// gates, plus the emitter state of `hash_emitter_state`.  Equal fingerprints
+/// emit equal sources, so a source's `.so` can be found without emitting it.
+fn event_input_key(
+    stmts: &[ProtoStatement],
+    skip_unchanged: bool,
+    gates: &[EventGate],
+) -> Option<u128> {
     use std::hash::{Hash, Hasher};
     let mut h = crate::backend::registry::Fp128::new();
     h.write(b"veryl_aot_event");
-    veryl_metadata::VERYL_VERSION.hash(&mut h);
-    binary_identity().hash(&mut h);
-    veryl_environment().hash(&mut h);
+    hash_emitter_state(&mut h, stmts)?;
     stmts.hash(&mut h);
     skip_unchanged.hash(&mut h);
     for gate in gates {
@@ -4344,16 +4345,50 @@ fn event_input_key(stmts: &[ProtoStatement], skip_unchanged: bool, gates: &[Even
         )
             .hash(&mut h);
     }
-    DF_EVENT_MARKS.with(|x| x.borrow().as_deref().hash(&mut h));
-    DF_FF_MARKS.with(|x| x.borrow().as_deref().hash(&mut h));
-    LOCALIZE_FORCED_OFF.load(Ordering::Relaxed).hash(&mut h);
-    localize_armed().hash(&mut h);
+    Some(h.finish_128())
+}
+
+/// Fingerprint of everything `emit_dataflow_function` reads: the statements
+/// and the plan, plus the emitter state of `hash_emitter_state`.
+fn dataflow_input_key(
+    stmts: &[ProtoStatement],
+    plan: &crate::ir::opt::dataflow::DataflowPlan,
+) -> Option<u128> {
+    use std::hash::{Hash, Hasher};
+    let mut h = crate::backend::registry::Fp128::new();
+    h.write(b"veryl_aot_dataflow");
+    hash_emitter_state(&mut h, stmts)?;
+    event_mode().hash(&mut h);
+    stmts.hash(&mut h);
+    plan.hash(&mut h);
+    Some(h.finish_128())
+}
+
+/// What the statement emitter reads besides its arguments: the dataflow marks
+/// and localization the caller set on this thread, the `VERYL_` environment,
+/// the version and the running binary.  `None` when the inputs cannot be
+/// pinned: the binary is unknown, or `stmts` hold a compiled block, whose hash
+/// leaves out the statements the emitter inlines.
+fn hash_emitter_state(
+    h: &mut crate::backend::registry::Fp128,
+    stmts: &[ProtoStatement],
+) -> Option<()> {
+    use std::hash::Hash;
+    if crate::backend::cranelift::runtime::proto_contains_compiled_block(stmts) {
+        return None;
+    }
+    veryl_metadata::VERYL_VERSION.hash(h);
+    binary_identity()?.hash(h);
+    veryl_environment().hash(h);
+    DF_MARKS_FINGERPRINT.with(|x| x.get().hash(h));
+    LOCALIZE_FORCED_OFF.load(Ordering::Relaxed).hash(h);
+    localize_armed().hash(h);
     let mut blocklist: Vec<isize> =
         LOCALIZE_BLOCKLIST.with(|x| x.borrow().iter().copied().collect());
     blocklist.sort_unstable();
-    blocklist.hash(&mut h);
-    LOCALIZE_RANGES.with(|x| x.borrow().hash(&mut h));
-    h.finish_128()
+    blocklist.hash(h);
+    LOCALIZE_RANGES.with(|x| x.borrow().hash(h));
+    Some(())
 }
 
 /// The running binary, by size and modification time: a rebuild changes the
@@ -4379,22 +4414,23 @@ fn veryl_environment() -> &'static [(String, String)] {
     })
 }
 
-fn event_index_path(input: u128) -> Option<PathBuf> {
+fn index_path(kind: &str, input: Option<u128>) -> Option<PathBuf> {
+    let input = input?;
     #[cfg(test)]
-    if !TEST_EVENT_INDEX.with(|x| x.get()) {
+    if !TEST_AOT_INDEX.with(|x| x.get()) {
         return None;
     }
     Some(
         aot_c_cache_dir()
             .ok()?
-            .join(format!("veryl_aot_event_{input:032x}.idx")),
+            .join(format!("veryl_aot_{kind}_{input:032x}.idx")),
     )
 }
 
 /// Records which `.so` the event source of `input` compiles to, with the
 /// dataflow flags its emission computed.
-fn index_event(input: u128, src: &str, comb_marked: bool, ff_marked: bool) {
-    let Some(path) = event_index_path(input) else {
+fn index_event(input: Option<u128>, src: &str, comb_marked: bool, ff_marked: bool) {
+    let Some(path) = index_path("event", input) else {
         return;
     };
     let (_, _, hash) = compile_key(src);
@@ -4404,9 +4440,9 @@ fn index_event(input: u128, src: &str, comb_marked: bool, ff_marked: bool) {
     );
 }
 
-/// Records that the emitter cannot cover the event of `input`.
-fn index_declined_event(input: u128) {
-    if let Some(path) = event_index_path(input) {
+/// Records that the emitter cannot cover the `kind` source of `input`.
+fn index_declined(kind: &str, input: Option<u128>) {
+    if let Some(path) = index_path(kind, input) {
         let _ = veryl_path::atomic_write(&path, b"declined\n");
     }
 }
@@ -4419,8 +4455,8 @@ enum IndexedEvent {
 
 /// What a previous run found for the event of `input`: its compiled `.so`,
 /// once published, or that the emitter declined it.
-fn load_indexed_event(input: u128) -> Option<IndexedEvent> {
-    let path = event_index_path(input)?;
+fn load_indexed_event(input: Option<u128>) -> Option<IndexedEvent> {
+    let path = index_path("event", input)?;
     let text = fs::read_to_string(&path).ok()?;
     let mut fields = text.split_whitespace();
     let hash = fields.next()?;
@@ -4438,15 +4474,59 @@ fn load_indexed_event(input: u128) -> Option<IndexedEvent> {
         .map(|module| IndexedEvent::Compiled(module, comb_marked, ff_marked))
 }
 
-#[cfg(test)]
-thread_local! {
-    /// Off in tests unless asked for, as a hit emits no source to inspect.
-    static TEST_EVENT_INDEX: Cell<bool> = const { Cell::new(false) };
+/// Records which `.so` the dataflow source of `input` compiles to, with the
+/// comb bytes its emission localized.
+fn index_dataflow(input: Option<u128>, src: &str, localized: &[(isize, usize)]) {
+    let Some(path) = index_path("dataflow", input) else {
+        return;
+    };
+    let (_, _, hash) = compile_key(src);
+    let mut text = hash;
+    for (off, nb) in localized {
+        text.push_str(&format!(" {off} {nb}"));
+    }
+    text.push('\n');
+    let _ = veryl_path::atomic_write(&path, text.as_bytes());
+}
+
+enum IndexedDataflow {
+    /// The `.so` and the localized comb bytes.
+    Compiled(EmittedModule, Vec<(isize, usize)>),
+    Declined,
+}
+
+/// What a previous run found for the dataflow settle of `input`: its compiled
+/// `.so`, once published, or that the emitter declined it.
+fn load_indexed_dataflow(input: Option<u128>) -> Option<IndexedDataflow> {
+    let path = index_path("dataflow", input)?;
+    let text = fs::read_to_string(&path).ok()?;
+    let mut fields = text.split_whitespace();
+    let hash = fields.next()?;
+    if hash == "declined" {
+        return Some(IndexedDataflow::Declined);
+    }
+    let mut localized = Vec::new();
+    while let Some(off) = fields.next() {
+        localized.push((off.parse().ok()?, fields.next()?.parse().ok()?));
+    }
+    let so_path = path.with_file_name(format!("veryl_aot_{hash}.so"));
+    if !so_path.exists() {
+        return None;
+    }
+    load_module(&so_path)
+        .ok()
+        .map(|module| IndexedDataflow::Compiled(module, localized))
 }
 
 #[cfg(test)]
-pub(crate) fn set_test_event_index(on: bool) {
-    TEST_EVENT_INDEX.with(|x| x.set(on));
+thread_local! {
+    /// Off in tests unless asked for, as a hit emits no source to inspect.
+    static TEST_AOT_INDEX: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_aot_index(on: bool) {
+    TEST_AOT_INDEX.with(|x| x.set(on));
 }
 
 #[cfg(test)]
@@ -6524,6 +6604,10 @@ thread_local! {
     static DF_LOCAL_WORDS: Cell<u32> = const { Cell::new(0) };
     /// FF counterpart of `DF_EVENT_MARKS`, marked at the log push.
     static DF_FF_MARKS: RefCell<Option<DataflowMarks>> = const { RefCell::new(None) };
+    /// Fingerprints of `DF_EVENT_MARKS` and `DF_FF_MARKS`, taken when they are
+    /// set: the tables span the whole module, so hashing them per event would
+    /// cost the module's event count times their size.
+    static DF_MARKS_FINGERPRINT: Cell<[u128; 2]> = const { Cell::new([0; 2]) };
     /// A push the current event makes could reach a dataflow reader without
     /// marking it: a runtime offset with no known span, or a width the change
     /// test cannot load.
@@ -6543,7 +6627,22 @@ fn df_ff_uncovered(why: usize) {
 }
 
 pub fn set_dataflow_ff_marks(marks: Option<DataflowMarks>) {
+    set_marks_fingerprint(1, marks.as_deref());
     DF_FF_MARKS.with(|m| *m.borrow_mut() = marks);
+}
+
+fn set_marks_fingerprint(slot: usize, marks: Option<&crate::ir::opt::dataflow::MarkTable>) {
+    use std::hash::Hash;
+    let fp = marks.map_or(0, |marks| {
+        let mut h = crate::backend::registry::Fp128::new();
+        marks.hash(&mut h);
+        h.finish_128()
+    });
+    DF_MARKS_FINGERPRINT.with(|x| {
+        let mut v = x.get();
+        v[slot] = fp;
+        x.set(v);
+    });
 }
 
 fn parse_offset(s: &str) -> Option<u32> {
@@ -6666,6 +6765,7 @@ fn df_ff_wide_push_mark(
 }
 
 pub fn set_dataflow_event_marks(marks: Option<DataflowMarks>) {
+    set_marks_fingerprint(0, marks.as_deref());
     DF_EVENT_MARKS.with(|m| *m.borrow_mut() = marks);
 }
 
@@ -10794,17 +10894,40 @@ pub fn emit_dataflow_function(
     Some(body)
 }
 
-/// Emit and compile a dataflow settle: `None` when the emitter declines.
+/// Emit and compile a dataflow settle, or load the `.so` a previous run
+/// indexed for the same inputs: `None` when the emitter declines.
 pub fn prepare_dataflow(
     stmts: &[ProtoStatement],
     plan: &crate::ir::opt::dataflow::DataflowPlan,
     async_mode: bool,
 ) -> Option<AotCell> {
     LAST_LOCALIZED_BYTES.with(|b| b.borrow_mut().clear());
-    let src = emit_dataflow_function(stmts, plan)?;
+    let input = dataflow_input_key(stmts, plan);
+    match load_indexed_dataflow(input) {
+        Some(IndexedDataflow::Compiled(module, localized)) => {
+            LAST_LOCALIZED_BYTES.with(|b| *b.borrow_mut() = localized);
+            let cell = Arc::new(OnceLock::new());
+            let _ = cell.set(module);
+            return Some(cell);
+        }
+        Some(IndexedDataflow::Declined) => return None,
+        None => {}
+    }
+    let Some(src) = emit_dataflow_function(stmts, plan) else {
+        index_declined("dataflow", input);
+        return None;
+    };
+    #[cfg(test)]
+    DATAFLOW_EMITS.with(|n| n.set(n.get() + 1));
+    LAST_LOCALIZED_BYTES.with(|b| index_dataflow(input, &src, &b.borrow()));
     // A cached `.so` loads at once, so the Cranelift cells are never needed.
     let async_mode = async_mode && !is_compiled(&src);
     Some(compile_or_spawn(src, async_mode))
+}
+
+#[cfg(test)]
+thread_local! {
+    static DATAFLOW_EMITS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -11580,6 +11703,64 @@ mod tests {
     }
 
     #[test]
+    fn a_dataflow_settle_of_equal_inputs_loads_without_emitting() {
+        // The second prepare finds the first one's `.so` by its inputs and
+        // restores the bytes the first emission localized.
+        if !crate::tests::aot_c_loads() {
+            return;
+        }
+        let assign = |dst: isize, expr: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: 32,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            })
+        };
+        let prepare = |k: u64| {
+            let stmts = vec![
+                assign(0x10, const_expr(k, 32)),
+                assign(0x20, var_expr(VarOffset::Comb(0x10), 32)),
+            ];
+            let plan = crate::ir::opt::dataflow::DataflowPlan {
+                cells: vec![vec![0, 1]],
+                boundary: vec![Vec::new()],
+                consumers: vec![Vec::new()],
+                mark_always: vec![false],
+                ..Default::default()
+            };
+            set_localize_blocklist(HashSet::default(), Vec::new());
+            DATAFLOW_EMITS.with(|n| n.set(0));
+            let cell = prepare_dataflow(&stmts, &plan, false);
+            clear_localize_blocklist();
+            assert!(cell.expect("must emit").get().is_some());
+            (
+                DATAFLOW_EMITS.with(|n| n.get()),
+                take_last_localized_bytes(),
+            )
+        };
+        let k = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
+            & 0xffff_ffff;
+        set_test_aot_index(true);
+        let first = prepare(k);
+        let second = prepare(k);
+        let other = prepare(k ^ 1);
+        set_test_aot_index(false);
+        assert_eq!(first.0, 1);
+        assert!(!first.1.is_empty(), "the test needs a localized byte");
+        assert_eq!(second, (0, first.1.clone()));
+        assert_eq!(other.0, 1);
+    }
+
+    #[test]
     fn dataflow_whole_settle_entry_has_no_size_cap() {
         let stmts: Vec<ProtoStatement> = (0..40_000)
             .map(|i| {
@@ -12251,6 +12432,63 @@ mod tests {
             !src.contains("veryl_aot_ol"),
             "nothing under a loop is outlined"
         );
+    }
+
+    #[test]
+    fn an_event_input_key_ignores_the_loop_token() {
+        // Reanalysis gives a loop new source tokens, which the emitter never
+        // reads, so equal loops must keep one key.
+        let event = |id: usize| {
+            let mut token = TokenRange::default();
+            token.beg.id = veryl_parser::resource_table::TokenId(id);
+            let for_stmt = ProtoForStatement {
+                var_offset: VarOffset::Comb(0x40),
+                var_width: 32,
+                var_native_bytes: 4,
+                var_signed: false,
+                token,
+                range: ProtoForRange::Forward {
+                    start: ProtoForBound::Const(0, true),
+                    end: ProtoForBound::Const(2, true),
+                    inclusive: false,
+                    step: 1,
+                },
+                body: comb_chain(4),
+            };
+            let stmts = [ProtoStatement::For(for_stmt)];
+            (
+                event_input_key(&stmts, false, &[]),
+                emit_event_function(&stmts, false, &[]),
+            )
+        };
+        let (key_a, src_a) = event(1);
+        let (key_b, src_b) = event(2);
+        assert_eq!(src_a, src_b);
+        assert!(key_a.is_some());
+        assert_eq!(key_a, key_b);
+    }
+
+    #[test]
+    fn an_event_input_key_follows_the_dataflow_marks() {
+        let marks = |w: u32| Some(Arc::new(vec![(w, w + 8, vec![(0, 0x4)])]));
+        let key = || event_input_key(&[], false, &[]);
+        let none = key();
+        set_dataflow_event_marks(marks(0x40));
+        let event_a = key();
+        assert_eq!(event_a, key());
+        set_dataflow_event_marks(marks(0x48));
+        let event_b = key();
+        set_dataflow_event_marks(None);
+        set_dataflow_ff_marks(marks(0x40));
+        let ff_a = key();
+        set_dataflow_ff_marks(None);
+        assert_eq!(none, key());
+        let keys = [none, event_a, event_b, ff_a];
+        for (i, a) in keys.iter().enumerate() {
+            for b in &keys[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
     }
 
     #[test]
