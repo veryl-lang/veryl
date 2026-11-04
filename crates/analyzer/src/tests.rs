@@ -13870,6 +13870,82 @@ fn mismatch_case_label() {
 }
 
 #[test]
+fn case_label_with_unfoldable_signed_bound() {
+    let code = r#"
+    module ModuleA (
+        s: input  i32,
+        y: output logic<2>,
+        z: output logic<2> [8],
+    ) {
+        const N: i32 = $sv::N;
+        always_comb {
+            y = case s {
+                0..N   : 1,
+                default: 0,
+            };
+            for i in 0..8 {
+                z[i] = case i {
+                    0..N   : 1,
+                    default: 0,
+                };
+            }
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. })),
+        "{errors:#?}"
+    );
+
+    // An unsigned bound still makes the whole comparison unsigned.
+    let code = r#"
+    module ModuleA (
+        s: input  i32,
+        y: output logic<2>,
+    ) {
+        const N: u32 = $sv::N;
+        always_comb {
+            y = case s {
+                0..N   : 1,
+                default: 0,
+            };
+        }
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 1, "{errors:#?}");
+
+    // A variable bound can still wrap.
+    let code = r#"
+    module ModuleA (
+        s: input  i8,
+        b: input  i8,
+        y: output logic<2>,
+    ) {
+        always_comb {
+            y = case s {
+                0..b   : 1,
+                default: 0,
+            };
+        }
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 1, "{errors:#?}");
+}
+
+#[test]
 fn string_case_label() {
     let code = r#"
     module ModuleA (
