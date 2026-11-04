@@ -160,11 +160,13 @@ impl Runner for Cocotb {
         }
 
         let file_list = fs::read_to_string(metadata.filelist_path()).into_diagnostic()?;
+        let file_list = split_filelist(&file_list);
         let mut sources = String::new();
-        for line in file_list.lines() {
+        for line in &file_list.sources {
             sources.push_str(&format!("\"{line}\","));
         }
         sources = format!("[{}]", sources.strip_suffix(',').unwrap());
+        let includes = format_py_str_array(file_list.include_dirs.iter());
 
         let module = format!("{}_{}", metadata.project.name, top.unwrap());
 
@@ -207,6 +209,7 @@ if cocotb_version.startswith("2."):
     runner = cocotb_tools.runner.get_runner("verilator")
     runner.build(
         sources=sources,
+        includes={includes},
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
@@ -227,6 +230,7 @@ elif cocotb_version.startswith("1.9."):
     runner = cocotb.runner.get_runner("verilator")
     runner.build(
         verilog_sources=sources,
+        includes={includes},
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
@@ -325,6 +329,27 @@ fn process_embed_item(embed_item: &syntax_tree::EmbedItem) -> String {
     }
 }
 
+/// Source files and include directories listed in a generated filelist
+#[derive(Debug, Default)]
+struct FilelistEntries {
+    sources: Vec<String>,
+    include_dirs: Vec<String>,
+}
+
+/// Splits a filelist of `absolute` or `relative` type into source files and
+/// include directories (`+incdir+`).
+fn split_filelist(text: &str) -> FilelistEntries {
+    let mut ret = FilelistEntries::default();
+    for line in text.lines().map(|x| x.trim()).filter(|x| !x.is_empty()) {
+        if let Some(dir) = line.strip_prefix("+incdir+") {
+            ret.include_dirs.push(dir.to_string());
+        } else {
+            ret.sources.push(line.to_string());
+        }
+    }
+    ret
+}
+
 fn format_py_str_array<S: AsRef<str>>(items: impl Iterator<Item = S>) -> String {
     format!(
         "[{}]",
@@ -333,4 +358,31 @@ fn format_py_str_array<S: AsRef<str>>(items: impl Iterator<Item = S>) -> String 
             .collect::<Vec<_>>()
             .join(",")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_filelist_separates_include_dirs() {
+        let text =
+            "+incdir+/prj/ip/include\n+incdir+/dep/include\n/prj/ip/a.sv\n\n/prj/target/foo.sv\n";
+        let entries = split_filelist(text);
+        assert_eq!(
+            entries.sources,
+            vec!["/prj/ip/a.sv".to_string(), "/prj/target/foo.sv".to_string()]
+        );
+        assert_eq!(
+            entries.include_dirs,
+            vec!["/prj/ip/include".to_string(), "/dep/include".to_string()]
+        );
+    }
+
+    #[test]
+    fn split_filelist_without_include_dirs() {
+        let entries = split_filelist("/prj/target/foo.sv\n");
+        assert_eq!(entries.sources, vec!["/prj/target/foo.sv".to_string()]);
+        assert!(entries.include_dirs.is_empty());
+    }
 }

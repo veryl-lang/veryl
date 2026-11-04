@@ -1,5 +1,9 @@
+use crate::analyzer_error::{AnalyzerError, InvalidInlineFunctionKind};
+use crate::attribute::Attribute;
+use crate::attribute_table;
 use crate::connect_operation_table;
 use crate::conv::Context;
+use crate::definition_table::{self, Definition};
 use crate::ir::Signature;
 use crate::namespace::{DefineContext, Namespace};
 use crate::symbol::{
@@ -10,12 +14,19 @@ use crate::symbol_table;
 use crate::{HashMap, HashSet, scope};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
+use veryl_parser::veryl_grammar_trait::{
+    FunctionDeclaration, Statement, StatementBlockGroupGroup, StatementBlockItem,
+};
 
-pub fn resolve_function(list: &[Symbol]) {
+pub fn resolve_function(list: &[Symbol]) -> Vec<AnalyzerError> {
+    let mut errors = Vec::new();
     for symbol in list {
         resolve_constantable(symbol, &mut Vec::new());
+        // `symbol` keeps `reference_paths` though `resolve_constantable` clears them in the symbol table
+        check_inline_function(symbol, &mut errors);
     }
     resolve_side_effects(list);
+    errors
 }
 
 fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
@@ -655,4 +666,111 @@ fn is_constantable_function(
     }
 
     true
+}
+
+fn is_single_return(arg: &FunctionDeclaration) -> bool {
+    let [item] = arg.statement_block.statement_block_list.as_slice() else {
+        return false;
+    };
+
+    let group = &item.statement_block_group;
+    if !group.statement_block_group_list.is_empty() {
+        return false;
+    }
+
+    if let StatementBlockGroupGroup::StatementBlockItem(x) =
+        group.statement_block_group_group.as_ref()
+        && let StatementBlockItem::Statement(x) = x.statement_block_item.as_ref()
+    {
+        matches!(x.statement.as_ref(), Statement::ReturnStatement(_))
+    } else {
+        false
+    }
+}
+
+fn get_parent_interface(function: &Symbol) -> Option<Symbol> {
+    let parent = function.get_parent()?;
+    matches!(parent.kind, SymbolKind::Interface(_)).then_some(parent)
+}
+
+fn is_interface_local_item(symbol: &Symbol, interface_namespace: &Namespace) -> bool {
+    let is_target_kind = matches!(
+        symbol.kind,
+        SymbolKind::Parameter(_)
+            | SymbolKind::TypeDef(_)
+            | SymbolKind::Struct(_)
+            | SymbolKind::Union(_)
+            | SymbolKind::Enum(_)
+            | SymbolKind::EnumMember(_)
+            | SymbolKind::GenericConst(_)
+    );
+    is_target_kind && symbol.namespace.included(interface_namespace)
+}
+
+fn check_function(
+    symbol: &Symbol,
+    property: &FunctionProperty,
+    arg: &FunctionDeclaration,
+    errors: &mut Vec<AnalyzerError>,
+) {
+    let name = symbol.token.to_string();
+    let identifier: TokenRange = arg.identifier.as_ref().into();
+    let mut push_error = |kind, token: &TokenRange| {
+        errors.push(AnalyzerError::invalid_inline_function(kind, &name, token));
+    };
+
+    let Some(interface) = get_parent_interface(symbol) else {
+        push_error(InvalidInlineFunctionKind::NotInInterface, &identifier);
+        return;
+    };
+
+    if !property.ports.is_empty() {
+        push_error(InvalidInlineFunctionKind::HasArgument, &identifier);
+    }
+
+    if property.ret.is_none() {
+        push_error(InvalidInlineFunctionKind::NoReturnType, &identifier);
+        return;
+    }
+
+    if !is_single_return(arg) {
+        push_error(InvalidInlineFunctionKind::NotSingleReturn, &identifier);
+        return;
+    }
+
+    // `reference_paths` covers the return type and the return expression
+    // because the function has no arguments and its body is a single return statement.
+    let interface_namespace = interface.inner_namespace();
+    for path in &property.reference_paths {
+        let Ok(referred) = symbol_table::resolve(path) else {
+            continue;
+        };
+
+        if referred.found.id == symbol.id {
+            push_error(InvalidInlineFunctionKind::RecursiveCall, &path.range);
+        } else if is_interface_local_item(&referred.found, &interface_namespace) {
+            push_error(
+                InvalidInlineFunctionKind::InterfaceLocalReference,
+                &path.range,
+            );
+        }
+    }
+}
+
+fn check_inline_function(symbol: &Symbol, errors: &mut Vec<AnalyzerError>) {
+    let SymbolKind::Function(property) = &symbol.kind else {
+        return;
+    };
+    if !attribute_table::contains(&symbol.token, Attribute::Inline) {
+        return;
+    }
+
+    let Some(definition) = property.definition.and_then(definition_table::get) else {
+        return;
+    };
+    let Definition::Function(arg) = definition.as_ref() else {
+        return;
+    };
+
+    check_function(symbol, property, arg, errors);
 }

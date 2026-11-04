@@ -27,7 +27,7 @@ use super::owners::{OwnerInputs, has_side_effects};
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::ProtoStatement;
-use crate::ir::variable::VarOffset;
+use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes};
 use crate::{HashMap, HashSet};
 
 /// `VERYL_DATAFLOW_DIAG=1`, read once: the runtime asks on hot paths.
@@ -186,17 +186,18 @@ fn disjoint_bits<'a>(
     (a, b): (usize, usize),
 ) -> bool {
     let is_ff = key >> 63 == 1;
+    let in_this =
+        |o: &VarOffset| o.is_ff() == is_ff && o.raw() >= 0 && (a..b).contains(&(o.raw() as usize));
     let in_span = |v: &[(VarOffset, usize, usize)]| -> Vec<(usize, usize)> {
         v.iter()
-            .filter(|(o, ..)| o.is_ff() == is_ff && o.raw() >= 0)
-            .filter(|(o, ..)| (a..b).contains(&(o.raw() as usize)))
+            .filter(|(o, ..)| in_this(o))
             .map(|&(o, lo, hi)| {
                 let base = (o.raw() as usize - a) * 8;
                 (base + lo, base + hi)
             })
             .collect()
     };
-    let mut r = Vec::new();
+    let mut r = Reads::default();
     if !read_bits(reader, &mut r) {
         return false;
     }
@@ -206,7 +207,11 @@ fn disjoint_bits<'a>(
             return false;
         }
     }
-    let (read, written) = (in_span(&r), in_span(&w));
+    let (read, written) = (in_span(&r.bits), in_span(&w));
+    // Elements a runtime index can never reach are not read at all.
+    if read.is_empty() && r.unreached.iter().any(in_this) {
+        return true;
+    }
     // Nothing found in the span means the walk could not place the access.
     !read.is_empty()
         && !written.is_empty()
@@ -215,9 +220,145 @@ fn disjoint_bits<'a>(
             .all(|&(rl, rh)| written.iter().all(|&(wl, wh)| rh < wl || wh < rl))
 }
 
-/// The bits `e` reads, `(variable, lo, hi)` relative to each variable.  False
-/// for an access it cannot place.
-fn expr_read_bits(e: &ProtoExpression, out: &mut Vec<(VarOffset, usize, usize)>) -> bool {
+#[derive(Default)]
+struct Reads {
+    /// `(variable, lo, hi)` relative to each variable.
+    bits: Vec<(VarOffset, usize, usize)>,
+    /// Array elements a runtime index can never select.
+    unreached: Vec<VarOffset>,
+}
+
+/// An inclusive `[lo, hi]` range of unsigned values.
+type ValueRange = (u128, u128);
+
+/// The unsigned values `e` can evaluate to, `[lo, hi]`, or `None` when they
+/// cannot be bounded.  Values with X/Z bits are left out: such an index
+/// selects no element.
+fn value_range(e: &ProtoExpression) -> Option<ValueRange> {
+    use crate::ir::Op;
+    let fits = |hi: u128, w: usize| w >= 128 || hi >> w == 0;
+    let full = |w: usize| (w < 128).then(|| (0, (1u128 << w) - 1));
+    let signed = |e: &ProtoExpression| match e {
+        ProtoExpression::Resize {
+            expr_context,
+            sign_extend,
+            ..
+        } => expr_context.signed || *sign_extend,
+        ProtoExpression::Variable { expr_context, .. }
+        | ProtoExpression::Value { expr_context, .. }
+        | ProtoExpression::Unary { expr_context, .. }
+        | ProtoExpression::Binary { expr_context, .. }
+        | ProtoExpression::Concatenation { expr_context, .. }
+        | ProtoExpression::Ternary { expr_context, .. }
+        | ProtoExpression::DynamicVariable { expr_context, .. } => expr_context.signed,
+        ProtoExpression::HierVariable(_) => true,
+    };
+    let boolean = Some((0, 1));
+    match e {
+        // A width-0 literal such as `'1` is filled to its context width when
+        // evaluated, so its stored payload is not its value.
+        ProtoExpression::Value { value, .. } if value.width() == 0 => None,
+        ProtoExpression::Value { value, .. } => value.to_u64().map(|v| (v as u128, v as u128)),
+        ProtoExpression::Variable {
+            dynamic_select: None,
+            width,
+            expr_context,
+            ..
+        } if !expr_context.signed => full(*width),
+        ProtoExpression::Unary {
+            op: Op::LogicNot, ..
+        } => boolean,
+        ProtoExpression::Resize { x, width, .. } if !signed(e) => {
+            let (lo, hi) = value_range(x)?;
+            if fits(hi, *width) {
+                Some((lo, hi))
+            } else {
+                full(*width)
+            }
+        }
+        ProtoExpression::Binary {
+            x,
+            op,
+            y,
+            width,
+            expr_context,
+        } => {
+            let operands_signed = signed(x) || signed(y);
+            let ranges = || Some((value_range(x)?, value_range(y)?));
+            let cmp = |lt: fn(ValueRange, ValueRange) -> Option<bool>| {
+                if operands_signed {
+                    return boolean;
+                }
+                match ranges().and_then(|(rx, ry)| lt(rx, ry)) {
+                    Some(t) => Some((t as u128, t as u128)),
+                    None => boolean,
+                }
+            };
+            match op {
+                // Each comparison decided when the ranges do not overlap.
+                Op::Less => cmp(|x, y| {
+                    (x.1 < y.0)
+                        .then_some(true)
+                        .or((x.0 >= y.1).then_some(false))
+                }),
+                Op::LessEq => cmp(|x, y| {
+                    (x.1 <= y.0)
+                        .then_some(true)
+                        .or((x.0 > y.1).then_some(false))
+                }),
+                Op::Greater => cmp(|x, y| {
+                    (x.0 > y.1)
+                        .then_some(true)
+                        .or((x.1 <= y.0).then_some(false))
+                }),
+                Op::GreaterEq => cmp(|x, y| {
+                    (x.0 >= y.1)
+                        .then_some(true)
+                        .or((x.1 < y.0).then_some(false))
+                }),
+                Op::Eq | Op::Ne | Op::LogicAnd | Op::LogicOr => boolean,
+                _ if operands_signed || expr_context.signed => None,
+                _ => {
+                    let ((xl, xh), (yl, yh)) = ranges()?;
+                    let w = (*width).min(expr_context.width);
+                    let (lo, hi) = match op {
+                        Op::Add => (xl.checked_add(yl)?, xh.checked_add(yh)?),
+                        Op::Sub if xl >= yh => (xl - yh, xh - yl),
+                        Op::Mul => (xl.checked_mul(yl)?, xh.checked_mul(yh)?),
+                        Op::LogicShiftL if yl == yh && yl < 128 && (xh << yl) >> yl == xh => {
+                            (xl << yl, xh << yl)
+                        }
+                        Op::LogicShiftR => (
+                            xl.checked_shr(yh.min(127) as u32).unwrap_or(0),
+                            xh.checked_shr(yl.min(127) as u32).unwrap_or(0),
+                        ),
+                        Op::BitAnd => (0, xh.min(yh)),
+                        _ => return None,
+                    };
+                    fits(hi, w).then_some((lo, hi))
+                }
+            }
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } if !signed(e) && !signed(true_expr) && !signed(false_expr) => match value_range(cond) {
+            Some((lo, _)) if lo > 0 => value_range(true_expr),
+            Some((0, 0)) => value_range(false_expr),
+            _ => {
+                let (tl, th) = value_range(true_expr)?;
+                let (fl, fh) = value_range(false_expr)?;
+                Some((tl.min(fl), th.max(fh)))
+            }
+        },
+        _ => None,
+    }
+}
+
+/// The bits `e` reads into `out.bits`.  False for an access it cannot place.
+fn expr_read_bits(e: &ProtoExpression, out: &mut Reads) -> bool {
     match e {
         ProtoExpression::Value { .. } => true,
         ProtoExpression::Variable {
@@ -232,7 +373,7 @@ fn expr_read_bits(e: &ProtoExpression, out: &mut Vec<(VarOffset, usize, usize)>)
                 (Some((hi, lo)), None) => (*lo, *hi),
                 _ => full,
             };
-            out.push((*var_offset, lo, hi));
+            out.bits.push((*var_offset, lo, hi));
             dynamic_select
                 .as_ref()
                 .is_none_or(|d| expr_read_bits(&d.index_expr, out))
@@ -246,10 +387,19 @@ fn expr_read_bits(e: &ProtoExpression, out: &mut Vec<(VarOffset, usize, usize)>)
             dynamic_select,
             ..
         } => {
+            let reach = value_range(index_expr).map_or(0..*num_elements, |(lo, hi)| {
+                let n = *num_elements as u128;
+                lo.min(n) as usize..hi.saturating_add(1).min(n) as usize
+            });
             for i in 0..*num_elements {
                 let off =
                     VarOffset::new(base_offset.is_ff(), base_offset.raw() + stride * i as isize);
-                out.push((off, 0, element_native_bytes.max(&1) * 8 - 1));
+                if reach.contains(&i) {
+                    out.bits
+                        .push((off, 0, element_native_bytes.max(&1) * 8 - 1));
+                } else {
+                    out.unreached.push(off);
+                }
             }
             expr_read_bits(index_expr, out)
                 && dynamic_select
@@ -278,7 +428,7 @@ fn expr_read_bits(e: &ProtoExpression, out: &mut Vec<(VarOffset, usize, usize)>)
 }
 
 /// `expr_read_bits` over every expression `s` evaluates.
-fn read_bits(s: &ProtoStatement, out: &mut Vec<(VarOffset, usize, usize)>) -> bool {
+fn read_bits(s: &ProtoStatement, out: &mut Reads) -> bool {
     match s {
         ProtoStatement::Assign(x) => {
             expr_read_bits(&x.expr, out)
@@ -421,8 +571,8 @@ impl StmtIo {
     }
 }
 
-/// `None` when a statement falls outside what the plan can track: an access
-/// outside every owner span or a side effect.
+/// `None` when a statement falls outside what the plan can track: a side
+/// effect, or storage no owner span covers whose writes cannot be bounded.
 fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>> {
     // A byte must belong to one span, or a writer would mark the readers of
     // one span while a reader of the same bytes is keyed on another.  Owner
@@ -447,6 +597,8 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
     let mut ins: Vec<VarOffset> = Vec::new();
     let mut outs: Vec<VarOffset> = Vec::new();
     let mut io = Vec::with_capacity(stmts.len());
+    // Comb bytes outside every owner span, as `(offset, statement, write)`.
+    let mut untracked: Vec<(usize, usize, bool)> = Vec::new();
     for (i, s) in stmts.iter().enumerate() {
         let effect = has_side_effects(s);
         if effect && !output_effects_only(s) {
@@ -468,9 +620,7 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             match o {
                 VarOffset::Comb(off) if *off >= 0 => match span_in(*off as usize) {
                     Some(sp) => x.out_comb.push(sp),
-                    None => {
-                        return bail(format_args!("statement {i} writes untracked comb {off:#x}"));
-                    }
+                    None => untracked.push((*off as usize, i, true)),
                 },
                 VarOffset::Ff(off) if *off >= 0 => {
                     let off = *off as usize;
@@ -501,9 +651,7 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             match o {
                 VarOffset::Comb(off) if *off >= 0 => match span_in(*off as usize) {
                     Some(sp) => x.in_comb.push(sp),
-                    None => {
-                        return bail(format_args!("statement {i} reads untracked comb {off:#x}"));
-                    }
+                    None => untracked.push((*off as usize, i, false)),
                 },
                 VarOffset::Ff(off) if *off >= 0 => match inputs.ff_owner.span(*off as usize) {
                     Some(sp) => x.in_ff.push(sp),
@@ -523,6 +671,79 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             v.dedup();
         }
         io.push(x);
+    }
+    // Storage no variable owns, such as an operand a selected write evaluates
+    // once, gets a span of its own over the bytes its writers store, so it
+    // joins the plan as a variable would.  Plans are 2-state, so there is no
+    // X/Z half to cover.
+    untracked.sort_unstable();
+    let starts: Vec<usize> = untracked.iter().map(|&(off, _, _)| off).collect();
+    // Per writing statement, the widest store to each comb offset, gathered
+    // once: an unrolled loop writes many such offsets from one block.
+    let mut stored: HashMap<usize, Option<HashMap<isize, usize>>> = HashMap::default();
+    let mut bits = Vec::new();
+    for group in untracked.chunk_by(|a, b| a.0 == b.0) {
+        let off = group[0].0;
+        let mut width: Option<usize> = None;
+        for &(_, i, _) in group.iter().filter(|&&(_, _, w)| w) {
+            let widths = stored.entry(i).or_insert_with(|| {
+                bits.clear();
+                write_bits(&stmts[i], &mut bits).then(|| {
+                    let mut m: HashMap<isize, usize> = HashMap::default();
+                    for &(dst, _, hi) in &bits {
+                        if let VarOffset::Comb(d) = dst {
+                            let e = m.entry(d).or_insert(0);
+                            *e = (*e).max(hi + 1);
+                        }
+                    }
+                    m
+                })
+            });
+            let w = widths
+                .as_ref()
+                .and_then(|m| m.get(&(off as isize)).copied());
+            let Some(w) = w else {
+                return bail(format_args!(
+                    "statement {i} writes untracked comb {off:#x} of no bounded width"
+                ));
+            };
+            width = Some(width.map_or(w, |x| x.max(w)));
+        }
+        let next = merged[merged.partition_point(|&(s, _)| s <= off)..]
+            .first()
+            .map_or(usize::MAX, |&(s, _)| s)
+            .min(
+                starts[starts.partition_point(|&s| s <= off)..]
+                    .first()
+                    .copied()
+                    .unwrap_or(usize::MAX),
+            );
+        let writer = group.iter().find(|&&(_, _, w)| w).map(|&(_, i, _)| i);
+        let span = match (writer, width) {
+            (Some(i), Some(w)) => {
+                let span = (off, off + calc_native_bytes(w));
+                if span.1 > next {
+                    return bail(format_args!(
+                        "statement {i} writes untracked comb {off:#x} over a claimed byte"
+                    ));
+                }
+                span
+            }
+            _ => {
+                let i = group[0].1;
+                return bail(format_args!("statement {i} reads untracked comb {off:#x}"));
+            }
+        };
+        for &(_, i, w) in group {
+            let v = if w {
+                &mut io[i].out_comb
+            } else {
+                &mut io[i].in_comb
+            };
+            if let Err(k) = v.binary_search(&span) {
+                v.insert(k, span);
+            }
+        }
     }
     Some(io)
 }
@@ -1551,6 +1772,140 @@ mod tests {
         assert!(plan(&stmts, &inputs(3)).is_none());
     }
 
+    fn ctx(width: usize) -> ExpressionContext {
+        ExpressionContext {
+            width,
+            signed: false,
+        }
+    }
+
+    fn konst(v: u64, width: usize) -> ProtoExpression {
+        ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload: v,
+                mask_xz: 0,
+                width: width as u32,
+                signed: false,
+            }),
+            width,
+            expr_context: ctx(width),
+        }
+    }
+
+    fn binary(
+        x: ProtoExpression,
+        op: crate::ir::Op,
+        y: ProtoExpression,
+        width: usize,
+    ) -> ProtoExpression {
+        ProtoExpression::Binary {
+            x: Box::new(x),
+            op,
+            y: Box::new(y),
+            width,
+            expr_context: ctx(width),
+        }
+    }
+
+    /// `t[row][sel]` over a `[2, 2]` array of bytes at `0, 8, 16, 24`, as
+    /// the bounds-checked flat index `(row < 2) ? sel + row * 2 : 4` with a
+    /// `sel_width`-bit `sel` at offset 40.
+    fn row_read(row: u64, sel_width: usize) -> ProtoExpression {
+        let sel = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(40),
+            select: None,
+            dynamic_select: None,
+            width: sel_width,
+            var_full_width: sel_width,
+            expr_context: ctx(sel_width),
+        };
+        let sel = ProtoExpression::Resize {
+            x: Box::new(sel),
+            width: 32,
+            sign_extend: false,
+            expr_context: ctx(32),
+        };
+        let index = ProtoExpression::Ternary {
+            cond: Box::new(binary(konst(row, 32), crate::ir::Op::Less, konst(2, 32), 1)),
+            true_expr: Box::new(binary(
+                sel,
+                crate::ir::Op::Add,
+                binary(konst(row, 32), crate::ir::Op::Mul, konst(2, 32), 32),
+                32,
+            )),
+            false_expr: Box::new(konst(4, 32)),
+            width: 32,
+            expr_context: ctx(32),
+        };
+        ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0),
+            stride: 8,
+            element_native_bytes: 1,
+            index_expr: Box::new(index),
+            num_elements: 4,
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            expr_context: ctx(8),
+        }
+    }
+
+    #[test]
+    fn a_runtime_index_reads_only_the_elements_it_can_reach() {
+        // Row 0 is written, then read through `sel`, then row 1 is written.
+        // A one-bit `sel` reaches only row 0, so the read before row 1's
+        // writers orders nothing; a two-bit one reaches row 1 too.
+        let (x, b) = (32, 48);
+        let stmts = |sel_width| {
+            vec![
+                assign(0, x),
+                assign(8, x),
+                assign_expr(b, row_read(0, sel_width)),
+                assign(16, x),
+                assign(24, x),
+            ]
+        };
+        assert!(plan(&stmts(1), &inputs(7)).is_some());
+        assert!(plan(&stmts(2), &inputs(7)).is_none());
+    }
+
+    #[test]
+    fn an_unsized_fill_literal_does_not_bound_an_index() {
+        // `sel & '1` with a two-bit `sel` reaches every element, although the
+        // literal's stored payload is 1.
+        let sel = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(40),
+            select: None,
+            dynamic_select: None,
+            width: 2,
+            var_full_width: 2,
+            expr_context: ctx(2),
+        };
+        let index = binary(sel, crate::ir::Op::BitAnd, konst(1, 0), 2);
+        assert!(value_range(&index).is_none_or(|(_, hi)| hi >= 3));
+
+        let read = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0),
+            stride: 8,
+            element_native_bytes: 1,
+            index_expr: Box::new(index),
+            num_elements: 4,
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            expr_context: ctx(8),
+        };
+        let (x, b) = (32, 48);
+        let stmts = vec![
+            assign(0, x),
+            assign(8, x),
+            assign_expr(b, read),
+            assign(16, x),
+            assign(24, x),
+        ];
+        assert!(plan(&stmts, &inputs(7)).is_none());
+    }
+
     #[test]
     fn every_reader_of_a_boundary_is_marked_and_runs_later() {
         // Chains over distinct inputs joined pairwise, so the co-activity
@@ -1589,6 +1944,38 @@ mod tests {
             }
         }
         assert!(checked > 0, "one cell holds everything: {:?}", p.cells);
+    }
+
+    #[test]
+    fn storage_no_variable_owns_is_planned_through_its_writers() {
+        // Byte 64 lies past every variable, as an operand evaluated once
+        // before a selected write does; each unrolled copy writes it again.
+        let (x, b, scratch) = (0, 8, 64);
+        let stmts = vec![
+            assign(scratch, x),
+            assign(b, scratch),
+            assign(scratch, x),
+            assign(b, scratch),
+        ];
+        let p = plan(&stmts, &inputs(2)).expect("plannable");
+        assert!(p.written.contains(&(64, 65)), "{:?}", p.written);
+
+        // Read with no writer, nothing defines its value.
+        assert!(plan(&[assign(b, scratch)], &inputs(2)).is_none());
+
+        // A writer whose bytes run into a variable cannot be given a span.
+        let wide = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(4),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: cvar(x),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: TokenRange::default(),
+        });
+        assert!(plan(&[wide, assign(b, 4)], &inputs(2)).is_none());
     }
 
     #[test]

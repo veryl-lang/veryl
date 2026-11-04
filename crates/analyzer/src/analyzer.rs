@@ -3,6 +3,7 @@ use crate::attribute_table;
 use crate::comb_loop_detect;
 use crate::conv::{Context, Conv};
 use crate::definition_table;
+use crate::driver_check;
 use crate::generic_inference_table;
 use crate::handlers::*;
 use crate::ir::{Ir, IrResult};
@@ -198,7 +199,7 @@ impl Analyzer {
         ret.append(&mut symbol_table::apply_connect());
         // Function effects for diamond connections depend on the linked
         // modports and validated connection pairs produced above.
-        symbol_table::resolve_function();
+        ret.append(&mut symbol_table::resolve_function());
         generic_inference_table::resolve_pending();
         ret.append(&mut reference_table::apply());
         ret.append(&mut type_dag::apply());
@@ -246,6 +247,7 @@ impl Analyzer {
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
+        symbol_table::set_defines(&context.config.defines);
         context.config.retain_component_body = ir.is_some();
         context.in_dependency = context
             .project_name()
@@ -271,6 +273,7 @@ impl Analyzer {
 
         ret.append(&mut symbol_table::check_unused_variable());
         ret.append(&mut symbol_table::check_wavedrom());
+        ret.append(&mut driver_check::check(ir));
         ret.append(&mut comb_loop_detect::check(ir));
 
         ret

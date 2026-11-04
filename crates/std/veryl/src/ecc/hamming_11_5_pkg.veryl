@@ -18,6 +18,26 @@ pub package hamming_11_5_pkg {
     const ENCODE_MATRIX_ROW_3: bit<DATA_WIDTH> = 11'h736; // check[3] (7 ones)
     const ENCODE_MATRIX_ROW_4: bit<DATA_WIDTH> = 11'h6da; // check[4] (7 ones)
 
+    // Syndrome produced by a single-bit error at each code bit.
+    const ERROR_SYNDROME: bit<CHECK_WIDTH> [CODE_WIDTH] = '{
+        5'h01, // check[0]
+        5'h02, // check[1]
+        5'h04, // check[2]
+        5'h08, // check[3]
+        5'h10, // check[4]
+        5'h07, // data[0]
+        5'h19, // data[1]
+        5'h0e, // data[2]
+        5'h13, // data[3]
+        5'h1c, // data[4]
+        5'h0b, // data[5]
+        5'h15, // data[6]
+        5'h16, // data[7]
+        5'h0d, // data[8]
+        5'h1a, // data[9]
+        5'h1f, // data[10]
+    };
+
     struct decode_result {
         error_pos: logic<CODE_WIDTH>, // error position (one-hot, [CHECK_WIDTH-1:0]=check, upper=data)
         corrected: logic            , // a single-bit error was located and corrected
@@ -54,28 +74,17 @@ pub package hamming_11_5_pkg {
         syndrome: input logic<CHECK_WIDTH>,
         width   : input u32               ,
     ) -> decode_result {
-        // Boolean-selector switch (SV: case (1'b1)); the syndrome values are mutually
-        // exclusive, so the branches stay parallel while sharing the width gate.
-        // A data branch that fails its width guard falls through to default -> detected.
-        switch {
-            syndrome == 5'h00: return decode_result'{error_pos: 16'h0000, corrected: false, detected: false}; // no error
-            syndrome == 5'h01: return decode_result'{error_pos: 16'h0001, corrected: true, detected: false}; // check[0]
-            syndrome == 5'h02: return decode_result'{error_pos: 16'h0002, corrected: true, detected: false}; // check[1]
-            syndrome == 5'h04: return decode_result'{error_pos: 16'h0004, corrected: true, detected: false}; // check[2]
-            syndrome == 5'h08: return decode_result'{error_pos: 16'h0008, corrected: true, detected: false}; // check[3]
-            syndrome == 5'h10: return decode_result'{error_pos: 16'h0010, corrected: true, detected: false}; // check[4]
-            syndrome == 5'h07 && width >= 1: return decode_result'{error_pos: 16'h0020, corrected: true, detected: false}; // data[0]
-            syndrome == 5'h19 && width >= 2: return decode_result'{error_pos: 16'h0040, corrected: true, detected: false}; // data[1]
-            syndrome == 5'h0e && width >= 3: return decode_result'{error_pos: 16'h0080, corrected: true, detected: false}; // data[2]
-            syndrome == 5'h13 && width >= 4: return decode_result'{error_pos: 16'h0100, corrected: true, detected: false}; // data[3]
-            syndrome == 5'h1c && width >= 5: return decode_result'{error_pos: 16'h0200, corrected: true, detected: false}; // data[4]
-            syndrome == 5'h0b && width >= 6: return decode_result'{error_pos: 16'h0400, corrected: true, detected: false}; // data[5]
-            syndrome == 5'h15 && width >= 7: return decode_result'{error_pos: 16'h0800, corrected: true, detected: false}; // data[6]
-            syndrome == 5'h16 && width >= 8: return decode_result'{error_pos: 16'h1000, corrected: true, detected: false}; // data[7]
-            syndrome == 5'h0d && width >= 9: return decode_result'{error_pos: 16'h2000, corrected: true, detected: false}; // data[8]
-            syndrome == 5'h1a && width >= 10: return decode_result'{error_pos: 16'h4000, corrected: true, detected: false}; // data[9]
-            syndrome == 5'h1f && width >= 11: return decode_result'{error_pos: 16'h8000, corrected: true, detected: false}; // data[10]
-            default: return decode_result'{error_pos: 16'h0000, corrected: false, detected: true}; // undefined syndrome / out-of-range (multiple-bit error)
+        var result: decode_result;
+
+        // Each bit compares the syndrome with its own H column, so the comparisons are
+        // independent of each other. A non-zero syndrome that matches no column (including
+        // a data bit beyond the active width) leaves error_pos zero and is reported as detected.
+        for i in 0..CODE_WIDTH {
+            result.error_pos[i] = syndrome == ERROR_SYNDROME[i] && i <: CHECK_WIDTH + width;
         }
+
+        result.corrected = result.error_pos != '0;
+        result.detected  = syndrome != '0 && !result.corrected;
+        return result;
     }
 }

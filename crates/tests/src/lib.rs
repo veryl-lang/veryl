@@ -673,148 +673,88 @@ mod path {
 #[cfg(test)]
 mod filelist {
     use std::fs;
-    use std::path::PathBuf;
-    use veryl_analyzer::{Analyzer, Context};
+    use veryl::OptBuild;
+    use veryl::cmd_build::{CmdBuild, EmitPolicy};
+    use veryl_analyzer::Analyzer;
     use veryl_metadata::Metadata;
-    use veryl_parser::Parser;
 
-    fn check_list(paths: &[String], expected: &[&str]) {
-        let paths: Vec<_> = paths.iter().map(|x| x.as_str()).collect();
-        for x in &paths {
-            assert!(expected.contains(x));
-        }
-        for x in expected {
-            assert!(paths.contains(x));
-        }
-    }
-
-    fn check_order(paths: &[String], path0: &str, path1: &str) {
-        let path0 = paths
-            .iter()
-            .enumerate()
-            .find_map(|(i, x)| if x == path0 { Some(i) } else { None });
-        let path1 = paths
-            .iter()
-            .enumerate()
-            .find_map(|(i, x)| if x == path1 { Some(i) } else { None });
-        assert!(path0 < path1);
-    }
+    // `{}` is replaced by the path of testcases/filelist
+    const EXPECTED: &[&str] = &[
+        "+incdir+{}/c/ip/include",
+        "+incdir+{}/a/ip/include",
+        "{}/c/ip/c_ip.sv",
+        "{}/a/ip/rtl/a_ip.sv",
+        "{}/a/dependencies/std/axi_if/axi_pkg.sv",
+        "{}/a/dependencies/std/ram/ram.sv",
+        "{}/a/src/01_package_a.sv",
+        "{}/a/src/02_package_b.sv",
+        "{}/a/src/03_module_a.sv",
+        "{}/a/src/04_module_b.sv",
+        "{}/a/src/05_module_c.sv",
+        "{}/a/src/06_package_c.sv",
+        "{}/a/src/07_module_d.sv",
+        "{}/a/src/09_module_f.sv",
+        "{}/a/src/08_module_e.sv",
+        "{}/a/src/10_package_g.sv",
+        "{}/a/src/11_package_h.sv",
+        "{}/a/src/14_package_j.sv",
+        "{}/a/src/16_package_l.sv",
+        "{}/a/src/15_module_k.sv",
+        "{}/a/src/17_package_m.sv",
+        "{}/a/src/18_package_n.sv",
+        "{}/a/src/19_package_o.sv",
+        "{}/a/src/20_module_p.sv",
+        "{}/a/dependencies/c/src/c_pkg.sv",
+        "{}/a/dependencies/b/src/b_pkg.sv",
+        "{}/a/dependencies/d/src/d_01_pkg.sv",
+        "{}/a/dependencies/d/src/d_02_module.sv",
+        "{}/a/dependencies/e/src/e_03_pkg.sv",
+        "{}/a/dependencies/e/src/e_04_pkg.sv",
+        "{}/a/dependencies/e/src/e_01_02_module.sv",
+        "{}/a/src/22_dependency_r.sv",
+        "{}/a/src/12_alias_i.sv",
+        "{}/a/src/13_embed.sv",
+        "{}/a/src/21_alias_q.sv",
+        "{}/a/src/23_embed_s.sv",
+    ];
 
     #[test]
     fn test() {
-        let path = std::env::current_dir().unwrap();
-        let path = path.join("../../testcases/filelist/a");
-        let metadata_path = Metadata::search_from(path).unwrap();
+        let base = std::env::current_dir()
+            .unwrap()
+            .join("../../testcases/filelist")
+            .canonicalize()
+            .unwrap();
+        let metadata_path = Metadata::search_from(base.join("a")).unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
-        let paths = metadata.paths::<PathBuf>(&[], false, true).unwrap();
 
-        let mut contexts = Vec::new();
+        Analyzer::new(&metadata).clear();
+        let build = CmdBuild::new(OptBuild {
+            files: Vec::new(),
+            check: false,
+            out_dir: None,
+        });
+        build
+            .exec(
+                &mut metadata,
+                false,
+                true,
+                None,
+                None,
+                &[],
+                EmitPolicy::Always,
+            )
+            .unwrap();
+        Analyzer::new(&metadata).clear();
 
-        for path in &paths {
-            let input = fs::read_to_string(&path.src).unwrap();
-            let parser = Parser::parse(&input, &path.src).unwrap();
-
-            let analyzer = Analyzer::new(&metadata);
-            let _ = analyzer.analyze_pass1(&path.prj, &parser.veryl);
-            contexts.push((path, input, parser, analyzer));
-        }
-
-        let err = Analyzer::analyze_post_pass1();
-        dbg!(&err);
-        assert!(err.is_empty());
-
-        let mut context = Context::default();
-        let mut ir = veryl_analyzer::ir::Ir::default();
-        for (_path, _, parser, analyzer) in &contexts {
-            let err = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
-            dbg!(&err);
-            assert!(err.is_empty());
-        }
-
-        let err = Analyzer::analyze_post_pass2(&ir);
-        dbg!(&err);
-        assert!(err.is_empty());
-
-        let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths, false);
-
-        let input_paths = metadata.paths::<PathBuf>(&[], false, true).unwrap();
-        let reference: Vec<_> = paths.iter().map(|x| x.src.clone()).collect();
-        for _ in 0..20 {
-            let again = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &input_paths, false);
-            let again: Vec<_> = again.into_iter().map(|x| x.src).collect();
-            assert_eq!(
-                reference, again,
-                "sort_filelist must be deterministic across invocations",
-            );
-        }
-
-        let paths: Vec<_> = paths
-            .into_iter()
-            .map(|x| x.src.file_name().unwrap().to_string_lossy().into_owned())
+        let base = base.to_string_lossy().replace('\\', "/");
+        let expected: Vec<_> = EXPECTED.iter().map(|x| x.replace("{}", &base)).collect();
+        let actual: Vec<_> = fs::read_to_string(metadata.filelist_path())
+            .unwrap()
+            .lines()
+            .map(|x| x.replace('\\', "/"))
             .collect();
-
-        dbg!(&paths);
-
-        let all = &[
-            "01_package_a.veryl",
-            "02_package_b.veryl",
-            "03_module_a.veryl",
-            "04_module_b.veryl",
-            "05_module_c.veryl",
-            "06_package_c.veryl",
-            "07_module_d.veryl",
-            "08_module_e.veryl",
-            "09_module_f.veryl",
-            "10_package_g.veryl",
-            "11_package_h.veryl",
-            "12_alias_i.veryl",
-            "13_embed.veryl",
-            "14_package_j.veryl",
-            "15_module_k.veryl",
-            "16_package_l.veryl",
-            "17_package_m.veryl",
-            "18_package_n.veryl",
-            "19_package_o.veryl",
-            "20_module_p.veryl",
-            "21_alias_q.veryl",
-            "22_dependency_r.veryl",
-            "23_embed_s.veryl",
-            "ram.veryl",
-            "axi_pkg.veryl",
-            "b_pkg.veryl",
-            "c_pkg.veryl",
-            "d_01_pkg.veryl",
-            "d_02_module.veryl",
-            "e_01_02_module.veryl",
-            "e_03_pkg.veryl",
-            "e_04_pkg.veryl",
-        ];
-        check_list(&paths, all);
-
-        check_order(&paths, "01_package_a.veryl", "03_module_a.veryl");
-        check_order(&paths, "02_package_b.veryl", "04_module_b.veryl");
-        check_order(&paths, "ram.veryl", "05_module_c.veryl");
-        check_order(&paths, "06_package_c.veryl", "07_module_d.veryl");
-        check_order(&paths, "07_module_d.veryl", "09_module_f.veryl");
-        check_order(&paths, "09_module_f.veryl", "08_module_e.veryl");
-        check_order(&paths, "10_package_g.veryl", "11_package_h.veryl");
-        check_order(&paths, "axi_pkg.veryl", "12_alias_i.veryl");
-        check_order(&paths, "axi_pkg.veryl", "13_embed.veryl");
-        check_order(&paths, "14_package_j.veryl", "16_package_l.veryl");
-        check_order(&paths, "16_package_l.veryl", "15_module_k.veryl");
-        check_order(&paths, "17_package_m.veryl", "18_package_n.veryl");
-        check_order(&paths, "18_package_n.veryl", "19_package_o.veryl");
-        check_order(&paths, "19_package_o.veryl", "20_module_p.veryl");
-        check_order(&paths, "20_module_p.veryl", "21_alias_q.veryl");
-        check_order(&paths, "c_pkg.veryl", "b_pkg.veryl");
-        check_order(&paths, "b_pkg.veryl", "22_dependency_r.veryl");
-        check_order(&paths, "d_02_module.veryl", "22_dependency_r.veryl");
-        check_order(&paths, "d_01_pkg.veryl", "d_02_module.veryl");
-        check_order(&paths, "e_01_02_module.veryl", "22_dependency_r.veryl");
-        check_order(&paths, "e_03_pkg.veryl", "e_01_02_module.veryl");
-        check_order(&paths, "e_04_pkg.veryl", "e_01_02_module.veryl");
-        // 23_embed_s is opaque, so it must not float ahead of files with a visible dependency
-        check_order(&paths, "22_dependency_r.veryl", "23_embed_s.veryl");
+        assert_eq!(actual, expected);
     }
 }
 

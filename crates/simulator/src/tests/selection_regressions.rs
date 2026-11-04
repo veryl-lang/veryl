@@ -1394,3 +1394,55 @@ fn packed_range_temporary_storage_does_not_scale_with_row_width() {
         );
     }
 }
+
+#[test]
+fn a_row_range_write_in_a_loop_follows_its_operands() {
+    // Each iteration evaluates the replication and the row once into storage
+    // no variable owns before the selected write.
+    let code = r#"
+    module Top (
+        clk  : input  clock    ,
+        rst  : input  reset    ,
+        valid: input  logic    ,
+        row  : input  logic    ,
+        mask : input  logic<4> ,
+        q    : output logic<32>,
+    ) {
+        var w: logic<1, 32>;
+        always_comb {
+            w = '0;
+            if valid {
+                for i in 0..4 {
+                    w[row][8 * i+:8] = {mask[i] repeat 8};
+                }
+            }
+        }
+        var r: logic<32>;
+        always_ff {
+            if_reset {
+                r = 0;
+            } else {
+                r = w;
+            }
+        }
+        assign q = r;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        if config.use_jit && !config.use_4state {
+            assert_eq!(ir.dataflow.is_some(), dataflow_on(), "{config:?}");
+        }
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.set("valid", Value::new(1, 1, false));
+        sim.set("row", Value::new(0, 1, false));
+        for (mask, q) in [(0b0101, 0x00ff_00ff), (0b1010, 0xff00_ff00)] {
+            sim.set("mask", Value::new(mask, 4, false));
+            sim.step(&clk);
+            assert_eq!(sim.get("q"), Some(Value::new(q, 32, false)), "{config:?}");
+        }
+    }
+}

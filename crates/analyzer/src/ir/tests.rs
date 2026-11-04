@@ -909,6 +909,66 @@ fn const_function_with_static_for() {
 }
 
 #[test]
+fn const_function_ternary_untaken_arm_out_of_range() {
+    let code = r#"
+    module ModuleA {
+        const T: logic<8> [2] = '{8'd3, 8'd5};
+        function pick(w: input u32) -> logic<8> {
+            return if w <: 2 ? T[w] : 8'd40;
+        }
+        const A: logic<8> = pick(2);
+        const B: logic<8> = pick(1);
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  const var0[0](T): logic<8> = 8'h03;
+  const var0[1](T): logic<8> = 8'h05;
+  var var2(pick.return): logic<8> = 8'h05;
+  input var3(pick.w): bit<32> = 32'sh00000001;
+  const var4(A): logic<8> = 8'h28;
+  const var5(B): logic<8> = 8'h05;
+  func var1(pick) -> var2 {
+    var2 = ((var3 <: 32'sh00000002) ? var0[var3] : 8'h28);
+  }
+
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
+fn const_function_ternary_untaken_arm_sizes_result() {
+    // The unevaluable `T[w]` is 16 bits wide, so `8'd1` lands in a 16-bit
+    // field of the concatenation.
+    let code = r#"
+    module ModuleA {
+        const T: logic<16> [2] = '{16'd3, 16'd5};
+        function pick(w: input u32) -> logic<24> {
+            return {8'd2, if w <: 2 ? T[w] : 8'd1};
+        }
+        const A: logic<24> = pick(2);
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  const var0[0](T): logic<16> = 16'h0003;
+  const var0[1](T): logic<16> = 16'h0005;
+  var var2(pick.return): logic<24> = 24'h020001;
+  input var3(pick.w): bit<32> = 32'sh00000002;
+  const var4(A): logic<24> = 24'h020001;
+  func var1(pick) -> var2 {
+    var2 = {8'h02, ((var3 <: 32'sh00000002) ? var0[var3] : 8'h01)};
+  }
+
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
 fn msb_lsb() {
     let code = r#"
     module ModuleA {

@@ -3,7 +3,6 @@
 //! the order analyzing them would produce.
 
 use super::coarse::CoarseSummary;
-use super::hierarchy;
 use super::model::ModuleCombSummary;
 use crate::conv::unit_cache;
 use crate::ir::{Ir, Module, Signature, VarPath};
@@ -74,7 +73,7 @@ fn index_signatures(ir: &Ir) {
         }
         let key = key_of(&module.signature);
         SIGNATURES.with(|x| x.borrow_mut().insert(key, module.signature.clone()));
-        work.extend(hierarchy::child_modules(module));
+        work.extend(module.child_modules());
     }
 }
 
@@ -126,7 +125,7 @@ impl<'a> Node<'a> {
 
     pub(super) fn children(&self) -> Vec<Node<'a>> {
         match self {
-            Node::Live(module) => hierarchy::child_modules(module).map(Node::of).collect(),
+            Node::Live(module) => module.child_modules().map(Node::of).collect(),
             Node::Cached(x) => x
                 .analysis
                 .iter()

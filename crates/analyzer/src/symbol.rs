@@ -1528,7 +1528,25 @@ impl Type {
     }
 
     pub fn is_compatible(&self, other: &Type) -> bool {
-        self.to_string() == other.to_string()
+        // The same user-defined type can be spelled through different paths,
+        // e.g. `T` brought in by `import pkg::*` and `pkg::T`, and the same
+        // spelling can name different symbols, so names are compared by what
+        // they resolve to in their own scopes.
+        let is_same_kind = match (&self.kind, &other.kind) {
+            (TypeKind::UserDefined(x), TypeKind::UserDefined(y)) => {
+                is_same_generic_path(&x.path, &y.path)
+            }
+            (x, y) => x.to_string() == y.to_string(),
+        };
+        is_same_kind
+            && self.modifier.len() == other.modifier.len()
+            && self
+                .modifier
+                .iter()
+                .zip(&other.modifier)
+                .all(|(x, y)| x.to_string() == y.to_string())
+            && is_same_expressions(&self.width, &other.width)
+            && is_same_expressions(&self.array, &other.array)
     }
 
     pub fn has_modifier(&self, kind: &TypeModifierKind) -> bool {
@@ -1997,6 +2015,71 @@ impl From<&syntax_tree::TypeModifier> for TypeModifier {
     }
 }
 
+fn is_same_generic_path(x: &GenericSymbolPath, y: &GenericSymbolPath) -> bool {
+    if x.kind != y.kind {
+        return false;
+    }
+    if !x.is_resolvable() {
+        return match (x.to_literal(), y.to_literal()) {
+            (Some(x), Some(y)) => x == y,
+            _ => x.to_string() == y.to_string(),
+        };
+    }
+
+    let resolve = |x: &GenericSymbolPath| {
+        let head = x.paths.first()?;
+        let path = SymbolPathNamespace::from_token(x.generic_path(), head.base.id);
+        symbol_table::resolve(path).ok().map(|x| x.found.clone())
+    };
+    let (Some(a), Some(b)) = (resolve(x), resolve(y)) else {
+        return false;
+    };
+    let is_generic = |x: &Symbol| {
+        matches!(
+            x.kind,
+            SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
+        )
+    };
+    // A generic parameter is local to each declaration, so only its spelling
+    // can be compared.
+    if is_generic(&a) || is_generic(&b) {
+        return is_generic(&a) && is_generic(&b) && x.to_string() == y.to_string();
+    }
+    if a.id != b.id && !is_proto_member_pair(&a, &b) && !is_proto_member_pair(&b, &a) {
+        return false;
+    }
+
+    let x_args: Vec<_> = x.paths.iter().flat_map(|x| &x.arguments).collect();
+    let y_args: Vec<_> = y.paths.iter().flat_map(|x| &x.arguments).collect();
+    x_args.len() == y_args.len()
+        && x_args
+            .iter()
+            .zip(&y_args)
+            .all(|(x, y)| is_same_generic_path(x, y))
+}
+
+// A member of a proto package (or a parameter of a proto module/interface)
+// stands for the same-named one of the component implementing it.
+fn is_proto_member_pair(proto_member: &Symbol, member: &Symbol) -> bool {
+    if proto_member.token.text != member.token.text {
+        return false;
+    }
+    let (Some(proto), Some(actual)) = (proto_member.get_parent(), member.get_parent()) else {
+        return false;
+    };
+    let implemented = match (&proto.kind, &actual.kind) {
+        (SymbolKind::Package(x), SymbolKind::Package(y)) if x.is_proto => &y.proto,
+        (SymbolKind::Module(x), SymbolKind::Module(y)) if x.is_proto => &y.proto,
+        (SymbolKind::Interface(x), SymbolKind::Interface(y)) if x.is_proto => &y.proto,
+        _ => return false,
+    };
+    let Some(implemented) = implemented else {
+        return false;
+    };
+    symbol_table::resolve((&implemented.generic_path(), &actual.namespace))
+        .is_ok_and(|x| x.found.id == proto.id)
+}
+
 impl fmt::Display for TypeModifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.kind {
@@ -2007,13 +2090,66 @@ impl fmt::Display for TypeModifier {
     }
 }
 
-impl fmt::Display for Type {
+fn is_same_expressions(x: &[syntax_tree::Expression], y: &[syntax_tree::Expression]) -> bool {
+    x.len() == y.len()
+        && x.iter().zip(y).all(|(x, y)| {
+            let x = ExpressionItemCollector::collect(x);
+            let y = ExpressionItemCollector::collect(y);
+            x.len() == y.len()
+                && x.iter().zip(&y).all(|(x, y)| match (x, y) {
+                    (ExpressionItem::Token(x), ExpressionItem::Token(y)) => x == y,
+                    (ExpressionItem::Path(x), ExpressionItem::Path(y)) => {
+                        is_same_generic_path(x, y)
+                    }
+                    _ => false,
+                })
+        })
+}
+
+enum ExpressionItem {
+    Token(StrId),
+    Path(GenericSymbolPath),
+}
+
+/// Collects tokens and paths of an expression in order
+/// so that paths can be compared by what they resolve to.
+#[derive(Default)]
+struct ExpressionItemCollector {
+    items: Vec<ExpressionItem>,
+}
+
+impl ExpressionItemCollector {
+    fn collect(expression: &syntax_tree::Expression) -> Vec<ExpressionItem> {
+        let mut collector = Self::default();
+        collector.expression(expression);
+        collector.items
+    }
+}
+
+impl VerylWalker for ExpressionItemCollector {
+    fn veryl_token(&mut self, arg: &VerylToken) {
+        self.items.push(ExpressionItem::Token(arg.token.text));
+    }
+
+    fn scoped_identifier(&mut self, arg: &syntax_tree::ScopedIdentifier) {
+        if symbol_table::resolve(arg).is_ok() {
+            self.items.push(ExpressionItem::Path(arg.into()));
+        } else {
+            // A path not found in the symbol table (e.g. system functions)
+            // is compared as written.
+            let mut stringifier = Stringifier::new();
+            stringifier.scoped_identifier(arg);
+            for x in stringifier.ids() {
+                self.items.push(ExpressionItem::Token(*x));
+            }
+        }
+    }
+}
+
+impl fmt::Display for TypeKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
-        for x in &self.modifier {
-            text.push_str(&x.to_string());
-        }
-        match &self.kind {
+        match self {
             TypeKind::Clock => text.push_str("clock"),
             TypeKind::ClockPosedge => text.push_str("clock posedge"),
             TypeKind::ClockNegedge => text.push_str("clock negedge"),
@@ -2055,6 +2191,17 @@ impl fmt::Display for Type {
             TypeKind::Any => text.push_str("any"),
             TypeKind::Inferred => text.push('_'),
         }
+        text.fmt(f)
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+        for x in &self.modifier {
+            text.push_str(&x.to_string());
+        }
+        text.push_str(&self.kind.to_string());
         if !self.width.is_empty() {
             text.push('<');
             for (i, x) in self.width.iter().enumerate() {

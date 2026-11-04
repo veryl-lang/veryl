@@ -1399,6 +1399,58 @@ fn component_input_with_a_runtime_index_keeps_every_element() {
 }
 
 #[test]
+fn component_input_with_a_hierarchical_index_keeps_the_let_combinational() {
+    let code = r#"
+    module Child (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<8>,
+    ) {
+        var arr: logic<8> [4];
+        always_comb {
+            arr[0] = 10;
+            arr[1] = 11;
+            arr[2] = 12;
+            arr[3] = 13;
+        }
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<8>;
+        var q_comp: logic<8>;
+        var s_rtl: logic<2>;
+        let sel: logic<2> = cnt[1:0] + 1;
+        let clk_n: '_ clock_negedge = clk;
+
+        inst dut: Child (clk, rst, cnt);
+
+        always_ff (clk) { s_rtl = sel; }
+
+        inst mirror: $comp::mirror ( clk: clk_n, d: dut.arr[sel], q: q_comp );
+
+        initial {
+            q_comp = 0;
+            rst.assert();
+            clk.next(3);
+            $assert(q_comp == 10 + {6'd0, cnt[1:0] + 2'd1}, "component read arr[cnt + 1]");
+            clk.next(1);
+            $assert(q_comp == 10 + {6'd0, cnt[1:0] + 2'd1}, "component read arr[cnt + 1]");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
 fn component_on_reset_fires_on_reset_edges() {
     // A connected reset port fires `on_reset` on every reset edge, and all
     // of them precede the first `on_clock` (the component asserts the

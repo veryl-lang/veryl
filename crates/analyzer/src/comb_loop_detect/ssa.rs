@@ -4,7 +4,7 @@ mod dag;
 mod log;
 mod repeated;
 
-use super::region::{ArraySpan, PackedSpan};
+use crate::ir::span::{ArraySpan, PackedSpan};
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::hash::Hash;

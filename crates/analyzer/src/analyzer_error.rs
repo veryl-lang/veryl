@@ -752,6 +752,25 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_inline_function),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" can't be inlined because {kind}")]
+    InvalidInlineFunction {
+        kind: InvalidInlineFunctionKind,
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_modport_item),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1590,6 +1609,27 @@ pub enum AnalyzerError {
     )]
     #[error("if_reset statement is required for always_ff with reset signal")]
     MissingIfReset {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(missing_modport_dependency),
+        help("export \"{identifier}\" by modport \"{modport}\" with the required direction"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" referred by function \"{function}\" {kind} modport \"{modport}\"")]
+    MissingModportDependency {
+        kind: MissingModportDependencyKind,
+        function: String,
+        identifier: String,
+        modport: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2767,6 +2807,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidLogicalOperand { input, .. } => input,
             AnalyzerError::InvalidLsb { input, .. } => input,
             AnalyzerError::InvalidModifier { input, .. } => input,
+            AnalyzerError::InvalidInlineFunction { input, .. } => input,
             AnalyzerError::InvalidModportItem { input, .. } => input,
             AnalyzerError::InvalidMsb { input, .. } => input,
             AnalyzerError::InvalidNumberCharacter { input, .. } => input,
@@ -2800,6 +2841,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { input, .. } => input,
             AnalyzerError::MissingDefaultArgument { input, .. } => input,
             AnalyzerError::MissingIfReset { input, .. } => input,
+            AnalyzerError::MissingModportDependency { input, .. } => input,
             AnalyzerError::MissingPort { input, .. } => input,
             AnalyzerError::MissingResetSignal { input, .. } => input,
             AnalyzerError::MissingResetStatement { input, .. } => input,
@@ -2899,6 +2941,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidLogicalOperand { input, .. } => input,
             AnalyzerError::InvalidLsb { input, .. } => input,
             AnalyzerError::InvalidModifier { input, .. } => input,
+            AnalyzerError::InvalidInlineFunction { input, .. } => input,
             AnalyzerError::InvalidModportItem { input, .. } => input,
             AnalyzerError::InvalidMsb { input, .. } => input,
             AnalyzerError::InvalidNumberCharacter { input, .. } => input,
@@ -2932,6 +2975,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { input, .. } => input,
             AnalyzerError::MissingDefaultArgument { input, .. } => input,
             AnalyzerError::MissingIfReset { input, .. } => input,
+            AnalyzerError::MissingModportDependency { input, .. } => input,
             AnalyzerError::MissingPort { input, .. } => input,
             AnalyzerError::MissingResetSignal { input, .. } => input,
             AnalyzerError::MissingResetStatement { input, .. } => input,
@@ -3038,6 +3082,7 @@ impl AnalyzerError {
             AnalyzerError::UnsignedArithShift { instance, .. } => instance,
             AnalyzerError::InvalidLsb { instance, .. } => instance,
             AnalyzerError::InvalidModifier { instance, .. } => instance,
+            AnalyzerError::InvalidInlineFunction { instance, .. } => instance,
             AnalyzerError::InvalidModportItem { instance, .. } => instance,
             AnalyzerError::InvalidMsb { instance, .. } => instance,
             AnalyzerError::InvalidNumberCharacter { instance, .. } => instance,
@@ -3081,6 +3126,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { instance, .. } => instance,
             AnalyzerError::MissingDefaultArgument { instance, .. } => instance,
             AnalyzerError::MissingIfReset { instance, .. } => instance,
+            AnalyzerError::MissingModportDependency { instance, .. } => instance,
             AnalyzerError::GenericInferenceFailed { instance, .. } => instance,
             AnalyzerError::TypeInferenceConflict { instance, .. } => instance,
             AnalyzerError::TypeInferenceNotSupported { instance, .. } => instance,
@@ -3170,6 +3216,7 @@ impl AnalyzerError {
             AnalyzerError::UnsignedArithShift { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidLsb { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidModifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidInlineFunction { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidModportItem { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidMsb { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidNumberCharacter { instance, .. } => instance.as_ref(),
@@ -3213,6 +3260,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { instance, .. } => instance.as_ref(),
             AnalyzerError::MissingDefaultArgument { instance, .. } => instance.as_ref(),
             AnalyzerError::MissingIfReset { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingModportDependency { instance, .. } => instance.as_ref(),
             AnalyzerError::GenericInferenceFailed { instance, .. } => instance.as_ref(),
             AnalyzerError::TypeInferenceConflict { instance, .. } => instance.as_ref(),
             AnalyzerError::TypeInferenceNotSupported { instance, .. } => instance.as_ref(),
@@ -3302,6 +3350,7 @@ impl AnalyzerError {
             AnalyzerError::UnsignedArithShift { token_source, .. } => *token_source,
             AnalyzerError::InvalidLsb { token_source, .. } => *token_source,
             AnalyzerError::InvalidModifier { token_source, .. } => *token_source,
+            AnalyzerError::InvalidInlineFunction { token_source, .. } => *token_source,
             AnalyzerError::InvalidModportItem { token_source, .. } => *token_source,
             AnalyzerError::InvalidMsb { token_source, .. } => *token_source,
             AnalyzerError::InvalidNumberCharacter { token_source, .. } => *token_source,
@@ -3345,6 +3394,7 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { token_source, .. } => *token_source,
             AnalyzerError::MissingDefaultArgument { token_source, .. } => *token_source,
             AnalyzerError::MissingIfReset { token_source, .. } => *token_source,
+            AnalyzerError::MissingModportDependency { token_source, .. } => *token_source,
             AnalyzerError::GenericInferenceFailed { token_source, .. } => *token_source,
             AnalyzerError::TypeInferenceConflict { token_source, .. } => *token_source,
             AnalyzerError::TypeInferenceNotSupported { token_source, .. } => *token_source,
@@ -3809,6 +3859,20 @@ impl AnalyzerError {
         AnalyzerError::InvalidModifier {
             kind: kind.to_string(),
             reason,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn invalid_inline_function(
+        kind: InvalidInlineFunctionKind,
+        identifier: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::InvalidInlineFunction {
+            kind,
+            identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -4320,6 +4384,24 @@ impl AnalyzerError {
     }
     pub fn missing_if_reset(token: &TokenRange) -> Self {
         AnalyzerError::MissingIfReset {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn missing_modport_dependency(
+        kind: MissingModportDependencyKind,
+        function: &str,
+        identifier: &str,
+        modport: &str,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::MissingModportDependency {
+            kind,
+            function: function.into(),
+            identifier: identifier.into(),
+            modport: modport.into(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -5036,6 +5118,35 @@ impl fmt::Display for InvalidModifierKind {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InvalidInlineFunctionKind {
+    NotInInterface,
+    HasArgument,
+    NoReturnType,
+    NotSingleReturn,
+    InterfaceLocalReference,
+    RecursiveCall,
+}
+
+impl fmt::Display for InvalidInlineFunctionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidInlineFunctionKind::NotInInterface => {
+                "it is not declared directly in an interface".fmt(f)
+            }
+            InvalidInlineFunctionKind::HasArgument => "it has arguments".fmt(f),
+            InvalidInlineFunctionKind::NoReturnType => "it has no return type".fmt(f),
+            InvalidInlineFunctionKind::NotSingleReturn => {
+                "its body is not a single return statement".fmt(f)
+            }
+            InvalidInlineFunctionKind::InterfaceLocalReference => {
+                "it refers to a type, const or param declared in the interface".fmt(f)
+            }
+            InvalidInlineFunctionKind::RecursiveCall => "it calls itself".fmt(f),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvalidModportItemKind {
     Function,
     Variable,
@@ -5046,6 +5157,23 @@ impl fmt::Display for InvalidModportItemKind {
         match self {
             InvalidModportItemKind::Function => "function".fmt(f),
             InvalidModportItemKind::Variable => "variable".fmt(f),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MissingModportDependencyKind {
+    NotExported,
+    NotWritable,
+}
+
+impl fmt::Display for MissingModportDependencyKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MissingModportDependencyKind::NotExported => "is not exported by".fmt(f),
+            MissingModportDependencyKind::NotWritable => {
+                "is assigned but not exported as output or inout by".fmt(f)
+            }
         }
     }
 }

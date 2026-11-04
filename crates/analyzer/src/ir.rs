@@ -5,6 +5,7 @@ mod declaration;
 mod expression;
 mod ff_table;
 mod function;
+mod hierarchy;
 pub mod peel;
 pub(crate) use function::FunctionValueCache;
 #[cfg(test)]
@@ -16,13 +17,14 @@ mod module;
 mod op;
 mod shape;
 mod signature;
+pub mod span;
 mod statement;
 mod system_function;
 mod utils;
 mod variable;
 mod width_expr;
 mod write_count;
-pub(crate) use assign_table::AssignTable;
+mod write_summary;
 pub use assign_table::{AssignTableEntry, ReferencedEntry};
 pub use comptime::{
     Comptime, ExpressionContext, InstanceKind, MemberSelectDomain, PartSelectPath, Type, TypeKind,
@@ -59,6 +61,7 @@ pub use variable::{
     VariableInfo,
 };
 pub use width_expr::{WidthExpr, WidthOp};
+pub use write_summary::{ProcessWrites, RegionWrite, WriteSummary};
 
 #[cfg(test)]
 mod tests;

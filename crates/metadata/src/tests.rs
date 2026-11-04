@@ -3,6 +3,7 @@ use crate::*;
 use semver::Version;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tempfile::TempDir;
 
 const GIT_IGNORE: &str = r#"
@@ -1273,4 +1274,772 @@ fn project_name_validation() {
     assert!(check_project_name("").is_err());
     assert!(check_project_name("has space").is_err());
     assert!(check_project_name("__reserved").is_err());
+}
+
+fn write_sv_files(root: &Path, files: &[&str]) {
+    for file in files {
+        let path = root.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, format!("// {file}\n")).unwrap();
+    }
+}
+
+fn create_sv_dirs(root: &Path, dirs: &[&str]) {
+    for dir in dirs {
+        fs::create_dir_all(root.join(dir)).unwrap();
+    }
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap()
+}
+
+fn path_list(paths: &[&str]) -> Vec<PathBuf> {
+    paths.iter().map(PathBuf::from).collect()
+}
+
+/// Creates a plain (non-git) project directory, used as a path dependency.
+fn create_sv_path_project(
+    root: &Path,
+    name: &str,
+    toml: &str,
+    files: &[&str],
+    dirs: &[&str],
+) -> PathBuf {
+    let path = root.join(name);
+    fs::create_dir_all(&path).unwrap();
+    fs::write(path.join("Veryl.toml"), toml).unwrap();
+    write_sv_files(&path, files);
+    create_sv_dirs(&path, dirs);
+    path
+}
+
+/// Creates a published git project whose SV files are committed, so it can
+/// be cloned into the cache as a git dependency.
+fn create_sv_git_project(root: &Path, name: &str, toml: &str, files: &[&str]) {
+    unsafe {
+        std::env::set_var("GIT_AUTHOR_NAME", "veryl");
+        std::env::set_var("GIT_AUTHOR_EMAIL", "veryl");
+        std::env::set_var("GIT_COMMITTER_NAME", "veryl");
+        std::env::set_var("GIT_COMMITTER_EMAIL", "veryl");
+    }
+
+    let path = root.join(name);
+    fs::create_dir(&path).unwrap();
+    let toml_path = path.join("Veryl.toml");
+    fs::write(&toml_path, toml).unwrap();
+    let git_ignore_path = path.join(".gitignore");
+    fs::write(&git_ignore_path, GIT_IGNORE).unwrap();
+    write_sv_files(&path, files);
+
+    let git = Git::init(&path).unwrap();
+    git.add(&toml_path).unwrap();
+    git.add(&git_ignore_path).unwrap();
+    for file in files {
+        git.add(&path.join(file)).unwrap();
+    }
+    git.commit("Add project").unwrap();
+
+    let mut metadata = Metadata::load(&toml_path).unwrap();
+    metadata.publish().unwrap();
+    git.add(&metadata.pubfile_path).unwrap();
+    git.commit("Publish").unwrap();
+}
+
+#[test]
+fn sv_filesets_default_empty() {
+    let (metadata, _tempdir) = create_metadata_simple();
+    assert!(metadata.sv.filesets.is_empty());
+}
+
+#[test]
+fn sv_filesets_parse() {
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[properties]
+for_asic = false
+width = 32
+
+[[sv.filesets]]
+files = ["ip/a.sv"]
+
+[[sv.filesets]]
+root         = "ip/foo"
+enable_if    = "!for_asic && width == 32"
+files        = ["rtl/foo_pkg.sv", "rtl/foo.sv"]
+include_dirs = ["include"]
+"#;
+    let metadata = Metadata::from_str(toml).unwrap();
+    let filesets = &metadata.sv.filesets;
+    assert_eq!(filesets.len(), 2);
+
+    assert_eq!(filesets[0].root, None);
+    assert_eq!(filesets[0].files, vec![PathBuf::from("ip/a.sv")]);
+    assert!(filesets[0].include_dirs.is_empty());
+    assert!(filesets[0].enable_if.is_none());
+
+    assert_eq!(filesets[1].root, Some(PathBuf::from("ip/foo")));
+    assert_eq!(
+        filesets[1].files,
+        vec![PathBuf::from("rtl/foo_pkg.sv"), PathBuf::from("rtl/foo.sv")]
+    );
+    assert_eq!(filesets[1].include_dirs, vec![PathBuf::from("include")]);
+    assert_eq!(
+        filesets[1].enable_if.as_ref().unwrap().to_string(),
+        "!for_asic && width == 32"
+    );
+}
+
+#[test]
+fn sv_sources_resolve_without_root() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[[sv.filesets]]
+files        = ["ip/rtl/a.sv", "ip/rtl/b.sv"]
+include_dirs = ["ip/include"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    let prj = metadata.project_path();
+    write_sv_files(&prj, &["ip/rtl/a.sv", "ip/rtl/b.sv"]);
+    create_sv_dirs(&prj, &["ip/include"]);
+
+    let sources = metadata.sv_sources(false).unwrap();
+    assert_eq!(sources.files, path_list(&["ip/rtl/a.sv", "ip/rtl/b.sv"]));
+    assert_eq!(sources.include_dirs, path_list(&["ip/include"]));
+}
+
+#[test]
+fn sv_sources_resolve_with_relative_root() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[[sv.filesets]]
+root         = "ip/foo"
+files        = ["rtl/foo.sv"]
+include_dirs = ["include"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    let prj = metadata.project_path();
+    write_sv_files(&prj, &["ip/foo/rtl/foo.sv"]);
+    create_sv_dirs(&prj, &["ip/foo/include"]);
+
+    let sources = metadata.sv_sources(false).unwrap();
+    assert_eq!(sources.files, path_list(&["ip/foo/rtl/foo.sv"]));
+    assert_eq!(sources.include_dirs, path_list(&["ip/foo/include"]));
+}
+
+#[test]
+fn sv_sources_resolve_with_absolute_root() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let vendor = tempdir.path().join("vendor");
+    write_sv_files(&vendor, &["rtl/vendor.sv"]);
+    create_sv_dirs(&vendor, &["include"]);
+
+    let toml = format!(
+        r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[[sv.filesets]]
+root         = "{}"
+files        = ["rtl/vendor.sv"]
+include_dirs = ["include"]
+"#,
+        path_to_toml_str(&vendor)
+    );
+    let mut metadata = create_project(tempdir.path(), "main", &toml, false);
+
+    // Paths under an absolute root are kept absolute
+    let sources = metadata.sv_sources(false).unwrap();
+    assert_eq!(
+        sources.files,
+        vec![canonical(&vendor.join("rtl/vendor.sv"))]
+    );
+    assert_eq!(
+        sources.include_dirs,
+        vec![canonical(&vendor.join("include"))]
+    );
+}
+
+#[test]
+fn sv_sources_absolute_path_ignores_root() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let vendor = tempdir.path().join("vendor");
+    write_sv_files(&vendor, &["rtl/vendor.sv"]);
+    create_sv_dirs(&vendor, &["include"]);
+
+    let toml = format!(
+        r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[[sv.filesets]]
+root         = "ip/foo"
+files        = ["rtl/foo.sv", "{}"]
+include_dirs = ["{}"]
+"#,
+        path_to_toml_str(&vendor.join("rtl/vendor.sv")),
+        path_to_toml_str(&vendor.join("include"))
+    );
+    let mut metadata = create_project(tempdir.path(), "main", &toml, false);
+    write_sv_files(&metadata.project_path(), &["ip/foo/rtl/foo.sv"]);
+
+    let sources = metadata.sv_sources(false).unwrap();
+    assert_eq!(
+        sources.files,
+        vec![
+            PathBuf::from("ip/foo/rtl/foo.sv"),
+            canonical(&vendor.join("rtl/vendor.sv"))
+        ]
+    );
+    assert_eq!(
+        sources.include_dirs,
+        vec![canonical(&vendor.join("include"))]
+    );
+}
+
+#[test]
+fn sv_sources_enable_if() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[properties]
+for_asic = false
+width = 32
+
+[[sv.filesets]]
+files = ["ip/always.sv"]
+
+[[sv.filesets]]
+enable_if    = "!for_asic"
+files        = ["ip/fpga.sv"]
+include_dirs = ["ip/fpga_include"]
+
+[[sv.filesets]]
+enable_if    = "for_asic"
+files        = ["ip/asic.sv"]
+include_dirs = ["ip/asic_include"]
+
+[[sv.filesets]]
+enable_if = "!for_asic && width == 32"
+files     = ["ip/fpga_32.sv"]
+
+[[sv.filesets]]
+enable_if = "!for_asic && width == 64"
+files     = ["ip/fpga_64.sv"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    let prj = metadata.project_path();
+    write_sv_files(
+        &prj,
+        &[
+            "ip/always.sv",
+            "ip/fpga.sv",
+            "ip/asic.sv",
+            "ip/fpga_32.sv",
+            "ip/fpga_64.sv",
+        ],
+    );
+    create_sv_dirs(&prj, &["ip/fpga_include", "ip/asic_include"]);
+
+    let sources = metadata.sv_sources(false).unwrap();
+    assert_eq!(
+        sources.files,
+        path_list(&["ip/always.sv", "ip/fpga.sv", "ip/fpga_32.sv"])
+    );
+    assert_eq!(sources.include_dirs, path_list(&["ip/fpga_include"]));
+}
+
+#[test]
+fn sv_sources_enable_if_unknown_property() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[properties]
+for_asic = false
+
+[[sv.filesets]]
+enable_if = "for_fpga"
+files     = ["ip/a.sv"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    write_sv_files(&metadata.project_path(), &["ip/a.sv"]);
+
+    let err = metadata.sv_sources(false).unwrap_err();
+    assert!(matches!(err, MetadataError::UnknownProperty { .. }));
+}
+
+#[test]
+fn sv_sources_enable_if_type_mismatch() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[properties]
+for_asic = false
+
+[[sv.filesets]]
+enable_if = "for_asic == 1"
+files     = ["ip/a.sv"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    write_sv_files(&metadata.project_path(), &["ip/a.sv"]);
+
+    let err = metadata.sv_sources(false).unwrap_err();
+    assert!(matches!(err, MetadataError::MismatchType { .. }));
+}
+
+fn condition_properties() -> std::collections::BTreeMap<String, ProjectProperty> {
+    [
+        ("for_asic", ProjectProperty::Bool(false)),
+        ("use_ecc", ProjectProperty::Bool(true)),
+        ("width", ProjectProperty::Int(32)),
+        ("depth", ProjectProperty::Int(-8)),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_string(), value))
+    .collect()
+}
+
+#[test]
+fn condition_eval() {
+    let properties = condition_properties();
+    let cases = [
+        ("for_asic", false),
+        ("use_ecc", true),
+        ("!for_asic", true),
+        ("!!for_asic", false),
+        ("! for_asic", true),
+        ("width == 32", true),
+        ("width==32", true),
+        ("width != 32", false),
+        ("width == 'h20", true),
+        ("width == 'b10_0000", true),
+        ("width == 0_32", true),
+        ("width <: 64", true),
+        ("width >: 64", false),
+        ("width <= 32", true),
+        ("width >= 33", false),
+        ("depth <: 0", true),
+        ("for_asic == use_ecc", false),
+        ("for_asic != use_ecc", true),
+        ("for_asic || use_ecc", true),
+        ("for_asic && use_ecc", false),
+        // `&&` has higher precedence than `||`
+        ("use_ecc || use_ecc && for_asic", true),
+        ("(use_ecc || use_ecc) && for_asic", false),
+        // `!` has higher precedence than `==`
+        ("!for_asic == use_ecc", true),
+        // relational operators have higher precedence than equality operators
+        ("width <: 64 == use_ecc", true),
+        // equality operators are left-associative
+        ("width == 32 == use_ecc", true),
+        ("width == 32 == for_asic", false),
+        ("!for_asic &&\n  (width == 32 || width == 64)", true),
+    ];
+    for (text, expected) in cases {
+        let condition = Condition::from_str(text).unwrap();
+        assert_eq!(
+            condition.eval(&properties, "test").unwrap(),
+            expected,
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn condition_syntax_error() {
+    let cases = [
+        "",
+        "   ",
+        "width ==",
+        "== 32",
+        "width = 32",
+        "width < 32",
+        "width > 32",
+        "for_asic & use_ecc",
+        "for_asic | use_ecc",
+        "(for_asic",
+        "for_asic)",
+        "for_asic use_ecc",
+        "width == 32'h20",
+        "width == 'd32",
+        "width == 'b102",
+        "width == 'h",
+        "width == 1__0",
+        "width == 10_",
+        "width == 32abc",
+        "width == 'hffff_ffff_ffff_ffff",
+        "$prop::width == 32",
+        "幅 == 32",
+    ];
+    for text in cases {
+        assert!(Condition::from_str(text).is_err(), "{text}");
+    }
+
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[[sv.filesets]]
+enable_if = "width = 32"
+files     = ["ip/a.sv"]
+"#;
+    let err = Metadata::from_str(toml).unwrap_err();
+    assert!(matches!(err, MetadataError::Deserialize(_)));
+}
+
+#[test]
+fn condition_eval_error() {
+    let properties = condition_properties();
+    let cases = [
+        "width",
+        "!width",
+        "width && use_ecc",
+        "use_ecc || width",
+        "for_asic == 0",
+        "width != use_ecc",
+        "for_asic <: 1",
+        "width >= use_ecc",
+        "width <: 64 <: 128",
+        // both operands are evaluated even if the result is determined by `lhs`
+        "for_asic && width",
+        "use_ecc || depth",
+    ];
+    for text in cases {
+        let condition = Condition::from_str(text).unwrap();
+        let err = condition.eval(&properties, "test").unwrap_err();
+        assert!(matches!(err, MetadataError::MismatchType { .. }), "{text}");
+    }
+
+    let condition = Condition::from_str("for_asic && for_fpga").unwrap();
+    let err = condition.eval(&properties, "test").unwrap_err();
+    assert!(matches!(err, MetadataError::UnknownProperty { .. }));
+}
+
+#[test]
+fn sv_sources_missing_file() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[[sv.filesets]]
+files = ["ip/missing.sv"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+
+    let err = metadata.sv_sources(false).unwrap_err();
+    assert!(matches!(err, MetadataError::SvPathNotFound(_)));
+}
+
+#[test]
+fn sv_sources_missing_include_dir() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[[sv.filesets]]
+files        = ["ip/a.sv"]
+include_dirs = ["ip/missing"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    write_sv_files(&metadata.project_path(), &["ip/a.sv"]);
+
+    let err = metadata.sv_sources(false).unwrap_err();
+    assert!(matches!(err, MetadataError::SvPathNotFound(_)));
+}
+
+#[test]
+fn sv_sources_disabled_missing_file_is_ignored() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[properties]
+for_asic = false
+
+[[sv.filesets]]
+enable_if = "for_asic"
+files     = ["ip/missing.sv"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+
+    let sources = metadata.sv_sources(false).unwrap();
+    assert!(sources.files.is_empty());
+}
+
+#[test]
+fn sv_sources_remove_duplicates() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[[sv.filesets]]
+files        = ["ip/common.sv", "ip/a.sv"]
+include_dirs = ["ip/include"]
+
+[[sv.filesets]]
+root         = "ip"
+files        = ["common.sv", "b.sv"]
+include_dirs = ["include"]
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    let prj = metadata.project_path();
+    write_sv_files(&prj, &["ip/common.sv", "ip/a.sv", "ip/b.sv"]);
+    create_sv_dirs(&prj, &["ip/include"]);
+
+    let sources = metadata.sv_sources(false).unwrap();
+    assert_eq!(
+        sources.files,
+        path_list(&["ip/common.sv", "ip/a.sv", "ip/b.sv"])
+    );
+    assert_eq!(sources.include_dirs, path_list(&["ip/include"]));
+}
+
+const SV_DEP_TOML: &str = r#"
+[project]
+name = "dep"
+version = "0.1.0"
+
+[properties]
+for_asic = false
+
+[[sv.filesets]]
+root         = "ip"
+files        = ["common.sv"]
+include_dirs = ["include"]
+
+[[sv.filesets]]
+enable_if = "!for_asic"
+files     = ["ip/fpga.sv"]
+
+[[sv.filesets]]
+enable_if = "for_asic"
+files     = ["ip/asic.sv"]
+"#;
+
+const SV_DEP_FILES: &[&str] = &[
+    "ip/common.sv",
+    "ip/fpga.sv",
+    "ip/asic.sv",
+    "ip/include/common.svh",
+    "ip/include/sub/sub.svh",
+];
+
+#[test]
+fn sv_sources_path_dependency() {
+    let tempdir = tempfile::tempdir().unwrap();
+    create_sv_path_project(tempdir.path(), "dep", SV_DEP_TOML, SV_DEP_FILES, &[]);
+
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+dep = {path = "../dep", properties = {for_asic = true}}
+
+[[sv.filesets]]
+files = ["ip/main.sv"]
+"#;
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    let prj = metadata.project_path();
+    write_sv_files(&prj, &["ip/main.sv"]);
+
+    // Without dependencies
+    let sources = metadata.sv_sources(false).unwrap();
+    assert_eq!(sources.files, path_list(&["ip/main.sv"]));
+
+    // Dependency files are referred at their original location, evaluated
+    // with the overridden property, and placed before the project's own.
+    let sources = metadata.sv_sources(true).unwrap();
+    assert_eq!(
+        sources.files,
+        path_list(&["../dep/ip/common.sv", "../dep/ip/asic.sv", "ip/main.sv"])
+    );
+    assert_eq!(sources.include_dirs, path_list(&["../dep/ip/include"]));
+    assert!(!prj.join("dependencies/dep/ip/common.sv").exists());
+}
+
+#[test]
+fn sv_sources_git_dependency_is_copied() {
+    let tempdir = tempfile::tempdir().unwrap();
+    create_sv_git_project(tempdir.path(), "dep", SV_DEP_TOML, SV_DEP_FILES);
+
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+dep = {git = "file://{}/dep", version = "0.1.0"}
+"#;
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+    let base = metadata.output_dependencies_path().join("dep");
+
+    let sources = metadata.sv_sources(true).unwrap();
+    assert_eq!(
+        sources.files,
+        path_list(&[
+            "dependencies/dep/ip/common.sv",
+            "dependencies/dep/ip/fpga.sv"
+        ])
+    );
+    assert_eq!(
+        sources.include_dirs,
+        path_list(&["dependencies/dep/ip/include"])
+    );
+    // Include directories are copied recursively
+    assert!(base.join("ip/include/common.svh").is_file());
+    assert!(base.join("ip/include/sub/sub.svh").is_file());
+    // Disabled files are not copied
+    assert!(!base.join("ip/asic.sv").exists());
+
+    let _ = metadata.lockfile.clear_cache();
+}
+
+#[test]
+fn sv_sources_same_dependency_with_different_properties() {
+    let tempdir = tempfile::tempdir().unwrap();
+    create_sv_path_project(tempdir.path(), "dep", SV_DEP_TOML, SV_DEP_FILES, &[]);
+    create_sv_path_project(
+        tempdir.path(),
+        "mid",
+        r#"
+[project]
+name = "mid"
+version = "0.1.0"
+
+[dependencies]
+dep = {path = "../dep", properties = {for_asic = false}}
+"#,
+        &[],
+        &[],
+    );
+
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+dep = {path = "../dep", properties = {for_asic = true}}
+mid = {path = "../mid"}
+"#;
+    let mut metadata = create_project(tempdir.path(), "main", toml, false);
+
+    // Both variants are merged without duplicating the common file
+    let files = metadata.sv_sources(true).unwrap().files;
+    let expected = path_list(&[
+        "../dep/ip/common.sv",
+        "../dep/ip/fpga.sv",
+        "../dep/ip/asic.sv",
+    ]);
+    assert_eq!(files.len(), expected.len());
+    for file in &expected {
+        assert_eq!(files.iter().filter(|x| *x == file).count(), 1);
+    }
+}
+
+fn publish_sv_project(fileset: &str) -> Result<(), MetadataError> {
+    let tempdir = tempfile::tempdir().unwrap();
+    let outside = tempdir.path().join("outside");
+    write_sv_files(&outside, &["a.sv"]);
+
+    let toml = format!(
+        r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[properties]
+for_asic = false
+
+[[sv.filesets]]
+{}
+"#,
+        fileset.replace("<outside>", &path_to_toml_str(&outside))
+    );
+    let mut metadata = create_project(tempdir.path(), "main", &toml, false);
+    metadata.publish()
+}
+
+#[test]
+fn publish_sv_filesets() {
+    assert!(publish_sv_project(r#"files = ["ip/a.sv"]"#).is_ok());
+    assert!(publish_sv_project("root = \"ip\"\nfiles = [\"a.sv\"]").is_ok());
+}
+
+#[test]
+fn publish_rejects_absolute_sv_path() {
+    let err = publish_sv_project(r#"files = ["<outside>/a.sv"]"#).unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+
+    let err =
+        publish_sv_project("files = [\"ip/a.sv\"]\ninclude_dirs = [\"<outside>\"]").unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+}
+
+#[test]
+fn publish_rejects_sv_path_with_parent_dir() {
+    // `..` is rejected even if the resolved path stays in the project
+    let err = publish_sv_project("root = \"ip/foo\"\nfiles = [\"../foo/a.sv\"]").unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+
+    let err = publish_sv_project("root = \"ip/../ip\"\nfiles = [\"a.sv\"]").unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+}
+
+#[test]
+fn publish_rejects_sv_path_outside_project() {
+    let err = publish_sv_project(r#"files = ["../outside/a.sv"]"#).unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+
+    let err = publish_sv_project("root = \"ip\"\nfiles = [\"../../outside/a.sv\"]").unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+}
+
+#[test]
+fn publish_rejects_invalid_sv_root() {
+    let err = publish_sv_project("root = \"<outside>\"\nfiles = [\"a.sv\"]").unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+
+    let err = publish_sv_project("root = \"../outside\"\nfiles = [\"a.sv\"]").unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
+}
+
+#[test]
+fn publish_checks_disabled_sv_filesets() {
+    let err =
+        publish_sv_project("enable_if = \"for_asic\"\nfiles = [\"<outside>/a.sv\"]").unwrap_err();
+    assert!(matches!(err, MetadataError::InvalidSvPath(_)));
 }

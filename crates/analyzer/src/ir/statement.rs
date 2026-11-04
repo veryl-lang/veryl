@@ -112,6 +112,14 @@ impl ForRange {
         (start, end)
     }
 
+    pub fn has_const_bounds(&self) -> bool {
+        let (start, end) = self.bounds();
+        [start, end].into_iter().all(|bound| match bound {
+            ForBound::Const(..) => true,
+            ForBound::Expression(x) => x.comptime().is_const,
+        })
+    }
+
     pub fn bounds_mut(&mut self) -> (&mut ForBound, &mut ForBound) {
         let (ForRange::Forward { start, end, .. }
         | ForRange::Reverse { start, end, .. }
@@ -482,9 +490,9 @@ impl Statement {
                             }
                         }
                     }
-                } else if context.comptime_for_overflow.is_none()
-                    && x.range.is_over_size_limit(context)
-                {
+                } else if !x.range.is_over_size_limit(context) {
+                    context.function_indeterminate = true;
+                } else if context.comptime_for_overflow.is_none() {
                     // Over-limit range: skipping the body would fold the const
                     // to its pre-loop value. The eval path swallows errors, so
                     // record it here for analyzer.rs to surface.
@@ -494,6 +502,11 @@ impl Statement {
             }
             Statement::SystemFunctionCall(_) => ControlFlow::Continue,
             Statement::FunctionCall(x) => {
+                // Output arguments are not written back, so their bindings
+                // would keep their previous values.
+                if !x.outputs.is_empty() {
+                    context.function_indeterminate = true;
+                }
                 x.eval_value(context);
                 ControlFlow::Continue
             }
@@ -788,8 +801,6 @@ impl AssignDestination {
     ) {
         if let Some(variable) = context.get_variable_info(self.id) {
             let is_index_const = self.index.is_const();
-            let is_select_const = self.select.is_const_with_range();
-            let is_const = is_index_const & is_select_const;
 
             let range = if !is_index_const {
                 variable.r#type.array.calc_range(&[])
@@ -832,17 +843,7 @@ impl AssignDestination {
                                 errors.push(AnalyzerError::unassign_variable(&text, &self.token));
                             }
 
-                            let maybe = !is_const | assign_context.is_system_verilog();
-                            // Exclude SV connects: the direction may be a read.
-                            let dynamic = !is_const && !assign_context.is_system_verilog();
-                            let _ = assign_table.insert_assign(
-                                &variable,
-                                index,
-                                mask.clone(),
-                                maybe,
-                                dynamic,
-                                self.token,
-                            );
+                            assign_table.insert_assign(&variable, index, mask.clone(), self.token);
                         }
                     }
                 }
@@ -1020,9 +1021,10 @@ impl AssignStatement {
                     variable.set_value(&index, value, range);
                 }
             }
-        } else if let Some(value) = self.expr.eval_value(context) {
+        } else {
             // TODO multiple dst
-            if let Some(index) = self.dst[0].index.eval_value(context)
+            let written = if let Some(value) = self.expr.eval_value(context)
+                && let Some(index) = self.dst[0].index.eval_value(context)
                 && let Some((beg, end)) =
                     self.dst[0]
                         .select
@@ -1030,6 +1032,13 @@ impl AssignStatement {
                 && let Some(variable) = context.variable_mut(&self.dst[0].id)
             {
                 variable.set_value(&index, value, Some((beg, end)));
+                true
+            } else {
+                false
+            };
+            // A skipped write leaves the destination at its previous value.
+            if !written {
+                context.function_indeterminate = true;
             }
         }
         // `return expr;` lowers to an assignment to the function's return
@@ -1122,6 +1131,8 @@ impl IfStatement {
                     }
                 }
             }
+        } else {
+            context.function_indeterminate = true;
         }
         ControlFlow::Continue
     }
@@ -1180,8 +1191,8 @@ impl IfStatement {
             true_table.check_uncoverd(context, &false_table, &base_tables);
         }
 
-        true_table.merge_by_or(context, &mut false_table, false);
-        assign_table.merge_by_or(context, &mut true_table, false);
+        true_table.merge_by_or(&mut false_table);
+        assign_table.merge_by_or(&mut true_table);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
@@ -1261,8 +1272,8 @@ impl IfResetStatement {
             true_table.check_missing_reset(context, &false_table);
         }
 
-        true_table.merge_by_or(context, &mut false_table, false);
-        assign_table.merge_by_or(context, &mut true_table, false);
+        true_table.merge_by_or(&mut false_table);
+        assign_table.merge_by_or(&mut true_table);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
@@ -1443,6 +1454,7 @@ impl CasePattern {
 impl CaseStatement {
     pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
         let Some(tgt) = self.case_target.eval_value(context) else {
+            context.function_indeterminate = true;
             return ControlFlow::Continue;
         };
         for arm in &self.arms {
@@ -1467,6 +1479,7 @@ impl CaseStatement {
                 return ControlFlow::Continue;
             }
             if undecided {
+                context.function_indeterminate = true;
                 return ControlFlow::Continue;
             }
         }
@@ -1524,10 +1537,10 @@ impl CaseStatement {
 
         let mut acc = branch_tables.pop().expect("default_table");
         for mut t in branch_tables.into_iter().rev() {
-            t.merge_by_or(context, &mut acc, false);
+            t.merge_by_or(&mut acc);
             acc = t;
         }
-        assign_table.merge_by_or(context, &mut acc, false);
+        assign_table.merge_by_or(&mut acc);
         assign_table.refernced = final_referenced;
     }
 
