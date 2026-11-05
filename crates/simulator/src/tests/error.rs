@@ -558,3 +558,189 @@ fn parent_array_shorter_than_the_port_it_is_wired_to() {
         "pk::e3_t [2]",
     );
 }
+
+#[test]
+fn a_loop_diagnostic_carries_its_file_once() {
+    // Every label points into one file; the report must not copy it per label.
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        b: output logic<32>,
+    ) {
+        var x: logic<32>;
+        assign x = b + a;
+        assign b = x;
+    }
+    "#;
+
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    let Err(SimulatorError::CombinationalLoop {
+        input,
+        loop_participants,
+        ..
+    }) = result
+    else {
+        panic!("a combinational loop is reported");
+    };
+    assert!(!loop_participants.is_empty());
+    assert_eq!(input.sources.len(), 1);
+}
+
+#[test]
+fn comb_logic_without_a_one_pass_order_is_rejected() {
+    // The arm writing the selector keeps the `case` whole, and the whole case
+    // both reads `valid` and writes what `valid` reads.  No bit feeds itself,
+    // but no granularity orders it either.
+    let code = r#"
+    module Top (
+        st   : input  logic<2>,
+        hold : input  logic   ,
+        ready: input  logic   ,
+        valid: output logic   ,
+        en   : output logic   ,
+        sel  : output logic<2>,
+    ) {
+        var valid_pre: logic   ;
+        var en_i     : logic   ;
+        var s        : logic<2>;
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+        assign sel   = s;
+
+        always_comb {
+            s         = st;
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            case s {
+                2'd0: {
+                    s = 2'd1;
+                }
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        match analyze_top(code, &config, "Top") {
+            Err(SimulatorError::UnorderedCombinationalLogic { participants, .. }) => {
+                assert!(!participants.is_empty(), "{config:?}");
+            }
+            Err(other) => panic!("{config:?}: {other:?}"),
+            Ok(_) => panic!("{config:?}: accepted"),
+        }
+        let allowed = Config {
+            allow_multi_pass: true,
+            ..config.clone()
+        };
+        assert!(analyze_top(code, &allowed, "Top").is_ok(), "{config:?}");
+    }
+}
+
+#[test]
+fn string_storage_the_simulator_cannot_size() {
+    // A `string` variable is sized from the assignments in its own module.
+    // Text that reaches it any other way would be cut to the nominal 1-bit
+    // width of the `string` type, so these are rejected instead.
+    let cases = [
+        (
+            "input port",
+            r#"
+            module Sub (s: input string) {
+                initial {
+                    $display("%s", s);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub (s: "hello");
+            }
+            "#,
+        ),
+        (
+            "function output argument",
+            r#"
+            function set (o: output string) {
+                o = "hello";
+            }
+            #[test(Top)]
+            module Top {
+                var s: string;
+                initial {
+                    set(s);
+                }
+            }
+            "#,
+        ),
+        (
+            "hierarchical read",
+            r#"
+            module Sub {
+                let m: string = "hello";
+                initial {
+                    $display("%s", m);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub;
+                initial {
+                    $display("%s", u.m);
+                }
+            }
+            "#,
+        ),
+        (
+            "hierarchical write",
+            r#"
+            module Sub {
+                var m: string;
+                assign m = "init";
+                initial {
+                    $display("%s", m);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub;
+                initial {
+                    u.m = "hello";
+                }
+            }
+            "#,
+        ),
+        (
+            "concatenation destination",
+            r#"
+            #[test(Top)]
+            module Top {
+                var s: string;
+                var x: logic<8>;
+                initial {
+                    {s, x} = {"hi", 8'h01};
+                }
+            }
+            "#,
+        ),
+    ];
+
+    for (name, code) in cases {
+        let result = analyze_top(code, &Config::default(), "Top");
+        assert!(
+            matches!(result, Err(SimulatorError::UnsupportedString { .. })),
+            "{name}: expected UnsupportedString, got {:?}",
+            result.err()
+        );
+    }
+}

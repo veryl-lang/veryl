@@ -4,7 +4,8 @@
 //!
 //! Safety: These functions are called from JIT-compiled code via function pointers.
 //! The caller guarantees that pointers are valid and that `nb` is a multiple of 8
-//! matching the buffer sizes.  Pointers may NOT be 8-byte aligned (variable layout
+//! matching the buffer sizes; window helpers also handle short native storage.
+//! Pointers may NOT be 8-byte aligned (variable layout
 //! gives slots no alignment guarantee), so all accesses use
 //! read_unaligned / write_unaligned.
 
@@ -387,6 +388,160 @@ pub unsafe extern "C" fn wide_window_store(
                 log_offset + (w0 * 8) as u32,
                 merged.as_ptr() as *const u8,
                 n * 8,
+            );
+        }
+    }
+}
+
+/// Window store starting at `src_bit` in a source buffer covering that bit range.
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn wide_window_store_from(
+    log_buf: *mut crate::ir::write_log::WriteLogBuffer,
+    dst: *mut u8,
+    src: *const u8,
+    amount: u64,
+    packed_width: u64,
+    log_and_flags: u64,
+    src_bit: u64,
+) {
+    record(ProfOp::WindowStore);
+    let width = (packed_width & 0xffff_ffff) as usize;
+    let dst_width = (packed_width >> 32) as usize;
+    let in_place = (log_and_flags >> 32) & 1 == 1;
+    let log_offset = (log_and_flags & 0xffff_ffff) as u32;
+    let amount = amount as usize;
+    if width == 0 || amount >= dst_width {
+        return;
+    }
+    let width = width.min(dst_width - amount);
+    let src_bit = src_bit as usize;
+    let src_words = (src_bit + width).div_ceil(64);
+    let dst_nb = crate::ir::native_bytes(dst_width);
+    let w0 = amount / 64;
+    let w1 = (amount + width - 1) / 64;
+    let n = w1 - w0 + 1;
+    // Runs per executed statement, and a window is a handful of words: only a
+    // very wide one reaches the heap.
+    let mut merged: smallvec::SmallVec<[u64; 16]> = smallvec::SmallVec::from_elem(0, n);
+    unsafe {
+        for (k, out) in merged.iter_mut().enumerate() {
+            let word = w0 + k;
+            let lo = (word * 64).max(amount);
+            let hi = ((word + 1) * 64).min(amount + width);
+            let shift = lo - word * 64;
+            let cnt = hi - lo;
+            let mask = if cnt >= 64 {
+                u64::MAX
+            } else {
+                ((1u64 << cnt) - 1) << shift
+            };
+            let sbit = src_bit + lo - amount;
+            let (sw, sb) = (sbit / 64, sbit % 64);
+            let s_lo = if sw < src_words { rd(src, sw) } else { 0 };
+            let s_hi = if sw + 1 < src_words {
+                rd(src, sw + 1)
+            } else {
+                0
+            };
+            let sv = if sb == 0 {
+                s_lo
+            } else {
+                (s_lo >> sb) | (s_hi << (64 - sb))
+            };
+            let old = select_word(dst, dst_nb, word);
+            *out = (old & !mask) | ((sv << shift) & mask);
+        }
+        if in_place {
+            for (k, &v) in merged.iter().enumerate() {
+                let offset = (w0 + k) * 8;
+                let bytes = (dst_nb - offset).min(8);
+                std::ptr::copy_nonoverlapping(v.to_le_bytes().as_ptr(), dst.add(offset), bytes);
+            }
+        }
+        if !log_buf.is_null() {
+            // Match whole-element writes so commit preserves statement order.
+            if dst_nb <= 16 {
+                for (k, &value) in merged.iter().enumerate() {
+                    crate::ir::write_log::write_log_grow_push_narrow(
+                        log_buf,
+                        log_offset + ((w0 + k) * 8) as u32,
+                        value,
+                        dst_nb.min(8) as u32,
+                    );
+                }
+            } else {
+                (*log_buf).push_wide_range(
+                    log_offset + (w0 * 8) as u32,
+                    merged.as_ptr() as *const u8,
+                    (dst_nb - w0 * 8).min(n * 8),
+                );
+            }
+        }
+    }
+}
+
+unsafe fn select_word(src: *const u8, nb: usize, word: usize) -> u64 {
+    let offset = word * 8;
+    if offset >= nb {
+        return 0;
+    }
+    let mut bytes = [0; 8];
+    unsafe {
+        std::ptr::copy_nonoverlapping(src.add(offset), bytes.as_mut_ptr(), (nb - offset).min(8));
+    }
+    u64::from_le_bytes(bytes)
+}
+
+/// Read a bounded source window into `dst[skip +: count]`, filling other bits.
+/// `start + count <= source_width` and `skip + count <= window` when count is nonzero.
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn wide_window_read(
+    dst: *mut u8,
+    src: *const u8,
+    source_width: u64,
+    window: u64,
+    start: u64,
+    skip: u64,
+    count: u64,
+    fill: u64,
+) {
+    let (window, start, skip, count) = (
+        window as usize,
+        start as usize,
+        skip as usize,
+        count as usize,
+    );
+    let nb = crate::ir::native_bytes(window);
+    let src_nb = crate::ir::native_bytes(source_width as usize);
+    let mask = |bits: usize| {
+        if bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << bits) - 1
+        }
+    };
+    unsafe {
+        for word in 0..window.div_ceil(64) {
+            let out = word * 64;
+            let lo = out.max(skip);
+            let hi = (out + 64).min(skip + count).min(window);
+            let mut value = fill & mask((window - out).min(64));
+            if lo < hi {
+                let bit = start + lo - skip;
+                let shift = bit % 64;
+                let low = select_word(src, src_nb, bit / 64);
+                let selected = if shift == 0 {
+                    low
+                } else {
+                    (low >> shift) | (select_word(src, src_nb, bit / 64 + 1) << (64 - shift))
+                };
+                let valid = mask(hi - lo) << (lo - out);
+                value = (value & !valid) | ((selected << (lo - out)) & valid);
+            }
+            std::ptr::copy_nonoverlapping(
+                value.to_le_bytes().as_ptr(),
+                dst.add(out / 8),
+                (nb - out / 8).min(8),
             );
         }
     }

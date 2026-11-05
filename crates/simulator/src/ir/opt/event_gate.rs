@@ -729,10 +729,19 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
                     compare.push((is_ff, s, e));
                 }
             }
-            // Direct comb writes the comb reads: shadowed, not logged.
+            // Direct comb writes the comb reads, or the gated statements read
+            // back on a later fire: shadowed, not logged.
+            let own_reads: Spans = merge(
+                reads[lo..hi]
+                    .iter()
+                    .flatten()
+                    .filter(|r| !r.0)
+                    .map(|r| (r.1, r.2))
+                    .collect(),
+            );
             let out_comb: Vec<(u32, u32)> = written_comb
                 .iter()
-                .filter(|&&(s, e)| overlaps(comb_touched_comb, s, e))
+                .filter(|&&(s, e)| overlaps(comb_touched_comb, s, e) || overlaps(&own_reads, s, e))
                 .map(|&r| narrow(r))
                 .collect();
             let gate = EventGate {

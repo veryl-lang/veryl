@@ -2,8 +2,8 @@ use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::utils::get_component;
 use crate::ir::{
-    Component, Expression, IrResult, Op, Shape, ShapeRef, Signature, VarIndex, VarPath, VarSelect,
-    VarSelectOp,
+    Component, Expression, Factor, IrResult, Op, Shape, ShapeRef, Signature, VarIndex, VarPath,
+    VarSelect, VarSelectOp,
 };
 use crate::ir_error;
 use crate::literal::TypeLiteral;
@@ -106,7 +106,11 @@ impl PartSelectPath {
     }
 
     pub fn to_base_select(&self, context: &mut Context, select: &VarSelect) -> Option<VarSelect> {
+        if self.base.total_width()? == 0 || (select.1.is_some() && select.0.is_empty()) {
+            return None;
+        }
         let mut pos_width: Option<(Expression, usize, Option<usize>)> = None;
+        let mut valid_coordinate: Option<Expression> = None;
 
         let (range_select, range_op_width) = if let Some((op, end)) = &select.1 {
             // Keep the width so the rebased select stays `low +: w`. A constant
@@ -121,16 +125,19 @@ impl PartSelectPath {
                     let beg = const_usize(context, beg);
                     let end = const_usize(context, end);
                     beg.zip(end)
-                        .and_then(|(beg, end)| beg.checked_sub(end))
-                        .map(|w| w + 1)
+                        .and_then(|(beg, end)| beg.checked_sub(end)?.checked_add(1))
                 } else {
                     None
                 }
             } else {
-                end.clone()
+                let width = end
+                    .clone()
                     .eval_value(context)
-                    .and_then(|v| v.to_usize_saturating())
-                    .map(|w| w.max(1))
+                    .and_then(|v| v.to_usize_saturating());
+                if width == Some(0) {
+                    return None;
+                }
+                width
             };
             let (beg, end) = op.eval_expr(select.0.last().unwrap(), end);
             (Some((beg, end)), op_width)
@@ -173,6 +180,44 @@ impl PartSelectPath {
                 // out-of-range member index would otherwise remap past the
                 // member into an adjacent field, emitting out-of-bounds SV.
                 for (k, coord) in sel.iter().enumerate() {
+                    if !coord.comptime().is_const
+                        && repeatable_coordinate(coord)
+                        && let Some(Some(size)) = x.r#type.width.get(k).copied()
+                    {
+                        let limit =
+                            Expression::create_value(Value::new(size as u64, 64, false), token);
+                        let mut valid = Expression::Binary(
+                            Box::new(coord.clone()),
+                            Op::Less,
+                            Box::new(limit),
+                            comptime.clone(),
+                        );
+                        if coord.comptime().r#type.signed {
+                            let zero = Expression::create_value(Value::new(0, 64, true), token);
+                            let nonnegative = Expression::Binary(
+                                Box::new(coord.clone()),
+                                Op::GreaterEq,
+                                Box::new(zero),
+                                comptime.clone(),
+                            );
+                            valid = Expression::Binary(
+                                Box::new(nonnegative),
+                                Op::LogicAnd,
+                                Box::new(valid),
+                                comptime.clone(),
+                            );
+                        }
+                        valid_coordinate = Some(if let Some(previous) = valid_coordinate {
+                            Expression::Binary(
+                                Box::new(previous),
+                                Op::LogicAnd,
+                                Box::new(valid),
+                                comptime.clone(),
+                            )
+                        } else {
+                            valid
+                        });
+                    }
                     if let Some(Some(size)) = x.r#type.width.get(k).copied()
                         && let Some(value) = coord.eval_value(context)
                         && !value.is_xz()
@@ -245,9 +290,12 @@ impl PartSelectPath {
                 x.r#type.total_width()?
             };
 
+            if width == 0 {
+                return None;
+            }
             let range_width = if let Some(x) = remaining_width.first() {
                 let x = (*x)?;
-                Some(width / x)
+                Some(width.checked_div(x)?)
             } else {
                 None
             };
@@ -335,7 +383,25 @@ impl PartSelectPath {
                 );
                 end = Expression::Binary(Box::new(end), Op::Add, Box::new(expr), comptime);
 
-                select_width = range_op_width.map(|w| w * rw);
+                select_width = match range_op_width {
+                    Some(w) => Some(w.checked_mul(rw)?),
+                    None => None,
+                };
+            }
+
+            if let Some(valid) = valid_coordinate {
+                let outside = Expression::create_value(
+                    Value::new(self.base.total_width()? as u64, 64, false),
+                    token,
+                );
+                let guard = Box::new(Comptime::create_unknown(token));
+                beg = Expression::Ternary(
+                    Box::new(valid.clone()),
+                    Box::new(beg),
+                    Box::new(outside.clone()),
+                    guard.clone(),
+                );
+                end = Expression::Ternary(Box::new(valid), Box::new(end), Box::new(outside), guard);
             }
 
             beg.eval_comptime(context, None);
@@ -353,6 +419,34 @@ impl PartSelectPath {
         } else {
             None
         }
+    }
+}
+
+// Bounds guards repeat their coordinates; calls must keep their single evaluation.
+fn repeatable_coordinate(expression: &Expression) -> bool {
+    match expression {
+        Expression::Term(factor) => match &**factor {
+            Factor::Value(_) => true,
+            Factor::Variable(_, index, select, _) => {
+                index.expressions().all(repeatable_coordinate)
+                    && select.0.iter().all(repeatable_coordinate)
+                    && select
+                        .1
+                        .as_ref()
+                        .is_none_or(|(_, end)| repeatable_coordinate(end))
+            }
+            _ => false,
+        },
+        Expression::Unary(_, value, _) => repeatable_coordinate(value),
+        Expression::Binary(left, _, right, _) => {
+            repeatable_coordinate(left) && repeatable_coordinate(right)
+        }
+        Expression::Ternary(condition, left, right, _) => {
+            repeatable_coordinate(condition)
+                && repeatable_coordinate(left)
+                && repeatable_coordinate(right)
+        }
+        _ => false,
     }
 }
 
@@ -383,6 +477,13 @@ pub struct ExpressionContext {
 }
 
 impl ExpressionContext {
+    pub fn cast_operand(&self, width: usize) -> Self {
+        Self {
+            width: self.width.max(width),
+            ..*self
+        }
+    }
+
     pub fn merge(&self, other: ExpressionContext) -> ExpressionContext {
         ExpressionContext {
             width: self.width.max(other.width),
@@ -393,11 +494,20 @@ impl ExpressionContext {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct Comptime {
     pub value: ValueVariant,
     pub r#type: Type,
+    /// Eligible for evaluation/constant folding within the current IR context.
+    /// This includes procedural loop variables while their loop is unrolled.
     pub is_const: bool,
+    /// The source expression depends on runtime values, even if optimization
+    /// has replaced it with a value. Keep this when folding or substituting IR.
+    /// Type queries do not depend on the value of their queried operand.
+    pub runtime_dependent: bool,
+    /// Cached source classification, independent of value evaluation. Cleared
+    /// when cloning metadata, which may be reused for a different expression.
+    pub elaboration_const: Option<bool>,
     pub is_global: bool,
     pub part_select: Option<PartSelectPath>,
     /// Packed base-variable domain retained from the member path and the
@@ -412,7 +522,33 @@ pub struct Comptime {
     pub token: TokenRange,
 }
 
+impl Clone for Comptime {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            r#type: self.r#type.clone(),
+            is_const: self.is_const,
+            runtime_dependent: self.runtime_dependent,
+            elaboration_const: None,
+            is_global: self.is_global,
+            part_select: self.part_select.clone(),
+            member_select_domain: self.member_select_domain,
+            member_signed: self.member_signed,
+            clock_domain: self.clock_domain,
+            expr_context: self.expr_context,
+            evaluated: self.evaluated,
+            token: self.token,
+        }
+    }
+}
+
 impl Comptime {
+    /// Whether an evaluated expression is a legal elaboration-time constant.
+    /// A concrete numeric value is not required (e.g. an external SV constant).
+    pub fn is_elaboration_const(&self) -> bool {
+        self.is_const && !self.runtime_dependent
+    }
+
     /// Rebase a struct/union member onto the whole variable's type, and report
     /// the array dimensions a select has to be split on.
     ///
@@ -715,6 +851,11 @@ impl Type {
         self.total_width() == Some(1)
     }
 
+    /// The width of a `$sv` type is unknown, so it may be 1-bit.
+    pub fn may_be_binary(&self) -> bool {
+        self.is_binary() || self.is_systemverilog()
+    }
+
     pub fn is_struct(&self) -> bool {
         matches!(&self.kind, TypeKind::Struct(_))
     }
@@ -770,13 +911,13 @@ impl Type {
     }
 
     pub fn total_width(&self) -> Option<usize> {
-        Some(self.kind.width()? * self.width.total()?)
+        self.kind.width()?.checked_mul(self.width.total()?)
     }
 
     /// Every bit the type holds, unpacked dimensions included. This is what
     /// `$bits` answers; `total_width` stops at one element.
     pub fn total_bits(&self) -> Option<usize> {
-        Some(self.total_width()? * self.array.total()?)
+        self.total_width()?.checked_mul(self.array.total()?)
     }
 
     /// Size of the `n`th dimension (1-based) as numbered by `$size(x, n)`:
@@ -1253,7 +1394,6 @@ impl TypeKind {
             | TypeKind::Type
             | TypeKind::String
             | TypeKind::Unknown
-            | TypeKind::SystemVerilog
             | TypeKind::Module(_)
             | TypeKind::Interface(_)
             | TypeKind::Modport(_, _)
@@ -1263,12 +1403,21 @@ impl TypeKind {
             TypeKind::Union(x) => x.width(),
             TypeKind::Struct(x) => x.width(),
             TypeKind::Enum(x) => x.width(),
-            TypeKind::Void => None,
+            TypeKind::SystemVerilog | TypeKind::Void => None,
         }
     }
 
     pub fn is_float(&self) -> bool {
         matches!(self, TypeKind::F32 | TypeKind::F64)
+    }
+
+    /// The defining symbol of a struct or union type.
+    pub fn aggregate_id(&self) -> Option<SymbolId> {
+        match self {
+            TypeKind::Struct(x) => Some(x.id),
+            TypeKind::Union(x) => Some(x.id),
+            _ => None,
+        }
     }
 
     pub fn signature(&self) -> Option<Signature> {
@@ -1338,9 +1487,9 @@ impl TypeKindStruct {
     }
 
     pub fn width(&self) -> Option<usize> {
-        let mut ret = 0;
+        let mut ret = 0usize;
         for x in &self.members {
-            ret += x.width()?;
+            ret = ret.checked_add(x.width()?)?;
         }
         Some(ret)
     }
@@ -1352,9 +1501,12 @@ impl TypeKindStruct {
         base: Option<&Type>,
     ) -> Vec<PartSelectPath> {
         let mut ret = vec![];
-        let mut offset = 0;
+        let mut offset = 0usize;
         for x in self.members.iter().rev() {
             let width = x.width().unwrap_or(1);
+            let Some(next_offset) = offset.checked_add(width) else {
+                return vec![];
+            };
             let x = x.expand_struct_union(path, part_select, base);
             for mut x in x.into_iter().rev() {
                 if let Some(x) = x.part_select.get_mut(part_select.len()) {
@@ -1362,7 +1514,7 @@ impl TypeKindStruct {
                 }
                 ret.push(x);
             }
-            offset += width;
+            offset = next_offset;
         }
         ret.reverse();
         ret

@@ -561,6 +561,7 @@ pub fn build_components(
             // `create`, from how it resolved the port.
             if let (Some(var_id), Some(in_idx)) = (connect.event_var, in_idx) {
                 if connect.is_clock {
+                    let var_id = ir.derived_clock_schedule.source_of(var_id);
                     clock_events.push((Event::clock(var_id), in_idx));
                 }
                 if connect.is_reset {

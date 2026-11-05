@@ -50,7 +50,7 @@ impl LsIncremental {
         let hash = veryl_cache::content_hash(text.as_bytes());
 
         let entry = self.store.entry(&src);
-        if !entry.is_some_and(|x| x.hash == hash && x.fragment.is_some()) {
+        if !entry.is_some_and(|x| x.file_hash == hash && x.fragment.is_some()) {
             return false;
         }
         let Some(bytes) = entry.and_then(|x| self.store.load(x)) else {
@@ -69,7 +69,7 @@ impl LsIncremental {
         scope::set_project(prj, is_root);
 
         match fragment_cache::restore(&fragment, prj) {
-            Ok(()) => {
+            Ok(_) => {
                 self.store.keep(&src);
                 self.restored += 1;
                 true

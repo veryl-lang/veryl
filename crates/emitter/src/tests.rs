@@ -775,6 +775,101 @@ endmodule
 }
 
 #[test]
+fn declaration_before_if_reset() {
+    let code = r#"module ModuleA (
+    i_clk: input clock,
+    i_rst: input reset,
+    i_dat: input logic,
+) {
+    var a: logic;
+    var b: logic;
+    var c: logic;
+
+    always_ff {
+        var x: logic;
+        if_reset {
+            a = 0;
+        } else {
+            x = i_dat;
+            a = x;
+        }
+    }
+
+    always_ff (i_clk, i_rst) {
+        var y: logic;
+        if_reset {
+            b = 0;
+        } else {
+            y = i_dat;
+            b = y;
+        }
+    }
+
+    always_ff {
+        const C: u32 = 1;
+        block {
+            var _z: logic;
+        }
+        if_reset {
+            c = 0;
+        } else {
+            c = C;
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_clk,
+    input var logic i_rst,
+    input var logic i_dat
+);
+    logic a;
+    logic b;
+    logic c;
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        logic x;
+        if (!i_rst) begin
+            a <= 0;
+        end else begin
+            x =  i_dat;
+            a <= x;
+        end
+    end
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        logic y;
+        if (!i_rst) begin
+            b <= 0;
+        end else begin
+            y =  i_dat;
+            b <= y;
+        end
+    end
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        localparam int unsigned C = 1;
+        logic _z;
+
+        if (!i_rst) begin
+            c <= 0;
+        end else begin
+            c <= C;
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn emit_nested_generic_instances() {
     let code = r#"proto package ProtoPkgA {
     const WIDTH: u32;
@@ -2073,6 +2168,9 @@ module ModuleD (
 module ModuleE (
     if_a: modport InterfaceA::mp[2]
 ) {}
+module ModuleG (
+    if_a: modport InterfaceA::mp[2, 4]
+) {}
 module ModuleF {
     inst if_a: InterfaceA[2, 3, 4];
 
@@ -2099,6 +2197,24 @@ module ModuleF {
     );
     inst u_e3: ModuleE (
         if_a: if_a[1][2][1 step 2]
+    );
+    inst u_g0: ModuleG (
+        if_a: if_a[1][0:1]
+    );
+    inst u_g1: ModuleG (
+        if_a: if_a[1][0+:2]
+    );
+    inst u_g2: ModuleG (
+        if_a: if_a[1][2-:2]
+    );
+    inst u_g3: ModuleG (
+        if_a: if_a[1][0 step 2]
+    );
+    inst u_c0: ModuleC (
+        if_a: if_a[1+:1]
+    );
+    inst u_c1: ModuleC (
+        if_a: if_a[1 step 1]
     );
 }
 "#;
@@ -2129,6 +2245,10 @@ module prj_ModuleE (
     prj_InterfaceA.mp if_a [2]
 );
 endmodule
+module prj_ModuleG (
+    prj_InterfaceA.mp if_a [2*4]
+);
+endmodule
 module prj_ModuleF;
     prj_InterfaceA if_a [2*3*4] ();
 
@@ -2151,10 +2271,28 @@ module prj_ModuleF;
         .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(2):(1)*(3)*(4)+(2)*(4)+(2)+(2)-1])
     );
     prj_ModuleE u_e2 (
-        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(3):(1)*(3)*(4)+(2)*(4)+(3)-(2)+1])
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(3)-(2)+1:(1)*(3)*(4)+(2)*(4)+(3)])
     );
     prj_ModuleE u_e3 (
         .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(1)*(2):(1)*(3)*(4)+(2)*(4)+((1)+1)*(2)-1])
+    );
+    prj_ModuleG u_g0 (
+        .if_a (if_a[(1)*(3)*(4)+(0)*(4):(1)*(3)*(4)+((1)+1)*(4)-1])
+    );
+    prj_ModuleG u_g1 (
+        .if_a (if_a[(1)*(3)*(4)+(0)*(4):(1)*(3)*(4)+((0)+(2))*(4)-1])
+    );
+    prj_ModuleG u_g2 (
+        .if_a (if_a[(1)*(3)*(4)+((2)-(2)+1)*(4):(1)*(3)*(4)+((2)+1)*(4)-1])
+    );
+    prj_ModuleG u_g3 (
+        .if_a (if_a[(1)*(3)*(4)+(0)*(2)*(4):(1)*(3)*(4)+((0)+1)*(2)*(4)-1])
+    );
+    prj_ModuleC u_c0 (
+        .if_a (if_a[(1)*(3)*(4):((1)+(1))*(3)*(4)-1])
+    );
+    prj_ModuleC u_c1 (
+        .if_a (if_a[(1)*(1)*(3)*(4):((1)+1)*(1)*(3)*(4)-1])
     );
 endmodule
 //# sourceMappingURL=test.sv.map
@@ -2206,6 +2344,237 @@ module prj___ModuleA____Pkg__8;
 endmodule
 module prj_ModuleB;
     prj___ModuleA____Pkg__8 u ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn generic_function_with_fixed_args_in_generic_module() {
+    let code = r#"
+proto package ProtoPkg {
+    const W: u32;
+}
+package PkgA for ProtoPkg {
+    const W: u32 = 4;
+}
+package PkgB for ProtoPkg {
+    const W: u32 = 8;
+}
+module ModuleA::<PKG: ProtoPkg> (
+    i_a: input  logic<8>,
+    o_y: output logic<8>,
+) {
+    function FuncA::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return a + PKG::W;
+    }
+    assign o_y = FuncA::<8>(i_a);
+}
+module ModuleB (
+    i_a: input  logic<8>,
+    o_a: output logic<8>,
+    o_b: output logic<8>,
+) {
+    inst u_a: ModuleA::<PkgA> (i_a, o_y: o_a);
+    inst u_b: ModuleA::<PkgB> (i_a, o_y: o_b);
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    localparam int unsigned W = 4;
+endpackage
+package prj_PkgB;
+    localparam int unsigned W = 8;
+endpackage
+module prj___ModuleA__PkgA (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_y
+);
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] a
+    ) ;
+        return a + prj_PkgA::W;
+    endfunction
+    always_comb o_y = __FuncA__8(i_a);
+endmodule
+module prj___ModuleA__PkgB (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_y
+);
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] a
+    ) ;
+        return a + prj_PkgB::W;
+    endfunction
+    always_comb o_y = __FuncA__8(i_a);
+endmodule
+module prj_ModuleB (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_a,
+    output var logic [8-1:0] o_b
+);
+    prj___ModuleA__PkgA u_a (
+        .i_a (i_a),
+        .o_y (o_a)
+    );
+    prj___ModuleA__PkgB u_b (
+        .i_a (i_a),
+        .o_y (o_b)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn generic_function_with_fixed_args_in_generic_package() {
+    let code = r#"
+package PkgA::<W: u32> {
+    function FuncA::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return a + W;
+    }
+    function FuncB (
+        a: input logic<8>,
+    ) -> logic<8> {
+        return FuncA::<8>(a);
+    }
+}
+module ModuleA (
+    i_a: input  logic<8>,
+    o_a: output logic<8>,
+    o_b: output logic<8>,
+) {
+    assign o_a = PkgA::<4>::FuncB(i_a);
+    assign o_b = PkgA::<8>::FuncB(i_a);
+}
+"#;
+
+    let expect = r#"package prj___PkgA__4;
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] a
+    ) ;
+        return a + 4;
+    endfunction
+    function automatic logic [8-1:0] FuncB(
+        input var logic [8-1:0] a
+    ) ;
+        return __FuncA__8(a);
+    endfunction
+endpackage
+package prj___PkgA__8;
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] a
+    ) ;
+        return a + 8;
+    endfunction
+    function automatic logic [8-1:0] FuncB(
+        input var logic [8-1:0] a
+    ) ;
+        return __FuncA__8(a);
+    endfunction
+endpackage
+module prj_ModuleA (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_a,
+    output var logic [8-1:0] o_b
+);
+    always_comb o_a = prj___PkgA__4::FuncB(i_a);
+    always_comb o_b = prj___PkgA__8::FuncB(i_a);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn generic_function_with_fixed_args_in_generic_interface() {
+    let code = r#"
+proto package ProtoPkg {
+    const W: u32;
+}
+package PkgA for ProtoPkg {
+    const W: u32 = 4;
+}
+package PkgB for ProtoPkg {
+    const W: u32 = 8;
+}
+interface InterfaceA::<PKG: ProtoPkg> {
+    var a: logic<8>;
+    var y: logic<8>;
+    function FuncA::<N: u32> (
+        x: input logic<N>,
+    ) -> logic<N> {
+        return x + PKG::W;
+    }
+    assign y = FuncA::<8>(a);
+}
+module ModuleA {
+    inst u_a: InterfaceA::<PkgA>;
+    inst u_b: InterfaceA::<PkgB>;
+    assign u_a.a = 1;
+    assign u_b.a = 2;
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    localparam int unsigned W = 4;
+endpackage
+package prj_PkgB;
+    localparam int unsigned W = 8;
+endpackage
+interface prj___InterfaceA__PkgA;
+    logic [8-1:0] a;
+    logic [8-1:0] y;
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] x
+    ) ;
+        return x + prj_PkgA::W;
+    endfunction
+    always_comb y = __FuncA__8(a);
+endinterface
+interface prj___InterfaceA__PkgB;
+    logic [8-1:0] a;
+    logic [8-1:0] y;
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] x
+    ) ;
+        return x + prj_PkgB::W;
+    endfunction
+    always_comb y = __FuncA__8(a);
+endinterface
+module prj_ModuleA;
+    prj___InterfaceA__PkgA u_a   ();
+    prj___InterfaceA__PkgB u_b   ();
+    always_comb u_a.a = 1;
+    always_comb u_b.a = 2;
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -2553,6 +2922,71 @@ endmodule
 module prj_ModuleB;
     prj___ModuleA____PkgA__16 u_a ();
     prj___ModuleA____PkgA__32 u_b ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn generic_package_global_function_reached_only_by_import() {
+    // The package instance is reached only through an import, whose scope
+    // also sees `W`.
+    let code = r#"function FuncA::<W: u32, N: u32> (
+    a: input logic<W>,
+) -> logic<W> {
+    return a + N;
+}
+proto package ProtoPkgA {
+    const N: u32;
+}
+package PkgA for ProtoPkgA {
+    const N: u32 = 3;
+}
+package PkgB::<P: ProtoPkgA> {
+    const W: u32 = 4;
+    function FuncB (
+        a: input logic<W>,
+    ) -> logic<W> {
+        return FuncA::<W, P::N>(a);
+    }
+}
+module ModuleA {
+    import PkgB::<PkgA>::*;
+    let _a: logic<W> = 0;
+}
+"#;
+
+    let expect = r#"
+
+
+package prj_PkgA;
+    localparam int unsigned N = 3;
+endpackage
+package prj___PkgB__PkgA;
+    localparam int unsigned W = 4;
+    function automatic logic [W-1:0] FuncB(
+        input var logic [W-1:0] a
+    ) ;
+        return __FuncA__W__PkgA_N(a);
+    endfunction
+
+    function automatic logic [W-1:0] __FuncA__W__PkgA_N(
+        input var logic [W-1:0] a
+    ) ;
+        return a + prj_PkgA::N;
+    endfunction
+endpackage
+module prj_ModuleA;
+    import prj___PkgB__PkgA::*;
+
+    logic [W-1:0] _a; always_comb _a = 0;
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -3138,6 +3572,132 @@ endmodule
 }
 
 #[test]
+fn local_concatenation_assignment_in_always_ff() {
+    let code = r#"module ModuleA (
+    clk: input clock,
+    data: input logic<8>,
+    result: output logic<8>,
+) {
+    struct Nibbles {
+        hi: logic<4>,
+        lo: logic<4>,
+    }
+
+    var reg_hi: logic<4>;
+    var reg_lo: logic<4>;
+
+    always_ff {
+        var hi: logic<4>;
+        var lo: logic<4>;
+        var parts: logic<4>[2];
+        var nibbles: Nibbles;
+        {hi, lo} = data;
+        {parts[0], parts[1]} = data;
+        {nibbles.hi, nibbles.lo} = data;
+        {reg_hi, reg_lo} = data;
+        result = {lo, hi};
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input  var logic         clk   ,
+    input  var logic [8-1:0] data  ,
+    output var logic [8-1:0] result
+);
+    typedef struct packed {
+        logic [4-1:0] hi;
+        logic [4-1:0] lo;
+    } Nibbles;
+
+    logic [4-1:0] reg_hi;
+    logic [4-1:0] reg_lo;
+
+    always_ff @ (posedge clk) begin
+        logic   [4-1:0] hi                          ;
+        logic   [4-1:0] lo                          ;
+        logic   [4-1:0] parts                    [2];
+        Nibbles         nibbles                     ;
+        {hi, lo}                 =  data;
+        {parts[0], parts[1]}     =  data;
+        {nibbles.hi, nibbles.lo} =  data;
+        {reg_hi, reg_lo}         <= data;
+        result                   <= {lo, hi};
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn local_concatenation_assignment_in_nested_statement_block() {
+    let code = r#"module ModuleA (
+    clk: input clock,
+    data: input logic<8>,
+    result: output logic<8>,
+) {
+    var reg_hi: logic<4>;
+    var reg_lo: logic<4>;
+
+    always_ff {
+        if data[0] {
+            var hi: logic<4>;
+            var lo: logic<4>;
+            {hi, lo} = data;
+            {reg_hi, reg_lo} = {lo, hi};
+        } else {
+            for _i in 0..2 {
+                var hi: logic<4>;
+                var lo: logic<4>;
+                {hi, lo} = data;
+                result = {hi, lo};
+            }
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input  var logic         clk   ,
+    input  var logic [8-1:0] data  ,
+    output var logic [8-1:0] result
+);
+    logic [4-1:0] reg_hi;
+    logic [4-1:0] reg_lo;
+
+    always_ff @ (posedge clk) begin
+        if (data[0]) begin
+            logic [4-1:0] hi              ;
+            logic [4-1:0] lo              ;
+            {hi, lo}         =  data;
+            {reg_hi, reg_lo} <= {lo, hi};
+        end else begin
+            for (int _i = 0; _i < 2; _i++) begin
+                logic [4-1:0] hi      ;
+                logic [4-1:0] lo      ;
+                {hi, lo} =  data;
+                result   <= {hi, lo};
+            end
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn nested_concatenation() {
     let code = r#"module ModuleA {
     let _a: u32 = {1'b1};
@@ -3306,6 +3866,105 @@ module ModuleA {
             default: _c = 4;
         endcase
     end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn case_expression() {
+    let code = r#"
+module ModuleA {
+    const A: bit   = 0;
+    const B: u32   = 1;
+    const C: logic = 2;
+
+    var x: logic<2>;
+
+    let _a: u32 = case x {
+        A      : 0,
+        B, 2   : 1,
+        A + 1  : 2,
+        default: 3,
+    };
+
+    let _b: u32 = case x {
+        A      : 0,
+        B, C   : 1,
+        3      : 2,
+        default: 3,
+    };
+
+    let _c: u32 = case x {
+        A      : 0,
+        2'b1x  : 1,
+        default: 2,
+    };
+
+    let _d: u32 = case x {
+        A      : 0,
+        B      : 1,
+        2..=3  : 2,
+        default: 3,
+    };
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    localparam bit          A = 0;
+    localparam int unsigned B = 1;
+    localparam logic        C = 2;
+
+    logic [2-1:0] x;
+
+    int unsigned _a; always_comb _a = (((x) == (A)) ? (
+        0
+    ) : ((x) == (B)) ? (
+        1
+    ) : ((x) == (2)) ? (
+        1
+    ) : ((x) == (A + 1)) ? (
+        2
+    ) : (
+        3
+    ));
+
+    int unsigned _b; always_comb _b = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (B)) ? (
+        1
+    ) : ((x) ==? (C)) ? (
+        1
+    ) : ((x) ==? (3)) ? (
+        2
+    ) : (
+        3
+    ));
+
+    int unsigned _c; always_comb _c = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (2'b1x)) ? (
+        1
+    ) : (
+        2
+    ));
+
+    int unsigned _d; always_comb _d = (((x) ==? (A)) ? (
+        0
+    ) : ((x) ==? (B)) ? (
+        1
+    ) : ((x) inside {[2:3]}) ? (
+        2
+    ) : (
+        3
+    ));
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -5221,6 +5880,130 @@ fn struct_member_ifdef_keeps_semicolon_inside_guard() {
 }
 
 #[test]
+fn attribute_in_ifdef_blocks() {
+    let code = r#"
+module ByteWriteDualPortRAM(
+    i_clk  : input  clock             ,
+    i_rst  : input  reset             ,
+    i_wen0 : input  logic<4>          ,
+    i_din0 : input  logic<4, 8>       ,
+    i_addr0: input  logic<$clog2(128)>,
+    o_dout0: output logic<4, 8>       ,
+    i_wen1 : input  logic<4>          ,
+    i_din1 : input  logic<4, 8>       ,
+    i_addr1: input  logic<$clog2(128)>,
+    o_dout1: output logic<4, 8>       ,
+) {
+    #[ifdef(FOO)]
+    {
+        for b in 0..4 :BYTE_MEMORY {
+            #[allow(multiple_assign)]
+            var memory: logic<8> [128];
+
+            always_ff {
+                if (i_wen0[b]) {
+                    memory[i_addr0] = i_din0[b];
+                }
+                o_dout0[b] = memory[i_addr0];
+            }
+            always_ff {
+                if (i_wen1[b]) {
+                    memory[i_addr1] = i_din1[b];
+                }
+                o_dout1[b] = memory[i_addr1];
+            }
+        }
+    }
+    #[else]
+    {
+        #[allow(multiple_assign)]
+        var memory: logic<4 * 8> [128];
+
+        always_ff {
+            for b in 0..4 {
+                if (i_wen0[b]) {
+                    memory[i_addr0][b * 8+:8] = i_din0[b];
+                }
+            }
+            o_dout0 = memory[i_addr0];
+        }
+        always_ff {
+            for b in 0..4 {
+                if (i_wen1[b]) {
+                    memory[i_addr1][b * 8+:8] = i_din1[b];
+                }
+            }
+            o_dout1 = memory[i_addr1];
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ByteWriteDualPortRAM (
+    input  var logic                   i_clk  ,
+    input  var logic                   i_rst  ,
+    input  var logic [4-1:0]           i_wen0 ,
+    input  var logic [4-1:0][8-1:0]    i_din0 ,
+    input  var logic [$clog2(128)-1:0] i_addr0,
+    output var logic [4-1:0][8-1:0]    o_dout0,
+    input  var logic [4-1:0]           i_wen1 ,
+    input  var logic [4-1:0][8-1:0]    i_din1 ,
+    input  var logic [$clog2(128)-1:0] i_addr1,
+    output var logic [4-1:0][8-1:0]    o_dout1
+);
+    `ifdef FOO
+    for (genvar b = 0; b < 4; b++) begin :BYTE_MEMORY
+
+        logic [8-1:0] memory [128];
+
+        always @ (posedge i_clk) begin
+            if ((i_wen0[b])) begin
+                memory[i_addr0] <= i_din0[b];
+            end
+            o_dout0[b] <= memory[i_addr0];
+        end
+        always @ (posedge i_clk) begin
+            if ((i_wen1[b])) begin
+                memory[i_addr1] <= i_din1[b];
+            end
+            o_dout1[b] <= memory[i_addr1];
+        end
+    end
+
+    `else
+    logic [(4 * 8)-1:0] memory [128];
+
+    always @ (posedge i_clk) begin
+        for (int b = 0; b < 4; b++) begin
+            if ((i_wen0[b])) begin
+                memory[i_addr0][b * 8+:8] <= i_din0[b];
+            end
+        end
+        o_dout0 <= memory[i_addr0];
+    end
+    always @ (posedge i_clk) begin
+        for (int b = 0; b < 4; b++) begin
+            if ((i_wen1[b])) begin
+                memory[i_addr1][b * 8+:8] <= i_din1[b];
+            end
+        end
+        o_dout1 <= memory[i_addr1];
+    end
+    `endif
+
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn non_portable_variable_lowers_always_ff_to_always() {
     // SystemVerilog forbids another process from writing a variable an
     // `always_ff` writes, so the opt-in has to drop the `_ff`.
@@ -5502,4 +6285,505 @@ endmodule
 "#;
 
     assert_eq!(emit(&metadata, code), expect);
+}
+
+#[test]
+fn reset_value_literal_polarity() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset_async_high,
+    i_rst1: input reset_async_low,
+    i_rst2: input reset_sync_high,
+    i_rst3: input reset_sync_low,
+) {}
+
+module ModuleB {
+    inst u0: ModuleA (
+        i_rst0: reset_active,
+        i_rst1: reset_active,
+        i_rst2: reset_active,
+        i_rst3: reset_active,
+    );
+    inst u1: ModuleA (
+        i_rst0: reset_inactive,
+        i_rst1: reset_inactive,
+        i_rst2: reset_inactive,
+        i_rst3: reset_inactive,
+    );
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1,
+    input var logic i_rst2,
+    input var logic i_rst3
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u0 (
+        .i_rst0 (1'b1),
+        .i_rst1 (1'b0),
+        .i_rst2 (1'b1),
+        .i_rst3 (1'b0)
+    );
+    prj_ModuleA u1 (
+        .i_rst0 (1'b0),
+        .i_rst1 (1'b1),
+        .i_rst2 (1'b0),
+        .i_rst3 (1'b1)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn reset_value_literal_reset_type() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset,
+    i_rst1: input reset,
+) {}
+
+module ModuleB {
+    inst u: ModuleA (
+        i_rst0: reset_active,
+        i_rst1: reset_inactive,
+    );
+}
+"#;
+
+    for (reset_type, hold, release) in [
+        (ResetType::AsyncHigh, "1'b1", "1'b0"),
+        (ResetType::AsyncLow, "1'b0", "1'b1"),
+        (ResetType::SyncHigh, "1'b1", "1'b0"),
+        (ResetType::SyncLow, "1'b0", "1'b1"),
+    ] {
+        let expect = format!(
+            r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u (
+        .i_rst0 ({hold}),
+        .i_rst1 ({release})
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#
+        );
+
+        let mut metadata = Metadata::create_default("prj").unwrap();
+        metadata.build.reset_type = reset_type;
+        let ret = emit(&metadata, code);
+
+        assert_eq!(ret, expect);
+    }
+}
+
+#[test]
+fn reset_value_literal_context() {
+    let code = r#"interface InterfaceA {
+    var rst: reset_async_low;
+    modport mp {
+        rst: output,
+    }
+}
+
+module ModuleA (
+    i_rst : input  reset_sync_low,
+    i_rsts: input  reset_async_high[2],
+    if_a  : modport InterfaceA::mp,
+    o_rst0: output reset_async_low,
+    o_rst1: output reset_sync_high,
+    o_a   : output logic<4>,
+) {
+    struct StructA {
+        rst: reset_sync_high,
+    }
+
+    let a: reset_async_high = reset_active;
+    var b: StructA;
+
+    assign b.rst    = reset_inactive;
+    assign if_a.rst = (reset_active);
+    assign o_rst0   = reset_inactive;
+
+    always_comb {
+        o_rst1 = reset_active;
+    }
+
+    assign o_a[0] = a == reset_active;
+    assign o_a[1] = reset_inactive != i_rst;
+    assign o_a[2] = i_rsts[1] == reset_inactive;
+    assign o_a[3] = b.rst != reset_active;
+}
+"#;
+
+    let expect = r#"interface prj_InterfaceA;
+    logic rst;
+    modport mp (
+        output rst
+    );
+endinterface
+
+module prj_ModuleA (
+    input var logic                 i_rst     ,
+    input var logic                 i_rsts [2],
+    prj_InterfaceA.mp         if_a      ,
+    output var logic                 o_rst0    ,
+    output var logic                 o_rst1    ,
+    output var logic         [4-1:0] o_a   
+);
+    typedef struct packed {
+        logic rst;
+    } StructA;
+
+    logic   a; always_comb a = 1'b1;
+    StructA b;
+
+    always_comb b.rst    = 1'b0;
+    always_comb if_a.rst = (1'b0);
+    always_comb o_rst0   = 1'b1;
+
+    always_comb begin
+        o_rst1 = 1'b1;
+    end
+
+    always_comb o_a[0] = a == 1'b1;
+    always_comb o_a[1] = 1'b1 != i_rst;
+    always_comb o_a[2] = i_rsts[1] == 1'b0;
+    always_comb o_a[3] = b.rst != 1'b1;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn inline_function() {
+    let code = r#"package PkgA {
+    const C: u32 = 1;
+}
+
+interface InterfaceA {
+    var ready: logic   ;
+    var valid: logic   ;
+    var data : logic<8>;
+
+    #[inline]
+    function ack() -> logic {
+        return ready && valid;
+    }
+
+    function f() -> logic {
+        return ready;
+    }
+
+    #[inline]
+    function g() -> logic {
+        return ack() && f() && data[0];
+    }
+
+    #[inline]
+    function sum() -> logic<8> {
+        return data + PkgA::C;
+    }
+
+    modport mp {
+        ready: output,
+        valid: input ,
+        data : input ,
+        ack  : import,
+        f    : import,
+        g    : import,
+        sum  : import,
+    }
+
+    let _a: logic = ack();
+}
+
+module ModuleA (
+    a_if: modport InterfaceA::mp,
+) {
+    inst b_if: InterfaceA [2];
+
+    let _a: logic    = a_if.ack();
+    let _b: logic    = a_if.g();
+    let _c: logic<8> = b_if[1].sum() + 1;
+}
+"#;
+
+    let expect = r#"package prj_PkgA;
+    localparam int unsigned C = 1;
+endpackage
+
+package prj___InterfaceA__inline_types;
+    typedef logic ack_ret_t;
+    typedef logic g_ret_t;
+    typedef logic [8-1:0] sum_ret_t;
+endpackage
+interface prj_InterfaceA;
+    logic         ready;
+    logic         valid;
+    logic [8-1:0] data ;
+
+    function automatic logic ack() ;
+        return ready && valid;
+    endfunction
+
+    function automatic logic f() ;
+        return ready;
+    endfunction
+
+    function automatic logic g() ;
+        return prj___InterfaceA__inline_types::ack_ret_t'(ready && valid) && f() && data[0];
+    endfunction
+
+    function automatic logic [8-1:0] sum() ;
+        return data + prj_PkgA::C;
+    endfunction
+
+    modport mp (
+        output ready,
+        input  valid,
+        input  data ,
+        import ack  ,
+        import f    ,
+        import g    ,
+        import sum  
+    );
+
+    logic _a; always_comb _a = prj___InterfaceA__inline_types::ack_ret_t'(ready && valid);
+endinterface
+
+module prj_ModuleA (
+    prj_InterfaceA.mp a_if
+);
+    prj_InterfaceA b_if [2] ();
+
+    logic         _a; always_comb _a = prj___InterfaceA__inline_types::ack_ret_t'(a_if.ready && a_if.valid);
+    logic         _b; always_comb _b = prj___InterfaceA__inline_types::g_ret_t'(prj___InterfaceA__inline_types::ack_ret_t'(a_if.ready
+            && a_if.valid) && a_if.f() && a_if.data[0]);
+    logic [8-1:0] _c; always_comb _c = prj___InterfaceA__inline_types::sum_ret_t'(b_if[1].data + prj_PkgA::C) + 1;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn inline_function_generic_interface() {
+    let code = r#"proto package ProtoPkgA {
+    type T;
+}
+
+package PkgA::<W: u32> for ProtoPkgA {
+    type T = logic<W>;
+}
+
+alias package PkgA8 = PkgA::<8>;
+
+interface InterfaceA::<PKG: ProtoPkgA> {
+    var ready: logic ;
+    var valid: logic ;
+    var data : PKG::T;
+
+    #[inline]
+    function ack() -> logic {
+        return ready && valid;
+    }
+
+    #[inline]
+    function get() -> PKG::T {
+        return data;
+    }
+
+    #[inline]
+    function ack_get() -> logic {
+        return ack() && get() == 0;
+    }
+
+    modport mp {
+        ready  : output,
+        valid  : input ,
+        data   : input ,
+        ack    : import,
+        get    : import,
+        ack_get: import,
+    }
+}
+
+#[expand(modport)]
+module ModuleA (
+    a_if: modport InterfaceA::<PkgA8>::mp [2],
+) {
+    let _a: logic = a_if[0].ack();
+}
+
+module ModuleB::<P: ProtoPkgA> (
+    a_if: modport InterfaceA::<P>::mp,
+) {
+    let _b: P::T = a_if.get();
+}
+
+module ModuleC {
+    inst a_if: InterfaceA::<PkgA8>;
+    inst u   : ModuleB::<PkgA8> (
+        a_if: a_if,
+    );
+}
+"#;
+
+    let expect = r#"
+
+package prj___PkgA__8;
+    typedef logic [8-1:0] T;
+endpackage
+
+
+package prj___InterfaceA____PkgA__8__inline_types;
+    typedef logic ack_ret_t;
+    typedef prj___PkgA__8::T get_ret_t;
+    typedef logic ack_get_ret_t;
+endpackage
+interface prj___InterfaceA____PkgA__8;
+    logic            ready;
+    logic            valid;
+    prj___PkgA__8::T data ;
+
+    function automatic logic ack() ;
+        return ready && valid;
+    endfunction
+
+    function automatic prj___PkgA__8::T get() ;
+        return data;
+    endfunction
+
+    function automatic logic ack_get() ;
+        return prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(ready && valid)
+            && prj___InterfaceA____PkgA__8__inline_types::get_ret_t'(data) == 0;
+    endfunction
+
+    modport mp (
+        output ready  ,
+        input  valid  ,
+        input  data   ,
+        import ack    ,
+        import get    ,
+        import ack_get
+    );
+endinterface
+
+module prj_ModuleA (
+    output var logic            __a_if_0_ready,
+    input  var logic            __a_if_0_valid,
+    input  var prj___PkgA__8::T __a_if_0_data ,
+    output var logic            __a_if_1_ready,
+    input  var logic            __a_if_1_valid,
+    input  var prj___PkgA__8::T __a_if_1_data 
+);
+    prj___InterfaceA____PkgA__8 a_if [2] ();
+    always_comb begin
+        __a_if_0_ready = a_if[0].ready ;
+        a_if[0].valid  = __a_if_0_valid;
+        a_if[0].data   = __a_if_0_data ;
+    end
+    always_comb begin
+        __a_if_1_ready = a_if[1].ready ;
+        a_if[1].valid  = __a_if_1_valid;
+        a_if[1].data   = __a_if_1_data ;
+    end
+    logic _a; always_comb _a = prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(a_if[0].ready && a_if[0].valid);
+endmodule
+
+module prj___ModuleB____PkgA__8 (
+    prj___InterfaceA____PkgA__8.mp a_if
+);
+    prj___PkgA__8::T _b; always_comb _b = prj___InterfaceA____PkgA__8__inline_types::get_ret_t'(a_if.data);
+endmodule
+
+module prj_ModuleC;
+    prj___InterfaceA____PkgA__8 a_if ();
+    prj___ModuleB____PkgA__8 u (
+        .a_if (a_if)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn inline_function_flatten_array_interface() {
+    let code = r#"interface InterfaceA {
+    var ready: logic;
+    var valid: logic;
+
+    #[inline]
+    function ack() -> logic {
+        return ready && valid;
+    }
+}
+
+module ModuleA {
+    inst a_if: InterfaceA [2, 3];
+
+    let _a: logic = a_if[1][2].ack();
+}
+"#;
+
+    let expect = r#"package prj___InterfaceA__inline_types;
+    typedef logic ack_ret_t;
+endpackage
+interface prj_InterfaceA;
+    logic ready;
+    logic valid;
+
+    function automatic logic ack() ;
+        return ready && valid;
+    endfunction
+endinterface
+
+module prj_ModuleA;
+    prj_InterfaceA a_if [2*3] ();
+
+    logic _a; always_comb _a = prj___InterfaceA__inline_types::ack_ret_t'(a_if[(1)*(3)+(2)].ready
+        && a_if[(1)*(3)+(2)].valid);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+
+    metadata.build.flatten_array_interface = true;
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }

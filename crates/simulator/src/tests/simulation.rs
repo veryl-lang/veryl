@@ -2,6 +2,79 @@ use super::*;
 use crate::output_buffer;
 
 #[test]
+fn guarded_loop_local_is_produced_before_each_read() {
+    let code = r#"
+    module Reduce (
+        enabled: input logic<2>,
+        data: input logic<2>,
+        result: output logic,
+        forwarded: output logic<2>,
+    ) {
+        always_comb {
+            forwarded = enabled;
+            result = 0;
+            for i in 0..2 {
+                if enabled[i] {
+                    let hit: logic = data[i];
+                    result |= hit;
+                }
+            }
+        }
+    }
+    module Top (
+        enabled: input logic<2>,
+        data: input logic<2>,
+        result: output logic,
+    ) {
+        var forwarded: logic<2>;
+        var masked: logic<2>;
+        assign masked = data & forwarded;
+        inst dut: Reduce (enabled, data: masked, result, forwarded);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for e in (0..4).rev() {
+            for d in (0..4).rev() {
+                sim.set("enabled", Value::new(e, 2, false));
+                sim.set("data", Value::new(d, 2, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("result").unwrap(),
+                    Value::new(u64::from(e & d != 0), 1, false),
+                    "enabled={e} data={d} {config:?}"
+                );
+            }
+        }
+        if config.use_4state {
+            for (enabled, data, expected) in [
+                (
+                    Value::new(0, 2, false),
+                    Value::new_x(2, false),
+                    Value::new(0, 1, false),
+                ),
+                (
+                    Value::new(1, 2, false),
+                    Value::new_x(2, false),
+                    Value::new_x(1, false),
+                ),
+                (
+                    Value::new_x(2, false),
+                    Value::new(3, 2, false),
+                    Value::new(0, 1, false),
+                ),
+            ] {
+                sim.set("enabled", enabled);
+                sim.set("data", data);
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(sim.get("result").unwrap(), expected, "{config:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn simple_comb() {
     let code = r#"
     module Top (
@@ -616,6 +689,112 @@ fn ff_read_as_index_from_other_block() {
             Value::new(0x22, 8, false),
             "config={config:?}"
         );
+    }
+}
+
+#[test]
+fn function_call_in_instance_port_is_not_delayed() {
+    // The inlined call must run before the child port is assigned, not in
+    // the parent's next block (here the always_ff, a cycle late).
+    let code = r#"
+    module Child (
+        clk: input  clock,
+        rst: input  reset,
+        i_x: input  logic,
+        o_q: output logic,
+    ) {
+        always_ff {
+            if_reset {
+                o_q = 0;
+            } else {
+                o_q = i_x;
+            }
+        }
+    }
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        q  : output logic,
+        e  : output logic,
+    ) {
+        function is_one (
+            k: input logic<3>,
+        ) -> logic {
+            return k == 3'd1;
+        }
+        var k: logic<3>;
+        inst u: Child (clk, rst, i_x: is_one(k), o_q: q);
+        always_ff {
+            if_reset {
+                k = 0;
+                e = 0;
+            } else {
+                k = k + 3;
+                e = is_one(k);
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        for _ in 0..16 {
+            sim.step(&clk);
+            assert_eq!(sim.get("q"), sim.get("e"), "config={config:?}");
+        }
+    }
+}
+
+#[test]
+fn function_reassigning_a_local_in_instance_port_through_child_loop() {
+    // The connection reads a child output and feeds a child input, so the
+    // instance's statements are sorted one by one; the inlined body must
+    // still run its reassignments of `z` in order.
+    let code = r#"
+    module Child (
+        i_k: input  logic<4>,
+        o_a: output logic<4>,
+        i_d: input  logic<8>,
+        o_q: output logic<8>,
+    ) {
+        assign o_a = i_k ^ 4'h5;
+        assign o_q = i_d;
+    }
+    module Top (
+        k: input  logic<4>,
+        q: output logic<8>,
+        e: output logic<8>,
+    ) {
+        function g (
+            x: input logic<4>,
+        ) -> logic<8> {
+            var z: logic<8>;
+            z = {x, x} + 8'h15;
+            z = (z ^ (z >> 3)) * 8'h2b;
+            z = (z ^ (z >> 2)) * 8'h4d;
+            return z;
+        }
+        var a: logic<4>;
+        inst u: Child (i_k: k, o_a: a, i_d: g(a), o_q: q);
+        assign e = g(k ^ 4'h5);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for k in 0..16 {
+            sim.set("k", Value::new(k, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("q"), sim.get("e"), "k={k} config={config:?}");
+        }
     }
 }
 
@@ -2298,6 +2477,8 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         dst_width: 5888,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(idx2.clone()),
             elem_width: 92,
             window: 92,
@@ -2318,6 +2499,8 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         dst_width: 1536,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(idx2),
             elem_width: 1,
             window: 32,
@@ -5487,6 +5670,95 @@ fn binary_corner_case() {
 }
 
 #[test]
+fn logical_and_known_zero_controls_unknown_operand() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'h0");
+        let one = format!("{width}'h1");
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&zero, "&&", &unknown, 1, "1'b0", true);
+            binary_test(&unknown, "&&", &zero, 1, "1'b0", true);
+            binary_test(&one, "&&", &unknown, 1, "1'bx", true);
+            binary_test(&unknown, "&&", &one, 1, "1'bx", true);
+            let mixed = format!("{width}'b1{}", digit.to_string().repeat(width - 1));
+            binary_test(&mixed, "&&", &one, 1, "1'b1", true);
+            binary_test(&one, "&&", &mixed, 1, "1'b1", true);
+        }
+    }
+    binary_test("8'b1xxxxxxx", "&&", "8'bxxxxxxx1", 1, "1'b1", true);
+}
+
+#[test]
+fn logical_or_known_one_controls_unknown_operand() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'h0");
+        // Put the controlling bit above the low word for wide operands.
+        let one = format!("{width}'b1{}", "0".repeat(width - 1));
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&one, "||", &unknown, 1, "1'b1", true);
+            binary_test(&unknown, "||", &one, 1, "1'b1", true);
+            binary_test(&zero, "||", &unknown, 1, "1'bx", true);
+            binary_test(&unknown, "||", &zero, 1, "1'bx", true);
+        }
+    }
+    binary_test("8'b1xxxxxxx", "||", "8'bzzzzzzzz", 1, "1'b1", true);
+    binary_test("8'bzzzzzzzz", "||", "8'b1xxxxxxx", 1, "1'b1", true);
+}
+
+#[test]
+fn bitwise_and_known_zero_controls_unknown_bits() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'b{}", "0".repeat(width));
+        let ones = format!("{width}'b{}", "1".repeat(width));
+        let unknown_result = format!("{width}'b{}", "x".repeat(width));
+        let mixed = format!(
+            "{width}'b{}",
+            "01".repeat(width).chars().take(width).collect::<String>()
+        );
+        let mixed_result = format!(
+            "{width}'b{}",
+            "0x".repeat(width).chars().take(width).collect::<String>()
+        );
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&zero, "&", &unknown, width, &zero, true);
+            binary_test(&unknown, "&", &zero, width, &zero, true);
+            binary_test(&ones, "&", &unknown, width, &unknown_result, true);
+            binary_test(&unknown, "&", &ones, width, &unknown_result, true);
+            binary_test(&mixed, "&", &unknown, width, &mixed_result, true);
+            binary_test(&unknown, "&", &mixed, width, &mixed_result, true);
+        }
+    }
+}
+
+#[test]
+fn bitwise_or_known_one_controls_unknown_bits() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'b{}", "0".repeat(width));
+        let ones = format!("{width}'b{}", "1".repeat(width));
+        let unknown_result = format!("{width}'b{}", "x".repeat(width));
+        let mixed = format!(
+            "{width}'b{}",
+            "01".repeat(width).chars().take(width).collect::<String>()
+        );
+        let mixed_result = format!(
+            "{width}'b{}",
+            "x1".repeat(width).chars().take(width).collect::<String>()
+        );
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&ones, "|", &unknown, width, &ones, true);
+            binary_test(&unknown, "|", &ones, width, &ones, true);
+            binary_test(&zero, "|", &unknown, width, &unknown_result, true);
+            binary_test(&unknown, "|", &zero, width, &unknown_result, true);
+            binary_test(&mixed, "|", &unknown, width, &mixed_result, true);
+            binary_test(&unknown, "|", &mixed, width, &mixed_result, true);
+        }
+    }
+}
+
+#[test]
 fn inout_function_argument_copies_back() {
     // https://github.com/veryl-lang/veryl/issues/3308
     let code = r#"
@@ -6347,6 +6619,65 @@ fn function_call_with_output() {
 }
 
 #[test]
+fn function_call_with_array_output() {
+    let code = r#"
+    module Top (
+        a   : input  logic<4>,
+        o0  : output logic<4>,
+        o1  : output logic<4>,
+        o2  : output logic<4>,
+        o3  : output logic<4>,
+        q0  : output logic<4>,
+        q1  : output logic<4>,
+    ) {
+        function split (
+            x: input  logic<4>    ,
+            c: output logic<4> [2],
+        ) {
+            c[0] = x;
+            c[1] = ~x;
+        }
+
+        var w: logic<4> [2, 2];
+        var r: logic<4> [2];
+
+        always_comb {
+            split(a, w[0]);
+            split(a + 4'd1, w[1]);
+        }
+
+        always_comb {
+            split(a - 4'd1, r);
+        }
+
+        assign o0 = w[0][0];
+        assign o1 = w[0][1];
+        assign o2 = w[1][0];
+        assign o3 = w[1][1];
+        assign q0 = r[0];
+        assign q1 = r[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(5, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o0").unwrap(), Value::new(5, 4, false));
+        assert_eq!(sim.get("o1").unwrap(), Value::new(10, 4, false));
+        assert_eq!(sim.get("o2").unwrap(), Value::new(6, 4, false));
+        assert_eq!(sim.get("o3").unwrap(), Value::new(9, 4, false));
+        assert_eq!(sim.get("q0").unwrap(), Value::new(4, 4, false));
+        assert_eq!(sim.get("q1").unwrap(), Value::new(11, 4, false));
+    }
+}
+
+#[test]
 fn function_call_nested() {
     let code = r#"
     module Top (
@@ -7069,6 +7400,794 @@ fn interface_modport() {
 }
 
 #[test]
+fn generic_interface_port() {
+    // Issue #3527: generic ports must bind to the connected interface, both
+    // for direct member access and when forwarding to a typed modport port.
+    let code = r#"
+    interface Link {
+        var req: logic<8>;
+        var resp: logic<8>;
+        modport client { req: output, resp: input, }
+        modport server { ..converse(client) }
+    }
+    module Client (bus: modport Link::client, x: input logic<8>, resp: output logic<8>) {
+        assign bus.req = x;
+        assign resp = bus.resp;
+    }
+    module ClientPass (bus: interface::client, x: input logic<8>, resp: output logic<8>) {
+        inst u: Client (bus, x, resp);
+    }
+    module ClientDirect (bus: interface::client, x: input logic<8>, resp: output logic<8>) {
+        assign bus.req = x;
+        assign resp = bus.resp;
+    }
+    module Server (bus: modport Link::server) {
+        assign bus.resp = ~bus.req;
+    }
+    module ServerPass (bus: interface) {
+        inst u: Server (bus);
+    }
+    module ServerDirect (bus: interface) {
+        assign bus.resp = ~bus.req;
+    }
+    module Top (x: input logic<8>, direct: output logic<8>, forwarded: output logic<8>) {
+        inst l_direct: Link;
+        inst l_forwarded: Link;
+        inst c_direct: ClientDirect (bus: l_direct, x, resp: direct);
+        inst s_direct: ServerDirect (bus: l_direct);
+        inst c_forwarded: ClientPass (bus: l_forwarded, x, resp: forwarded);
+        inst s_forwarded: ServerPass (bus: l_forwarded);
+    }
+    #[test(test_generic_port)]
+    module test_generic_port {
+        inst clk: $tb::clock_gen;
+        var x: logic<8>;
+        var direct: logic<8>;
+        var forwarded: logic<8>;
+        inst dut: Top (x, direct, forwarded);
+        initial {
+            x = 8'h0f;
+            clk.next();
+            $assert(direct == 8'hf0);
+            $assert(forwarded == 8'hf0);
+            x = 8'h81;
+            clk.next();
+            $assert(direct == 8'h7e);
+            $assert(forwarded == 8'h7e);
+            $finish();
+        }
+    }
+    "#;
+
+    for client in ["interface", "interface::client"] {
+        for server in ["interface", "interface::server"] {
+            let code = code
+                .replace("bus: interface::client", &format!("bus: {client}"))
+                .replace("(bus: interface)", &format!("(bus: {server})"));
+            for config in Config::all() {
+                let ir = analyze(&code, &config);
+                let mut sim = Simulator::new(ir, None);
+                for x in [0x0f, 0x81] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&Event::clock(VarId::SYNTHETIC));
+                    for output in ["direct", "forwarded"] {
+                        assert_eq!(sim.get(output).unwrap(), Value::new(x ^ 0xff, 8, false));
+                    }
+                }
+                let ir = analyze_top(&code, &config, "test_generic_port").unwrap();
+                assert_eq!(
+                    run_native_testbench(ir, None, "test_generic_port".into()).unwrap(),
+                    TestResult::Pass
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_partial_writes() {
+    let code = r#"
+    interface Bus {
+        var word: logic<8>;
+        var elems: logic<8> [2];
+    }
+    module Child (bus: interface, low: input logic<4>, data: output logic<8>) {
+        assign bus.word[3:0] = low;
+        assign bus.elems[0] = {low, low};
+        assign data = bus.word ^ bus.elems[1];
+    }
+    module Pass (bus: interface, low: input logic<4>, data: output logic<8>) {
+        inst u: Child (bus, low, data);
+    }
+    module Top (
+        low: input logic<4>, high: input logic<4>,
+        data: output logic<8>, word: output logic<8>, elems: output logic<8>,
+    ) {
+        inst bus: Bus [2];
+        // Connecting element 1 also checks the translation of member-array
+        // masks through an indexed interface and a second module boundary.
+        inst u: Pass (bus: bus[1], low, data);
+        assign bus[0].word = '0;
+        assign bus[0].elems = '{default: '0};
+        assign bus[1].word[7:4] = high;
+        assign bus[1].elems[1] = {high, high};
+        assign word = bus[1].word;
+        assign elems = bus[1].elems[0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (low, high) in [(0x5, 0xa), (0x3, 0xc)] {
+            sim.set("low", Value::new(low, 4, false));
+            sim.set("high", Value::new(high, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("word").unwrap(),
+                Value::new((high << 4) | low, 8, false)
+            );
+            assert_eq!(sim.get("elems").unwrap(), Value::new(low * 0x11, 8, false));
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(((high << 4) | low) ^ (high * 0x11), 8, false)
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_alias_nba_reads() {
+    for view in ["interface", "interface::reader"] {
+        let code = format!(
+            r#"
+            interface Bus {{ var data: logic<8>; modport reader {{ data: input, }} }}
+            module Child (clk: input clock, a: interface, b: {view}, x: input logic<8>, data: output logic<8>) {{
+                always_ff {{ a.data = x; data = b.data; }}
+            }}
+            module Pass (clk: input clock, a: interface, b: {view}, x: input logic<8>, data: output logic<8>) {{
+                inst u: Child (clk, a, b, x, data);
+            }}
+            module Top (clk: input clock, x: input logic<8>, data: output logic<8>, word: output logic<8>) {{
+                inst bus: Bus;
+                inst u: Pass (clk, a: bus, b: bus, x, data);
+                assign word = bus.data;
+            }}
+        "#
+        );
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("x", Value::new(0, 8, false));
+            sim.step(&clk);
+            sim.step(&clk);
+            for x in [1, 2, 3] {
+                sim.set("x", Value::new(x, 8, false));
+                sim.step(&clk);
+                assert_eq!(
+                    sim.get("data").unwrap(),
+                    Value::new(x - 1, 8, false),
+                    "{view}: {config:?}"
+                );
+                assert_eq!(
+                    sim.get("word").unwrap(),
+                    Value::new(x, 8, false),
+                    "{view}: {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_modport_blocking_alias() {
+    for (view, body) in [
+        ("reader", "a.data = x; data = b.data; a.data = ~x;"),
+        ("writer", "b.data = x; data = a.data; b.data = ~x;"),
+    ] {
+        let code = format!(
+            r#"
+        interface Bus {{ var data: logic<8>; modport reader {{ data: input, }} modport writer {{ data: output, }} }}
+        module Child (a: interface, b: interface::{view}, x: input logic<8>, data: output logic<8>) {{
+            always_comb {{ {body} }}
+        }}
+        module Top (x: input logic<8>, data: output logic<8>, word: output logic<8>) {{
+            inst bus: Bus;
+            inst u: Child (a: bus, b: bus, x, data);
+            assign word = bus.data;
+        }}
+    "#
+        );
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            for x in [0x12, 0x7f, 0xff] {
+                sim.set("x", Value::new(x, 8, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("data").unwrap(),
+                    Value::new(x, 8, false),
+                    "{config:?}"
+                );
+                assert_eq!(
+                    sim.get("word").unwrap(),
+                    Value::new(x ^ 0xff, 8, false),
+                    "{config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_complete_initial_writes() {
+    let path =
+        std::env::temp_dir().join(format!("veryl_generic_initial_{}.hex", std::process::id()));
+    std::fs::write(&path, "00 3c 00\n").unwrap();
+    let path_str = path.to_str().unwrap().replace('\\', "\\\\");
+    for initial in [
+        format!("$readmemh(\"{path_str}\", bus.data);"),
+        "bus.data[index] = 8'h3c;".into(),
+    ] {
+        let code = format!(
+            r#"
+            interface Bus {{ var data: logic<8> [3]; }}
+            module Child (clk: input clock, bus: interface) {{
+                always_ff {{ for i in 0..3 {{ bus.data[i] = bus.data[i] + 8'd1; }} }}
+            }}
+            module Pass (clk: input clock, bus: interface) {{ inst u: Child (clk, bus); }}
+            module Top (clk: input clock, index: input u32, a: output logic<8>, b: output logic<8>, c: output logic<8>) {{
+                #[allow(initial_assign)]
+                inst bus: Bus;
+                inst u: Pass (clk, bus);
+                initial {{ bus.data = '{{default: '0}}; {initial} }}
+                assign a = bus.data[0]; assign b = bus.data[1]; assign c = bus.data[2];
+            }}
+        "#
+        );
+        let indices = if initial.starts_with("$readmemh") {
+            vec![1]
+        } else {
+            vec![0, 1, 2]
+        };
+        for config in Config::all() {
+            for index in &indices {
+                let mut sim = Simulator::new(analyze(&code, &config), None);
+                let clk = sim.get_clock("clk").unwrap();
+                sim.set("index", Value::new(*index as u64, 32, false));
+                sim.step(&Event::Initial);
+                for (element, port) in ["a", "b", "c"].into_iter().enumerate() {
+                    let expected = if element == *index { 0x3c } else { 0 };
+                    assert_eq!(
+                        sim.get(port).unwrap(),
+                        Value::new(expected, 8, false),
+                        "{initial}: {config:?}"
+                    );
+                }
+                sim.step(&clk);
+                for (element, port) in ["a", "b", "c"].into_iter().enumerate() {
+                    let expected = if element == *index { 0x3d } else { 1 };
+                    assert_eq!(
+                        sim.get(port).unwrap(),
+                        Value::new(expected, 8, false),
+                        "{initial}: {config:?}"
+                    );
+                }
+            }
+        }
+    }
+    std::fs::remove_file(path).unwrap();
+
+    // Element two is referenced by the child but unreachable by a one-bit
+    // index; truncating its index must not redirect an initialization of zero.
+    let code = r#"
+        interface Bus { var data: logic<8> [3]; }
+        module Child (clk: input clock, bus: interface) {
+            always_ff { bus.data[2] = bus.data[2] + 8'd1; }
+        }
+        module Top (clk: input clock, index: input logic, a: output logic<8>, c: output logic<8>) {
+            #[allow(initial_assign)]
+            inst bus: Bus;
+            inst u: Child (clk, bus);
+            initial { bus.data[2] = '0; bus.data[index] = 8'h3c; }
+            assign a = bus.data[0]; assign c = bus.data[2];
+        }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("index", Value::new(0, 1, false));
+        sim.step(&Event::Initial);
+        assert_eq!(sim.get("a").unwrap(), Value::new(0x3c, 8, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(0, 8, false));
+        sim.step(&clk);
+        assert_eq!(sim.get("c").unwrap(), Value::new(1, 8, false));
+    }
+}
+
+#[test]
+fn generic_interface_port_shared_alias_storage() {
+    for (body, delta) in [
+        ("a.data = x; b.data = a.data + 8'd1; observed = b.data;", 1),
+        ("b.data = x; a.data = b.data + 8'd1; observed = a.data;", 1),
+        ("b.data = x; observed = a.data;", 0),
+    ] {
+        for forwarded in [false, true] {
+            let child = if forwarded { "Pass" } else { "Child" };
+            let code = format!(
+                r#"
+                interface Bus {{ var data: logic<8>; }}
+                module Child (a: interface, b: interface, x: input logic<8>, observed: output logic<8>) {{
+                    always_comb {{ {body} }}
+                }}
+                module Pass (a: interface, b: interface, x: input logic<8>, observed: output logic<8>) {{
+                    inst u: Child (a, b, x, observed);
+                }}
+                module Top (x: input logic<8>, data: output logic<8>, observed: output logic<8>) {{
+                    inst bus: Bus [2];
+                    assign bus[0].data = '0;
+                    inst u: {child} (a: bus[1], b: bus[1], x, observed);
+                    assign data = bus[1].data;
+                }}
+            "#
+            );
+            for config in Config::all() {
+                let mut sim = Simulator::new(analyze(&code, &config), None);
+                for x in [0x12, 0x7f, 0xff] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&Event::clock(VarId::SYNTHETIC));
+                    for port in ["data", "observed"] {
+                        assert_eq!(
+                            sim.get(port).unwrap(),
+                            Value::new((x + delta) & 0xff, 8, false),
+                            "{body}, forwarded={forwarded}: {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_child_initialization_before_clock() {
+    let code = r#"
+        interface Bus { #[allow(unused_variable)] var data: logic<8>; }
+        #[test(initialize)]
+        module Initialize (#[allow(initial_assign)] bus: interface) {
+            inst clk: $tb::clock_gen;
+            initial {
+                bus.data = 8'h3c;
+                clk.next();
+                $assert(bus.data == 8'h3c, "initialized child: %h", bus.data);
+                $finish();
+            }
+        }
+        module Pass (bus: interface) { inst u: Initialize (bus); }
+        #[test(child_initialization)]
+        module child_initialization {
+            inst bus: Bus;
+            inst u: Pass (bus);
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "child_initialization").unwrap();
+        assert_eq!(
+            run_native_testbench(ir, None, "child_initialization".into()).unwrap(),
+            TestResult::Pass,
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn generic_interface_port_aliased_ff_partial_writes() {
+    let code = r#"
+        interface Bus { var data: logic<8>; }
+        module Child (clk: input clock, a: interface, b: interface, x: input logic<8>) {
+            always_ff {
+                a.data[3:0] = x[3:0];
+                b.data[7:4] = a.data[3:0];
+            }
+        }
+        module Pass (clk: input clock, a: interface, b: interface, x: input logic<8>) {
+            inst u: Child (clk, a, b, x);
+        }
+        module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+            inst bus: Bus;
+            inst u: Pass (clk, a: bus, b: bus, x);
+            assign data = bus.data;
+        }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("x", Value::new(0, 8, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        for (x, expected) in [(1, 0x01), (2, 0x12), (3, 0x23)] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(expected, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_clocked_partial_writes() {
+    let code = r#"
+    interface Bus {
+        var clk: clock;
+        var word: logic<8>;
+    }
+    module Child (bus: interface, low: input logic<4>) {
+        always_ff (bus.clk) { bus.word[3:0] = low; }
+    }
+    module Pass (bus: interface, low: input logic<4>) {
+        inst u: Child (bus, low);
+    }
+    module Top (
+        clk: input clock, low: input logic<4>, high: input logic<4>, word: output logic<8>,
+    ) {
+        inst bus: Bus;
+        assign bus.clk = clk;
+        assign bus.word[7:4] = high;
+        inst u: Pass (bus, low);
+        assign word = bus.word;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        for (low, high) in [(0x5, 0xa), (0x3, 0xc)] {
+            sim.set("low", Value::new(low, 4, false));
+            sim.set("high", Value::new(high, 4, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("word").unwrap(),
+                Value::new((high << 4) | low, 8, false)
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_disjoint_ff_writes() {
+    // A partial FF update must preserve the bits copied from the other side
+    // of an interface, including in dual-slot 4-state interpreter storage.
+    let code = r#"
+    interface Bus { var data: logic<8>; }
+    module Child (clk: input clock, bus: interface, x: input logic<8>) {
+        // Two writes force dual-slot storage for the lower-half producer.
+        always_ff {
+            bus.data[3:2] = x[3:2];
+            bus.data[1:0] = x[1:0];
+        }
+    }
+    module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+        inst bus: Bus;
+        inst u: Child (clk, bus, x);
+        // The upper half samples the previous edge's lower half. Splitting
+        // the write exercises the parent's dual-slot read-modify-write too.
+        always_ff {
+            bus.data[7:6] = bus.data[3:2];
+            bus.data[5:4] = bus.data[1:0];
+        }
+        assign data = bus.data;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        // Warm up both halves so assertions do not depend on the initial Xs.
+        sim.set("x", Value::new(0, 8, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        for (x, expected) in [(1, 0x01), (2, 0x12), (3, 0x23)] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(expected, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_array_slices() {
+    for (slice, base) in [("1:2", 1), ("1+:2", 1), ("2-:2", 1), ("1 step 2", 2)] {
+        let independent = (0..4)
+            .filter(|i| *i < base || *i >= base + 2)
+            .map(|i| format!("assign bus[{i}].data = 8'ha5;"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for clocked in [false, true] {
+            let clock_member = if clocked { "var clk: clock;" } else { "" };
+            let clocks = if clocked {
+                "for i in 0..4 :g { assign bus[i].clk = clk; }"
+            } else {
+                ""
+            };
+            let writes = if clocked {
+                "always_ff (bus[0].clk) { bus[0].data = x; }
+             always_ff (bus[1].clk) { bus[1].data = ~x; }"
+            } else {
+                "assign bus[0].data = x; assign bus[1].data = ~x;"
+            };
+            let code = format!(
+                r#"
+        interface Bus {{ var data: logic<8>; {clock_member} }}
+        module Child (bus: interface [2], x: input logic<8>) {{
+            {writes}
+        }}
+        module Pass (bus: interface [2], x: input logic<8>) {{ inst u: Child (bus, x); }}
+        module Top (clk: input clock, x: input logic<8>, a: output logic<8>, b: output logic<8>, c: output logic<8>, d: output logic<8>) {{
+            inst bus: Bus [4];
+            inst u: Pass (bus: bus[{slice}], x);
+            {independent}
+            {clocks}
+            assign a = bus[0].data;
+            assign b = bus[1].data;
+            assign c = bus[2].data;
+            assign d = bus[3].data;
+        }}
+        "#
+            );
+            for config in Config::all() {
+                let mut sim = Simulator::new(analyze(&code, &config), None);
+                let clk = sim.get_clock("clk").unwrap();
+                for x in [0x0f, 0x81] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&clk);
+                    for (element, port) in ["a", "b", "c", "d"].into_iter().enumerate() {
+                        let expected = if element == base {
+                            x
+                        } else if element == base + 1 {
+                            x ^ 0xff
+                        } else {
+                            0xa5
+                        };
+                        assert_eq!(
+                            sim.get(port).unwrap(),
+                            Value::new(expected, 8, false),
+                            "{slice}, clocked={clocked}: {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_initialization() {
+    let code = r#"
+    interface Bus { var data: logic<8>; }
+    module Child (#[allow(initial_assign)] bus: interface) {
+        initial { bus.data = 8'h3c; }
+    }
+    module Pass (bus: interface) { inst u: Child (bus); }
+    module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+        inst bus: Bus;
+        inst u: Pass (bus);
+        always_ff {
+            bus.data[7:4] = x[7:4];
+            bus.data[3:0] = x[3:0];
+        }
+        assign data = bus.data;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.step(&Event::Initial);
+        assert_eq!(
+            sim.get("data").unwrap(),
+            Value::new(0x3c, 8, false),
+            "{config:?}"
+        );
+        for x in [0x12, 0x34] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(x, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_parent_initialization() {
+    let code = r#"
+    interface Bus {
+        #[allow(initial_assign)]
+        var data: logic<8>;
+    }
+    module Child (clk: input clock, bus: interface) {
+        always_ff { bus.data = bus.data + 8'd1; }
+    }
+    module Pass (clk: input clock, bus: interface) { inst u: Child (clk, bus); }
+    module Top (clk: input clock, data: output logic<8>) {
+        #[allow(initial_assign)]
+        inst bus: Bus;
+        inst u: Pass (clk, bus);
+        initial { bus.data = 8'h3c; }
+        assign data = bus.data;
+    }
+    #[test(parent_initialization)]
+    module parent_initialization {
+        inst clk: $tb::clock_gen;
+        #[allow(initial_assign)]
+        inst bus: Bus;
+        inst u: Pass (clk, bus);
+        initial {
+            bus.data = 8'h3c;
+            clk.next();
+            $assert(bus.data == 8'h3d, "first edge: %h", bus.data);
+            bus.data[3:0] = 4'hf;
+            clk.next();
+            $assert(bus.data == 8'h40, "partial initialization: %h", bus.data);
+            $finish();
+        }
+    }
+    "#;
+    for update in [
+        "bus.data = bus.data + 8'd1;",
+        "let next: logic<8> = bus.data + 8'd1;
+         bus.data[7:4] = next[7:4];
+         bus.data[3:0] = next[3:0];",
+    ] {
+        let code = code.replace("bus.data = bus.data + 8'd1;", update);
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.step(&Event::Initial);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(0x3c, 8, false),
+                "{config:?}"
+            );
+            for expected in [0x3d, 0x3e] {
+                sim.step(&clk);
+                assert_eq!(
+                    sim.get("data").unwrap(),
+                    Value::new(expected, 8, false),
+                    "{config:?}"
+                );
+            }
+            let ir = analyze_top(&code, &config, "parent_initialization").unwrap();
+            assert_eq!(
+                run_native_testbench(ir, None, "parent_initialization".into()).unwrap(),
+                TestResult::Pass,
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_array_analysis_limit() {
+    for size in [128, 129] {
+        let code = format!(
+            r#"
+            interface Bus {{ var data: logic<8> [{size}]; }}
+            module Child (bus: interface) {{ assign bus.data[0] = 8'h3c; }}
+            module Pass (bus: interface) {{ inst u: Child (bus); }}
+            module Top (data: output logic<8>) {{
+                inst bus: Bus;
+                inst u: Pass (bus);
+                for i in 1..{size} :g {{ assign bus.data[i] = '0; }}
+                assign data = bus.data[0];
+            }}
+        "#
+        );
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze_top(&code, &config, "Top").unwrap(), None);
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(0x3c, 8, false),
+                "{size} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_specialization() {
+    // The same generic module must use the actual interface's type and
+    // parameter values at every level of pass-through instantiation.
+    let code = r#"
+    interface Bus #(param W: u32 = 8) {
+        var data: logic<W>;
+        modport writer { data: output, }
+    }
+    interface OtherBus {
+        var data: logic<32>;
+        modport writer { data: output, }
+    }
+    module Writer (bus: interface::writer, data: input logic<32>) {
+        assign bus.data = data;
+    }
+    module Reader (bus: interface, data: output logic<32>) {
+        assign data = bus.data;
+    }
+    module WritePass (bus: interface::writer, data: input logic<32>) {
+        inst u: Writer (bus, data);
+    }
+    module ReadPass (bus: interface, data: output logic<32>) {
+        inst u: Reader (bus, data);
+    }
+    module Top (
+        data: input logic<32>,
+        out8: output logic<32>,
+        out16: output logic<32>,
+        out32: output logic<32>,
+    ) {
+        inst bus8: Bus;
+        inst bus16: Bus #(W: 16);
+        inst bus32: OtherBus;
+        inst w8: WritePass (bus: bus8, data);
+        inst r8: ReadPass (bus: bus8, data: out8);
+        inst w16: WritePass (bus: bus16, data);
+        inst r16: ReadPass (bus: bus16, data: out16);
+        inst w32: WritePass (bus: bus32, data);
+        inst r32: ReadPass (bus: bus32, data: out32);
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for data in [0x12345678, 0xabcdef01] {
+            sim.set("data", Value::new(data, 32, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (output, mask) in [("out8", 0xff), ("out16", 0xffff), ("out32", 0xffffffff)] {
+                assert_eq!(sim.get(output).unwrap(), Value::new(data & mask, 32, false));
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_array_element() {
+    let code = r#"
+    interface Bus {
+        var data: logic<8>;
+        modport reader { data: input, }
+    }
+    module Reader (bus: interface::reader, data: output logic<8>) {
+        assign data = bus.data;
+    }
+    module Pass (bus: interface, data: output logic<8>) {
+        inst u: Reader (bus, data);
+    }
+    module Top (
+        a: input logic<8>, b: input logic<8>,
+        out0: output logic<8>, out1: output logic<8>,
+    ) {
+        inst bus: Bus [2];
+        assign bus[0].data = a;
+        assign bus[1].data = b;
+        inst r0: Pass (bus: bus[0], data: out0);
+        inst r1: Pass (bus: bus[1], data: out1);
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("a", Value::new(0x12, 8, false));
+        sim.set("b", Value::new(0x34, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("out0").unwrap(), Value::new(0x12, 8, false));
+        assert_eq!(sim.get("out1").unwrap(), Value::new(0x34, 8, false));
+    }
+}
+
+#[test]
 fn interface_array_modport_index() {
     // `inst u: Child(port: s_port[i])` where `s_port` is a modport array.
     // Earlier, `get_port_connects` dropped the `[i]` from the input member
@@ -7230,6 +8349,48 @@ fn interface_parameter_override() {
         let wide = sim.get("out_wide").unwrap();
         assert_eq!(narrow, Value::new(0x00FF, 16, false));
         assert_eq!(wide, Value::new(0xFFFF, 16, false));
+    }
+}
+
+#[test]
+fn always_ff_under_inactive_ifdef_is_dropped() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        o  : output logic,
+    ) {
+        #[ifdef(CHK)]
+        {
+            var q: logic;
+            always_ff {
+                if_reset {
+                    q = 0;
+                } else {
+                    q = 1;
+                }
+            }
+            assign o = q;
+        }
+        #[ifndef(CHK)]
+        assign o = 0;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0, 1, false),
+            "config={config:?}"
+        );
     }
 }
 
@@ -17510,6 +18671,63 @@ fn hazard_block_phantom_cycle_not_a_loop() {
     }
 }
 
+// Regression (#3543): a bitwise operator keeps each result bit tied to the
+// same bit of its operands, so `v[4] = m[8]` with `m = f(v)` reads only
+// `v[8]` and closes no loop.  Inside a child instance `v` is split into the
+// parts it is written by, and `f` then sees their concatenation.
+#[test]
+fn bitwise_operator_is_not_a_comb_loop_at_bit_level() {
+    type Model = fn(u64) -> u64;
+    let cases: [(&str, Model); 4] = [
+        ("16'h0110 & v", |v| 0x0110 & v),
+        ("16'h0000 | v", |v| v),
+        ("v ^ 16'h00ff", |v| v ^ 0x00ff),
+        ("~v", |v| !v & 0xffff),
+    ];
+
+    for (expr, f) in cases {
+        let code = format!(
+            r#"
+    module Core (
+        a: input  logic<16>,
+        o: output logic<16>,
+    ) {{
+        var v: logic<16>;
+        var m: logic<16>;
+
+        assign m       = {expr};
+        assign v[4]    = m[8];
+        assign v[15:5] = a[15:5];
+        assign v[3:0]  = a[3:0];
+
+        assign o = m;
+    }}
+
+    module Top (
+        a: input  logic<16>,
+        o: output logic<16>,
+    ) {{
+        inst u: Core ( a, o );
+    }}
+    "#
+        );
+
+        for top in ["Core", "Top"] {
+            for config in Config::all() {
+                dbg!(expr, top, &config);
+                let ir = analyze_top(&code, &config, top).unwrap();
+                let mut sim = Simulator::new(ir, None);
+                for a in [0x0000, 0x0100, 0xfeff, 0xffff, 0x1234] {
+                    let v = (a & !0x0010) | (((f(a) >> 8) & 1) << 4);
+                    sim.set("a", Value::new(a, 16, false));
+                    sim.step(&Event::clock(VarId::SYNTHETIC));
+                    assert_eq!(sim.get("o").unwrap(), Value::new(f(v), 16, false));
+                }
+            }
+        }
+    }
+}
+
 // Regression: sequential reassignment must survive analyze_dependency's
 // Phase-2 flatten AND reorder_by_level's leveling. Two always_comb blocks
 // cross-reference m/z so Phase-1 sees a phantom cycle and drops into Phase 2,
@@ -17849,7 +19067,7 @@ fn runtime_loops(code: &str, module: &str) -> usize {
     context.functions = module.functions.clone();
     let peeled = crate::ir::module::peeled_declarations(module, &mut context);
     let (declarations, _) =
-        crate::ir::module::simulated_declarations(module, &mut context, false, peeled);
+        crate::ir::module::simulated_declarations(module, &mut context, false, peeled, &[]);
     declarations
         .iter()
         .map(|d| match d {
@@ -18039,7 +19257,7 @@ fn unfolded_selects(code: &str, module: &str) -> usize {
     context.functions = module.functions.clone();
     let peeled = crate::ir::module::peeled_declarations(module, &mut context);
     let (declarations, _) =
-        crate::ir::module::simulated_declarations(module, &mut context, false, peeled);
+        crate::ir::module::simulated_declarations(module, &mut context, false, peeled, &[]);
     declarations
         .iter()
         .map(|d| match d {
@@ -18118,6 +19336,130 @@ fn constant_loop_lowering_keeps_an_over_budget_loop() {
 }
 
 /// Outside reset an `always_ff` loop is logic, like a comb loop.
+/// Read as runtime values, the `let` node numbers would make every node
+/// access a runtime index over the whole array, and the two calls sharing the
+/// function's scratch would look like they need another settle pass.
+#[test]
+fn constant_loop_lowering_reads_a_let_of_an_iteration_as_its_constant() {
+    let code = r#"
+    module Top (
+        a0: input  logic<4> ,
+        a1: input  logic<4> ,
+        t : input  logic<12>,
+        fa: input  logic<4> ,
+        o0: output logic<4> ,
+        o1: output logic<4> ,
+        fy: output logic<4> ,
+    ) {
+        function oldest (
+            v  : input logic<4>    ,
+            age: input logic<3> [4],
+        ) -> logic<4> {
+            var hv: logic    [8];
+            var ht: logic<3> [8];
+            var hi: logic<2> [8];
+            var r : logic<4>    ;
+            for i in 0..4 {
+                let leaf: u32 = 4 + i;
+                hv[leaf] = v[i];
+                ht[leaf] = age[i];
+                hi[leaf] = i;
+            }
+            for j in 1..4 {
+                let n    : u32   = 4 - j;
+                let right: logic = hv[2 * n + 1] && (!hv[2 * n] || ht[2 * n + 1] <: ht[2 * n]);
+                hv[n] = hv[2 * n] || hv[2 * n + 1];
+                ht[n] = if right ? ht[2 * n + 1] : ht[2 * n];
+                hi[n] = if right ? hi[2 * n + 1] : hi[2 * n];
+            }
+            for i in 0..4 {
+                r[i] = hv[1] && hi[1] == i;
+            }
+            return r;
+        }
+        var age: logic<3> [4];
+        var a  : logic<4> [2];
+        var o  : logic<4> [2];
+        always_comb {
+            for i in 0..4 {
+                age[i] = t[3 * i+:3];
+            }
+        }
+        assign a[0] = a0;
+        assign a[1] = a1;
+        always_comb {
+            for i in 0..2 {
+                var req: logic<4>;
+                for e in 0..4 {
+                    req[e] = a[i][e];
+                }
+                o[i] = oldest(req, age);
+            }
+        }
+        assign o0 = o[0];
+        assign o1 = o[1];
+        // A block reassigning a variable is not kept whole, so the
+        // statements above are ordered one by one.
+        var ft : logic<4>;
+        var fx : logic<4>;
+        var fx2: logic<4>;
+        always_comb {
+            ft = fa;
+            fx = ft;
+            ft = ~fa;
+            fy = ft ^ fx2;
+        }
+        always_comb {
+            fx2 = fx + 1;
+        }
+    }
+    "#;
+    let oldest = |v: u64, t: u64| -> u64 {
+        let age = |i: u64| (t >> (3 * i)) & 7;
+        (0..4)
+            .filter(|&i| v >> i & 1 == 1)
+            .min_by_key(|&i| (age(i), i))
+            .map_or(0, |i| 1 << i)
+    };
+    for config in [
+        Config::default(),
+        Config {
+            use_jit: true,
+            ..Default::default()
+        },
+    ] {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (a0, a1, t, fa) in [
+            (0b0110u64, 0b1001u64, 0o0123u64, 3u64),
+            (0b1111, 0b0000, 0o3210, 9),
+            (0b1010, 0b0111, 0o7777, 15),
+            (0b0001, 0b1100, 0o0516, 0),
+        ] {
+            sim.set("a0", Value::new(a0, 4, false));
+            sim.set("a1", Value::new(a1, 4, false));
+            sim.set("t", Value::new(t, 12, false));
+            sim.set("fa", Value::new(fa, 4, false));
+            let get = |sim: &mut Simulator, name: &str| sim.get(name).unwrap().payload_u64();
+            assert_eq!(
+                get(&mut sim, "o0"),
+                oldest(a0, t),
+                "{config:?} {a0:b} {t:o}"
+            );
+            assert_eq!(
+                get(&mut sim, "o1"),
+                oldest(a1, t),
+                "{config:?} {a1:b} {t:o}"
+            );
+            assert_eq!(
+                get(&mut sim, "fy"),
+                !fa & 0xf ^ ((fa + 1) & 0xf),
+                "{config:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn constant_loop_lowering_unrolls_an_over_budget_loop_outside_reset() {
     let code = r#"
@@ -18558,7 +19900,7 @@ fn assert_matches_runtime_loop_allowing(
     allow: Allowed,
 ) {
     let analyze =
-        |code: &str, config: &Config| analyze_top_inner(code, config, "Top", allow).unwrap();
+        |code: &str, config: &Config| analyze_top_inner(code, config, "Top", allow, &[]).unwrap();
     for config in Config::all().into_iter().filter(configs) {
         let mut sim = Simulator::new(analyze(code, &config), None);
         let mut reference = Simulator::new(analyze(control, &config), None);
@@ -27028,6 +28370,50 @@ fn ff_outside_comb_reach_advances_under_a_constant_comb() {
 }
 
 #[test]
+fn event_display_prints_once_under_validation() {
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+    ) {
+        always_ff (clk) {
+            if a == 8'd7 {
+                $display("hit a=%h o=%h", a, o);
+            }
+            o = a;
+        }
+    }
+    "#;
+
+    let mut configs = Config::all();
+    if crate::tests::aot_c_loads() {
+        configs.push(aot_native_validate_config());
+    }
+    let mut seen: Option<String> = None;
+    for config in configs {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        for a in [5u64, 7, 7, 9] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&clk);
+        }
+        let output = output_buffer::take();
+        assert_eq!(
+            output.matches("hit a=07").count(),
+            2,
+            "config={config:?} output={output:?}"
+        );
+        match &seen {
+            None => seen = Some(output),
+            Some(first) => assert_eq!(&output, first, "config={config:?}"),
+        }
+    }
+}
+
+#[test]
 fn comb_display_output_matches_across_backends() {
     // `$display` inside an `always_comb` is a side effect in a place the comb
     // backends may otherwise reorder or skip.  The dataflow plan keeps a cell
@@ -27086,6 +28472,96 @@ fn comb_display_output_matches_across_backends() {
         let output = output_buffer::take();
         assert!(
             output.contains("hit a=07 t=08"),
+            "config={config:?} output={output:?}"
+        );
+        match &seen {
+            None => seen = Some(output),
+            Some(first) => assert_eq!(&output, first, "config={config:?}"),
+        }
+    }
+}
+
+#[test]
+fn event_display_of_wide_args_keeps_the_event_aot_native() {
+    // A print argument wider than 64 bits must keep the clock event on AOT-C
+    // and print as the other backends do.
+    let code = r#"
+    module Top (
+        clk: input  clock    ,
+        rst: input  reset    ,
+        a  : input  logic<64>,
+        b  : input  logic<64>,
+        o  : output logic<64>,
+    ) {
+        var q: logic<64>;
+        var s: signed logic<100>;
+        var w: logic<200>;
+        always_ff (clk, rst) {
+            if_reset {
+                q = 0;
+                s = 0;
+                w = 0;
+            } else {
+                if a[0] {
+                    $write("c=%h ", {b, a});
+                    if a[1] {
+                        $write("w=%h ", w);
+                    }
+                    $display("s=%d q=%h", s, q);
+                }
+                q = q + a;
+                s = 0 - {36'd0, a};
+                w = {b, a, b[7:0], a};
+            }
+        }
+        assign o = q;
+    }
+    "#;
+
+    if crate::tests::aot_c_loads() {
+        let ir = analyze(code, &aot_native_validate_config());
+        let missing: Vec<_> = ir
+            .event_statements
+            .keys()
+            .filter(|e| matches!(e, Event::Clock(..)) && !ir.whole_events.contains_key(e))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "clock event not AOT-C-native: {missing:?}"
+        );
+    }
+
+    // The validated run prints through Cranelift, so the AOT-C print is
+    // only compared by the unvalidated one.
+    let mut configs = Config::all();
+    if crate::tests::aot_c_loads() {
+        configs.push(Config {
+            aot_c_validate: false,
+            ..aot_native_validate_config()
+        });
+        configs.push(aot_native_validate_config());
+    }
+    let mut seen: Option<String> = None;
+    for config in configs {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for (a, b) in [
+            (0x8000_0000_0000_0003u64, 0x1122_3344_5566_7788u64),
+            (0xffff_ffff_ffff_fffb, 0xdead_beef_0000_0001),
+            (0x0000_0000_0000_0002, 0xffff_ffff_ffff_ffff),
+            (0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210),
+        ] {
+            sim.set("a", Value::new(a, 64, false));
+            sim.set("b", Value::new(b, 64, false));
+            sim.step(&clk);
+        }
+        let output = output_buffer::take();
+        assert!(
+            output.contains("c=11223344556677888000000000000003 "),
             "config={config:?} output={output:?}"
         );
         match &seen {
@@ -27447,6 +28923,8 @@ fn wide_dynamic_bit_select_store_gate() {
         dst_width,
         select: None,
         dynamic_select: Some(ProtoDynamicBitSelect {
+            low_adjust: 0,
+            row_elements: None,
             index_expr: Box::new(index.clone()),
             elem_width: 1,
             window,
@@ -29845,6 +31323,95 @@ fn an_unpacked_array_parameter_element_sizes_a_child() {
     }
 }
 
+/// Each iteration rewrites its temporaries before reading them: `k` under
+/// the guard it is read under, `s` bit by bit.  The next iteration's writes
+/// come later in the pass but never reach those reads.
+#[test]
+fn loop_temporaries_rewritten_each_iteration_settle_in_one_pass() {
+    let code = r#"
+    module Top (
+        x : input  logic<32>,
+        fa: input  logic<4> ,
+        y : output logic<32>,
+        z : output logic<4> ,
+        fy: output logic<4> ,
+    ) {
+        always_comb {
+            for l in 0..4 {
+                let kind: logic<4> = x[8 * l+:4];
+                if kind <: 5 || kind >= 12 {
+                    let k: logic<4> = x[8 * l + 4+:4] ^ kind;
+                    y[8 * l+:8] = {k, k + 4'd1};
+                } else {
+                    y[8 * l+:8] = {kind, 4'd0};
+                }
+            }
+        }
+        always_comb {
+            for e in 0..4 {
+                var s: logic<4>;
+                for w in 0..4 {
+                    s[w] = x[8 * w + e];
+                }
+                z[e] = |s;
+            }
+        }
+        // A block reassigning a variable is not kept whole, so the
+        // statements above are ordered one by one.
+        var ft : logic<4>;
+        var fx : logic<4>;
+        var fx2: logic<4>;
+        always_comb {
+            ft = fa;
+            fx = ft;
+            ft = ~fa;
+            fy = ft ^ fx2;
+        }
+        always_comb {
+            fx2 = fx + 1;
+        }
+    }
+    "#;
+    let expect = |x: u64| -> (u64, u64) {
+        let mut y = 0;
+        let mut z = 0;
+        for l in 0..4 {
+            let kind = (x >> (8 * l)) & 0xf;
+            let byte = if !(5..12).contains(&kind) {
+                let k = ((x >> (8 * l + 4)) & 0xf) ^ kind;
+                (k << 4) | ((k + 1) & 0xf)
+            } else {
+                kind << 4
+            };
+            y |= byte << (8 * l);
+        }
+        for e in 0..4 {
+            if (0..4).any(|w| x >> (8 * w + e) & 1 == 1) {
+                z |= 1 << e;
+            }
+        }
+        (y, z)
+    };
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        assert_eq!(ir.required_comb_passes, 1, "{config:?}");
+        let mut sim = Simulator::new(ir, None);
+        for x in [
+            0x0000_0000u64,
+            0x1234_5678,
+            0xc3a5_0f1e,
+            0x8888_0001,
+            0xffff_ffff,
+        ] {
+            sim.set("x", Value::new(x, 32, false));
+            sim.set("fa", Value::new(x & 0xf, 4, false));
+            let (y, z) = expect(x);
+            assert_eq!(sim.get("y").unwrap().payload_u64(), y, "{config:?} {x:x}");
+            assert_eq!(sim.get("z").unwrap().payload_u64(), z, "{config:?} {x:x}");
+        }
+    }
+}
+
 #[test]
 fn a_reduction_tree_inside_one_vector_settles_in_one_pass() {
     // Every node of the tree lives in ONE packed vector, so each statement
@@ -30152,6 +31719,16 @@ fn a_handshake_closed_across_two_arms_is_split_per_arm() {
     }
 }
 
+/// `Config::all()` allowing a multi-pass settle: for designs built to reach
+/// the phase that orders what no granularity linearized.
+fn multi_pass_configs() -> Vec<Config> {
+    let mut configs = Config::all();
+    for config in &mut configs {
+        config.allow_multi_pass = true;
+    }
+    configs
+}
+
 #[test]
 fn an_arm_writing_the_selector_keeps_the_case_whole() {
     // The first arm writes the SELECTOR: one `case` picks a branch once,
@@ -30197,7 +31774,7 @@ fn an_arm_writing_the_selector_keeps_the_case_whole() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, hold, ready) -> (valid, en, sel)
@@ -30280,7 +31857,7 @@ fn a_dynamic_element_write_keeps_the_scope_in_source_order() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, sel, hold, ready, idx, a2) -> o
@@ -30472,7 +32049,7 @@ fn a_read_and_a_write_in_different_arms_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, a, c, d) -> (y, en, sel, eno)
@@ -30601,7 +32178,7 @@ fn two_arms_reading_each_other_back_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, c, d) -> (po, qo, sel, eno)
@@ -30721,7 +32298,7 @@ fn struct_members_across_a_boundary_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // Elaborating at all is the regression, so it is checked under every
@@ -30807,7 +32384,7 @@ fn disjoint_halves_of_a_vector_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // As above: elaboration under every config, values where the undriven
@@ -31632,6 +33209,170 @@ fn an_async_reset_the_design_produces_itself_asserts_when_it_falls() {
             config.use_jit,
             config.use_4state,
         );
+    }
+}
+
+#[test]
+fn copies_of_a_design_reset_assert_together_from_one_monitored_net() {
+    // `rst_a` and `rst_b` only copy `rst_l`: the three resets are watched as
+    // one net, and its assertion still fires every domain they reset.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q0  : output logic,
+        q1  : output logic,
+        q2  : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let rst_l: '_ reset_async_low = ~f;
+        let rst_a: '_ reset_async_low = rst_l;
+        let rst_b: '_ reset_async_low = rst_a;
+        inst u0: Sub (clk, rst_l, q: q0);
+        inst u1: Sub (clk, rst_l: rst_a, q: q1);
+        inst u2: Sub (clk, rst_l: rst_b, q: q2);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X; the assertion edge is what is under test.
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let resets = &ir.derived_clock_schedule.resets;
+        assert!(
+            resets.len() < resets.iter().map(|r| r.members.len()).sum::<usize>(),
+            "the copies share a monitored net: {resets:?}"
+        );
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(1, 1, false),
+                "{q} released ({config:?})"
+            );
+        }
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(0, 1, false),
+                "{q} reset ({config:?})"
+            );
+        }
+    }
+}
+
+#[test]
+fn reset_copies_of_a_plain_net_assert_from_that_net() {
+    // `n` is not a reset and no event reads it, yet it is what the two copies
+    // are watched through, so it has to stay in the comb buffer.  `rst_h`
+    // inverts and watches its own net.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module SubH (
+        clk  : input  clock           ,
+        rst_h: input  reset_async_high,
+        q    : output logic           ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_h) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q0  : output logic,
+        q1  : output logic,
+        q2  : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let n    : logic                = ~f;
+        let rst_a: '_ reset_async_low  = n;
+        let rst_b: '_ reset_async_low  = n;
+        let rst_h: '_ reset_async_high = ~rst_a;
+        inst u0: Sub (clk, rst_l: rst_a, q: q0);
+        inst u1: Sub (clk, rst_l: rst_b, q: q1);
+        inst u2: SubH (clk, rst_h, q: q2);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X; the assertion edge is what is under test.
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(1, 1, false),
+                "{q} released ({config:?})"
+            );
+        }
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(
+                sim.get(q).unwrap(),
+                Value::new(0, 1, false),
+                "{q} reset ({config:?})"
+            );
+        }
     }
 }
 
@@ -33101,6 +34842,48 @@ fn display_string_argument_renders_text() {
 }
 
 #[test]
+fn string_let_and_var_hold_their_text() {
+    // A `string` type's width is a nominal 1 bit, and a `let`/`var` of it was
+    // allocated that: `%s` printed the low bits of the text, and a bare
+    // `$display(a)` printed them in hex. The storage is now as wide as the
+    // longest text assigned, and a shorter text is zero-padded in it.
+    let code = r#"
+    #[test(Top)]
+    module Top {
+        let a: string = "hi";
+        var b: string;
+        var c: string;
+        var x: logic<8>;
+        initial {
+            b = "hello";
+            c = b;
+            b = "hi";
+            x = 8'hab;
+            $write("[%s][%s][%s][%5s]", a, b, c, b);
+            $write(a, x, c);
+            if b == "hi" && c != "hi" {
+                $write("[eq]");
+            }
+            c = if x == 8'hab ? "longer text" : "s";
+            $write("[%s]", c);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(
+            output, "[hi][hi][hello][   hi]hi ab hello[eq][longer text]",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn a_runtime_indexed_write_reports_the_read_elements_between_its_endpoints() {
     use crate::ir::module::ReadOffsets;
     use crate::ir::{
@@ -34159,6 +35942,44 @@ fn folded_const_select_keeps_its_sign() {
 }
 
 #[test]
+fn overridden_param_default_not_evaluated() {
+    let code = r#"
+    module Sub #(
+        param N  : u32          = 1      ,
+        param TBL: logic<8> [N] = '{8'd0},
+    ) (
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        assign y0 = TBL[0];
+        assign y1 = TBL[N - 1];
+    }
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        const T: logic<8> [2] = '{8'd1, 8'd2};
+        inst u: Sub #(
+            N  : 2,
+            TBL: T,
+        ) (
+            y0,
+            y1,
+        );
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0, 8, false))],
+        &[
+            ("y0", Value::new(1, 8, false)),
+            ("y1", Value::new(2, 8, false)),
+        ],
+    );
+}
+
+#[test]
 fn runtime_for_bound_keeps_its_type() {
     // `j < N` compares unsigned when `N` is unsigned, so a negative start
     // runs no iteration; a bound is evaluated at the 32-bit `int` width, so
@@ -35100,6 +36921,43 @@ fn dataflow_event_config() -> Config {
 }
 
 #[test]
+fn aot_c_event_reuses_the_compile_of_equal_inputs() {
+    // An event whose inputs a previous build compiled loads that `.so` without
+    // emitting its source again, and simulates the same.
+    if !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, o: output logic<8>) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 3; }
+        }
+        assign o = r;
+    }
+    "#;
+    crate::backend::aot_c::emit::set_test_aot_index(true);
+    let mut emitted = Vec::new();
+    for _ in 0..2 {
+        crate::backend::aot_c::emit::take_event_sources();
+        let ir = analyze(code, &dataflow_event_config());
+        emitted.push(crate::backend::aot_c::emit::take_event_sources());
+        assert!(!ir.whole_events.is_empty(), "the event must run as AOT-C");
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for c in 1..6u64 {
+            sim.step(&clk);
+            sim.ensure_comb_updated();
+            assert_eq!(sim.get("o").unwrap().payload_u64(), c * 3, "cycle {c}");
+        }
+    }
+    crate::backend::aot_c::emit::set_test_aot_index(false);
+    assert!(emitted[1].is_empty(), "the second build must not emit");
+}
+
+#[test]
 fn aot_c_event_break_between_stores_to_one_watch() {
     // Two stores to `r` share one watch; the `break` between them leaves after
     // the first, which must still compare and mark.
@@ -35353,4 +37211,1722 @@ fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
         on_jit,
         "the .so landed before the first settle; nothing was handed over"
     );
+}
+
+#[test]
+fn a_block_reading_bits_another_block_writes_waits_for_them() {
+    // Each block writes one half of `v` and of `w` and reads the half the
+    // other block writes.  As blocks they feed each other; bit by bit
+    // `v[3:0] -> v[7:4] -> w[7:4] -> w[3:0]` is a chain.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        c: input  logic<4>,
+        d: input  logic<4>,
+        v: output logic<8>,
+        w: output logic<8>,
+    ) {
+        always_comb {
+            w[3:0] = w[7:4] & d;
+            v[7:4] = v[3:0] ^ c;
+        }
+        always_comb {
+            v[3:0] = a;
+            w[7:4] = v[7:4] | b;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (a, b, c, d) in [
+            (0x5u64, 0x2u64, 0x9u64, 0xfu64),
+            (0xa, 0x1, 0x3, 0x6),
+            (0xf, 0x0, 0xf, 0xb),
+        ] {
+            sim.set("a", Value::new(a, 4, false));
+            sim.set("b", Value::new(b, 4, false));
+            sim.set("c", Value::new(c, 4, false));
+            sim.set("d", Value::new(d, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            let v = ((a ^ c) << 4) | a;
+            let w_hi = (a ^ c) | b;
+            let w = (w_hi << 4) | (w_hi & d);
+            assert_eq!(sim.get("v").unwrap(), Value::new(v, 8, false), "{config:?}");
+            assert_eq!(sim.get("w").unwrap(), Value::new(w, 8, false), "{config:?}");
+        }
+    }
+}
+
+/// `(output, value, width)` per output a case checks.
+type Expected = Vec<(&'static str, u64, usize)>;
+
+/// `code` under every config, inputs set per case and outputs checked.
+fn check_cases(
+    code: &str,
+    inputs: &[(&str, usize)],
+    cases: &[&[u64]],
+    expect: &dyn Fn(&[u64]) -> Expected,
+) {
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for case in cases {
+            for ((name, width), value) in inputs.iter().zip(*case) {
+                sim.set(name, Value::new(*value, *width, false));
+            }
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (name, value, width) in expect(case) {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(value, width, false),
+                    "{name} {case:x?} {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_snapshot_across_generations_leaves_untouched_bits_unconditional() {
+    // The else arm reads `v[7:6]` after writing `v[3:0]`, so the snapshot
+    // spans bits of two generations.  `v[7:4]` is written before the `if`
+    // only; folding it under `c` would close a loop through `c = v[7]`.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        d: input  logic<4>,
+        o: output logic<8>,
+    ) {
+        var v: logic<8>;
+        var c: logic;
+        always_comb {
+            v[7:4] = a;
+            if c {
+                v[3:0] = b;
+            } else {
+                v[3:0] = d;
+                v[1:0] = v[7:6];
+            }
+        }
+        assign c = v[7];
+        assign o = v;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("b", 4), ("d", 4)],
+        &[&[0x8, 0x5, 0xa], &[0x4, 0x5, 0xa], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let lo = if k[0] & 8 != 0 {
+                k[1]
+            } else {
+                (k[2] & 0xc) | (k[0] >> 2)
+            };
+            vec![("o", (k[0] << 4) | lo, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_read_comes_before_every_later_write_of_its_bits() {
+    // `v3[7:4] = v2[3:0]` reads the version of `v2[3:0]` written above it, and
+    // two later writes each replace half of it.  Both must wait for the read;
+    // ordering only the first leaves `v2[3:2] = ...` free to run ahead.
+    let code = r#"
+    module Top (
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+        o3: output logic<8>,
+        o4: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        var v4: logic<8>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = v4;
+        always_comb {
+            v4[3:0] = i3[3:0];
+            v1      = i2;
+            v4[7:4] = v3[3:0];
+        }
+        always_comb {
+            v2[7:4] = i3[6:3];
+        }
+        always_comb {
+            v2[3:0] = i2[6:3];
+            v3[3:0] = v1[3:0];
+            v3[7:4] = v3[3:0];
+            v3[7:4] = v2[3:0];
+            v2[1:0] = i2[4:3];
+            v2[3:2] = v1[4:3];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i2", 8), ("i3", 8)],
+        &[&[0xb1, 0xd0], &[0x0f, 0xa8], &[0x70, 0x2c], &[0x00, 0xff]],
+        &|k| {
+            let (i2, i3) = (k[0], k[1]);
+            let v2 = (((i3 >> 3) & 0xf) << 4) | (((i2 >> 3) & 3) << 2) | ((i2 >> 3) & 3);
+            let v3 = (((i2 >> 3) & 0xf) << 4) | (i2 & 0xf);
+            let v4 = ((i2 & 0xf) << 4) | (i3 & 0xf);
+            vec![("o1", i2, 8), ("o2", v2, 8), ("o3", v3, 8), ("o4", v4, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_read_of_settled_bits_does_not_wait_for_their_writer_to_come_after() {
+    // `y` reads `x[3:1]`, versions this block wrote, and `x[7:4]`, settled
+    // bits the assign below supplies.  Only the versions are bound to come
+    // before a later write; ordering the settled bits that way too would
+    // contradict their own edge and reject the design.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<2>,
+        e: input  logic<4>,
+        o: output logic<8>,
+        q: output logic   ,
+    ) {
+        var x: logic<8>;
+        var s: logic<4>;
+        var y: logic;
+        always_comb {
+            x[3:0] = a;
+            x[1:0] = c;
+            y      = ^x[7:1];
+            s      = e;
+        }
+        assign x[7:4] = s;
+        assign o      = x;
+        assign q      = y;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 2), ("e", 4)],
+        &[&[0x8, 0x1, 0xa], &[0x4, 0x2, 0x1], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let x = (k[2] << 4) | (k[0] & 0xc) | k[1];
+            vec![("o", x, 8), ("q", ((x >> 1).count_ones() & 1) as u64, 1)]
+        },
+    );
+}
+
+#[test]
+fn a_reader_of_bits_it_writes_itself_waits_for_the_rest() {
+    // `v0[5:4] = v0[6:5]` reads bit 5, which it writes itself, and bit 6,
+    // which the statement above writes.  Only bit 6 orders it, and must.
+    let code = r#"
+    module Top (
+        i1: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+    ) {
+        var v0: logic<8>;
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        assign o0 = v0;
+        always_comb {
+            v0[3:0] = i3[5:2];
+            v3[3:0] = v0[3:0];
+            v0[3:0] = v3[3:0] & v1[7:4];
+        }
+        always_comb {
+            v2      = i1;
+            v0[7:4] = v2[4:1];
+            v2      = i3;
+            v1[7:4] = v2[6:3];
+            v0[7:6] = v0[1:0];
+            v0[5:4] = v0[6:5];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i1", 8), ("i3", 8)],
+        &[&[0x63, 0xcd], &[0x34, 0x78], &[0x08, 0xfe]],
+        &|k| {
+            let (i1, i3) = (k[0], k[1]);
+            let lo = ((i3 >> 2) & 0xf) & ((i3 >> 3) & 0xf);
+            let mut v0 = (((i1 >> 1) & 0xf) << 4) | lo;
+            v0 = (v0 & 0x3f) | ((lo & 3) << 6);
+            v0 = (v0 & !0x30) | (((v0 >> 5) & 3) << 4);
+            vec![("o0", v0, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_reader_of_a_version_and_of_other_bits_waits_for_both() {
+    // `z = v[5:2]` reads `v[3:2]` from the version above and `v[5:4]` from
+    // the other block, which reads `y` back from this one.  Bit by bit the
+    // blocks only pass values forward.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<4>,
+        v: output logic<8>,
+        y: output logic<4>,
+        z: output logic<4>,
+    ) {
+        always_comb {
+            v[3:0] = a;
+            y      = v[3:0] ^ c;
+            z      = v[5:2];
+            v[3:0] = y + 1;
+        }
+        always_comb {
+            v[7:4] = y;
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 4)],
+        &[&[5, 1], &[0xa, 3], &[0xf, 0], &[3, 2]],
+        &|k| {
+            let y = k[0] ^ k[1];
+            let z = ((y & 3) << 2) | (k[0] >> 2);
+            vec![
+                ("v", (y << 4) | ((y + 1) & 0xf), 8),
+                ("y", y, 4),
+                ("z", z, 4),
+            ]
+        },
+    );
+}
+
+#[test]
+fn a_childs_comb_keeps_its_one_pass_order() {
+    // Inside `Sub`, `v6[7:4]` reads `v2[3:0]` and `v2[7:4]` reads `v6[5:4]`:
+    // as blocks the two feed each other, bit by bit they are a chain.  The
+    // child's comb runs as one compiled unit, so the unit's own order has to
+    // be the one-pass one.
+    let code = r#"
+    module Sub (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v6: logic<8>;
+        assign o0 = v1;
+        assign o1 = v2;
+        assign o2 = v6;
+        always_comb {
+            v1[7:4] = i0[7:4];
+            v1[3:0] = i1[3:0];
+        }
+        always_comb {
+            v6[3:0] = i2[3:0];
+            v6[7:4] = v2[3:0] | v1[3:0];
+        }
+        always_comb {
+            v2[3:0] = i3[3:0];
+            v2[7:4] = v2[3:0] ^ v6[5:2];
+        }
+    }
+
+    module Top (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        inst u: Sub (i0, i1, i2, i3, o0, o1, o2);
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("i1", 8), ("i2", 8), ("i3", 8)],
+        &[
+            &[0x41, 0xbb, 0x5f, 0x68],
+            &[0x12, 0x34, 0x56, 0x78],
+            &[0xf0, 0x0f, 0xaa, 0x55],
+            &[0x5a, 0xa5, 0x3c, 0xc3],
+        ],
+        &|k| {
+            let v1 = (k[0] & 0xf0) | (k[1] & 0xf);
+            let v6 = (((k[3] | k[1]) & 0xf) << 4) | (k[2] & 0xf);
+            let v2 = (((k[3] ^ (v6 >> 2)) & 0xf) << 4) | (k[3] & 0xf);
+            vec![("o0", v1, 8), ("o1", v2, 8), ("o2", v6, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_signed_read_of_the_destination_keeps_its_sign() {
+    // Each guarded write reads back bits of its own destination as signed;
+    // folding the guard into one write must not read them zero-extended.
+    let code = r#"
+    module Top (
+        i0: input  logic<8>,
+        c : input  logic   ,
+        o1: output logic<16>,
+        o2: output logic<16>,
+        o3: output logic<16>,
+        o4: output logic<3>,
+    ) {
+        var v1: logic<16>;
+        var v2: logic<16>;
+        var v3: logic<16>;
+        var t : logic<3>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = t;
+        assign v1[7:0] = i0;
+        assign v2[7:0] = i0;
+        assign v3[7:0] = i0;
+        always_comb {
+            t[0] = c;
+            if c {
+                v1[15:8] = $signed(v1[7:4]) >>> 1;
+            } else {
+                v1[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[1] = c;
+            if c {
+                v2[15:8] = $signed(v2[7:4]) * $signed(v2[3:0]);
+            } else {
+                v2[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[2] = c;
+            if c {
+                v3[15:8] = $signed(v3[7:4]) / 4'sd2;
+            } else {
+                v3[15:8] = 0;
+            }
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("c", 1)],
+        &[&[0xc9, 1], &[0x73, 1], &[0x8f, 1], &[0xc9, 0]],
+        &|k| {
+            let sext = |x: u64| ((x as i64) << 60 >> 60) as u64;
+            let (hi, lo) = ((k[0] >> 4) & 0xf, k[0] & 0xf);
+            let top = |x: u64| if k[1] == 1 { x & 0xff } else { 0 };
+            let sra = top(((sext(hi) as i64) >> 1) as u64);
+            let mul = top(sext(hi).wrapping_mul(sext(lo)));
+            let div = top(((sext(hi) as i64) / 2) as u64);
+            vec![
+                ("o1", (sra << 8) | k[0], 16),
+                ("o2", (mul << 8) | k[0], 16),
+                ("o3", (div << 8) | k[0], 16),
+            ]
+        },
+    );
+}
+
+#[test]
+fn a_copy_chain_longer_than_the_speculative_rounds_schedules() {
+    // `v[7:4]` reads `v[3:0]` through twelve copies; the cut at bit 4
+    // crosses one per round.
+    let mut code = String::from("module Top (i0: input logic<8>, o: output logic<8>) {\n");
+    for k in 0..12 {
+        code.push_str(&format!("    var b{k}: logic<8>;\n"));
+    }
+    code.push_str("    var v: logic<8>;\n    assign v[7:4] = b11[3:0] + 4'd1;\n");
+    for k in (1..12).rev() {
+        code.push_str(&format!("    assign b{k} = b{};\n", k - 1));
+    }
+    code.push_str("    assign b0 = v;\n    assign v[3:0] = i0[3:0];\n    assign o = v;\n}\n");
+    check_cases(&code, &[("i0", 8)], &[&[0x35], &[0xaf]], &|c| {
+        vec![("o", ((c[0] + 1) & 0xf) << 4 | c[0] & 0xf, 8)]
+    });
+}
+
+#[test]
+fn a_chain_of_copies_between_members_of_one_struct_schedules() {
+    // Each copy reads `s`, but not the bits it writes.
+    let n = 9;
+    let mut code =
+        String::from("module Top (i0: input logic<8>, o: output logic<8>) {\n    struct s_t {\n");
+    for k in 0..n {
+        code.push_str(&format!("        m{k}: logic<8>,\n"));
+    }
+    code.push_str("    }\n    var s: s_t;\n    var v: logic<8>;\n");
+    code.push_str(&format!("    assign v[7:4] = s.m{}[3:0] + 4'd1;\n", n - 1));
+    for k in (1..n).rev() {
+        code.push_str(&format!("    assign s.m{k} = s.m{};\n", k - 1));
+    }
+    code.push_str("    assign s.m0 = v;\n    assign v[3:0] = i0[3:0];\n    assign o = v;\n}\n");
+    check_cases(&code, &[("i0", 8)], &[&[0x35], &[0xaf]], &|c| {
+        vec![("o", ((c[0] + 1) & 0xf) << 4 | c[0] & 0xf, 8)]
+    });
+}
+
+#[test]
+fn a_concatenation_of_more_elements_than_the_speculative_bound_schedules() {
+    use num_bigint::BigUint;
+    // `w` is `v` bit by bit and `v[k]` reads `w[k-1]`: a ripple, acyclic only
+    // per element of the two 65-element concatenations.
+    let width = 65;
+    let w_elems: Vec<String> = (0..width)
+        .rev()
+        .map(|k| format!("v[{k}] ^ i0[{k}]"))
+        .collect();
+    let mut v_elems: Vec<String> = (1..width)
+        .rev()
+        .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+        .collect();
+    v_elems.push("i1[0]".into());
+    let code = format!(
+        "module Top (i0: input logic<{width}>, i1: input logic<{width}>, lo: output logic<64>, hi: output logic) {{
+    var v: logic<{width}>;
+    var w: logic<{width}>;
+    assign w = {{{}}};
+    assign v = {{{}}};
+    assign lo = w[63:0];
+    assign hi = w[64];
+}}
+",
+        w_elems.join(", "),
+        v_elems.join(", ")
+    );
+    let reference = |i0: u64, i1: u64| -> (u64, u64) {
+        let bit = |x: u64, k: usize| if k == 64 { 1 } else { (x >> k) & 1 };
+        let (mut lo, mut prev_w) = (0u64, 0u64);
+        for k in 0..65 {
+            let v = if k == 0 {
+                bit(i1, 0)
+            } else {
+                prev_w & bit(i1, k)
+            };
+            prev_w = v ^ bit(i0, k);
+            if k < 64 {
+                lo |= prev_w << k;
+            }
+        }
+        (lo, prev_w)
+    };
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (i0, i1) in [
+            (0x2345_6789_abcd_ef01u64, 0xffff_0000_ffff_0000u64),
+            (0, u64::MAX),
+        ] {
+            let with_bit_64 = |x: u64| (BigUint::from(1u32) << 64u32) + BigUint::from(x);
+            sim.set("i0", Value::new_biguint(with_bit_64(i0), width, false));
+            sim.set("i1", Value::new_biguint(with_bit_64(i1), width, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            let (lo, hi) = reference(i0, i1);
+            assert_eq!(
+                sim.get("lo").unwrap(),
+                Value::new(lo, 64, false),
+                "{config:?}"
+            );
+            assert_eq!(
+                sim.get("hi").unwrap(),
+                Value::new(hi, 1, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_split_copy_keeps_a_condition_that_reads_the_written_bits() {
+    // Split per source, the upper part's condition would read the bit the
+    // lower part just wrote.
+    for arm in ["x[15:8]", "z"] {
+        let code = format!(
+            r#"
+module Top (i0: input logic<8>, i1: input logic<4>, i2: input logic<8>, o: output logic<16>, q: output logic<16>) {{
+    var b: logic<16>;
+    var x: logic<16>;
+    var y: logic<16>;
+    var z: logic<8>;
+    assign b = x;
+    always_comb {{
+        x = {{8'h00, i0}};
+        y = x;
+        z[3:0] = b[15:12] + 4'd1;
+        z[7:4] = i1;
+        x[15:8] = z;
+        x[7:0] = if x[0] ? {arm} : i2;
+    }}
+    assign o = x;
+    assign q = y;
+}}
+"#
+        );
+        check_cases(
+            &code,
+            &[("i0", 8), ("i1", 4), ("i2", 8)],
+            &[&[0x01, 0x5, 0x00], &[0x02, 0xa, 0x3c]],
+            &|c| {
+                let hi = c[1] << 4 | ((c[1] + 1) & 0xf);
+                let lo = if c[0] & 1 == 1 { hi } else { c[2] };
+                vec![("o", hi << 8 | lo, 16)]
+            },
+        );
+    }
+}
+
+#[test]
+fn a_split_concatenation_keeps_elements_that_read_the_written_bits() {
+    // Split, the second element would read the first's result.
+    let code = r#"
+module Top (i0: input logic<8>, o: output logic<8>, p: output logic<8>) {
+    var b: logic<8>;
+    var v: logic<8>;
+    var x: logic<8>;
+    var y: logic<8>;
+    assign b = v;
+    assign v[7:4] = b[3:0] + 4'd1;
+    assign v[3:0] = i0[3:0];
+    assign o = v;
+    always_comb {
+        x = i0;
+        y = x;
+        x = {x[3:0], x[7:4]};
+    }
+    assign p = x;
+}
+"#;
+    check_cases(code, &[("i0", 8)], &[&[0x35], &[0xa7]], &|c| {
+        vec![("p", (c[0] & 0xf) << 4 | c[0] >> 4, 8)]
+    });
+}
+
+#[test]
+fn a_concatenation_in_a_branch_schedules_beside_a_whole_write() {
+    // `w[k]` reads `v[k]`, which reads `w[k-1]`: acyclic only per element,
+    // and the other arm writes `w` whole.
+    for (arm, other) in [
+        ("if en {", "} else {"),
+        ("case en { 1'b1: {", "} default: {"),
+    ] {
+        for (fill, fill_value) in [("0", 0u64), ("-1", 0xff)] {
+            let close = if arm.starts_with("case") { "} }" } else { "}" };
+            let w: Vec<String> = (0..8).rev().map(|k| format!("v[{k}] ^ i0[{k}]")).collect();
+            let v: Vec<String> = (1..8)
+                .rev()
+                .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+                .chain(["i1[0]".to_string()])
+                .collect();
+            let code = format!(
+                "module Top (en: input logic, i0: input logic<8>, i1: input logic<8>, o: output logic<8>) {{
+    var v: logic<8>;
+    var w: logic<8>;
+    always_comb {{
+        {arm}
+            w = {{{}}};
+        {other}
+            w = {fill};
+        {close}
+    }}
+    assign v = {{{}}};
+    assign o = w;
+}}
+",
+                w.join(", "),
+                v.join(", ")
+            );
+            check_cases(
+                &code,
+                &[("en", 1), ("i0", 8), ("i1", 8)],
+                &[&[1, 0x03, 0x05], &[1, 0xa5, 0xff], &[0, 0x03, 0x05]],
+                &|c| {
+                    if c[0] == 0 {
+                        return vec![("o", fill_value, 8)];
+                    }
+                    let (mut w, mut prev) = (0u64, 0u64);
+                    for k in 0..8 {
+                        let v = if k == 0 {
+                            c[2] & 1
+                        } else {
+                            prev & (c[2] >> k) & 1
+                        };
+                        prev = v ^ ((c[1] >> k) & 1);
+                        w |= prev << k;
+                    }
+                    vec![("o", w, 8)]
+                },
+            );
+        }
+    }
+}
+
+#[test]
+fn a_destructured_literal_beside_a_cut_branch_keeps_its_value() {
+    // The arms are cut at `p1`'s bit 0, but the destructure takes its slice of
+    // the literal only at the store, so it must stay as written.
+    let w: Vec<String> = (0..8).rev().map(|k| format!("v[{k}] ^ i0[{k}]")).collect();
+    let v: Vec<String> = (1..8)
+        .rev()
+        .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+        .chain(["i1[0]".to_string()])
+        .collect();
+    let code = format!(
+        "module Top (en: input logic, i0: input logic<8>, i1: input logic<8>, q1: output logic<8>, q0: output logic<8>) {{
+    var v: logic<8>;
+    var w: logic<8>;
+    var p1: logic<8>;
+    var p0: logic<8>;
+    always_comb {{
+        p1 = 0;
+        p0 = 0;
+        if en {{
+            p1[0] = 1;
+            w = {{{}}};
+        }} else {{
+            w = 0;
+            {{p1, p0}} = 16'h12_34;
+        }}
+    }}
+    assign v = {{{}}};
+    assign q1 = p1;
+    assign q0 = p0;
+}}
+",
+        w.join(", "),
+        v.join(", ")
+    );
+    check_cases(
+        &code,
+        &[("en", 1), ("i0", 8), ("i1", 8)],
+        &[&[0, 0x03, 0x05], &[1, 0x03, 0x05]],
+        &|c| {
+            if c[0] == 0 {
+                vec![("q1", 0x12, 8), ("q0", 0x34, 8)]
+            } else {
+                vec![("q1", 0x01, 8), ("q0", 0, 8)]
+            }
+        },
+    );
+}
+
+#[test]
+fn a_read_between_cut_writes_sees_every_part() {
+    // `y = w` reads both parts of the whole write above it; a later write of
+    // one part must not run ahead of the read.
+    for (whole, later, mask) in [
+        ("x", "w[3:0] = 0", 0xf0u64),
+        ("{x[7:4], x[3:0]}", "w[7:4] = 0", 0x0f),
+    ] {
+        let code = format!(
+            "module Top (en: input logic, x: input logic<8>, c: input logic<4>, e: input logic<4>, y: output logic<8>, wo: output logic<8>) {{
+    var w: logic<8>;
+    var d: logic<4>;
+    always_comb {{
+        if en {{
+            w[7:4] = d;
+            w[3:0] = e;
+            y = {{c, c}};
+        }} else {{
+            w = {whole};
+            y = w;
+            {later};
+        }}
+    }}
+    assign d = w[3:0];
+    assign wo = w;
+}}
+"
+        );
+        for config in Config::all() {
+            let config = Config {
+                allow_multi_pass: true,
+                ..config
+            };
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            for (en, x, c, e) in [(0u64, 0xa5u64, 3u64, 6u64), (1, 0x3c, 3, 6)] {
+                sim.set("en", Value::new(en, 1, false));
+                sim.set("x", Value::new(x, 8, false));
+                sim.set("c", Value::new(c, 4, false));
+                sim.set("e", Value::new(e, 4, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                let (y, wo) = if en == 0 {
+                    (x, x & mask)
+                } else {
+                    (c << 4 | c, e << 4 | e)
+                };
+                assert_eq!(
+                    sim.get("y").unwrap(),
+                    Value::new(y, 8, false),
+                    "{whole} {config:?}"
+                );
+                assert_eq!(
+                    sim.get("wo").unwrap(),
+                    Value::new(wo, 8, false),
+                    "{whole} {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_default_then_override_in_a_branch_keeps_its_order() {
+    // `o` reads only `w[1]`; ordering it after `w[0] = 0` as well would weld
+    // it to the `w[0]` write it guards through `p`.
+    let code = r#"
+module Top (en: input logic, q0: input logic, b: input logic, o: output logic, wo: output logic<2>) {
+    var w: logic<2>;
+    var p: logic;
+    always_comb {
+        w = 0;
+        o = 0;
+        if en {
+            w[0] = 0;
+            w[1] = b;
+            o    = w[1];
+            if p {
+                w[0] = q0;
+            }
+        }
+    }
+    assign p  = ~o;
+    assign wo = w;
+}
+"#;
+    check_cases(
+        code,
+        &[("en", 1), ("q0", 1), ("b", 1)],
+        &[&[1, 1, 1], &[1, 1, 0], &[0, 1, 1]],
+        &|c| {
+            if c[0] == 0 {
+                return vec![("o", 0, 1), ("wo", 0, 2)];
+            }
+            let o = c[2];
+            let w0 = if o == 0 { c[1] } else { 0 };
+            vec![("o", o, 1), ("wo", c[2] << 1 | w0, 2)]
+        },
+    );
+}
+
+#[test]
+fn an_event_gate_keeps_state_only_its_own_statements_read() {
+    // Only its own update reads `cnt`, yet it carries a value to the next
+    // fire: a gate idle on the other registers must not skip it.
+    const N: usize = 64;
+    let (mut decls, mut resets, mut steps) = (String::new(), String::new(), String::new());
+    for i in 0..N {
+        decls.push_str(&format!("        var r{i}: logic<16>;\n"));
+        resets.push_str(&format!("                r{i} = 0;\n"));
+    }
+    steps.push_str("                    r0 = r0 + 16'd1;\n");
+    for i in 1..N {
+        steps.push_str(&format!(
+            "                    r{i} = r{p} + r{i};\n",
+            p = i - 1
+        ));
+    }
+    let code = format!(
+        r#"
+    module Idle (
+        clk: input  clock,
+        rst: input  reset,
+        en:  input  logic,
+        o:   output logic<16>,
+    ) {{
+        var cnt: logic<64>;
+{decls}
+        always_ff {{
+            if_reset {{
+                cnt = 0;
+{resets}
+            }} else {{
+                cnt = cnt + 64'd1;
+                if en {{
+{steps}
+                }}
+            }}
+        }}
+        assign o = r{last};
+    }}
+
+    module Busy (
+        clk: input  clock,
+        rst: input  reset,
+        o:   output logic<16>,
+    ) {{
+        var c: logic<16>;
+        always_ff {{
+            if_reset {{
+                c = 0;
+            }} else {{
+                c = c + 16'd1;
+            }}
+        }}
+        assign o = c;
+    }}
+
+    module Top (
+        clk:    input  clock,
+        rst:    input  reset,
+        rst2:   input  reset,
+        en:     input  logic,
+        o_idle: output logic<16>,
+        o_busy: output logic<16>,
+    ) {{
+        inst u: Idle (clk, rst, en, o: o_idle);
+        inst v: Busy (clk, rst: rst2, o: o_busy);
+    }}
+"#,
+        last = N - 1,
+    );
+    let mut any_gated = false;
+    for mut config in Config::all() {
+        config.aot_c_min_stmts = 0;
+        let ir = analyze(&code, &config);
+        let gated = !ir.event_gate_flags.is_empty();
+        any_gated |= gated;
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        let rst2 = sim.get_reset("rst2").unwrap();
+        sim.set("en", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        sim.step_reset(&clk, &rst2);
+        let mut edges = sim.get_var("u.cnt").unwrap().payload_u64();
+        for en in [1u64, 0, 1, 0] {
+            sim.set("en", Value::new(en, 1, false));
+            for _ in 0..6 {
+                sim.step(&clk);
+                edges += 1;
+                assert_eq!(
+                    sim.get_var("u.cnt").unwrap().payload_u64(),
+                    edges,
+                    "gated={gated} {config:?}"
+                );
+            }
+        }
+    }
+    assert!(any_gated, "the test needs a gate");
+}
+
+#[test]
+fn reset_value_literal_polarity() {
+    let code = r#"
+    module Top (
+        o_hold0   : output reset_async_high,
+        o_hold1   : output reset_async_low,
+        o_hold2   : output reset_sync_high,
+        o_hold3   : output reset_sync_low,
+        o_release0: output reset_async_high,
+        o_release1: output reset_async_low,
+        o_release2: output reset_sync_high,
+        o_release3: output reset_sync_low,
+    ) {
+        assign o_hold0    = reset_active;
+        assign o_hold1    = reset_active;
+        assign o_hold2    = reset_active;
+        assign o_hold3    = reset_active;
+        assign o_release0 = reset_inactive;
+        assign o_release1 = reset_inactive;
+        assign o_release2 = reset_inactive;
+        assign o_release3 = reset_inactive;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+
+        for (name, exp) in [
+            ("o_hold0", 1),
+            ("o_hold1", 0),
+            ("o_hold2", 1),
+            ("o_hold3", 0),
+            ("o_release0", 0),
+            ("o_release1", 1),
+            ("o_release2", 0),
+            ("o_release3", 1),
+        ] {
+            assert_eq!(sim.get(name).unwrap(), Value::new(exp, 1, false), "{name}");
+        }
+    }
+}
+
+#[test]
+fn reset_value_literal_reset_type() {
+    let code = r#"
+    module Top (
+        o_hold   : output reset,
+        o_release: output reset,
+    ) {
+        assign o_hold    = reset_active;
+        assign o_release = reset_inactive;
+    }
+    "#;
+
+    for base in Config::all() {
+        for active_high in [false, true] {
+            let config = Config {
+                abstract_reset_active_high: active_high,
+                ..base.clone()
+            };
+            dbg!(&config);
+
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            let (hold, release) = if active_high { (1, 0) } else { (0, 1) };
+            assert_eq!(sim.get("o_hold").unwrap(), Value::new(hold, 1, false));
+            assert_eq!(sim.get("o_release").unwrap(), Value::new(release, 1, false));
+        }
+    }
+}
+
+#[test]
+fn reset_value_literal_context() {
+    let code = r#"
+    module Sub (
+        i_rst0: input  reset_async_low,
+        i_rst1: input  reset_sync_high,
+        o_rst0: output logic,
+        o_rst1: output logic,
+    ) {
+        assign o_rst0 = i_rst0;
+        assign o_rst1 = i_rst1;
+    }
+    module Top (
+        i_rst : input  reset_async_high,
+        o_rst0: output logic,
+        o_rst1: output logic,
+        o_eq  : output logic,
+        o_ne  : output logic,
+    ) {
+        inst u: Sub (
+            i_rst0: reset_active,
+            i_rst1: reset_active,
+            o_rst0,
+            o_rst1,
+        );
+
+        assign o_eq = i_rst == reset_active;
+        assign o_ne = reset_inactive != i_rst;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (i_rst, exp_eq, exp_ne) in [(1, 1, 1), (0, 0, 0)] {
+            sim.set("i_rst", Value::new(i_rst, 1, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            assert_eq!(sim.get("o_rst0").unwrap(), Value::new(0, 1, false));
+            assert_eq!(sim.get("o_rst1").unwrap(), Value::new(1, 1, false));
+            assert_eq!(sim.get("o_eq").unwrap(), Value::new(exp_eq, 1, false));
+            assert_eq!(sim.get("o_ne").unwrap(), Value::new(exp_ne, 1, false));
+        }
+    }
+}
+
+#[test]
+fn two_always_ff_on_one_clock_writing_fields_of_one_register_both_land() {
+    // The blocks differ in their reset but share the clock event and its
+    // commit, so `x` takes a write from each in the same step.  The fields
+    // share a byte: a field write logs only the bytes it covers.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a  : input  logic<4>,
+        b  : input  logic<4>,
+        y  : output logic<8>,
+    ) {
+        var x: logic<8>;
+        var r: logic<8>;
+        always_ff (clk) {
+            x[3:0] = a;
+        }
+        always_ff (clk, rst) {
+            if_reset {
+                x[7:4] = 0;
+                r      = 0;
+            } else {
+                x[7:4] = b;
+                r      = x;
+            }
+        }
+        assign y = r;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("a", Value::new(0x3, 4, false));
+        sim.set("b", Value::new(0x5, 4, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0x53, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn a_constant_index_write_after_a_runtime_index_write_to_its_wide_element_wins() {
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        rst:  input  reset,
+        we:   input  logic,
+        wc:   input  logic,
+        idx:  input  logic<2>,
+        ridx: input  logic<2>,
+        a:    input  logic<100>,
+        b:    input  logic<100>,
+        q:    output logic<100>,
+    ) {
+        var mem: logic<100> [4];
+        var r: logic<100>;
+        assign q = r;
+        always_ff {
+            if_reset {
+                mem = '{0, 0, 0, 0};
+                r = 0;
+            } else {
+                if we {
+                    mem[idx] = a;
+                }
+                if wc {
+                    mem[2] = b;
+                }
+                r = mem[ridx];
+            }
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("we", Value::new(0, 1, false));
+        sim.set("wc", Value::new(1, 1, false));
+        sim.set("idx", Value::new(2, 2, false));
+        sim.set("ridx", Value::new(2, 2, false));
+        sim.set("a", Value::new(0x55, 100, false));
+        sim.set("b", Value::new(0x11, 100, false));
+        // Element 2 holds `b` before the step that writes both, so a write
+        // compared against the current value would see `b` as unchanged.
+        sim.step(&clk);
+        sim.set("we", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x11, 100, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn interpreted_and_compiled_writes_to_one_wide_element_keep_their_order() {
+    // `$display` keeps its branch interpreted while the other is compiled, so
+    // the two writes to element 2 are logged by different backends.
+    for (first, second, want) in [
+        ("mem[2] = b; $display(\"\");", "mem[idx] = a;", 0x55),
+        ("mem[idx] = a; $display(\"\");", "mem[2] = b;", 0x11),
+    ] {
+        let code = format!(
+            r#"
+    module Top (
+        clk:  input  clock,
+        we:   input  logic,
+        idx:  input  logic<2>,
+        a:    input  logic<100>,
+        b:    input  logic<100>,
+        q:    output logic<100>,
+    ) {{
+        var mem: logic<100> [4];
+        assign q = mem[2];
+        always_ff (clk) {{
+            if we {{
+                {first}
+            }}
+            if we {{
+                {second}
+            }}
+        }}
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("we", Value::new(1, 1, false));
+            sim.set("idx", Value::new(2, 2, false));
+            sim.set("a", Value::new(0x55, 100, false));
+            sim.set("b", Value::new(0x11, 100, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(want, 100, false),
+                "{first} / {second} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_clock_event_and_a_reset_event_in_one_commit_keep_their_write_order() {
+    // `step_reset` fires the clk block and the clk2 block's reset in one
+    // commit.  `m[i][j]` keeps the reset event off AOT-C while the clk event
+    // runs on it, and the `$display` variant leaves its write interpreted.
+    for extra in ["", "if j != 0 { x[29:0] = 0; $display(\"\"); }"] {
+        let code = r#"
+    module Top (
+        clk:  input 'd clock,
+        clk2: input 'd clock,
+        rst:  input 'd reset_async_high,
+        i:    input 'd logic<2>,
+        j:    input 'd logic<3>,
+        a:    input 'd logic<70>,
+        b:    input 'd logic<30>,
+        q:    output logic<100>,
+        y:    output logic<100>,
+    ) {
+        var x: 'd logic<100>;
+        var m: 'd logic<8> [4];
+        var yy: 'd logic<100>;
+        assign y = yy;
+        assign q = x;
+        always_ff (clk) {
+            x[99:30] = a;
+            yy = x;
+        }
+        always_ff (clk2, rst) {
+            if_reset {
+                x[29:0] = 0;
+                m[i][j] = 0;
+                EXTRA
+            } else {
+                x[29:0] = b;
+                m[i][j] = 1;
+            }
+        }
+    }
+    "#
+        .replace("EXTRA", extra);
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let clk2 = sim.get_clock("clk2").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.set("i", Value::new(0, 2, false));
+            sim.set("j", Value::new(1, 3, false));
+            sim.set("a", Value::new(0x3, 70, false));
+            sim.set("b", Value::new(0x3fff_ffff, 30, false));
+            sim.step(&clk2);
+            sim.step(&clk);
+            sim.set("a", Value::new(0x7, 70, false));
+            sim.step_reset(&clk, &rst);
+            assert_eq!(
+                sim.get("q").unwrap().payload_u128(),
+                0x7u128 << 30,
+                "{extra:?} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_sixteen_byte_write_into_a_wider_register_lands_after_a_whole_write() {
+    // The later write is 16 bytes, but its register is wider, so both writes
+    // go to the wide pool.
+    for (decl, [lo, hi], write, want) in [
+        (
+            "logic<256>",
+            ["x[127:0]", "x[255:128]"],
+            "x[191:64] = b;",
+            (0x1234u128 << 64 | 0xffff, 0),
+        ),
+        (
+            "logic<2, 128>",
+            ["x[0]", "x[1]"],
+            "x[idx] = b;",
+            (0xffff, 0x1234),
+        ),
+    ] {
+        let code = format!(
+            r#"
+    module Top (
+        clk:  input  clock,
+        idx:  input  logic,
+        a:    input  logic<256>,
+        b:    input  logic<128>,
+        q_lo: output logic<128>,
+        q_hi: output logic<128>,
+    ) {{
+        var x: {decl};
+        assign q_lo = {lo};
+        assign q_hi = {hi};
+        always_ff (clk) {{
+            x = a;
+            {write}
+        }}
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("idx", Value::new(1, 1, false));
+            sim.set("a", Value::new(0xffff, 256, false));
+            sim.set("b", Value::new(0x1234, 128, false));
+            sim.step(&clk);
+            let got = (
+                sim.get("q_lo").unwrap().payload_u128(),
+                sim.get("q_hi").unwrap().payload_u128(),
+            );
+            assert_eq!(got, want, "{decl} {write} {config:?}");
+        }
+    }
+}
+
+#[test]
+fn a_field_write_after_a_runtime_index_write_to_its_element_merges_with_it() {
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        idx:  input  logic<2>,
+        a:    input  logic<8>,
+        b:    input  logic<4>,
+        q:    output logic<8>,
+    ) {
+        var mem: logic<8> [4];
+        assign q = mem[2];
+        always_ff (clk) {
+            mem[idx]      = a;
+            mem[2][3:0]   = b;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("idx", Value::new(2, 2, false));
+        sim.set("a", Value::new(0xa0, 8, false));
+        sim.set("b", Value::new(0x5, 4, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0xa5, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn struct_member_of_param_array_sized_by_earlier_param() {
+    let code = r#"
+    package pk {
+        struct Region {
+            base: logic<32>,
+            mask: logic<8> ,
+        }
+    }
+    module Top #(
+        param N: u32            = 2,
+        param W: pk::Region [N] = '{
+            pk::Region'{ base: 32'h11, mask: 8'h22 },
+            pk::Region'{ base: 32'h33, mask: 8'h44 }
+        },
+    ) (
+        i: input  logic    ,
+        o: output logic<32>,
+        m: output logic<8> ,
+    ) {
+        assign o = W[i].base;
+        assign m = W[1].mask;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (i, exp) in [(0, 0x11), (1, 0x33)] {
+            sim.set("i", Value::new(i, 1, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("o").unwrap(), Value::new(exp, 32, false));
+            assert_eq!(sim.get("m").unwrap(), Value::new(0x44, 8, false));
+        }
+    }
+}
+
+#[test]
+fn ifdef_package_items_follow_defines() {
+    let code = r#"
+    package pk {
+        #[ifdef(SEL_A)]
+        const C: u32 = 2;
+        #[elsif(SEL_B)]
+        const C: u32 = 4;
+        #[else]
+        const C: u32 = 14;
+
+        #[ifdef(SEL_A)]
+        type T = logic<8>;
+        #[else]
+        type T = logic<4>;
+
+        #[ifdef(SEL_A)]
+        function f () -> logic<8> {
+            return 8'd200;
+        }
+        #[else]
+        function f () -> logic<8> {
+            return 8'd7;
+        }
+    }
+    module Top (
+        c: output logic<8>,
+        t: output logic<8>,
+        r: output logic<8>,
+    ) {
+        var x: pk::T;
+        assign x = '1;
+        assign c = pk::C;
+        assign t = x;
+        assign r = pk::f();
+    }
+    "#;
+
+    for (defines, exp) in [
+        (&[][..], [14, 15, 7]),
+        (&["SEL_A"][..], [2, 255, 200]),
+        (&["SEL_B"][..], [4, 15, 7]),
+    ] {
+        for config in Config::all() {
+            let ir = analyze_with_defines(code, &config, defines);
+            let mut sim = Simulator::new(ir, None);
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (name, exp) in ["c", "t", "r"].iter().zip(exp) {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(exp, 8, false),
+                    "{name} defines={defines:?} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_in_function() {
+    let code = r#"
+    package Pkg {
+        function w (n: input u32) -> u32 {
+            return $clog2(n);
+        }
+    }
+
+    module Top (
+        a : input  u32     ,
+        b : input  u64     ,
+        c : input  logic<8>,
+        o0: output u32     ,
+        o1: output u32     ,
+        o2: output u32     ,
+        o3: output logic   ,
+        o4: output u32     ,
+        o5: output logic<8>,
+    ) {
+        function wide (n: input u64) -> u32 {
+            return $clog2(n);
+        }
+
+        function one (x: input logic<8>) -> logic {
+            return $onehot(x);
+        }
+
+        function width (x: input logic<8>) -> u32 {
+            return $bits(x) + $size(x);
+        }
+
+        function pick (x: input logic<8>) -> logic<8> {
+            var r: logic<8> [8];
+            r = '{default: 0};
+            let k: u32 = Pkg::w(5);
+            r[k] = x;
+            return r[3];
+        }
+
+        assign o0 = Pkg::w(a);
+        assign o1 = Pkg::w(7);
+        assign o2 = wide(b);
+        assign o3 = one(c);
+        assign o4 = width(c);
+        assign o5 = pick(c);
+    }
+    "#;
+
+    let clog2 = |n: u64| {
+        if n <= 1 {
+            0
+        } else {
+            64 - (n - 1).leading_zeros() as u64
+        }
+    };
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (a, b, c) in [
+            (0u64, 0u64, 0u64),
+            (1, 1, 1),
+            (2, 2, 4),
+            (5, 1 << 40, 6),
+            (1 << 31, (1 << 40) + 1, 128),
+            (u32::MAX as u64, u64::MAX, 255),
+        ] {
+            sim.set("a", Value::new(a, 32, false));
+            sim.set("b", Value::new(b, 64, false));
+            sim.set("c", Value::new(c, 8, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            assert_eq!(sim.get("o0").unwrap(), Value::new(clog2(a), 32, false));
+            assert_eq!(sim.get("o1").unwrap(), Value::new(3, 32, false));
+            assert_eq!(sim.get("o2").unwrap(), Value::new(clog2(b), 32, false));
+            let onehot = (c.count_ones() == 1) as u64;
+            assert_eq!(sim.get("o3").unwrap(), Value::new(onehot, 1, false));
+            assert_eq!(sim.get("o4").unwrap(), Value::new(16, 32, false));
+            assert_eq!(sim.get("o5").unwrap(), Value::new(c, 8, false));
+        }
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_evaluates_it_once() {
+    let code = r#"
+    module Top (
+        o0: output u32     ,
+        c0: output logic<4>,
+        o1: output logic   ,
+        c1: output logic<4>,
+    ) {
+        var cnt: logic<4>;
+
+        function next () -> logic<4> {
+            cnt += 1;
+            return cnt;
+        }
+
+        function clog2_next () -> u32 {
+            return $clog2(next());
+        }
+
+        function onehot_next () -> logic {
+            return $onehot(next());
+        }
+
+        always_comb {
+            cnt = 1;
+            o0  = clog2_next();
+            c0  = cnt;
+            cnt = 1;
+            o1  = onehot_next();
+            c1  = cnt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o0").unwrap(),
+            Value::new(1, 32, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("c0").unwrap(),
+            Value::new(2, 4, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o1").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("c1").unwrap(),
+            Value::new(2, 4, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_keeps_signed_clog2() {
+    let code = r#"
+    module Top (
+        a: input  u32  ,
+        o: output logic,
+    ) {
+        function negative (x: input u32) -> logic {
+            return $clog2(x) <: -1;
+        }
+
+        assign o = negative(a);
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for a in [0, 1, 8, u32::MAX as u64] {
+            sim.set("a", Value::new(a, 32, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("o").unwrap(), Value::new(0, 1, false), "{config:?}");
+        }
+    }
+}
+
+#[test]
+fn system_function_with_runtime_argument_follows_four_state_rules() {
+    let code = r#"
+    module Top (
+        a : input  logic<4>,
+        o0: output u32     ,
+        o1: output logic   ,
+    ) {
+        function c (x: input logic<4>) -> u32 {
+            return $clog2(x);
+        }
+
+        function h (x: input logic<4>) -> logic {
+            return $onehot(x);
+        }
+
+        assign o0 = c(a);
+        assign o1 = h(a);
+    }
+    "#;
+
+    for config in Config::all().into_iter().filter(|c| c.use_4state) {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        // (payload, x/z mask, $onehot): $clog2 is all x whenever a bit is.
+        for (payload, mask, onehot) in [
+            (0b1001, 0b0100, 0),
+            (0b0001, 0b0100, 1),
+            (0b0000, 0b0100, 0),
+            (0b0000, 0b1111, 0),
+        ] {
+            sim.set("a", Value::from_u128(payload, mask, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o0").unwrap(),
+                Value::from_u128(0, 0xffff_ffff, 32, false),
+                "{config:?} {payload:#b}/{mask:#b}"
+            );
+            assert_eq!(
+                sim.get("o1").unwrap(),
+                Value::new(onehot, 1, false),
+                "{config:?} {payload:#b}/{mask:#b}"
+            );
+        }
+        sim.set("a", Value::new(0b0100, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o0").unwrap(),
+            Value::new(2, 32, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o1").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn constant_index_past_end_in_untaken_arm() {
+    let code = r#"
+    module Top (
+        x : input  logic<8>,
+        w2: output logic<16>,
+        w3: output logic<16>,
+    ) {
+        const N: u32 = 4;
+        var a: logic<8>  [N];
+        var w: logic<16> [N];
+        always_comb {
+            for h in 0..N {
+                a[h] = x + h;
+            }
+            for h in 0..N {
+                w[h] = {if h + 1 <: N ? a[h + 1] : 8'd0, a[h]};
+            }
+        }
+        assign w2 = w[2];
+        assign w3 = w[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("x", Value::new(0x10, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("w2").unwrap(),
+            Value::new(0x1312, 16, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("w3").unwrap(),
+            Value::new(0x0013, 16, false),
+            "config={config:?}"
+        );
+    }
 }

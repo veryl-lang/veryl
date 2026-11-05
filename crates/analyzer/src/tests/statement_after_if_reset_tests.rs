@@ -151,6 +151,34 @@ fn statement_after_if_reset_multiple_statements() {
 }
 
 #[test]
+fn statement_after_if_reset_declarations_before() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a: input logic,
+        x: output logic,
+    ) {
+        always_ff {
+            #[allow(unassign_variable)]
+            var _t: logic;
+            if_reset { x = 0; }
+            x = a;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    let AnalyzerError::StatementAfterIfReset { error_location, .. } = &errors[0] else {
+        panic!("{errors:?}");
+    };
+    assert_eq!(
+        &code[error_location.offset()..error_location.offset() + error_location.len()],
+        "x = a;",
+    );
+}
+
+#[test]
 fn statement_after_if_reset_valid_layouts() {
     let code = r#"
     module ModuleA (

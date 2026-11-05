@@ -25,7 +25,8 @@ impl VerylWalker for Finder {
     fn veryl_token(&mut self, arg: &VerylToken) {
         if arg.token.line == self.line
             && arg.token.column <= self.column
-            && self.column < arg.token.column + arg.token.length
+            && arg.token.length > 0
+            && self.column <= arg.token.end_column()
         {
             self.token = Some(arg.token);
             self.hit = true;

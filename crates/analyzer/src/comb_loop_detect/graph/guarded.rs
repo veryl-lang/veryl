@@ -54,7 +54,7 @@ pub(super) fn guarded_cycle_displacements_cancel(
         HashMap::default();
     let mut all_exact = true;
     for cycle in cycles {
-        if !budget.spend_product(cycle.relation.piece_count(), 1) {
+        if !budget.spend_pieces(cycle.relation.piece_count(), 1) {
             return false;
         }
         if let Some((dependency, feasible)) = cycle.relation.exact_translation() {
@@ -255,10 +255,10 @@ fn guarded_relations_close(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBu
             let Some(next_condition) = condition.conjoin_if_compatible(&cycle.condition) else {
                 continue;
             };
-            if !budget.spend_product(relation.piece_count(), cycle.relation.piece_count()) {
+            if !budget.spend_pieces(relation.piece_count(), cycle.relation.piece_count()) {
                 return false;
             }
-            let next_relation = relation.then(&cycle.relation);
+            let next_relation = relation.then(&cycle.relation, budget);
             if next_relation.is_empty() {
                 continue;
             }

@@ -40,6 +40,23 @@ pub(crate) fn static_field_byte_span(hi: usize, lo: usize, nb: usize) -> Option<
     Some((blo, bhi - blo + 1))
 }
 
+/// Aligned 1/2/4/8-byte window containing byte span `[blo, bhi]`, or None.
+/// It must not run past `nb`: the commit writes the whole window.
+pub(crate) fn log_window_for_span(blo: usize, bhi: usize, nb: usize) -> Option<(usize, usize)> {
+    if bhi < blo || bhi >= nb {
+        return None;
+    }
+    let mut w = 1usize;
+    while w <= 8 {
+        let start = blo & !(w - 1);
+        if start + w > bhi && start + w <= nb {
+            return Some((start, w));
+        }
+        w <<= 1;
+    }
+    None
+}
+
 /// Wide-FF log entry.  64 bytes = 1 cache line, with up to 56 bytes of
 /// payload (covers 64–448-bit FFs in a single entry; wider FFs use
 /// multiple entries).  `align(64)` ensures each entry occupies exactly

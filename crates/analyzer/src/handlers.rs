@@ -1,6 +1,7 @@
 pub mod check_attribute;
 pub mod check_embed_include;
 pub mod check_identifier;
+pub mod check_reset_value_literal;
 pub mod check_statement;
 pub mod check_unsafe;
 pub mod create_literal_table;
@@ -8,6 +9,7 @@ pub mod create_symbol_table;
 use check_attribute::*;
 use check_embed_include::*;
 use check_identifier::*;
+use check_reset_value_literal::*;
 use check_statement::*;
 use check_unsafe::*;
 use create_literal_table::*;
@@ -22,6 +24,7 @@ pub struct Pass1Handlers {
     check_attribute: CheckAttribute,
     check_embed_include: CheckEmbedInclude,
     check_identifier: CheckIdentifier,
+    check_reset_value_literal: CheckResetValueLiteral,
     check_statement: CheckStatement,
     check_unsafe: CheckUnsafe,
     create_literal_table: CreateLiteralTable,
@@ -39,6 +42,7 @@ impl Pass1Handlers {
             check_attribute: CheckAttribute::new(lint_opt, is_dependency, project_name),
             check_embed_include: CheckEmbedInclude::new(),
             check_identifier: CheckIdentifier::new(lint_opt, is_dependency),
+            check_reset_value_literal: CheckResetValueLiteral::new(),
             check_statement: CheckStatement::new(),
             check_unsafe: CheckUnsafe::new(),
             create_literal_table: CreateLiteralTable::new(),
@@ -51,6 +55,7 @@ impl Pass1Handlers {
             &mut self.check_attribute as &mut dyn Handler,
             &mut self.check_embed_include as &mut dyn Handler,
             &mut self.check_identifier as &mut dyn Handler,
+            &mut self.check_reset_value_literal as &mut dyn Handler,
             &mut self.check_statement as &mut dyn Handler,
             &mut self.check_unsafe as &mut dyn Handler,
             &mut self.create_literal_table as &mut dyn Handler,
@@ -63,6 +68,7 @@ impl Pass1Handlers {
         ret.append(&mut self.check_attribute.errors);
         ret.append(&mut self.check_embed_include.errors);
         ret.append(&mut self.check_identifier.errors);
+        ret.append(&mut self.check_reset_value_literal.errors);
         ret.append(&mut self.check_statement.errors);
         ret.append(&mut self.check_unsafe.errors);
         ret.append(&mut self.create_literal_table.errors);

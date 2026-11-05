@@ -15,7 +15,7 @@
 
 use crate::backend::CompileCtx;
 use crate::ir::context::{CachedChunk, ChunkCacheEntry, Context};
-use crate::ir::declaration::stable_topo_sort;
+use crate::ir::declaration::stable_topo_sort_with_blocks;
 use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableElement, VariableMeta};
 use crate::ir::{CompiledBlockStatement, Event, ProtoStatement};
 use crate::{HashMap, HashSet};
@@ -637,13 +637,17 @@ pub fn try_compile_inst_chunks(
             .iter()
             .all(|s| context.backends.any_supports_stmt(s));
         let comb_func = if all_can_build && !all_comb_statements.is_empty() {
-            // Topo-sort by RAW dependencies so output-port connections
-            // run before assigns that read them.
+            // The parent orders a compiled block as one node, so the block
+            // runs its statements in this order every settle: compile only
+            // an order that provably settles in one pass, and otherwise leave
+            // the statements to the parent's full dependency analysis.
             crate::ir::module::dump_stmt_order("child-presort", src.name, all_comb_statements);
-            let sorted_comb_for_func = stable_topo_sort(all_comb_statements.clone());
+            let blocks: Vec<usize> = (0..all_comb_statements.len()).collect();
+            let (sorted_comb_for_func, passes_hint, fell_back) =
+                stable_topo_sort_with_blocks(all_comb_statements.clone(), &blocks);
             crate::ir::module::dump_stmt_order("child-postsort", src.name, &sorted_comb_for_func);
 
-            let artifact = {
+            let artifact = (!fell_back && passes_hint == Some(1)).then(|| {
                 let ctx = CompileCtx {
                     config: &context.config,
                     use_4state: context.config.use_4state,
@@ -653,8 +657,8 @@ pub fn try_compile_inst_chunks(
                 context
                     .backends
                     .try_compile_chunk(&ctx, sorted_comb_for_func.as_slice())
-            };
-            if let Some(artifact) = artifact {
+            });
+            if let Some(Some(artifact)) = artifact {
                 let (input_offsets, output_offsets) =
                     gather_external_offsets(&sorted_comb_for_func);
 

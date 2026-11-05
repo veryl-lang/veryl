@@ -51,19 +51,15 @@ impl ShapeRef {
     }
 
     pub fn total(&self) -> Option<usize> {
-        if self.is_empty() {
-            Some(1)
-        } else {
-            let mut ret = 1;
-            for x in &self.0 {
-                if let Some(x) = x {
-                    ret *= x;
-                } else {
-                    return None;
-                }
-            }
-            Some(ret)
+        if self.0.iter().any(Option::is_none) {
+            return None;
         }
+        if self.0.contains(&Some(0)) {
+            return Some(0);
+        }
+        self.0
+            .iter()
+            .try_fold(1usize, |total, extent| total.checked_mul((*extent)?))
     }
 
     #[inline]
@@ -114,21 +110,25 @@ impl ShapeRef {
         } else if index.len() != self.dims() {
             None
         } else {
-            let mut ret = 0;
-            let mut base = 1;
-            for (i, x) in self.iter().enumerate().rev() {
-                if let Some(x) = x {
-                    ret += index[i] * base;
-                    base *= x;
-                } else {
+            self.total()?;
+            let mut ret = 0usize;
+            let mut base = 1usize;
+            for (i, extent) in self.iter().enumerate().rev() {
+                let extent = (*extent)?;
+                if index[i] >= extent {
                     return None;
                 }
+                ret = ret.checked_add(index[i].checked_mul(base)?)?;
+                base = base.checked_mul(extent)?;
             }
             Some(ret)
         }
     }
 
     pub fn calc_index_expr(&self, index: &[Expression]) -> Option<Expression> {
+        if self.total()? == 0 {
+            return None;
+        }
         if self.is_empty() || (self.dims() == 1 && self[0] == Some(1) && index.is_empty()) {
             let token = TokenRange::default();
             let expr = Expression::create_value(Value::new(0, 32, false), token);
@@ -137,7 +137,7 @@ impl ShapeRef {
             None
         } else {
             let mut ret = None;
-            let mut base = 1;
+            let mut base = 1usize;
             for (i, x) in self.iter().enumerate().rev() {
                 if let Some(x) = x {
                     let index_expr = index[i].clone();
@@ -163,7 +163,7 @@ impl ShapeRef {
                         ret = Some(expr);
                     }
 
-                    base *= x;
+                    base = base.checked_mul(*x)?;
                 } else {
                     return None;
                 }
@@ -174,26 +174,30 @@ impl ShapeRef {
 
     pub fn calc_range(&self, index: &[usize]) -> Option<(usize, usize)> {
         if index.len() > self.dims() {
-            None
-        } else if index.len() < self.dims() {
-            let mut beg = index.to_vec();
-            let mut end = index.to_vec();
-            for (i, x) in self.iter().enumerate() {
-                if i >= index.len() {
-                    if let Some(x) = x {
-                        beg.push(0);
-                        end.push(x.saturating_sub(1));
-                    } else {
-                        return None;
-                    }
-                }
-            }
-            let beg = self.calc_index(&beg)?;
-            let end = self.calc_index(&end)?;
-            Some((beg, end))
-        } else {
-            self.calc_index(index).map(|x| (x, x))
+            return None;
         }
+        if self.total()? == 0 {
+            return None;
+        }
+        let mut start = 0usize;
+        let mut stride = 1usize;
+        let mut length = 1usize;
+        for (dimension, extent) in self.iter().enumerate().rev() {
+            let extent = (*extent)?;
+            if extent == 0 {
+                return None;
+            }
+            if dimension < index.len() {
+                if index[dimension] >= extent {
+                    return None;
+                }
+                start = start.checked_add(index[dimension].checked_mul(stride)?)?;
+            } else {
+                length = length.checked_mul(extent)?;
+            }
+            stride = stride.checked_mul(extent)?;
+        }
+        Some((start, start.checked_add(length.checked_sub(1)?)?))
     }
 }
 
@@ -531,6 +535,9 @@ impl Shape {
 
     #[inline]
     pub fn calc_index_expr(&self, index: &[Expression]) -> Option<Expression> {
+        if self.total()? == 0 {
+            return None;
+        }
         self.as_shape_ref().calc_index_expr(index)
     }
 

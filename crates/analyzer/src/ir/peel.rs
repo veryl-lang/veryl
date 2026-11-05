@@ -94,25 +94,29 @@ pub fn has_for_loop(decls: &[Declaration]) -> bool {
 /// costs the settle its one-pass order.
 /// `keep_reset` keeps a reset-side loop, outside the budget, when every array
 /// it indexes at runtime already is outside reset, so no array changes layout.
+///
+/// `lets` also folds, within each `always_comb` iteration, the reads of a
+/// `let` declared there as its constant (see [`lower_constant_loop_body`]).
 pub fn lower_constant_loops(
     context: &mut Context,
     module: &Module,
     declarations: &mut [Declaration],
     statement_limit: usize,
     keep_reset: bool,
+    lets: bool,
 ) -> bool {
     if is_test_module(module) {
         return false;
     }
     let mut changed = false;
     for decl in declarations.iter_mut() {
-        let (stmts, limit) = match decl {
-            Declaration::Comb(x) => (&mut x.statements, usize::MAX),
-            Declaration::Ff(x) if !keep_reset => (&mut x.statements, statement_limit),
-            Declaration::Ff(x) => (&mut x.statements, usize::MAX),
+        let (stmts, limit, lets) = match decl {
+            Declaration::Comb(x) => (&mut x.statements, usize::MAX, lets),
+            Declaration::Ff(x) if !keep_reset => (&mut x.statements, statement_limit, false),
+            Declaration::Ff(x) => (&mut x.statements, usize::MAX, false),
             _ => continue,
         };
-        changed |= lower_constant_loop_body(context, stmts, limit, keep_reset);
+        changed |= lower_constant_loop_body(context, stmts, limit, keep_reset, lets);
     }
     if keep_reset {
         let mut dynamic = HashSet::default();
@@ -217,7 +221,13 @@ fn lower_reset_loops(
                 runtime_indexed(std::slice::from_ref(&stmt), true, &mut written);
                 if !written.is_subset(dynamic) {
                     let mut lowered = vec![stmt.clone()];
-                    if lower_constant_loop_body(context, &mut lowered, statement_limit, false) {
+                    if lower_constant_loop_body(
+                        context,
+                        &mut lowered,
+                        statement_limit,
+                        false,
+                        false,
+                    ) {
                         out.extend(lowered);
                         changed = true;
                         continue;
@@ -275,18 +285,25 @@ fn bound_reads_written(range: &ForRange, written: &HashSet<VarId>) -> bool {
 
 /// Lower constant loops in a backend-owned procedure or function body.
 /// Exceeding the caller's statement budget leaves the original body intact.
+///
+/// With `lets`, each iteration also reads a `let` it declares with a constant
+/// as that constant, so an index computed through one stays constant.  Only
+/// for a body whose assignments are blocking.
 pub fn lower_constant_loop_body(
     context: &mut Context,
     stmts: &mut Vec<Statement>,
     statement_limit: usize,
     keep_reset: bool,
+    lets: bool,
 ) -> bool {
+    #[allow(clippy::too_many_arguments)]
     fn lower(
         context: &mut Context,
         stmts: &[Statement],
         budget: &mut usize,
         changed: &mut bool,
         keep_reset: bool,
+        lets: bool,
         written: &HashSet<VarId>,
     ) -> Option<Vec<Statement>> {
         let mut out = Vec::new();
@@ -298,8 +315,14 @@ pub fn lower_constant_loop_body(
                 && let Some(iterations) = x.range.eval_iter(context)
             {
                 for iteration in iterations {
-                    let body = specialize_iteration(context, x, iteration)?;
-                    out.extend(lower(context, &body, budget, changed, keep_reset, written)?);
+                    let body = if lets {
+                        specialize_iteration_with_lets(context, x, iteration)?
+                    } else {
+                        specialize_iteration(context, x, iteration)?
+                    };
+                    out.extend(lower(
+                        context, &body, budget, changed, keep_reset, lets, written,
+                    )?);
                 }
                 *changed = true;
                 continue;
@@ -307,27 +330,59 @@ pub fn lower_constant_loop_body(
             let mut stmt = stmt.clone();
             match &mut stmt {
                 Statement::For(x) => {
-                    x.body = lower(context, &x.body, budget, changed, keep_reset, written)?
+                    x.body = lower(context, &x.body, budget, changed, keep_reset, lets, written)?
                 }
                 Statement::If(x) => {
-                    x.true_side =
-                        lower(context, &x.true_side, budget, changed, keep_reset, written)?;
-                    x.false_side =
-                        lower(context, &x.false_side, budget, changed, keep_reset, written)?;
+                    x.true_side = lower(
+                        context,
+                        &x.true_side,
+                        budget,
+                        changed,
+                        keep_reset,
+                        lets,
+                        written,
+                    )?;
+                    x.false_side = lower(
+                        context,
+                        &x.false_side,
+                        budget,
+                        changed,
+                        keep_reset,
+                        lets,
+                        written,
+                    )?;
                 }
                 Statement::IfReset(x) => {
                     if !keep_reset {
-                        x.true_side =
-                            lower(context, &x.true_side, budget, changed, keep_reset, written)?;
+                        x.true_side = lower(
+                            context,
+                            &x.true_side,
+                            budget,
+                            changed,
+                            keep_reset,
+                            lets,
+                            written,
+                        )?;
                     }
-                    x.false_side =
-                        lower(context, &x.false_side, budget, changed, keep_reset, written)?;
+                    x.false_side = lower(
+                        context,
+                        &x.false_side,
+                        budget,
+                        changed,
+                        keep_reset,
+                        lets,
+                        written,
+                    )?;
                 }
                 Statement::Case(x) => {
                     for arm in &mut x.arms {
-                        arm.body = lower(context, &arm.body, budget, changed, keep_reset, written)?;
+                        arm.body = lower(
+                            context, &arm.body, budget, changed, keep_reset, lets, written,
+                        )?;
                     }
-                    x.default = lower(context, &x.default, budget, changed, keep_reset, written)?;
+                    x.default = lower(
+                        context, &x.default, budget, changed, keep_reset, lets, written,
+                    )?;
                 }
                 _ => {}
             }
@@ -349,6 +404,7 @@ pub fn lower_constant_loop_body(
         &mut budget,
         &mut expanded,
         keep_reset,
+        lets,
         &written,
     ) && expanded
     {
@@ -842,6 +898,55 @@ pub(crate) fn specialize_iteration(
     Some(body)
 }
 
+/// As [`specialize_iteration`], and reads each `let` the body declares with
+/// a constant as that constant in the statements after it.  A `let` is
+/// written by its declaration alone, so nothing between changes it.  A
+/// statement the extra constants cannot be substituted into keeps only the
+/// iterator.
+fn specialize_iteration_with_lets(
+    context: &mut Context,
+    statement: &ir::ForStatement,
+    iteration: usize,
+) -> Option<Vec<Statement>> {
+    let width = statement.var_type.total_width()?;
+    let mut subs = vec![(
+        statement.var_id,
+        Value::new(iteration as u64, width, statement.var_type.signed),
+    )];
+    let mut body = statement.body.clone();
+    for stmt in &mut body {
+        let original = stmt.clone();
+        let mut subst = Subst {
+            context,
+            subs: &subs,
+            analysis: true,
+        };
+        if subst.stmts(std::slice::from_mut(stmt)).is_none() {
+            *stmt = original;
+            Subst {
+                context,
+                subs: &subs[..1],
+                analysis: true,
+            }
+            .stmts(std::slice::from_mut(stmt))?;
+        }
+        if let Statement::Assign(x) = stmt
+            && let [dst] = x.dst.as_slice()
+            && context
+                .variables
+                .get(&dst.id)
+                .is_some_and(|v| v.kind == VarKind::Let)
+            && !subs.iter().any(|(id, _)| *id == dst.id)
+            && let Some((id, value)) = assigned_value(context, &KnownValues::default(), x)
+        {
+            let var = context.variables.get(&id)?;
+            let width = var.r#type.total_width()?;
+            subs.push((id, Value::new(value, width, var.r#type.signed)));
+        }
+    }
+    Some(body)
+}
+
 /// Reads each iterator of the loops being peeled as its constant, as an
 /// ordinary unrolled loop has them, keeping the read's type and context, and
 /// folds each index and select made only of constants. A constant index or
@@ -1027,6 +1132,7 @@ impl<'a> Subst<'a> {
         value.set_signed(comptime.r#type.signed);
         let mut comptime = comptime.clone();
         comptime.value = ValueVariant::Numeric(value);
+        comptime.runtime_dependent |= !comptime.is_const;
         comptime.is_const = true;
         Some(Factor::Value(comptime))
     }
@@ -1045,7 +1151,7 @@ impl<'a> Subst<'a> {
     /// `expr` as a constant when it reads nothing but parameters and
     /// constants and evaluates free of X and Z, as conversion folds an index
     /// of an unrolled loop.
-    fn folded(&mut self, expr: &Expression) -> Option<Expression> {
+    fn folded(&mut self, expr: &mut Expression) -> Option<Expression> {
         if !reads_only_constants(self.context, expr)
             || matches!(expr, Expression::Term(x) if matches!(x.as_ref(), Factor::Value(_)))
         {
@@ -1057,6 +1163,7 @@ impl<'a> Subst<'a> {
         }
         let mut comptime = expr.comptime().clone();
         comptime.value = ValueVariant::Numeric(value);
+        comptime.runtime_dependent |= !expr.eval_elaboration_const(self.context);
         comptime.is_const = true;
         Some(Expression::Term(Box::new(Factor::Value(comptime))))
     }
@@ -1182,7 +1289,10 @@ impl<'a> Subst<'a> {
             },
             Factor::FunctionCall(call) if self.analysis => self.call(call),
             Factor::FunctionCall(_) => None,
-            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => Some(()),
+            Factor::Value(_)
+            | Factor::ResetValue(..)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => Some(()),
         }
     }
 
@@ -1656,7 +1766,9 @@ fn factor_has_call(factor: &Factor) -> bool {
             // free.
             _ => !x.comptime.is_const,
         },
-        Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => false,
+        Factor::Value(_) | Factor::ResetValue(..) | Factor::Anonymous(_) | Factor::Unknown(_) => {
+            false
+        }
     }
 }
 
@@ -1956,7 +2068,10 @@ fn expr_reads(expr: &Expression, f: &mut impl FnMut(VarId)) {
             Factor::HierVariable(x) => selector_reads(&x.index, &x.select, f),
             Factor::FunctionCall(x) => call_reads(x, f),
             Factor::SystemFunctionCall(x) => system_reads(x, f),
-            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => {}
+            Factor::Value(_)
+            | Factor::ResetValue(..)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => {}
         },
         Expression::Unary(_, x, _) => expr_reads(x, f),
         Expression::Binary(x, _, y, _) => {

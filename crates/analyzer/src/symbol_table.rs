@@ -1,6 +1,7 @@
 mod connect;
 mod r#enum;
 mod function;
+mod modport;
 mod msb;
 
 use crate::analyzer_error::DuplicatedIdentifierKind;
@@ -142,9 +143,14 @@ struct LookupCandidate {
 /// Resolves the candidates gathered within one scope (one precedence tier).
 /// Ambiguous when two distinct definition sites could be active together;
 /// otherwise picks the deepest binding (last wins ties) among generic clones
-/// and ifdef variants. When `prefer_container` (a non-final path segment), a
-/// container outranks a deeper same-named leaf.
-fn resolve_tier(candidates: &[LookupCandidate], prefer_container: bool) -> LexicalLookup {
+/// and ifdef variants, preferring the ifdef variant enabled by `defines`. When
+/// `prefer_container` (a non-final path segment), a container outranks a
+/// deeper same-named leaf.
+fn resolve_tier(
+    candidates: &[LookupCandidate],
+    prefer_container: bool,
+    defines: &HashSet<StrId>,
+) -> LexicalLookup {
     let mut distinct: Vec<&LookupCandidate> = Vec::new();
     for candidate in candidates {
         if !distinct.iter().any(|x| x.site == candidate.site) {
@@ -161,7 +167,13 @@ fn resolve_tier(candidates: &[LookupCandidate], prefer_container: bool) -> Lexic
         return LexicalLookup::Ambiguous;
     }
 
-    let rank = |c: &LookupCandidate| (prefer_container && c.can_have_member, c.depth);
+    let rank = |c: &LookupCandidate| {
+        (
+            prefer_container && c.can_have_member,
+            c.define_context.is_active(defines),
+            c.depth,
+        )
+    };
     let mut best = &candidates[0];
     for candidate in &candidates[1..] {
         if rank(candidate) >= rank(best) {
@@ -205,6 +217,8 @@ pub struct SymbolTable {
     sv_shadows: Vec<Symbol>,
     suppress_cache_clear: bool,
     skip_generic_args: bool,
+    /// Defines that select among mutually exclusive ifdef variants of a name.
+    defines: HashSet<StrId>,
 }
 
 impl SymbolTable {
@@ -908,7 +922,7 @@ impl SymbolTable {
             candidates.extend(scope::locals_get(inner, name));
         }
 
-        let mut max_depth = 0;
+        let mut max_rank = (false, 0);
         let mut found = None;
         for id in candidates {
             let Some(symbol) = self.symbol_table.get(&id) else {
@@ -919,9 +933,13 @@ impl SymbolTable {
                     && !context
                         .define_context
                         .exclusive(&symbol.namespace.define_context));
-            if matched && symbol.namespace.depth() >= max_depth {
+            let rank = (
+                symbol.namespace.define_context.is_active(&self.defines),
+                symbol.namespace.depth(),
+            );
+            if matched && rank >= max_rank {
                 found = Some(symbol);
-                max_depth = symbol.namespace.depth();
+                max_rank = rank;
             }
         }
 
@@ -1007,7 +1025,7 @@ impl SymbolTable {
             }
             if !tier.is_empty()
                 && let Some(result) = self.container_or_stash(
-                    resolve_tier(&tier, prefer_container),
+                    resolve_tier(&tier, prefer_container, &self.defines),
                     prefer_container,
                     &mut fallback,
                 )
@@ -1035,7 +1053,7 @@ impl SymbolTable {
             }
             if !tier.is_empty()
                 && let Some(result) = self.container_or_stash(
-                    resolve_tier(&tier, prefer_container),
+                    resolve_tier(&tier, prefer_container, &self.defines),
                     prefer_container,
                     &mut fallback,
                 )
@@ -1063,7 +1081,7 @@ impl SymbolTable {
             }
             if !tier.is_empty()
                 && let Some(result) = self.container_or_stash(
-                    resolve_tier(&tier, prefer_container),
+                    resolve_tier(&tier, prefer_container, &self.defines),
                     prefer_container,
                     &mut fallback,
                 )
@@ -1687,6 +1705,14 @@ impl SymbolTable {
         ret
     }
 
+    pub fn get_generic_instance_owners(&self) -> Vec<Symbol> {
+        self.symbol_table
+            .values()
+            .filter(|x| !x.generic_instances.is_empty())
+            .map(|x| (**x).clone())
+            .collect()
+    }
+
     pub fn get_all(&self) -> Vec<Symbol> {
         let mut ret = Vec::new();
         for symbol in self.symbol_table.values() {
@@ -2080,6 +2106,7 @@ impl SymbolTable {
             self.link_modport_members(*modport, &members);
         }
         self.link_modports(if_symbol, &members, &modports, errors);
+        self.check_modport_function(&modports, errors);
     }
 
     fn collect_interface_members(
@@ -2261,7 +2288,13 @@ impl SymbolTable {
         modports: &Vec<SymbolId>,
         errors: &mut Vec<AnalyzerError>,
     ) {
+        let mut visited = HashSet::default();
+        let mut ordered = Vec::new();
         for mp_id in modports {
+            self.order_modport(*mp_id, members, modports, &mut visited, &mut ordered);
+        }
+
+        for mp_id in &ordered {
             if let Some(mut mp_symbol) = self.get(*mp_id)
                 && let SymbolKind::Modport(mp) = &mp_symbol.kind
             {
@@ -2297,6 +2330,37 @@ impl SymbolTable {
                 self.update(mp_symbol);
             }
         }
+    }
+
+    /// Puts the `..same`/`..converse` targets of a modport before it, so their
+    /// own default members are generated by the time it copies them.
+    fn order_modport(
+        &self,
+        mp_id: SymbolId,
+        members: &HashMap<StrId, SymbolId>,
+        modports: &[SymbolId],
+        visited: &mut HashSet<SymbolId>,
+        ordered: &mut Vec<SymbolId>,
+    ) {
+        if !visited.insert(mp_id) {
+            return;
+        }
+
+        if let Some(mp_symbol) = self.get(mp_id)
+            && let SymbolKind::Modport(mp) = &mp_symbol.kind
+            && let Some(ModportDefault::Same(targets) | ModportDefault::Converse(targets)) =
+                &mp.default
+        {
+            for target in targets {
+                if let Some(target_id) = members.get(&target.text)
+                    && modports.contains(target_id)
+                {
+                    self.order_modport(*target_id, members, modports, visited, ordered);
+                }
+            }
+        }
+
+        ordered.push(mp_id);
     }
 
     /// The declaration a modport member takes its guard from, if any. Resolves
@@ -3439,6 +3503,10 @@ pub fn get_namespace_symbol(namespace: &Namespace) -> Option<Symbol> {
     }
 }
 
+pub fn get_generic_instance_owners() -> Vec<Symbol> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_generic_instance_owners())
+}
+
 pub fn get_all() -> Vec<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get_all())
 }
@@ -3522,9 +3590,9 @@ pub fn resolve_user_defined() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
 }
 
-pub fn resolve_function() {
+pub fn resolve_function() -> Vec<AnalyzerError> {
     let list = SYMBOL_TABLE.with(|f| f.borrow().get_function_symbols());
-    function::resolve_function(&list);
+    function::resolve_function(&list)
 }
 
 pub fn resolve_enum() -> Vec<AnalyzerError> {
@@ -3572,6 +3640,21 @@ pub fn restore_fragment(fragment: SymbolTableFragment) -> Result<(), Box<Symbol>
     let ret = SYMBOL_TABLE.with(|f| f.borrow_mut().restore_fragment(fragment));
     clear_resolve_caches();
     ret
+}
+
+/// Sets the defines that pick the active variant of an ifdef-ed declaration.
+pub fn set_defines(defines: &HashSet<StrId>) {
+    let changed = SYMBOL_TABLE.with(|f| {
+        let mut table = f.borrow_mut();
+        let changed = table.defines != *defines;
+        if changed {
+            table.defines = defines.clone();
+        }
+        changed
+    });
+    if changed {
+        clear_resolve_caches();
+    }
 }
 
 pub fn clear() {

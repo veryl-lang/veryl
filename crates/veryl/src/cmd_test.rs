@@ -343,6 +343,7 @@ impl CmdTest {
         let mut config = Config {
             use_jit,
             disable_ff_opt: self.opt.disable_ff_opt,
+            allow_multi_pass: self.opt.allow_multi_pass,
             aot_c,
             aot_c_event: aot_c,
             aot_c_async: aot_c && !validate,
@@ -378,11 +379,13 @@ impl CmdTest {
                 "--backend cc: {}; falling back to the Cranelift JIT backend",
                 static_build_reason()
             );
+            config.fall_back_to_cranelift();
         } else if config.aot_c && !veryl_simulator::backend::aot_c::cc_available() {
             warn!(
                 "--backend cc: no C compiler found (set VERYL_AOT_CC, or install cc/gcc); \
                  falling back to the Cranelift JIT backend"
             );
+            config.fall_back_to_cranelift();
         }
         check_format_version(self.opt.format, self.opt.format_version)?;
         let json = matches!(self.opt.format, Format::Json);

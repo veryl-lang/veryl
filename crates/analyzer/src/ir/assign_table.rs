@@ -1,7 +1,6 @@
 use crate::HashSet;
 use crate::conv::Context;
-use crate::conv::checker::portability::{allow_initial_assign, allow_multiple_assign};
-use crate::ir::{Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
+use crate::ir::{RegionWrite, Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
 use crate::symbol::Affiliation;
 use crate::{AnalyzerError, BigUint, HashMap};
 use std::borrow::Cow;
@@ -29,101 +28,56 @@ impl AssignContext {
     pub fn is_function(&self) -> bool {
         self == &AssignContext::Function
     }
-
-    pub fn is_system_verilog(&self) -> bool {
-        self == &AssignContext::SystemVerilog
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct AssignTableEntry {
     pub mask: Vec<BigUint>,
-    /// Const-index writes only; conflicts check this, not `mask`, since `maybe` is sticky.
-    pub definite_mask: Vec<BigUint>,
     pub path: VarPath,
     pub width: Option<usize>,
     pub array: Shape,
     pub affiliation: Affiliation,
-    pub maybe: bool,
-    /// Per array element: the bits a non-const index/select may have written.
-    pub dynamic_mask: Vec<BigUint>,
-    /// Per array element: set when a module-level declaration writes it.
-    pub process_write: Vec<bool>,
     pub tokens: Vec<TokenRange>,
 }
 
 impl AssignTableEntry {
+    /// `element` is the linear array index, or `None` if out of range.
     pub fn new(
         variable: &VariableInfo,
-        index: &[usize],
+        element: Option<usize>,
         mask: BigUint,
-        maybe: bool,
-        dynamic: bool,
         token: TokenRange,
     ) -> Self {
         let array = &variable.r#type.array;
         let mut masks = vec![];
-        let mut dynamics = vec![];
 
-        let index = array.calc_index(index);
         if let Some(array) = array.total() {
             for i in 0..array {
-                if index == Some(i) {
+                if element == Some(i) {
                     masks.push(mask.clone());
-                    dynamics.push(if dynamic { mask.clone() } else { 0u32.into() });
                 } else {
                     masks.push(0u32.into());
-                    dynamics.push(0u32.into());
                 }
             }
         }
 
-        let definite_mask: Vec<BigUint> = if maybe {
-            masks.iter().map(|_| BigUint::from(0u32)).collect()
-        } else {
-            masks.clone()
-        };
-        let elements = masks.len();
         Self {
             mask: masks,
-            definite_mask,
             path: variable.path.clone(),
             width: variable.total_width(),
             array: array.to_owned(),
             affiliation: variable.affiliation,
-            maybe,
-            process_write: vec![false; elements],
-            dynamic_mask: dynamics,
             tokens: vec![token],
         }
     }
 
-    pub fn add(
-        &mut self,
-        index: &[usize],
-        mask: &BigUint,
-        maybe: bool,
-        dynamic: bool,
-        token: TokenRange,
-    ) -> Option<Vec<TokenRange>> {
-        let i = self.array.calc_index(index)?;
+    pub fn add(&mut self, element: Option<usize>, mask: &BigUint, token: TokenRange) {
+        let Some(i) = element else {
+            return;
+        };
 
-        let fail = !maybe && &self.definite_mask[i] & mask != 0u32.into();
         self.mask[i] |= mask;
-        if !maybe {
-            self.definite_mask[i] |= mask;
-        }
-        if dynamic {
-            self.dynamic_mask[i] |= mask;
-        }
-        self.maybe |= maybe;
         self.tokens.push(token);
-
-        if fail {
-            Some(self.tokens.clone())
-        } else {
-            None
-        }
     }
 
     pub fn is_always(&self) -> bool {
@@ -136,16 +90,6 @@ impl AssignTableEntry {
     pub fn merge_by_or(&mut self, value: &AssignTableEntry) {
         for (i, val) in self.mask.iter_mut().enumerate() {
             *val |= &value.mask[i];
-        }
-        for (i, val) in self.definite_mask.iter_mut().enumerate() {
-            *val |= &value.definite_mask[i];
-        }
-        self.maybe |= value.maybe;
-        for (i, val) in self.dynamic_mask.iter_mut().enumerate() {
-            *val |= &value.dynamic_mask[i];
-        }
-        for (i, val) in self.process_write.iter_mut().enumerate() {
-            *val |= value.process_write[i];
         }
     }
 }
@@ -181,11 +125,11 @@ impl ReferencedEntry {
         }
     }
 
-    pub fn new_assign(index: &[usize], array: &ShapeRef, mask: &BigUint) -> Self {
+    pub fn new_assign(element: Option<usize>, array: &ShapeRef, mask: &BigUint) -> Self {
         let mut mask_ref = vec![];
         let mut mask_assign = vec![];
 
-        if let Some(index) = array.calc_index(index)
+        if let Some(index) = element
             && let Some(array) = array.total()
         {
             for i in 0..array {
@@ -213,8 +157,8 @@ impl ReferencedEntry {
         }
     }
 
-    pub fn add_assign(&mut self, index: &[usize], mask: &BigUint) {
-        if let Some(index) = self.array.calc_index(index)
+    pub fn add_assign(&mut self, element: Option<usize>, mask: &BigUint) {
+        if let Some(index) = element
             && let Some(x) = self.mask_assign.get_mut(index)
         {
             *x |= mask;
@@ -254,38 +198,52 @@ impl AssignTable {
         variable: &VariableInfo,
         index: Vec<usize>,
         mask: BigUint,
-        maybe: bool,
-        dynamic: bool,
         token: TokenRange,
-    ) -> (bool, Vec<TokenRange>) {
-        let mut ret = true;
-        let mut tokens = vec![];
-
+    ) {
         if variable.r#type.total_array().unwrap_or(0) > self.array_limit {
-            return (ret, tokens);
+            return;
         }
+        let element = variable.r#type.array.calc_index(&index);
+        self.insert_element(variable, element, mask, token);
+    }
 
+    /// The written region of a summarized write.
+    pub fn insert_region(&mut self, context: &Context, write: &RegionWrite) {
+        let Some(variable) = context.get_variable_info(write.id) else {
+            return;
+        };
+        let Some(total) = variable.r#type.total_array() else {
+            return;
+        };
+        if total > self.array_limit {
+            return;
+        }
+        let mask = write.packed.mask();
+        let end = write.array.end().unwrap_or(usize::MAX).min(total);
+        for element in write.array.start..end {
+            self.insert_element(&variable, Some(element), mask.clone(), write.token);
+        }
+    }
+
+    fn insert_element(
+        &mut self,
+        variable: &VariableInfo,
+        element: Option<usize>,
+        mask: BigUint,
+        token: TokenRange,
+    ) {
         let array = &variable.r#type.array;
 
         // add assign bit
         self.refernced
             .entry(variable.id)
-            .and_modify(|x| x.add_assign(&index, &mask))
-            .or_insert(ReferencedEntry::new_assign(&index, array, &mask));
+            .and_modify(|x| x.add_assign(element, &mask))
+            .or_insert_with(|| ReferencedEntry::new_assign(element, array, &mask));
 
         self.table
             .entry(variable.id)
-            .and_modify(|x| {
-                if let Some(x) = x.add(&index, &mask, maybe, dynamic, token) {
-                    ret = false;
-                    tokens = x;
-                }
-            })
-            .or_insert(AssignTableEntry::new(
-                variable, &index, mask, maybe, dynamic, token,
-            ));
-
-        (ret, tokens)
+            .and_modify(|x| x.add(element, &mask, token))
+            .or_insert_with(|| AssignTableEntry::new(variable, element, mask, token));
     }
 
     pub fn insert_reference(&mut self, variable: &Variable, index: Vec<usize>, mask: BigUint) {
@@ -313,77 +271,11 @@ impl AssignTable {
         }
     }
 
-    /// Initialization by the configuration bitstream is not a driving process,
-    /// so it must not conflict with what drives the variable at run time.
-    /// `mask` is kept, so the write still counts for the unassigned check.
-    pub fn exempt_initial_writes(&mut self, context: &Context) {
-        let zero = BigUint::from(0u32);
-        for (id, entry) in self.table.iter_mut() {
-            if !allow_initial_assign(context, *id) {
-                continue;
-            }
-            for x in entry.definite_mask.iter_mut() {
-                *x = zero.clone();
-            }
-            for x in entry.dynamic_mask.iter_mut() {
-                *x = zero.clone();
-            }
-        }
-    }
-
-    pub fn merge_by_or(
-        &mut self,
-        context: &mut Context,
-        value: &mut AssignTable,
-        check_conflict: bool,
-    ) {
-        self.merge_by_or_from(context, value, check_conflict, false);
-    }
-
-    /// True only at the module-level per-declaration merge, where each
-    /// declaration is a distinct process; false for intra-declaration and
-    /// function merges.
-    pub fn merge_by_or_from(
-        &mut self,
-        context: &mut Context,
-        value: &mut AssignTable,
-        check_conflict: bool,
-        process_level: bool,
-    ) {
+    pub fn merge_by_or(&mut self, value: &mut AssignTable) {
         for (key, mut val) in value.table.drain() {
-            // SV connects register maybe-only writes and may actually be
-            // reads, so they must not count as a driving process.
-            if process_level {
-                for i in 0..val.process_write.len() {
-                    if val.dynamic_mask[i] != 0u32.into() || val.definite_mask[i] != 0u32.into() {
-                        val.process_write[i] = true;
-                    }
-                }
-            }
             if let Some(x) = self.table.get_mut(&key) {
                 x.tokens.append(&mut val.tokens);
-
-                if let Some(array) = val.array.total() {
-                    for i in 0..array {
-                        // A dynamic write's position is unprovable, so it
-                        // conflicts with anything the other process writes in
-                        // the same range, which is invalid in SV.
-                        let multi_process = val.process_write[i] && x.process_write[i];
-                        let dynamic_overlap = &x.dynamic_mask[i] & &val.mask[i] != 0u32.into()
-                            || &val.dynamic_mask[i] & &x.mask[i] != 0u32.into();
-                        let definite_overlap =
-                            &x.definite_mask[i] & &val.definite_mask[i] != 0u32.into();
-                        if (multi_process && dynamic_overlap || definite_overlap)
-                            && check_conflict
-                            && !allow_multiple_assign(context, key)
-                        {
-                            context.insert_error(AnalyzerError::multiple_assignment(
-                                &x.path.to_string(),
-                                &x.tokens[0],
-                                &x.tokens,
-                            ));
-                        }
-                    }
+                if val.array.total().is_some() {
                     x.merge_by_or(&val);
                 }
             } else {
@@ -660,15 +552,12 @@ mod tests {
         let variable = VariableInfo::new(&variable);
 
         let mask = ValueBigUint::gen_mask_range(10, 1);
-        let ret = table.insert_assign(&variable, vec![], mask, false, false, TokenRange::default());
-        assert!(ret.0);
+        table.insert_assign(&variable, vec![], mask, TokenRange::default());
 
         let mask = ValueBigUint::gen_mask_range(20, 11);
-        let ret = table.insert_assign(&variable, vec![], mask, false, false, TokenRange::default());
-        assert!(ret.0);
+        table.insert_assign(&variable, vec![], mask, TokenRange::default());
 
-        let mask = ValueBigUint::gen_mask_range(14, 8);
-        let ret = table.insert_assign(&variable, vec![], mask, false, false, TokenRange::default());
-        assert!(!ret.0);
+        let entry = &table.table[&variable.id];
+        assert_eq!(entry.mask[0], ValueBigUint::gen_mask_range(20, 1));
     }
 }

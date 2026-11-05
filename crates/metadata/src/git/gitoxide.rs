@@ -180,9 +180,10 @@ impl Git {
                 index.entries().iter().map(|e| e.path(&index)).collect();
             for entry in old_index.entries() {
                 let path = entry.path(&old_index);
-                if !new_paths.contains(path) {
-                    let file_path = workdir.join(gix::path::from_bstr(path));
-                    let _ = std::fs::remove_file(&file_path);
+                if !new_paths.contains(path)
+                    && let Ok(rel_path) = gix::path::from_bstr(path)
+                {
+                    let _ = std::fs::remove_file(workdir.join(rel_path));
                 }
             }
         }

@@ -1337,23 +1337,26 @@ fn many_comb_declarations_build_the_module_context_once() {
 
 #[test]
 fn independent_assignments_only_check_referenced_source_visibility() {
-    for count in [64, 256, 1_024] {
-        for ty in [format!("logic<{count}>"), format!("logic [{count}]")] {
-            let mut code = format!("module Top (i: input {ty}, o: output {ty}) {{\n");
-            for index in 0..count {
-                code.push_str(&format!("assign o[{index}] = i[{index}];\n"));
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        for count in [64, 256, 1_024] {
+            for ty in [format!("logic<{count}>"), format!("logic [{count}]")] {
+                let mut code = format!("module Top (i: input {ty}, o: output {ty}) {{\n");
+                for index in 0..count {
+                    code.push_str(&format!("assign o[{index}] = i[{index}];\n"));
+                }
+                code.push_str("}\n");
+                crate::comb_loop_detect::reset_visible_source_probes();
+                assert!(analyze(&code).is_empty());
+                let probes = crate::comb_loop_detect::visible_source_probes();
+                assert!(
+                    (count..=count * 4).contains(&probes),
+                    "each declaration must inspect its own sources, not every module region: count={count}, probes={probes}"
+                );
+                assert!(comb_loop_analysis_is_complete(&code));
             }
-            code.push_str("}\n");
-            crate::comb_loop_detect::reset_visible_source_probes();
-            assert!(analyze(&code).is_empty());
-            let probes = crate::comb_loop_detect::visible_source_probes();
-            assert!(
-                (count..=count * 4).contains(&probes),
-                "each declaration must inspect its own sources, not every module region: count={count}, probes={probes}"
-            );
-            assert!(comb_loop_analysis_is_complete(&code));
         }
-    }
+    })
 }
 
 #[test]
@@ -1691,3 +1694,117 @@ fn comb_loop_generic_specializations_report_one_diagnostic() {
         .count();
     assert_eq!(loops, 1, "{errors:?}");
 }
+
+comb_loop_case!(
+    comb_loop_instance_outputs_reach_only_their_packed_elements,
+    "an instance output reaches only the packed element bound to it",
+    r#"
+    module Cell (a_di: input logic<8>, carry: output logic, sum_do: output logic<8>) {
+        var sum_ext: logic<9>;
+        assign sum_ext = {1'b0, a_di} + 9'd1;
+        assign carry   = sum_ext[8];
+        assign sum_do  = sum_ext[7:0];
+    }
+    module Top (i: input logic<8>, q: output logic<8>) {
+        var a : logic<3, 8>;
+        var s : logic<3, 8>;
+        var cy: logic<3>   ;
+        assign a[0] = i;
+        assign a[1] = {s[0][6:0], ~s[0][7]};
+        assign a[2] = {s[1][6:0], ~s[1][7]};
+        for k in 0..3 :g {
+            inst u: Cell (a_di: a[k], carry: cy[k], sum_do: s[k]);
+        }
+        assign q = s[2];
+    }
+    "#,
+    false
+);
+
+comb_loop_case!(
+    comb_loop_instance_output_element_feeds_its_own_input,
+    "an instance output feeding its own packed element is a loop",
+    r#"
+    module Cell (a_di: input logic<8>, sum_do: output logic<8>) {
+        assign sum_do = a_di + 8'd1;
+    }
+    module Top (i: input logic<8>, q: output logic<8>) {
+        var a: logic<3, 8>;
+        var s: logic<3, 8>;
+        assign a[0] = i;
+        assign a[1] = s[1];
+        assign a[2] = s[1];
+        for k in 0..3 :g {
+            inst u: Cell (a_di: a[k], sum_do: s[k]);
+        }
+        assign q = s[2];
+    }
+    "#,
+    true
+);
+
+const OUTPUT_GATED_BY_OUTPUT: &str = r#"
+    module Child (
+        a_i : input  logic<8>,
+        we_o: output logic   ,
+        d_o : output logic<8>,
+    ) {
+        assign we_o = a_i[0];
+        assign d_o  = if we_o ? a_i : 8'd0;
+    }
+"#;
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_member_is_not_a_loop,
+    "an output selected by another output of the same instance reads only that output's member",
+    format!(
+        r#"{OUTPUT_GATED_BY_OUTPUT}
+        module Top (a: input logic<8>, o: output logic<8>) {{
+            struct s_t {{ we: logic, data: logic<8> }}
+            var p: s_t;
+            inst u: Child (a_i: a, we_o: p.we, d_o: p.data);
+            assign o = p.data;
+        }}
+        "#
+    ),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_in_an_array_element_is_not_a_loop,
+    "an output selected by another output reads only that output's member of the element",
+    format!(
+        r#"{OUTPUT_GATED_BY_OUTPUT}
+        module Top (a: input logic<8>, o: output logic<8>) {{
+            struct s_t {{ we: logic, data: logic<8> }}
+            var p: s_t [2];
+            inst u: Child (a_i: a, we_o: p[1].we, d_o: p[1].data);
+            assign p[0] = 0;
+            assign o = p[1].data;
+        }}
+        "#
+    ),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_keeps_a_real_feedback,
+    "an output selected by another output still loops through the member that selects it",
+    r#"
+    module Child (
+        a_i : input  logic<8>,
+        we_o: output logic   ,
+        d_o : output logic<8>,
+    ) {
+        assign we_o = a_i[0];
+        assign d_o  = if we_o ? 8'd1 : 8'd0;
+    }
+    module Top (o: output logic<8>) {
+        struct s_t { we: logic, data: logic<8> }
+        var p: s_t;
+        inst u: Child (a_i: p.data, we_o: p.we, d_o: p.data);
+        assign o = p.data;
+    }
+    "#,
+    true
+);

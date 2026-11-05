@@ -4,6 +4,7 @@ pub mod component;
 pub mod file_table;
 pub mod ir;
 pub mod output_buffer;
+pub mod queue_table;
 pub mod random_table;
 pub mod residency;
 pub mod simulator;

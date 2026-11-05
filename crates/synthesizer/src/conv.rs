@@ -97,6 +97,7 @@ pub fn convert_module_with_library(
         &mut lowered.declarations,
         usize::MAX,
         false,
+        false,
     );
     for function in lowered.functions.values_mut() {
         for body in &mut function.functions {
@@ -104,6 +105,7 @@ pub fn convert_module_with_library(
                 &mut analyzer_context,
                 &mut body.statements,
                 usize::MAX,
+                false,
                 false,
             );
         }
@@ -213,6 +215,7 @@ pub(crate) struct VarSlot {
 
 pub(crate) struct PreFf {
     pub ff_indices: Vec<usize>,
+    pub nonblocking: bool,
 }
 
 /// Accumulates a RAM block's ports as the converter walks the writes/reads of
@@ -244,6 +247,7 @@ pub(crate) struct ConvContext {
     pub nets: Vec<NetInfo>,
     pub variables: HashMap<air::VarId, VarSlot>,
     pub ff_allocation: HashMap<air::VarId, PreFf>,
+    pub ff_snapshot_reads: bool,
     /// User functions, for inline expansion at call sites. Cloned (not borrowed)
     /// because the module borrow wouldn't survive recursive child conversion.
     pub functions: HashMap<air::VarId, Function>,
@@ -299,6 +303,7 @@ impl ConvContext {
             nets,
             variables: HashMap::new(),
             ff_allocation: HashMap::new(),
+            ff_snapshot_reads: false,
             functions,
             eval_ctx: veryl_analyzer::Context::default(),
             ram_vars: HashMap::new(),
@@ -642,7 +647,19 @@ impl ConvContext {
                         self.nets[q as usize].driver = NetDriver::FfQ(ff_idx);
                         ff_indices.push(ff_idx);
                     }
-                    self.ff_allocation.insert(vid, PreFf { ff_indices });
+                    let nonblocking = !matches!(
+                        module.variables[&vid].affiliation,
+                        veryl_analyzer::symbol::Affiliation::AlwaysFf
+                            | veryl_analyzer::symbol::Affiliation::StatementBlock
+                            | veryl_analyzer::symbol::Affiliation::Function
+                    );
+                    self.ff_allocation.insert(
+                        vid,
+                        PreFf {
+                            ff_indices,
+                            nonblocking,
+                        },
+                    );
                 }
             }
         }
@@ -735,7 +752,11 @@ impl ConvContext {
                         }
                     }
                 }
-                process_statements(self, &main_stmts, &mut current)?;
+                let previous_snapshot_reads = self.ff_snapshot_reads;
+                self.ff_snapshot_reads = true;
+                let result = process_statements(self, &main_stmts, &mut current);
+                self.ff_snapshot_reads = previous_snapshot_reads;
+                result?;
                 for (vid, nets) in current {
                     let pre = match self.ff_allocation.get(&vid) {
                         Some(p) => p.ff_indices.clone(),

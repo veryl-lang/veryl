@@ -191,6 +191,11 @@ fn resolve_stmt(
             crate::ir::statement::ProtoTbMethodKind::RandomSeed { value } => {
                 resolve_expr(value, context, children)?;
             }
+            crate::ir::statement::ProtoTbMethodKind::Queue { value, .. } => {
+                if let Some(v) = value {
+                    resolve_expr(v, context, children)?;
+                }
+            }
             crate::ir::statement::ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                 resolve_expr(min, context, children)?;
                 resolve_expr(max, context, children)?;
@@ -251,7 +256,7 @@ fn resolve_hier_assign(
     let dynamic_select = if need_dynamic_select {
         let width_shape = meta.r#type.width().clone();
         let kind_width = meta.r#type.kind.width().unwrap_or(1);
-        let mut sel = crate::ir::expression::build_dynamic_bit_select(
+        let mut sel = crate::ir::expression::build_dynamic_write_select(
             context,
             &width_shape,
             &hier.select,
@@ -408,7 +413,7 @@ pub(crate) fn resolve_expr(
             let dynamic_select = if need_dynamic_select {
                 let width_shape = meta.r#type.width().clone();
                 let kind_width = meta.r#type.kind.width().unwrap_or(1);
-                let mut sel = crate::ir::expression::build_dynamic_bit_select(
+                let mut sel = crate::ir::expression::build_dynamic_read_select(
                     context,
                     &width_shape,
                     &hier.select,

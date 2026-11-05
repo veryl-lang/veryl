@@ -18,6 +18,7 @@ use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::msb_table;
 use veryl_analyzer::namespace::{DefineContext, Namespace};
+use veryl_analyzer::reset_value_table;
 use veryl_analyzer::resolved_type_table;
 use veryl_analyzer::scope;
 use veryl_analyzer::symbol::Direction as SymDirection;
@@ -138,6 +139,19 @@ pub struct Emitter {
     // ----- Modport expansion -----------------------------------------------
     modport_connections_tables: Vec<ExpandModportConnectionsTable>,
     modport_ports_table: Option<ExpandedModportPortTable>,
+
+    // ----- Inline function expansion ---------------------------------------
+    inline_contexts: Vec<InlineContext>,
+}
+
+/// Context to emit the expression of an `#[inline]` function at its call site
+#[derive(Clone)]
+struct InlineContext {
+    /// The interface where the inlined function is declared
+    interface: Namespace,
+    /// The identifier referring to the interface at the call site like `a_if` of `a_if.f()`,
+    /// and the dot following it. `None` if called inside the interface.
+    prefix: Option<(ExpressionIdentifier, Dot)>,
 }
 
 impl Default for Emitter {
@@ -201,7 +215,24 @@ impl Default for Emitter {
 
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
+
+            inline_contexts: Vec::new(),
         }
+    }
+}
+
+// Variables local to a statement block or function are updated immediately,
+// so only the other targets of an always_ff assignment need a nonblocking one.
+fn is_nba_target<T: Into<SymbolPathNamespace>>(path: T) -> bool {
+    match symbol_table::resolve(path) {
+        Ok(symbol) => match &symbol.found.kind {
+            SymbolKind::Variable(x) => !matches!(
+                x.affiliation,
+                Affiliation::StatementBlock | Affiliation::Function
+            ),
+            _ => true,
+        },
+        Err(_) => true,
     }
 }
 
@@ -832,21 +863,36 @@ impl Emitter {
     }
 
     fn is_simple_case_statement(arg: &CaseStatement) -> bool {
+        let conditions = arg.case_statement_list.iter().filter_map(|x| {
+            if let CaseItemGroup::CaseCondition(x) = x.case_item.case_item_group.as_ref() {
+                Some(x.case_condition.as_ref())
+            } else {
+                None
+            }
+        });
+        Self::is_simple_case_conditions(conditions)
+    }
+
+    fn is_simple_case_expression(arg: &CaseExpression) -> bool {
+        let conditions = std::iter::once(arg.case_condition.as_ref()).chain(
+            arg.case_expression_list
+                .iter()
+                .map(|x| x.case_condition.as_ref()),
+        );
+        Self::is_simple_case_conditions(conditions)
+    }
+
+    fn is_simple_case_conditions<'a>(conditions: impl Iterator<Item = &'a CaseCondition>) -> bool {
         let mut context = Context::default();
 
-        for statement in &arg.case_statement_list {
-            if let CaseItemGroup::CaseCondition(case_item) =
-                statement.case_item.case_item_group.as_ref()
-            {
-                let condition = &case_item.case_condition;
-                if !Self::is_simple_case_condition(condition.range_item.as_ref(), &mut context) {
-                    return false;
-                }
+        for condition in conditions {
+            if !Self::is_simple_case_condition(condition.range_item.as_ref(), &mut context) {
+                return false;
+            }
 
-                for x in &condition.case_condition_list {
-                    if !Self::is_simple_case_condition(x.range_item.as_ref(), &mut context) {
-                        return false;
-                    }
+            for x in &condition.case_condition_list {
+                if !Self::is_simple_case_condition(x.range_item.as_ref(), &mut context) {
+                    return false;
                 }
             }
         }
@@ -971,13 +1017,19 @@ impl Emitter {
         }
     }
 
-    fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem) {
+    fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem, simple: bool) {
         if rhs.range.range_opt.is_some() && !self.build_opt.expand_inside_operation {
             self.str("(");
             self.expression(lhs);
             self.str(") inside {");
             self.range(&rhs.range);
             self.str("}");
+        } else if simple {
+            self.str("(");
+            self.expression(lhs);
+            self.str(") == (");
+            self.expression(&rhs.range.expression);
+            self.str(")");
         } else {
             self.inside_element_operation(lhs, rhs);
         }
@@ -1078,7 +1130,7 @@ impl Emitter {
                 self.space(1);
             }
             self.always_ff_reset(&x.always_ff_reset);
-        } else if self.always_ff_if_reset_exists(decl) {
+        } else if decl.has_if_reset() {
             self.always_ff_implicit_reset_event();
         }
         self.r_paren(&arg.r_paren);
@@ -1087,7 +1139,7 @@ impl Emitter {
     fn always_ff_implicit_event_list(&mut self, arg: &AlwaysFfDeclaration) {
         self.str("(");
         self.always_ff_implicit_clock_event();
-        if self.always_ff_if_reset_exists(arg) {
+        if arg.has_if_reset() {
             self.always_ff_implicit_reset_event();
         }
         self.str(")")
@@ -1121,16 +1173,21 @@ impl Emitter {
         }
     }
 
-    fn always_ff_if_reset_exists(&mut self, arg: &AlwaysFfDeclaration) -> bool {
-        if let Some(x) = arg.statement_block.statement_block_list.first() {
-            let x: Vec<_> = x.statement_block_group.as_ref().into();
-            if let Some(StatementBlockItem::Statement(x)) = x.first() {
-                matches!(*x.statement, Statement::IfResetStatement(_))
-            } else {
-                false
-            }
+    /// Value of a reset value literal according to the polarity of its counterpart
+    fn reset_value_text(&self, token: &VerylToken, is_active: bool) -> &'static str {
+        let reset_type = match reset_value_table::get(token.token.id).unwrap() {
+            TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
+            TypeKind::ResetAsyncLow => ResetType::AsyncLow,
+            TypeKind::ResetSyncHigh => ResetType::SyncHigh,
+            TypeKind::ResetSyncLow => ResetType::SyncLow,
+            TypeKind::Reset => self.build_opt.reset_type,
+            _ => unreachable!(),
+        };
+        let active_high = matches!(reset_type, ResetType::AsyncHigh | ResetType::SyncHigh);
+        if active_high == is_active {
+            "1'b1"
         } else {
-            false
+            "1'b0"
         }
     }
 
@@ -1270,6 +1327,21 @@ impl Emitter {
             }
             _ => (),
         }
+    }
+
+    /// Emits every attribute in `attrs` and returns how many of them were
+    /// actually pushed onto `self.attribute` (only `ifdef`/`ifndef`/`elsif`/
+    /// `else`/`test` push; others, like `allow`, do not). The caller must
+    /// close exactly that many via `attribute_end`, not `attrs.len()` --
+    /// otherwise a non-pushing attribute (e.g. `allow`) makes the closing
+    /// loop pop an unrelated entry left on the stack by an enclosing scope,
+    /// emitting a stray `` `endif`` in the wrong place.
+    fn emit_attributes<'a>(&mut self, attrs: impl IntoIterator<Item = &'a Attribute>) -> usize {
+        let before = self.attribute.len();
+        for x in attrs {
+            self.attribute(x);
+        }
+        self.attribute.len() - before
     }
 
     fn emit_inferred_type(&mut self, token_id: veryl_parser::resource_table::TokenId) {
@@ -1768,6 +1840,7 @@ impl Emitter {
 
     fn emit_flattened_select(&mut self, select: &[Box<Select>], array_size: &[Expression]) {
         let last_select = select.last().unwrap();
+        let last_index = select.len() - 1;
 
         for (i, x) in select.iter().enumerate() {
             if i == 0 {
@@ -1776,24 +1849,37 @@ impl Emitter {
                 self.token(&x.l_bracket.l_bracket_token.replace("+"));
             }
 
-            self.str("(");
-            self.expression(&x.expression);
-            self.str(")");
+            let inner = array_size.get(i + 1..).unwrap_or(&[]);
+            let select_operator = x
+                .select_opt
+                .as_ref()
+                .filter(|_| i == last_index)
+                .map(|y| (&*y.select_operator, &y.expression));
 
-            if (i + 1) < array_size.len() {
-                self.force_duplicated = true;
-                for x in array_size.iter().skip(i + 1) {
-                    self.str("*(");
-                    self.expression(x);
-                    self.str(")");
+            match select_operator {
+                Some((SelectOperator::MinusColon(_), width)) => {
+                    self.emit_flattened_index(inner, false, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")-(");
+                        s.expression(width);
+                        s.str(")+1");
+                    });
                 }
-                self.force_duplicated = false;
-            } else if let Some(ref y) = x.select_opt
-                && matches!(&*y.select_operator, SelectOperator::Step(_))
-            {
-                self.str("*(");
-                self.expression(&y.expression);
-                self.str(")");
+                Some((SelectOperator::Step(_), step)) => {
+                    self.str("(");
+                    self.expression(&x.expression);
+                    self.str(")*(");
+                    self.expression(step);
+                    self.str(")");
+                    self.emit_flattened_array_size(inner);
+                }
+                _ => {
+                    self.str("(");
+                    self.expression(&x.expression);
+                    self.str(")");
+                    self.emit_flattened_array_size(inner);
+                }
             }
         }
 
@@ -1810,59 +1896,101 @@ impl Emitter {
                 self.token(&x.l_bracket.l_bracket_token.replace("+"));
             }
 
-            if (i + 1) < select.len() || x.select_opt.is_none() {
-                if (i + 1) < select.len() {
-                    self.str("(");
-                    self.expression(&x.expression);
-                    self.str(")");
-                } else {
-                    self.str("((");
-                    self.expression(&x.expression);
-                    self.str(")+1)");
-                }
+            let inner = array_size.get(i + 1..).unwrap_or(&[]);
+            if i < last_index {
+                self.str("(");
+                self.expression(&x.expression);
+                self.str(")");
+                self.emit_flattened_array_size(inner);
+                continue;
+            }
 
-                for x in array_size.iter().skip(i + 1) {
-                    self.str("*(");
-                    self.expression(x);
-                    self.str(")");
-                }
+            let select_operator = x
+                .select_opt
+                .as_ref()
+                .map(|y| (&*y.select_operator, &y.expression));
 
-                if (i + 1) == select.len() {
+            match select_operator {
+                None => {
+                    self.emit_flattened_index(inner, true, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")");
+                    });
+                }
+                Some((SelectOperator::Colon(_), end)) => {
+                    self.emit_flattened_index(inner, true, |s| {
+                        s.str("(");
+                        s.expression(end);
+                        s.str(")");
+                    });
+                }
+                Some((SelectOperator::PlusColon(_), width)) => {
+                    self.emit_flattened_index(inner, false, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")+(");
+                        s.expression(width);
+                        s.str(")");
+                    });
                     self.str("-1");
                 }
-            } else if let Some(ref y) = x.select_opt {
-                match &*y.select_operator {
-                    SelectOperator::Colon(_) => {
-                        self.str("(");
-                        self.expression(&y.expression);
-                        self.str(")");
-                    }
-                    SelectOperator::PlusColon(_) => {
-                        self.str("(");
-                        self.expression(&x.expression);
-                        self.str(")+(");
-                        self.expression(&y.expression);
-                        self.str(")-1");
-                    }
-                    SelectOperator::MinusColon(_) => {
-                        self.str("(");
-                        self.expression(&x.expression);
-                        self.str(")-(");
-                        self.expression(&y.expression);
-                        self.str(")+1");
-                    }
-                    SelectOperator::Step(_) => {
-                        self.str("((");
-                        self.expression(&x.expression);
-                        self.str(")+1)*(");
-                        self.expression(&y.expression);
-                        self.str(")-1");
-                    }
+                Some((SelectOperator::MinusColon(_), _)) => {
+                    self.emit_flattened_index(inner, true, |s| {
+                        s.str("(");
+                        s.expression(&x.expression);
+                        s.str(")");
+                    });
+                }
+                Some((SelectOperator::Step(_), step)) => {
+                    self.str("((");
+                    self.expression(&x.expression);
+                    self.str(")+1)*(");
+                    self.expression(step);
+                    self.str(")");
+                    self.emit_flattened_array_size(inner);
+                    self.str("-1");
                 }
             }
         }
         self.force_duplicated = false;
         self.r_bracket(&last_select.r_bracket);
+    }
+
+    /// Emits the flattened index of the element at `index` in the outer dimension.
+    /// If `last` is true, the index points to the last element of the sub-array of the inner dimensions.
+    fn emit_flattened_index<F: FnOnce(&mut Self)>(
+        &mut self,
+        inner: &[Expression],
+        last: bool,
+        index: F,
+    ) {
+        if inner.is_empty() {
+            index(self);
+            return;
+        }
+
+        self.str("(");
+        index(self);
+        if last {
+            self.str("+1");
+        }
+        self.str(")");
+        self.emit_flattened_array_size(inner);
+        if last {
+            self.str("-1");
+        }
+    }
+
+    fn emit_flattened_array_size(&mut self, array_size: &[Expression]) {
+        let force_duplicated = self.force_duplicated;
+        self.force_duplicated = true;
+        for x in array_size {
+            self.str("*(");
+            self.expression(x);
+            self.str(")");
+        }
+        self.force_duplicated = force_duplicated;
     }
 
     fn emit_width(&mut self, exp: &Expression) {
@@ -2844,6 +2972,232 @@ impl Emitter {
         self.align_reset();
     }
 
+    fn get_inline_function(&self, identifier: &ExpressionIdentifier) -> Option<Rc<Symbol>> {
+        let symbol = if let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) {
+            symbol
+        } else {
+            symbol_table::resolve(identifier).ok()?
+        };
+        let symbol = match &symbol.found.kind {
+            SymbolKind::Function(_) => Rc::clone(&symbol.found),
+            SymbolKind::ModportFunctionMember(x) => Rc::new(symbol_table::get(x.function)?),
+            _ => return None,
+        };
+        attribute_table::contains(&symbol.token, Attr::Inline).then_some(symbol)
+    }
+
+    /// Returns the generic map of the interface referred by `identifier` like `a_if` of `a_if.f()`
+    fn get_inline_interface_map(&self, identifier: &ExpressionIdentifier) -> Option<GenericMap> {
+        let symbol = symbol_table::resolve(identifier).ok()?;
+        let mut path = match &symbol.found.kind {
+            SymbolKind::Port(x) => match &x.r#type.kind {
+                TypeKind::UserDefined(x) => x.path.clone(),
+                _ => return None,
+            },
+            SymbolKind::Instance(x) => x.type_name.clone(),
+            _ => return None,
+        };
+
+        while !path.paths.is_empty() {
+            let (Ok(found), _) = self.resolve_generic_path(&path, Some(&symbol.found.namespace))
+            else {
+                return None;
+            };
+            match &found.found.kind {
+                SymbolKind::Interface(_) => return Some(GenericMap::default()),
+                SymbolKind::GenericInstance(_) => return found.found.generic_maps().pop(),
+                // `a_if: modport InterfaceA::slave`
+                SymbolKind::Modport(_) => {
+                    path.paths.pop();
+                }
+                _ => return None,
+            }
+        }
+
+        None
+    }
+
+    /// Returns the generic map of the given interface which is currently emitted
+    fn get_current_interface_map(&self, interface: &Symbol) -> GenericMap {
+        // The map of the function being emitted may be pushed above the map of the interface
+        self.generic_map
+            .iter()
+            .rev()
+            .flatten()
+            .find(|x| {
+                x.id.and_then(symbol_table::get).is_some_and(
+                    |x| matches!(&x.kind, SymbolKind::GenericInstance(x) if x.base == interface.id),
+                )
+            })
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn inline_types_package_name(&mut self, interface: &Symbol, map: &GenericMap) -> String {
+        let name = if map.generic() {
+            let name = map.name(true, self.build_opt.hashed_mangled_name);
+            let name = if self.build_opt.omit_project_prefix {
+                let project_name = format!("{}_", self.project_name.unwrap());
+                name.strip_prefix(&project_name)
+                    .map(|x| x.to_string())
+                    .unwrap_or(name)
+            } else {
+                name
+            };
+            name.replace("$std_", "__std_")
+        } else {
+            let context: SymbolContext = self.into();
+            format!(
+                "{}__{}",
+                namespace_string(&interface.namespace, &GenericTables::default(), &context),
+                interface.token
+            )
+        };
+        format!("{name}__inline_types")
+    }
+
+    /// Emits the call of an `#[inline]` function as its expression.
+    /// Returns false if the given function is not an `#[inline]` function.
+    fn emit_inline_function_call(&mut self, identifier: &ExpressionIdentifier) -> bool {
+        let Some(function) = self.get_inline_function(identifier) else {
+            return false;
+        };
+        let Some(interface) = function.get_parent() else {
+            return false;
+        };
+        let Some(expression) = get_inline_expression(&function) else {
+            return false;
+        };
+
+        let (prefix, map) = if let Some(last) = identifier.expression_identifier_list0.last() {
+            let mut prefix = identifier.clone();
+            prefix.expression_identifier_list0.pop();
+            let Some(map) = self.get_inline_interface_map(&prefix) else {
+                return false;
+            };
+            (Some((prefix, *last.dot.clone())), Some(map))
+        } else if let Some(context) = self.inline_contexts.last() {
+            // nested call in an inlined expression
+            (context.prefix.clone(), None)
+        } else {
+            // call inside the interface
+            (None, None)
+        };
+
+        let current_map = map
+            .clone()
+            .unwrap_or_else(|| self.get_current_interface_map(&interface));
+        let package = self.inline_types_package_name(&interface, &current_map);
+        self.str(&format!("{package}::{}_ret_t'(", function.token));
+
+        let map_pushed = map.is_some();
+        if let Some(map) = map {
+            self.push_generic_map(map);
+        }
+
+        let src_line = self.src_line;
+        let emit_package_prefix = self.emit_package_prefix;
+        self.emit_package_prefix = true;
+        self.clear_adjust_line();
+        self.inline_contexts.push(InlineContext {
+            interface: interface.inner_namespace(),
+            prefix,
+        });
+
+        self.expression(&expression);
+
+        self.inline_contexts.pop();
+        self.src_line = src_line;
+        self.emit_package_prefix = emit_package_prefix;
+
+        if map_pushed {
+            self.pop_generic_map();
+        }
+
+        self.str(")");
+        true
+    }
+
+    /// Returns the identifier prefixed by the interface identifier of the call site
+    /// if `arg` refers to a member of the interface in an inlined expression.
+    fn get_inline_member_identifier(
+        &self,
+        arg: &ExpressionIdentifier,
+    ) -> Option<ExpressionIdentifier> {
+        let context = self.inline_contexts.last()?;
+        let (prefix, dot) = context.prefix.as_ref()?;
+
+        let symbol = symbol_table::resolve(arg.scoped_identifier.as_ref()).ok()?;
+        let is_member = matches!(
+            symbol.found.kind,
+            SymbolKind::Variable(_) | SymbolKind::Function(_)
+        ) && symbol.found.namespace.matched(&context.interface);
+        if !is_member {
+            return None;
+        }
+
+        let mut ret = prefix.clone();
+        ret.expression_identifier_list0
+            .push(ExpressionIdentifierList0 {
+                dot: Box::new(dot.clone()),
+                identifier: Box::new(Identifier {
+                    identifier_token: arg.identifier().clone(),
+                }),
+                expression_identifier_list0_list: arg
+                    .expression_identifier_list
+                    .iter()
+                    .map(|x| ExpressionIdentifierList0List {
+                        select: x.select.clone(),
+                    })
+                    .collect(),
+            });
+        ret.expression_identifier_list0
+            .extend(arg.expression_identifier_list0.iter().cloned());
+        Some(ret)
+    }
+
+    fn emit_inline_types_package(
+        &mut self,
+        arg: &InterfaceDeclaration,
+        interface: &Symbol,
+        map: &GenericMap,
+    ) {
+        let functions = collect_inline_functions(arg);
+        if functions.is_empty() {
+            return;
+        }
+
+        // Emit the blank line before the interface ahead of the package
+        self.consume_adjust_line(&arg.interface.interface_token.token);
+
+        let name = self.inline_types_package_name(interface, map);
+        self.str(&format!("package {name};"));
+        self.newline_push();
+
+        let src_line = self.src_line;
+        let emit_package_prefix = self.emit_package_prefix;
+        self.emit_package_prefix = true;
+        for (i, function) in functions.iter().enumerate() {
+            let Some(ret) = &function.function_declaration_opt1 else {
+                continue;
+            };
+            if i != 0 {
+                self.newline();
+            }
+            self.clear_adjust_line();
+            self.str("typedef ");
+            self.emit_scalar_type(&ret.scalar_type, false);
+            self.str(&format!(" {}_ret_t;", function.identifier.identifier_token));
+        }
+        self.src_line = src_line;
+        self.emit_package_prefix = emit_package_prefix;
+
+        self.newline_pop();
+        self.str("endpackage");
+        self.newline();
+        self.clear_adjust_line();
+    }
+
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let SymbolKind::Modport(x) = &symbol.found.kind {
@@ -3070,8 +3424,7 @@ impl Emitter {
 
                     if inst.affiliation_symbols.contains(&associated_component) {
                         true
-                    } else if is_global_func
-                        && let Some(associated_symbol) = symbol_table::get(associated_component)
+                    } else if let Some(associated_symbol) = symbol_table::get(associated_component)
                         && let SymbolKind::GenericInstance(associated_inst) = associated_symbol.kind
                     {
                         inst.affiliation_symbols.contains(&associated_inst.base)
@@ -3320,6 +3673,20 @@ impl VerylWalker for Emitter {
         self.token(&arg.msb_token.replace(&text));
     }
 
+    /// Semantic action for non-terminal 'ResetActive'
+    fn reset_active(&mut self, arg: &ResetActive) {
+        let token = &arg.reset_active_token;
+        let text = self.reset_value_text(token, true);
+        self.veryl_token(&token.replace(text));
+    }
+
+    /// Semantic action for non-terminal 'ResetInactive'
+    fn reset_inactive(&mut self, arg: &ResetInactive) {
+        let token = &arg.reset_inactive_token;
+        let text = self.reset_value_text(token, false);
+        self.veryl_token(&token.replace(text));
+    }
+
     /// Semantic action for non-terminal 'Param'
     fn param(&mut self, arg: &Param) {
         self.veryl_token(&arg.param_token.replace("parameter"));
@@ -3526,6 +3893,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
+        if let Some(x) = self.get_inline_member_identifier(arg) {
+            // The prefix is an identifier of the call site, so emit it outside the inline context
+            let context = self.inline_contexts.pop();
+            self.expression_identifier(&x);
+            self.inline_contexts.extend(context);
+            return;
+        }
+
         let mut expanded_modport = None;
         if let Some(table) = self.modport_ports_table.as_ref()
             && let Some(member_identifier) = arg.expression_identifier_list0.first()
@@ -3848,6 +4223,7 @@ impl VerylWalker for Emitter {
         match arg {
             Factor::Number(x) => self.number(&x.number),
             Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
+            Factor::ResetValueLiteral(x) => self.reset_value_literal(&x.reset_value_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
@@ -3930,8 +4306,10 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.identifier_factor_opt {
             match x.identifier_factor_opt_group.as_ref() {
                 IdentifierFactorOptGroup::FunctionCall(x) => {
-                    self.expression_identifier(&arg.expression_identifier);
-                    self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                    if !self.emit_inline_function_call(&arg.expression_identifier) {
+                        self.expression_identifier(&arg.expression_identifier);
+                        self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                    }
                 }
                 IdentifierFactorOptGroup::StructConstructor(x) => {
                     self.expression_identifier(&arg.expression_identifier);
@@ -4075,8 +4453,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'CaseExpression'
     fn case_expression(&mut self, arg: &CaseExpression) {
+        let simple = Self::is_simple_case_expression(arg);
         self.token(&arg.case.case_token.replace("(("));
-        self.case_expression_condition(&arg.expression, &arg.case_condition.range_item);
+        self.case_expression_condition(&arg.expression, &arg.case_condition.range_item, simple);
         self.str(") ? (");
         self.newline_push();
         self.expression(&arg.expression0);
@@ -4085,7 +4464,7 @@ impl VerylWalker for Emitter {
             self.token(&x.comma.comma_token.replace(")"));
             self.space(1);
             self.str(": (");
-            self.case_expression_condition(&arg.expression, &x.range_item);
+            self.case_expression_condition(&arg.expression, &x.range_item, simple);
             self.str(") ? (");
             self.newline_push();
             self.expression(&arg.expression0);
@@ -4095,7 +4474,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         for x in &arg.case_expression_list {
             self.str(": (");
-            self.case_expression_condition(&arg.expression, &x.case_condition.range_item);
+            self.case_expression_condition(&arg.expression, &x.case_condition.range_item, simple);
             self.str(") ? (");
             self.newline_push();
             self.expression(&x.expression);
@@ -4104,7 +4483,7 @@ impl VerylWalker for Emitter {
                 self.token(&y.comma.comma_token.replace(")"));
                 self.space(1);
                 self.str(": (");
-                self.case_expression_condition(&arg.expression, &y.range_item);
+                self.case_expression_condition(&arg.expression, &y.range_item, simple);
                 self.str(") ? (");
                 self.newline_push();
                 self.expression(&x.expression);
@@ -4381,6 +4760,16 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationAssignment'
     fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        let list = &arg.assign_concatenation_list;
+        let is_nba = self.in_always_ff
+            && std::iter::once(&*list.assign_concatenation_item)
+                .chain(
+                    list.assign_concatenation_list_list
+                        .iter()
+                        .map(|x| &*x.assign_concatenation_item),
+                )
+                .any(|item| is_nba_target(item.hierarchical_identifier.identifier.as_ref()));
+
         self.align_start(align_kind::IDENTIFIER);
         self.l_brace(&arg.l_brace);
         self.assign_concatenation_list(&arg.assign_concatenation_list);
@@ -4388,7 +4777,7 @@ impl VerylWalker for Emitter {
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.align_start(align_kind::ASSIGNMENT);
-        if self.in_always_ff {
+        if is_nba {
             self.str("<");
         }
         self.equ(&arg.equ);
@@ -4400,23 +4789,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
-        let is_nba = if !self.in_always_ff {
-            false
-        } else if let Some(lhs) = &self.assignment_lefthand_side {
-            if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
-                match &lhs_symbol.found.kind {
-                    SymbolKind::Variable(x) => !matches!(
-                        x.affiliation,
-                        Affiliation::StatementBlock | Affiliation::Function
-                    ),
-                    _ => true,
-                }
-            } else {
-                true
-            }
-        } else {
-            true
-        };
+        let is_nba = self.in_always_ff
+            && match &self.assignment_lefthand_side {
+                Some(lhs) => is_nba_target(lhs.scoped_identifier.as_ref()),
+                None => true,
+            };
 
         self.space(1);
         if is_nba {
@@ -5394,16 +5771,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModportGroup'
     fn modport_group(&mut self, arg: &ModportGroup) {
-        for x in &arg.modport_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.modport_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.modport_group_group {
             ModportGroupGroup::LBraceModportListRBrace(x) => {
                 self.modport_list(&x.modport_list);
             }
             ModportGroupGroup::ModportItem(x) => self.modport_item(&x.modport_item),
         }
-        for _ in &arg.modport_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5471,16 +5847,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumGroup'
     fn enum_group(&mut self, arg: &EnumGroup) {
-        for x in &arg.enum_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(arg.enum_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.enum_group_group {
             EnumGroupGroup::LBraceEnumListRBrace(x) => {
                 self.enum_list(&x.enum_list);
             }
             EnumGroupGroup::EnumItem(x) => self.enum_item(&x.enum_item),
         }
-        for _ in &arg.enum_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5600,9 +5974,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StructUnionGroup'
     fn struct_union_group(&mut self, arg: &StructUnionGroup) {
-        for x in &arg.struct_union_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.struct_union_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.struct_union_group_group {
             StructUnionGroupGroup::LBraceStructUnionListRBrace(x) => {
                 self.struct_union_list(&x.struct_union_list);
@@ -5611,7 +5987,7 @@ impl VerylWalker for Emitter {
                 self.struct_union_item(&x.struct_union_item)
             }
         }
-        for _ in &arg.struct_union_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5689,9 +6065,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstParameterGroup'
     fn inst_parameter_group(&mut self, arg: &InstParameterGroup) {
-        for x in &arg.inst_parameter_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.inst_parameter_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.inst_parameter_group_group {
             InstParameterGroupGroup::LBraceInstParameterListRBrace(x) => {
                 self.inst_parameter_list(&x.inst_parameter_list);
@@ -5700,7 +6078,7 @@ impl VerylWalker for Emitter {
                 self.inst_parameter_item(&x.inst_parameter_item)
             }
         }
-        for _ in &arg.inst_parameter_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5739,16 +6117,18 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstPortGroup'
     fn inst_port_group(&mut self, arg: &InstPortGroup) {
-        for x in &arg.inst_port_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.inst_port_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.inst_port_group_group {
             InstPortGroupGroup::LBraceInstPortListRBrace(x) => {
                 self.inst_port_list(&x.inst_port_list);
             }
             InstPortGroupGroup::InstPortItem(x) => self.inst_port_item(&x.inst_port_item),
         }
-        for _ in &arg.inst_port_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5849,9 +6229,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'WithParameterGroup'
     fn with_parameter_group(&mut self, arg: &WithParameterGroup) {
-        for x in &arg.with_parameter_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.with_parameter_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.with_parameter_group_group {
             WithParameterGroupGroup::LBraceWithParameterListRBrace(x) => {
                 self.with_parameter_list(&x.with_parameter_list);
@@ -5860,7 +6242,7 @@ impl VerylWalker for Emitter {
                 self.with_parameter_item(&x.with_parameter_item)
             }
         }
-        for _ in &arg.with_parameter_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5954,9 +6336,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PortDeclarationGroup'
     fn port_declaration_group(&mut self, arg: &PortDeclarationGroup) {
-        for x in &arg.port_declaration_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.port_declaration_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.port_declaration_group_group {
             PortDeclarationGroupGroup::LBracePortDeclarationListRBrace(x) => {
                 self.port_declaration_list(&x.port_declaration_list);
@@ -5965,7 +6349,7 @@ impl VerylWalker for Emitter {
                 self.port_declaration_item(&x.port_declaration_item)
             }
         }
-        for _ in &arg.port_declaration_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6311,9 +6695,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModuleGroup'
     fn module_group(&mut self, arg: &ModuleGroup) {
-        for x in &arg.module_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.module_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.module_group_group {
             ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(x) => {
                 for (i, x) in x.module_group_group_list.iter().enumerate() {
@@ -6325,7 +6708,7 @@ impl VerylWalker for Emitter {
             }
             ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
         }
-        for _ in &arg.module_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6341,6 +6724,7 @@ impl VerylWalker for Emitter {
             }
             self.push_generic_map(map.clone());
 
+            self.emit_inline_types_package(arg, &symbol.found, map);
             self.emit_generic_instance_name_comment(map);
             self.interface(&arg.interface);
             self.space(1);
@@ -6382,9 +6766,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InterfaceGroup'
     fn interface_group(&mut self, arg: &InterfaceGroup) {
-        for x in &arg.interface_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.interface_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.interface_group_group {
             InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
                 for (i, x) in x.interface_group_group_list.iter().enumerate() {
@@ -6396,7 +6782,7 @@ impl VerylWalker for Emitter {
             }
             InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
         }
-        for _ in &arg.interface_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6550,9 +6936,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'GenerateGroup'
     fn generate_group(&mut self, arg: &GenerateGroup) {
-        for x in &arg.generate_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.generate_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.generate_group_group {
             GenerateGroupGroup::LBraceGenerateGroupGroupListRBrace(x) => {
                 for (i, x) in x.generate_group_group_list.iter().enumerate() {
@@ -6564,7 +6949,7 @@ impl VerylWalker for Emitter {
             }
             GenerateGroupGroup::GenerateItem(x) => self.generate_item(&x.generate_item),
         }
-        for _ in &arg.generate_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6619,9 +7004,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PackageGroup'
     fn package_group(&mut self, arg: &PackageGroup) {
-        for x in &arg.package_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.package_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.package_group_group {
             PackageGroupGroup::LBracePackageGroupGroupListRBrace(x) => {
                 for (i, x) in x.package_group_group_list.iter().enumerate() {
@@ -6633,7 +7017,7 @@ impl VerylWalker for Emitter {
             }
             PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
         }
-        for _ in &arg.package_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6709,9 +7093,11 @@ impl VerylWalker for Emitter {
         if self.in_dependency && attribute::has_test_attribute(arg) {
             return;
         }
-        for x in &arg.description_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.description_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.description_group_group {
             DescriptionGroupGroup::LBraceDescriptionGroupGroupListRBrace(x) => {
                 for (i, x) in x.description_group_group_list.iter().enumerate() {
@@ -6723,7 +7109,7 @@ impl VerylWalker for Emitter {
             }
             DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
         }
-        for _ in &arg.description_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -7362,4 +7748,57 @@ fn estimated_token_width(tokens: &[Token]) -> u32 {
         total += gap;
     }
     total
+}
+
+fn get_inline_expression(function: &Symbol) -> Option<Expression> {
+    let SymbolKind::Function(x) = &function.kind else {
+        return None;
+    };
+    let definition = definition_table::get(x.definition?)?;
+    let Definition::Function(definition) = definition.as_ref() else {
+        return None;
+    };
+    let [item] = definition.statement_block.statement_block_list.as_slice() else {
+        return None;
+    };
+    if let StatementBlockGroupGroup::StatementBlockItem(x) = item
+        .statement_block_group
+        .statement_block_group_group
+        .as_ref()
+        && let StatementBlockItem::Statement(x) = x.statement_block_item.as_ref()
+        && let Statement::ReturnStatement(x) = x.statement.as_ref()
+    {
+        Some(*x.return_statement.expression.clone())
+    } else {
+        None
+    }
+}
+
+fn collect_inline_functions(arg: &InterfaceDeclaration) -> Vec<FunctionDeclaration> {
+    fn collect(group: &InterfaceGroup, ret: &mut Vec<FunctionDeclaration>) {
+        match group.interface_group_group.as_ref() {
+            InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
+                for x in &x.interface_group_group_list {
+                    collect(&x.interface_group, ret);
+                }
+            }
+            InterfaceGroupGroup::InterfaceItem(x) => {
+                if let InterfaceItem::GenerateItem(x) = x.interface_item.as_ref()
+                    && let GenerateItem::FunctionDeclaration(x) = x.generate_item.as_ref()
+                    && attribute_table::contains(
+                        &x.function_declaration.identifier.identifier_token.token,
+                        Attr::Inline,
+                    )
+                {
+                    ret.push(*x.function_declaration.clone());
+                }
+            }
+        }
+    }
+
+    let mut ret = Vec::new();
+    for x in &arg.interface_declaration_list {
+        collect(&x.interface_group, &mut ret);
+    }
+    ret
 }

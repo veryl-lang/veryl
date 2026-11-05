@@ -90,7 +90,47 @@ pub fn convert_cast(
             }
             _ => val,
         }
+    } else if match dst_kind {
+        TypeKind::Bit => true,
+        TypeKind::Struct(x) => x.is_2state(),
+        TypeKind::Union(x) => x.is_2state(),
+        TypeKind::Enum(x) => x.is_2state(),
+        _ => false,
+    } {
+        // IEEE 1800-2023 6.11.2 maps X/Z to zero for 2-state targets.
+        let mut val = val;
+        match &mut val {
+            Value::U64(x) => {
+                x.payload &= !x.mask_xz;
+                x.mask_xz = 0;
+            }
+            Value::BigUint(x) => {
+                *x.payload ^= &*x.payload & &*x.mask_xz;
+                *x.mask_xz = 0u32.into();
+            }
+        }
+        val
     } else {
         val
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integral_casts_to_two_state_clear_unknown_payload_and_mask() {
+        for width in [1, 4, 64, 65, 128, 129] {
+            let input = Value::new_z(width, true);
+            let output = convert_cast(input.clone(), &TypeKind::Logic, &TypeKind::Bit, width);
+            assert!(output.is_zero());
+            assert!(!output.is_xz());
+            assert_eq!((output.width(), output.signed()), (width, true));
+            assert_eq!(
+                convert_cast(input.clone(), &TypeKind::Logic, &TypeKind::Logic, width),
+                input
+            );
+        }
     }
 }

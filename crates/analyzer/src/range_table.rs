@@ -52,8 +52,12 @@ where
         if let TokenSource::File { path, .. } = token.source
             && let Some(values) = self.table.get(&path)
         {
+            // Token-start membership needs no character extent or string lookup.
+            let position = (token.line, token.column);
             for (range, value) in values {
-                if range.include(path, token.line, token.column) {
+                if (range.beg.line, range.beg.column) <= position
+                    && position <= (range.end.line, range.end.column)
+                {
                     ret.push(value.clone());
                 }
             }
@@ -129,5 +133,53 @@ where
         writeln!(f, "]")?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use veryl_parser::resource_table::StrId;
+
+    #[test]
+    fn membership_uses_token_positions_without_resolving_text() {
+        let path = PathId(7);
+        let token = |path, line, column| Token {
+            text: StrId(usize::MAX),
+            line,
+            column,
+            length: 1,
+            source: TokenSource::File {
+                path,
+                text: Default::default(),
+            },
+            ..Token::default()
+        };
+        let mut table = RangeTable::default();
+        table.insert(
+            TokenRange {
+                beg: token(path, 2, 3),
+                end: token(path, 4, 7),
+            },
+            17,
+        );
+        for (line, column, expected) in [
+            (1, 99, false),
+            (2, 2, false),
+            (2, 3, true),
+            (2, 8, true),
+            (3, 1, true),
+            (4, 6, true),
+            (4, 7, true),
+            (4, 8, false),
+            (5, 1, false),
+        ] {
+            assert_eq!(
+                table.contains(&token(path, line, column), &17),
+                expected,
+                "{line}:{column}"
+            );
+        }
+        assert!(!table.contains(&token(PathId(8), 3, 1), &17));
     }
 }

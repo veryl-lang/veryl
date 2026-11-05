@@ -90,6 +90,11 @@ pub fn get(id: TextId) -> Option<TextInfo> {
     TEXT_TABLE.with(|f| f.borrow().get(id))
 }
 
+/// The length of a text, without copying it as `get` does.
+pub fn text_len(id: TextId) -> Option<usize> {
+    TEXT_TABLE.with(|f| f.borrow().table.get(&id).map(|x| x.text.len()))
+}
+
 pub fn drop(id: PathId) {
     TEXT_TABLE.with(|f| f.borrow_mut().drop(id))
 }

@@ -1,0 +1,33 @@
+module Module97A (
+    i_rst_a: input reset_async_high,
+    i_rst_b: input reset_sync_low  ,
+    i_rst_c: input reset           ,
+) {}
+
+module Module97B (
+    i_rst: input  reset_async_high   ,
+    o_rst: output reset_sync_high    ,
+    o_a  : output logic           <2>,
+) {
+    struct StructA {
+        rst: reset_sync_low,
+    }
+
+    let a: reset   = reset_active;
+    var b: StructA;
+
+    assign b.rst = reset_inactive;
+
+    always_comb {
+        o_rst = reset_active;
+    }
+
+    assign o_a[0] = i_rst == reset_active;
+    assign o_a[1] = b.rst != reset_inactive;
+
+    inst u: Module97A (
+        i_rst_a: reset_active  ,
+        i_rst_b: reset_inactive,
+        i_rst_c: a             ,
+    );
+}

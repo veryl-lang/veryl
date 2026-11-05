@@ -19,10 +19,15 @@ def build_h_columuns(data_width, check_width)
     min_weight = candidates.map { |(_, weight)| weight }.min
     pool = candidates.select { |(_, weight)| weight == min_weight }
 
+    # Pick the column that puts its 1s on the rows with the fewest 1s so far.
+    # Evaluation criteria (smaller is better, in this order):
+    #   1. cost: the sum of the current 1 counts of the rows the column sets
+    #   2. v   : the column value, to make the choice deterministic
+    # This keeps the row counts (the XOR tree sizes) close to each other for any
+    # data width cut from the low side.
     best, _ = pool.min_by do |(v, _)|
-      after = row_bits.dup
-      check_width.times { |i| after[i] += v[i] }
-      [after.max, after.sum, v]
+      cost = row_bits.map.with_index { |count, i| v[i] == 1 ? count : 0 }.sum
+      [cost, v]
     end
 
     selected << best
@@ -92,9 +97,24 @@ def emit_encode_matrix(h_matrix, data_width, check_width)
   lines = []
   lines << "    // Coefficient matrix for check-bit generation."
   h_matrix.each_with_index do |row, i|
-    value = hex_literal(row >> check_width, data_width)
-    lines << "    const ENCODE_MATRIX_ROW_#{i}: bit<DATA_WIDTH> = #{value}; // check[#{i}]"
+    data_bits = row >> check_width
+    value = hex_literal(data_bits, data_width)
+    lines << "    const ENCODE_MATRIX_ROW_#{i}: bit<DATA_WIDTH> = #{value}; // check[#{i}] (#{popcount(data_bits)} ones)"
   end
+  lines.join("\n")
+end
+
+# Single-error syndrome of each code bit (the H columns), [CHECK_WIDTH-1:0]=check, upper=data.
+def emit_error_syndrome(h_matrix, data_width, check_width)
+  columns = data_column_values(h_matrix, data_width, check_width)
+  lines = []
+  lines << "    // Syndrome produced by a single-bit error at each code bit."
+  lines << "    const ERROR_SYNDROME: bit<CHECK_WIDTH> [CODE_WIDTH] = '{"
+  columns.each_with_index do |column_bits, i|
+    comment = i < check_width ? "check[#{i}]" : "data[#{i - check_width}]"
+    lines << "        #{hex_literal(column_bits, check_width)}, // #{comment}"
+  end
+  lines << "    };"
   lines.join("\n")
 end
 
@@ -141,25 +161,7 @@ def emit_syndrome
 end
 
 # Function that locates the error position and detects errors from the syndrome.
-def emit_decode(h_matrix, data_width, check_width)
-  columns = data_column_values(h_matrix, data_width, check_width)
-  code_width = data_width + check_width
-
-  # [condition, error position (one-hot), comment, corrected]
-  entries = []
-  entries << ["syndrome == #{hex_literal(0, check_width)}", 0, "no error", false]
-  columns.each_with_index do |column_bits, i|
-    condition, comment =
-      if i < check_width
-        ["syndrome == #{hex_literal(column_bits, check_width)}", "check[#{i}]"]
-      else
-        pos = i - check_width
-        w = pos + 1
-        ["syndrome == #{hex_literal(column_bits, check_width)} && width >= #{w}", "data[#{pos}]"]
-      end
-    entries << [condition, 1 << i, comment, true]
-  end
-
+def emit_decode
   lines = []
   lines << "    /// Determine the error position and flags (corrected/detected) from the syndrome."
   lines << "    /// A data-bit correction is honored only while its index is below the active width."
@@ -167,15 +169,18 @@ def emit_decode(h_matrix, data_width, check_width)
   lines << "        syndrome: input logic<CHECK_WIDTH>,"
   lines << "        width   : input u32               ,"
   lines << "    ) -> decode_result {"
-  lines << "        // Boolean-selector switch (SV: case (1'b1)); the syndrome values are mutually"
-  lines << "        // exclusive, so the branches stay parallel while sharing the width gate."
-  lines << "        // A data branch that fails its width guard falls through to default -> detected."
-  lines << "        switch {"
-  entries.each do |condition, error_pos, comment, corrected|
-    lines << "            #{condition}: return decode_result'{error_pos: #{hex_literal(error_pos, code_width)}, corrected: #{corrected}, detected: false}; // #{comment}"
-  end
-  lines << "            default: return decode_result'{error_pos: #{hex_literal(0, code_width)}, corrected: false, detected: true}; // undefined syndrome / out-of-range (multiple-bit error)"
+  lines << "        var result: decode_result;"
+  lines << ""
+  lines << "        // Each bit compares the syndrome with its own H column, so the comparisons are"
+  lines << "        // independent of each other. A non-zero syndrome that matches no column (including"
+  lines << "        // a data bit beyond the active width) leaves error_pos zero and is reported as detected."
+  lines << "        for i in 0..CODE_WIDTH {"
+  lines << "            result.error_pos[i] = syndrome == ERROR_SYNDROME[i] && i <: CHECK_WIDTH + width;"
   lines << "        }"
+  lines << ""
+  lines << "        result.corrected = result.error_pos != '0;"
+  lines << "        result.detected  = syndrome != '0 && !result.corrected;"
+  lines << "        return result;"
   lines << "    }"
   lines.join("\n")
 end
@@ -188,10 +193,11 @@ def build_veryl(h_matrix, data_width, check_width)
     header,
     emit_consts(data_width, check_width),
     emit_encode_matrix(h_matrix, data_width, check_width),
+    emit_error_syndrome(h_matrix, data_width, check_width),
     emit_struct,
     emit_encode(check_width),
     emit_syndrome,
-    emit_decode(h_matrix, data_width, check_width),
+    emit_decode,
   ]
 
   sections.join("\n\n") + "\n}\n"

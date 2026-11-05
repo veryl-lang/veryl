@@ -49,6 +49,14 @@ use veryl_parser::veryl_token::Token;
 
 impl Conv<&GenerateItem> for ir::DeclarationBlock {
     fn conv(context: &mut Context, value: &GenerateItem) -> IrResult<Self> {
+        // Not every declaration kind checks this itself: an inactive
+        // `always_ff` would otherwise keep its clock and reset without a body.
+        let range: TokenRange = value.into();
+        let define_context: DefineContext = range.beg.into();
+        if !define_context.is_active(&context.config.defines) {
+            return Ok(ir::DeclarationBlock::default());
+        }
+
         match value {
             GenerateItem::LetDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
                 context,
@@ -444,8 +452,16 @@ impl Conv<&WithParameterItem> for () {
 
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
 
-            // parameter default value
-            let expr = if context.is_affiliated(Affiliation::ProtoModule) {
+            let overridden = context
+                .get_override(&symbol.found.namespace, &path)
+                .cloned();
+
+            // The default is sized by the parameters as overridden, so a default
+            // that fits only the default shape must not be evaluated when unused.
+            let is_overridden = overridden.is_some();
+            let mut expr = if let Some(expr) = overridden {
+                expr
+            } else if context.is_affiliated(Affiliation::ProtoModule) {
                 let comptime = Comptime::create_unknown(token);
                 let expr = ir::Expression::Term(Box::new(ir::Factor::Unknown(comptime.clone())));
                 (comptime, expr)
@@ -461,12 +477,6 @@ impl Conv<&WithParameterItem> for () {
                 eval_expr(context, Some(r#type.clone()), expr, false)?
             };
 
-            // Get overridden parameter if it exists
-            let mut expr = context
-                .get_override(&symbol.found.namespace, &path)
-                .cloned()
-                .unwrap_or(expr);
-
             let dst = ir::AssignDestination {
                 id: VarId::default(),
                 path: path.clone(),
@@ -476,7 +486,7 @@ impl Conv<&WithParameterItem> for () {
                 token: variable_token,
             };
 
-            eval_const_assign(context, kind, &dst, &mut expr)?;
+            eval_const_assign(context, kind, &dst, &mut expr, is_overridden)?;
 
             Ok(())
         } else {
@@ -509,8 +519,42 @@ impl Conv<&PortDeclarationItem> for () {
                 _ => TypePosition::Variable,
             };
 
-            let r#type = x.r#type.to_ir_type(context, pos)?;
+            let mut r#type = x.r#type.to_ir_type(context, pos)?;
             let clock_domain = x.clock_domain;
+
+            // Generic interface ports acquire their member types from the
+            // actual connection. Register that signature for pass-through
+            // connections too, so each child is specialized independently.
+            if let ir::TypeKind::AbstractInterface(modport) = r#type.kind
+                && let Some(sig) = context.get_modport_signature(&value.identifier)
+            {
+                let component = get_component(context, &sig, token)?;
+                if let ir::Component::Interface(component) = component.as_ref() {
+                    context.insert_inst_signature(value.identifier.as_ref(), &sig);
+                    context.extract_interface_member(
+                        value.identifier.text(),
+                        &r#type.array,
+                        component.clone(),
+                        modport,
+                        clock_domain,
+                        variable_token,
+                    );
+                    if let Some(name) = modport {
+                        r#type.kind = ir::TypeKind::Modport(Arc::new(sig), name);
+                    } else {
+                        // Direction-free members remain references. What
+                        // the module writes through them is in its write
+                        // summary.
+                        for variable in context.variables.values_mut() {
+                            if variable.path.starts_with(&path.0)
+                                && variable.kind == VarKind::Variable
+                            {
+                                variable.kind = VarKind::Inout;
+                            }
+                        }
+                    }
+                }
+            }
 
             // Function args share the PortDeclarationItem grammar; skip here
             // so they don't shadow same-named module ports in port_types.
@@ -580,8 +624,17 @@ impl Conv<&PortDeclarationItem> for () {
                     return Ok(());
                 }
                 Direction::Interface => {
-                    if let ir::TypeKind::AbstractInterface(_) = &r#type.kind {
+                    if matches!(
+                        r#type.kind,
+                        ir::TypeKind::AbstractInterface(_) | ir::TypeKind::Modport(_, _)
+                    ) {
                         let path = VarPath::new(value.identifier.text());
+                        if matches!(r#type.kind, ir::TypeKind::AbstractInterface(None))
+                            && let Some(sig) = context.get_modport_signature(&value.identifier)
+                        {
+                            r#type.kind =
+                                ir::TypeKind::Instance(Arc::new(sig), InstanceKind::Interface);
+                        }
                         let comptime =
                             Comptime::from_type(r#type.clone(), clock_domain, variable_token);
                         context.insert_var_path(path.clone(), comptime);
@@ -723,15 +776,6 @@ impl Conv<&VarDeclaration> for ir::Declaration {
                 && let SymbolKind::TbComponent(c) = &ty_symbol.found.kind
             {
                 match &c.kind {
-                    TbComponentKind::File | TbComponentKind::Random => {
-                        // `file` handle and `random` generator are never assigned
-                        // (their state lives in the simulator), so suppress the
-                        // unassigned lint.
-                        attribute_table::insert(
-                            variable_token,
-                            Attribute::Allow(AllowItem::UnassignVariable),
-                        );
-                    }
                     TbComponentKind::External(component) => {
                         if !context.in_test_module {
                             context.insert_error(AnalyzerError::invalid_tb_usage(&token));
@@ -764,6 +808,15 @@ impl Conv<&VarDeclaration> for ir::Declaration {
                                 token,
                             },
                         )));
+                    }
+                    kind if kind.is_variable() => {
+                        // `file` handle, `random` generator and `queue` are never
+                        // assigned (their state lives in the simulator), so suppress
+                        // the unassigned lint.
+                        attribute_table::insert(
+                            variable_token,
+                            Attribute::Allow(AllowItem::UnassignVariable),
+                        );
                     }
                     _ => {}
                 }
@@ -893,7 +946,7 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
                 token: variable_token,
             };
 
-            eval_const_assign(context, kind, &dst, &mut (comptime, expr))?;
+            eval_const_assign(context, kind, &dst, &mut (comptime, expr), false)?;
 
             Ok(ir::Declaration::Null)
         } else {
@@ -1479,8 +1532,11 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 return Ok(ir::Declaration::Null);
             }
 
-            // `$tb::file` is declared with `var`, not `inst`.
-            if matches!(tb_prop.kind, TbComponentKind::File) {
+            if let TbComponentKind::External(component) = &tb_prop.kind {
+                return conv_external_component(context, value, *component);
+            }
+
+            if tb_prop.kind.is_variable() {
                 let token: TokenRange = value
                     .component_instantiation
                     .scoped_identifier
@@ -1488,10 +1544,6 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     .into();
                 context.insert_error(AnalyzerError::invalid_tb_usage(&token));
                 return Ok(ir::Declaration::Null);
-            }
-
-            if let TbComponentKind::External(component) = &tb_prop.kind {
-                return conv_external_component(context, value, *component);
             }
 
             // Generate clock/reset variable for $tb component instances
@@ -1506,10 +1558,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             let type_kind = match tb_prop.kind {
                 TbComponentKind::ClockGen => ir::TypeKind::Clock,
                 TbComponentKind::ResetGen => ir::TypeKind::Reset,
-                // `file`/`random` are `var`-form; external handled above.
-                TbComponentKind::File | TbComponentKind::Random | TbComponentKind::External(_) => {
-                    unreachable!()
-                }
+                // `var`-form components are rejected above.
+                _ => unreachable!(),
             };
             let ir_type = {
                 let mut t = ir::Type::new(type_kind);
@@ -1579,12 +1629,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             let type_name = match tb_prop.kind {
                                 TbComponentKind::ClockGen => "$tb::clock_gen",
                                 TbComponentKind::ResetGen => "$tb::reset_gen",
-                                // `file`/`random` are `var`-form; external handled above.
-                                TbComponentKind::File
-                                | TbComponentKind::Random
-                                | TbComponentKind::External(_) => {
-                                    unreachable!()
-                                }
+                                // `var`-form components are rejected above.
+                                _ => unreachable!(),
                             };
                             context.insert_error(AnalyzerError::unknown_tb_port(
                                 type_name,
@@ -1646,7 +1692,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         context.push_override(symbol.inner_namespace(), overridden_params);
         let modport_signatures = context.collect_modport_signatures(value);
 
-        // The interfaces connected to this instance's modport ports are part of
+        // The interfaces connected to this instance's interface ports are part of
         // the instantiated body (their parameters size its members), so they
         // must distinguish the instance cache entry.
         let mut modport_signatures: Vec<_> = modport_signatures.into_iter().collect();
@@ -1690,7 +1736,13 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             };
 
                             if let Some(actual) = connects.interface_binding {
-                                for (child, child_variable) in &component.interface_members {
+                                let references = component
+                                    .variables
+                                    .iter()
+                                    .filter(|(id, _)| component.is_direction_free_member(**id));
+                                for (child, child_variable) in
+                                    component.interface_members.iter().chain(references)
+                                {
                                     if !child_variable.path.starts_with(&path.0) {
                                         continue;
                                     }

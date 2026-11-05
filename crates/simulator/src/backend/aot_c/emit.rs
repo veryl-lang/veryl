@@ -7,6 +7,9 @@
 //! Uncovered constructs return `None` from the emitters and fall back
 //! to Cranelift (per-module for comb, per-event for events).
 
+#[path = "selection.rs"]
+mod selection;
+
 use crate::FuncPtr;
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
 use crate::ir::opt::event_gate::{
@@ -141,7 +144,7 @@ static inline int64_t vw_scmp_asym(const uint8_t* a,const uint8_t* b,uint32_t ap
 static inline void vw_shl(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
   unsigned n=VW_NW(nb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
-  for(unsigned i=n;i-->0;){ long si=(long)i-(long)ws;
+  for(unsigned i=n;i-->0;){ int64_t si=(int64_t)i-(int64_t)ws;
     uint64_t lo = si>=0 ? VW_RD(a,(unsigned)si) : 0;
     uint64_t hi = si>0 ? VW_RD(a,(unsigned)si-1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo<<bs)|(hi>>(64-bs))); } }
@@ -814,6 +817,10 @@ fn emit_wide_const(
 /// reduction, which produce a narrow register handled in `emit_expr_inner`).
 /// Returns `None` (→ module bails to Cranelift) for any uncovered shape.
 fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
+    if selection::handles(expr) {
+        return selection::read(expr, pre);
+    }
+
     match expr {
         ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
@@ -2099,16 +2106,11 @@ fn extend_scalar_operand(s: &str, src_width: usize, width: usize, signed: bool) 
 
 /// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
 /// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`
-/// (a C expression).  Each entry holds ≤56 bytes; larger values chunk.
+/// (a C expression), known to lie in FF bytes `span` (see
+/// `emit_log_push_in`).  Each entry holds ≤56 bytes; larger values chunk.
 /// Unchecked: the event prologue's bulk reserve guarantees room.
-/// Mirrors `event_write_log_push_wide` / `emit_wide_log_chunks`.
-fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
-    emit_wide_log_chunks_in(src_ptr, base_off, nb, None)
-}
-
-/// `emit_wide_log_chunks` for a runtime `base_off` known to lie in FF bytes
-/// `span` (see `emit_log_push_in`).
-fn emit_wide_log_chunks_in(
+/// Mirrors `event_write_log_push_wide` and Cranelift's `emit_wide_log_chunks`.
+fn emit_wide_log_chunks(
     src_ptr: &str,
     base_off: &str,
     nb: usize,
@@ -2128,7 +2130,7 @@ fn emit_wide_log_chunks_in(
         out.push_str(&format!(
             "{{ unsigned char* _lb = (unsigned char*)write_log; \
                 unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
-                unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
+                unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
                 *(unsigned int*)(_ls + {o_off}) = (unsigned int)(({base}) + {w}u); \
                 *(unsigned char*)(_ls + {o_nb}) = (unsigned char){chunk}u; \
                 __builtin_memcpy(_ls + {o_pay}, ({src}) + {w}u, {chunk}u); \
@@ -2147,6 +2149,45 @@ fn emit_wide_log_chunks_in(
         written += chunk;
     }
     out
+}
+
+/// Log bytes `[blo, blo + blen)` of an FF element of `ff_nb` bytes, read from
+/// `elem_ptr` and placed from FF byte `elem_off`.  An element up to 16 bytes
+/// goes to the narrow pool, as the interpreter and Cranelift log it: events of
+/// different backends can share a commit, and the commit applies the narrow
+/// pool before the wide one.  The narrow entries are the 8-byte words around
+/// the range, so `elem_ptr` must hold the pending value over those words.
+fn emit_ff_elem_log(
+    elem_ptr: &str,
+    elem_off: &str,
+    ff_nb: usize,
+    (blo, blen): (usize, usize),
+    span: Option<(u32, u32)>,
+) -> String {
+    let from = format!("(({elem_ptr}) + {blo}u)");
+    let at = offset_plus(elem_off, blo);
+    if ff_nb > 16 {
+        return emit_wide_log_chunks(&from, &at, blen, span);
+    }
+    let mut out = df_ff_wide_push_mark(&at, &from, blen, span);
+    for w in blo / 8..(blo + blen).div_ceil(8) {
+        out.push_str(&emit_log_entry(
+            &offset_plus(elem_off, w * 8),
+            &format!("*(const veryl_u64_ua *)(({elem_ptr}) + {}u)", w * 8),
+            8,
+        ));
+    }
+    out
+}
+
+/// `base + k` as a C offset, folded when `base` is a constant so that
+/// `df_ff_push_target` can place the push instead of marking every reader.
+fn offset_plus(base: &str, k: usize) -> String {
+    match parse_offset(base) {
+        Some(b) => format!("{:#x}", b as usize + k),
+        None if k == 0 => base.to_string(),
+        None => format!("(({base}) + {k}u)"),
+    }
 }
 
 /// Lazily-published compiled `.so`.  `None` while the background
@@ -2176,10 +2217,81 @@ fn set_event_mode(on: bool) {
     EVENT_MODE.with(|c| c.set(on));
 }
 
-/// Whether a wide FF write may leave the log unadvanced when the value it
-/// deposits is what its write slot already holds.  Wide only: a wide entry
-/// costs 64 bytes to push and to commit, a narrow one too little to be worth
-/// a compare at every write site.  Sound because the write slot carries the
+thread_local! {
+    /// Bodies of the event functions `outline_block` split off, in emit
+    /// order, so a callee always precedes its callers.
+    static OUTLINED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// Emitted `for` bodies enclosing the current statement: a block there may
+    /// `break` or read the loop's C index, so it must stay inline.
+    static FOR_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// A block smaller than this stays inline: splitting it saves the host
+/// compiler nothing.
+const OUTLINE_MIN_BYTES: usize = 512 * 1024;
+
+/// Join the emitted statements of one block, moving runs of them into
+/// separate event functions when the block is big.
+///
+/// An always_ff unrolled into a wide tree would otherwise be one C function
+/// past what the host compiler handles, or past [`max_stmt_bytes`].  The parts
+/// run in source order on the same buffers and FF stores go through the write
+/// log either way, so splitting does not change the result.  `pieces` pairs
+/// each statement's C with whether a part may end after it.
+fn outline_block(pieces: Vec<(String, bool)>) -> String {
+    let total: usize = pieces.iter().map(|(p, _)| p.len() + 1).sum();
+    let outline = event_mode()
+        && total >= OUTLINE_MIN_BYTES
+        && FOR_DEPTH.with(|d| d.get()) == 0
+        && std::env::var("VERYL_AOT_C_OUTLINE").as_deref() != Ok("0");
+    let mut out = String::new();
+    if !outline {
+        for (p, _) in pieces {
+            out.push_str(&p);
+            out.push(' ');
+        }
+        return out;
+    }
+    let mut cur = String::new();
+    let flush = |cur: &mut String, out: &mut String| {
+        if cur.is_empty() {
+            return;
+        }
+        let k = OUTLINED.with(|o| {
+            let mut o = o.borrow_mut();
+            o.push(std::mem::take(cur));
+            o.len() - 1
+        });
+        out.push_str(&format!("veryl_aot_ol{k}{ENTRY_ARGS}; "));
+    };
+    for (p, may_end) in pieces {
+        cur.push_str(&p);
+        cur.push(' ');
+        if may_end && cur.len() >= ENTRY_PART_BYTES {
+            flush(&mut cur, &mut out);
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
+
+/// The definitions of the functions [`outline_block`] split off.
+fn take_outlined() -> String {
+    let bodies = OUTLINED.with(|o| std::mem::take(&mut *o.borrow_mut()));
+    let mut out = String::new();
+    for (k, body) in bodies.iter().enumerate() {
+        out.push_str(&format!(
+            "static __attribute__((noinline)) void veryl_aot_ol{k}{ENTRY_SIG} {{\n{}}}\n\n",
+            df_local_marks(body)
+        ));
+    }
+    out
+}
+
+/// Whether a write to an FF wider than 8 bytes may leave the log unadvanced
+/// when the value it deposits is what its write slot already holds.  Not
+/// narrower FFs: their single entry costs too little to be worth a compare at
+/// every write site.  Sound because the write slot carries the
 /// pending value: a dual-slot FF's next slot accumulates the step's writes,
 /// and a packed FF's current slot is written once per event and changed only
 /// by the commit.  Off for reset events: they fire after the clock events of
@@ -2228,6 +2340,12 @@ fn emit_log_push_in(
     wc: usize,
     span: Option<(u32, u32)>,
 ) -> String {
+    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
+    format!("{mark}{}", emit_log_entry(offset_expr, payload_expr, wc))
+}
+
+/// The narrow entry push of `emit_log_push_in`, without its dataflow mark.
+fn emit_log_entry(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
     // Offsets shared with the Cranelift push via write_log.rs consts,
     // so a layout change can't silently desync this emitted C.
     use crate::ir::write_log::{
@@ -2236,11 +2354,10 @@ fn emit_log_push_in(
         WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
     };
     EVENT_NARROW_PUSHES.with(|c| c.set(c.get() + 1));
-    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
     format!(
-        "{mark}{{ unsigned char* _lb = (unsigned char*)write_log; \
+        "{{ unsigned char* _lb = (unsigned char*)write_log; \
             unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
-            unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
+            unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
             *(unsigned int*)(_ls + {o_off}) = (unsigned int)({off}); \
             *(unsigned short*)(_ls + {o_mask}) = 0; \
             *(unsigned short*)(_ls + {o_wc}) = (unsigned short){wc}u; \
@@ -2364,6 +2481,7 @@ pub fn event_uncovered_census(stmts: &[ProtoStatement]) -> Vec<String> {
     for s in stmts {
         collect_uncovered(s, &mut out);
     }
+    OUTLINED.with(|o| o.borrow_mut().clear());
     set_event_mode(prev);
     out
 }
@@ -2915,14 +3033,14 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 }
 
 /// Event-path WIDE FF write (static dst, `dst_width > 64`): materialize the
-/// masked RHS into a scratch and push it through the 64-byte WriteLogWideEntry
-/// pool (≤56-byte payload chunks).  Covers 65-128 bit (scalar promoted) and
-/// `>128` bit (helper-table value).  A static slice covering whole words
-/// reduces to the full-width form at a shifted offset: the commit is a plain
-/// byte-range copy, so a byte-exact subrange needs no read-modify-write
-/// against uncommitted state.  A slice that covers neither (`ff4232[1287:1196]`
-/// — 92-bit fields never land on a word boundary) goes through the general
-/// read-modify-write in `emit_event_ff_assign_wide_select`; a runtime index
+/// masked RHS into a scratch and log it (`emit_ff_elem_log`).  Covers 65-128
+/// bit (scalar promoted) and `>128` bit (helper-table value).  A static slice
+/// covering whole words reduces to the full-width form at a shifted offset:
+/// the commit is a plain byte-range copy, so a byte-exact subrange needs no
+/// read-modify-write against uncommitted state.  A slice that covers neither
+/// (`ff4232[1287:1196]`: 92-bit fields never land on a word boundary) goes
+/// through the general read-modify-write in
+/// `emit_event_ff_assign_wide_select`; a runtime index
 /// goes to the `_dynsel*` siblings.  rhs_select bails.  2-state only.
 fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
     // A sign-extended RHS is only expressible on the static-select path below;
@@ -3032,7 +3150,13 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -
     );
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb),
+        &emit_ff_elem_log(
+            &format!("(uint8_t*)_w{d}"),
+            &format!("{cur_off:#x}"),
+            native_bytes(a.dst_width),
+            (0, nb),
+            None,
+        ),
     );
     Some(format!("{{ {pre}{flag}{store}{push} }}"))
 }
@@ -3066,7 +3190,7 @@ fn emit_wide_ff_rmw_prologue(
 /// Shared tail for the wide-FF read-modify-write paths.  `span` is the byte
 /// range the write changed, `None` for the whole register; a narrowed span
 /// still composes, since entries apply in push order, last-write-wins per
-/// byte, and one FF's entries all share the wide pool.
+/// byte, and one FF's entries all share a pool.
 fn emit_wide_ff_rmw_tail(
     reg: &str,
     nb: usize,
@@ -3091,10 +3215,12 @@ fn emit_wide_ff_rmw_tail(
     }
     out.push_str(&guard_push(
         &flag,
-        &emit_wide_log_chunks(
-            &format!("((uint8_t*){reg} + {blo}u)"),
-            &format!("{:#x}", cur_off + blo as isize),
-            blen,
+        &emit_ff_elem_log(
+            &format!("(uint8_t*){reg}"),
+            &format!("{cur_off:#x}"),
+            nb,
+            (blo, blen),
+            None,
         ),
     ));
     out
@@ -3138,10 +3264,12 @@ fn emit_event_ff_assign_wide_field(
     // `emit_event_ff_assign_wide_select`.
     if !packed && hi < a.dst_width {
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
-        let log = emit_wide_log_chunks(
-            &format!("((uint8_t*)(ff_values + {dst_raw:#x}) + {blo}u)"),
-            &format!("{:#x}", cur_off + blo as isize),
-            blen,
+        let log = emit_ff_elem_log(
+            &format!("(uint8_t*)(ff_values + {dst_raw:#x})"),
+            &format!("{cur_off:#x}"),
+            nb,
+            (blo, blen),
+            None,
         );
         if let Some(store) =
             emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, Some(&log), |k| {
@@ -3283,11 +3411,7 @@ fn emit_event_ff_assign_wide_select(
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
         body.push_str(&guard_push(
             &flag,
-            &emit_wide_log_chunks(
-                &format!("({dst} + {blo}u)"),
-                &format!("{:#x}", cur_off + blo as isize),
-                blen,
-            ),
+            &emit_ff_elem_log(&dst, &format!("{cur_off:#x}"), nb, (blo, blen), None),
         ));
         return Some(format!("{{ {body} }}"));
     }
@@ -3548,10 +3672,11 @@ fn emit_event_ff_assign_wide_dynsel(
     );
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks_in(
+        &emit_ff_elem_log(
             &format!("(uint8_t*)_w{d}"),
             &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
-            nb,
+            native_bytes(a.dst_width),
+            (0, nb),
             u32::try_from(cur_off)
                 .ok()
                 .and_then(|lo| Some((lo, lo.checked_add(u32::try_from(ne * nb).ok()?)?))),
@@ -3566,6 +3691,9 @@ fn emit_event_ff_assign_wide_dynsel(
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
 /// canonical current offset.  2-state narrow packed FFs only.
 fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
+    if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+        return selection::assign(a);
+    }
     if a.dst_width == 0 {
         ev_diag("static FF: width=0");
         return None;
@@ -3710,6 +3838,9 @@ fn dyn_ff_span(a: &ProtoAssignDynamicStatement, cur_base: isize, nb: usize) -> O
 /// AssignDynamicStatement::eval_step: merge into the NEXT slot, since
 /// same-event prior writes must be visible, and push the merged element.
 fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<String> {
+    if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+        return selection::assign_dynamic(a);
+    }
     if let Some(ds) = &a.dynamic_select
         && (ds.elem_width == 0 || ds.window == 0 || ds.index_expr.width() > 64)
     {
@@ -3953,7 +4084,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
     let span = dyn_ff_span(a, cur_base, nb);
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks_in(&format!("(uint8_t*)_w{d}"), "_woff", nb, span),
+        &emit_ff_elem_log(&format!("(uint8_t*)_w{d}"), "_woff", nb, (0, nb), span),
     );
     let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
@@ -3981,6 +4112,8 @@ pub struct EmittedModule {
     /// A dataflow comb's whole-settle entry (`veryl_aot_eval_coarse`): every
     /// statement, no per-cell test.  Same ABI as `func`.
     pub coarse_func: Option<FuncPtr>,
+    /// `func` counting `[statements, calls]` through its log argument.
+    pub counted: Option<FuncPtr>,
     /// Keep-alive: dropping unloads the library and invalidates `func`.
     _lib: libloading::Library,
 }
@@ -4152,11 +4285,24 @@ pub fn prepare_event(
     skip_unchanged: bool,
     gates: &[EventGate],
 ) -> Option<(AotCell, bool, bool)> {
+    let input = event_input_key(stmts, skip_unchanged, gates);
+    match load_indexed_event(input) {
+        Some(IndexedEvent::Compiled(module, comb_marked, ff_marked)) => {
+            let cell = Arc::new(OnceLock::new());
+            let _ = cell.set(module);
+            return Some((cell, comb_marked, ff_marked));
+        }
+        Some(IndexedEvent::Declined) => return None,
+        None => {}
+    }
     DF_COVERED.with(|c| c.borrow_mut().clear());
     DF_FF_UNCOVERED.with(|c| c.set(false));
     DF_FF_UNCOVERED_WHY.with(|c| c.set([0; 2]));
     DF_LOCAL_WORDS.with(|n| n.set(0));
-    let src = emit_event_function(stmts, skip_unchanged, gates)?;
+    let Some(src) = emit_event_function(stmts, skip_unchanged, gates) else {
+        index_declined("event", input);
+        return None;
+    };
     #[cfg(test)]
     EVENT_SOURCES.with(|v| v.borrow_mut().push(src.clone()));
     let marks = DF_EVENT_MARKS.with(|m| m.borrow().clone());
@@ -4171,7 +4317,216 @@ pub fn prepare_event(
             why[0], why[1]
         );
     }
+    index_event(input, &src, comb_marked, ff_marked);
     Some((compile_or_spawn(src, async_mode), comb_marked, ff_marked))
+}
+
+/// Fingerprint of everything `emit_event_function` reads: the statements and
+/// gates, plus the emitter state of `hash_emitter_state`.  Equal fingerprints
+/// emit equal sources, so a source's `.so` can be found without emitting it.
+fn event_input_key(
+    stmts: &[ProtoStatement],
+    skip_unchanged: bool,
+    gates: &[EventGate],
+) -> Option<u128> {
+    use std::hash::{Hash, Hasher};
+    let mut h = crate::backend::registry::Fp128::new();
+    h.write(b"veryl_aot_event");
+    hash_emitter_state(&mut h, stmts)?;
+    stmts.hash(&mut h);
+    skip_unchanged.hash(&mut h);
+    for gate in gates {
+        (
+            gate.lo,
+            gate.hi,
+            gate.state_off,
+            &gate.compare,
+            &gate.out_comb,
+        )
+            .hash(&mut h);
+    }
+    Some(h.finish_128())
+}
+
+/// Fingerprint of everything `emit_dataflow_function` reads: the statements
+/// and the plan, plus the emitter state of `hash_emitter_state`.
+fn dataflow_input_key(
+    stmts: &[ProtoStatement],
+    plan: &crate::ir::opt::dataflow::DataflowPlan,
+) -> Option<u128> {
+    use std::hash::{Hash, Hasher};
+    let mut h = crate::backend::registry::Fp128::new();
+    h.write(b"veryl_aot_dataflow");
+    hash_emitter_state(&mut h, stmts)?;
+    event_mode().hash(&mut h);
+    stmts.hash(&mut h);
+    plan.hash(&mut h);
+    Some(h.finish_128())
+}
+
+/// What the statement emitter reads besides its arguments: the dataflow marks
+/// and localization the caller set on this thread, the `VERYL_` environment,
+/// the version and the running binary.  `None` when the inputs cannot be
+/// pinned: the binary is unknown, or `stmts` hold a compiled block, whose hash
+/// leaves out the statements the emitter inlines.
+fn hash_emitter_state(
+    h: &mut crate::backend::registry::Fp128,
+    stmts: &[ProtoStatement],
+) -> Option<()> {
+    use std::hash::Hash;
+    if crate::backend::cranelift::runtime::proto_contains_compiled_block(stmts) {
+        return None;
+    }
+    veryl_metadata::VERYL_VERSION.hash(h);
+    binary_identity()?.hash(h);
+    veryl_environment().hash(h);
+    DF_MARKS_FINGERPRINT.with(|x| x.get().hash(h));
+    LOCALIZE_FORCED_OFF.load(Ordering::Relaxed).hash(h);
+    localize_armed().hash(h);
+    let mut blocklist: Vec<isize> =
+        LOCALIZE_BLOCKLIST.with(|x| x.borrow().iter().copied().collect());
+    blocklist.sort_unstable();
+    blocklist.hash(h);
+    LOCALIZE_RANGES.with(|x| x.borrow().hash(h));
+    Some(())
+}
+
+/// The running binary, by size and modification time: a rebuild changes the
+/// emitter without changing any input above, and the version tells apart only
+/// builds that stamp `VERSION`.
+fn binary_identity() -> Option<(u64, std::time::SystemTime)> {
+    static ID: OnceLock<Option<(u64, std::time::SystemTime)>> = OnceLock::new();
+    *ID.get_or_init(|| {
+        let meta = fs::metadata(std::env::current_exe().ok()?).ok()?;
+        Some((meta.len(), meta.modified().ok()?))
+    })
+}
+
+/// The `VERYL_` variables, which switch emitter and compiler options.
+fn veryl_environment() -> &'static [(String, String)] {
+    static ENV: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    ENV.get_or_init(|| {
+        let mut vars: Vec<_> = std::env::vars()
+            .filter(|(k, _)| k.starts_with("VERYL_"))
+            .collect();
+        vars.sort();
+        vars
+    })
+}
+
+fn index_path(kind: &str, input: Option<u128>) -> Option<PathBuf> {
+    let input = input?;
+    #[cfg(test)]
+    if !TEST_AOT_INDEX.with(|x| x.get()) {
+        return None;
+    }
+    Some(
+        aot_c_cache_dir()
+            .ok()?
+            .join(format!("veryl_aot_{kind}_{input:032x}.idx")),
+    )
+}
+
+/// Records which `.so` the event source of `input` compiles to, with the
+/// dataflow flags its emission computed.
+fn index_event(input: Option<u128>, src: &str, comb_marked: bool, ff_marked: bool) {
+    let Some(path) = index_path("event", input) else {
+        return;
+    };
+    let (_, _, hash) = compile_key(src);
+    let _ = veryl_path::atomic_write(
+        &path,
+        format!("{hash} {} {}\n", comb_marked as u8, ff_marked as u8).as_bytes(),
+    );
+}
+
+/// Records that the emitter cannot cover the `kind` source of `input`.
+fn index_declined(kind: &str, input: Option<u128>) {
+    if let Some(path) = index_path(kind, input) {
+        let _ = veryl_path::atomic_write(&path, b"declined\n");
+    }
+}
+
+enum IndexedEvent {
+    /// The `.so` and the dataflow flags.
+    Compiled(EmittedModule, bool, bool),
+    Declined,
+}
+
+/// What a previous run found for the event of `input`: its compiled `.so`,
+/// once published, or that the emitter declined it.
+fn load_indexed_event(input: Option<u128>) -> Option<IndexedEvent> {
+    let path = index_path("event", input)?;
+    let text = fs::read_to_string(&path).ok()?;
+    let mut fields = text.split_whitespace();
+    let hash = fields.next()?;
+    if hash == "declined" {
+        return Some(IndexedEvent::Declined);
+    }
+    let comb_marked = fields.next()? == "1";
+    let ff_marked = fields.next()? == "1";
+    let so_path = path.with_file_name(format!("veryl_aot_{hash}.so"));
+    if !so_path.exists() {
+        return None;
+    }
+    load_module(&so_path)
+        .ok()
+        .map(|module| IndexedEvent::Compiled(module, comb_marked, ff_marked))
+}
+
+/// Records which `.so` the dataflow source of `input` compiles to, with the
+/// comb bytes its emission localized.
+fn index_dataflow(input: Option<u128>, src: &str, localized: &[(isize, usize)]) {
+    let Some(path) = index_path("dataflow", input) else {
+        return;
+    };
+    let (_, _, hash) = compile_key(src);
+    let mut text = hash;
+    for (off, nb) in localized {
+        text.push_str(&format!(" {off} {nb}"));
+    }
+    text.push('\n');
+    let _ = veryl_path::atomic_write(&path, text.as_bytes());
+}
+
+enum IndexedDataflow {
+    /// The `.so` and the localized comb bytes.
+    Compiled(EmittedModule, Vec<(isize, usize)>),
+    Declined,
+}
+
+/// What a previous run found for the dataflow settle of `input`: its compiled
+/// `.so`, once published, or that the emitter declined it.
+fn load_indexed_dataflow(input: Option<u128>) -> Option<IndexedDataflow> {
+    let path = index_path("dataflow", input)?;
+    let text = fs::read_to_string(&path).ok()?;
+    let mut fields = text.split_whitespace();
+    let hash = fields.next()?;
+    if hash == "declined" {
+        return Some(IndexedDataflow::Declined);
+    }
+    let mut localized = Vec::new();
+    while let Some(off) = fields.next() {
+        localized.push((off.parse().ok()?, fields.next()?.parse().ok()?));
+    }
+    let so_path = path.with_file_name(format!("veryl_aot_{hash}.so"));
+    if !so_path.exists() {
+        return None;
+    }
+    load_module(&so_path)
+        .ok()
+        .map(|module| IndexedDataflow::Compiled(module, localized))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Off in tests unless asked for, as a hit emits no source to inspect.
+    static TEST_AOT_INDEX: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_aot_index(on: bool) {
+    TEST_AOT_INDEX.with(|x| x.set(on));
 }
 
 #[cfg(test)]
@@ -4247,7 +4602,7 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
                unsigned int n1 = *(unsigned int*)(lb + {ncnt}), w1 = *(unsigned int*)(lb + {wcnt});
                unsigned char *ne = *(unsigned char**)(lb + {neptr});
                for (unsigned int z = n0; z < n1; z++) {{
-                 unsigned char *e = ne + (unsigned long)z * {nesz};
+                 unsigned char *e = ne + (uintptr_t)z * {nesz}u;
                  const uint8_t *cur = ff_values + *(unsigned int*)(e + {neoff});
                  unsigned long long pay = *(unsigned long long*)(e + {nepay});
                  switch (*(unsigned short*)(e + {newc})) {{
@@ -4259,7 +4614,7 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
                }}
                unsigned char *we = *(unsigned char**)(lb + {weptr});
                for (unsigned int z = w0; z < w1; z++) {{
-                 unsigned char *e = we + (unsigned long)z * {wesz};
+                 unsigned char *e = we + (uintptr_t)z * {wesz}u;
                  if (__builtin_memcmp(e + {wepay}, ff_values + *(unsigned int*)(e + {weoff}), *(unsigned char*)(e + {wenb})) != 0) return 0;
                }}
                return 1;
@@ -4433,6 +4788,7 @@ fn emit_event_function(
     clear_current_local();
     EVENT_NARROW_PUSHES.with(|c| c.set(0));
     EVENT_WIDE_PUSHES.with(|c| c.set(0));
+    OUTLINED.with(|o| o.borrow_mut().clear());
     let diag = std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1");
     set_event_mode(true);
     EVENT_SKIP_UNCHANGED.with(|c| c.set(skip_unchanged));
@@ -4544,7 +4900,11 @@ fn emit_event_function(
     })();
     set_event_mode(false);
     EVENT_SKIP_UNCHANGED.with(|c| c.set(false));
-    let mut units = body_res?;
+    let Some(mut units) = body_res else {
+        OUTLINED.with(|o| o.borrow_mut().clear());
+        return None;
+    };
+    let outlined = take_outlined();
     let gate_fns = apply_event_gates(&mut units, gates);
     // > u32::MAX pushes per eval can't be reserved in one call; bail to
     // Cranelift (which checks per push) rather than under-reserving.
@@ -4557,13 +4917,15 @@ fn emit_event_function(
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
          __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
          __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
     src.push_str(WIDEOPS_C_DECLS);
     src.push_str(WIDEOPS_C_INLINE);
+    src.push_str(selection::INLINE);
     src.push('\n');
+    src.push_str(&outlined);
     src.push_str(&gate_fns);
     // The bulk reserve is the ENTRY PREAMBLE, not body text: split or not it
     // stays in `veryl_aot_eval` ahead of the parts, so it dominates every
@@ -4636,8 +4998,9 @@ fn emit_reserve_prologue(narrow: u32, wide: u32) -> String {
 /// Event-path `$display` / `$write` → a call into the Rust formatter
 /// (`veryl_sysfn_cb`, wired by `compile_source`), instead of bailing.  Reuses
 /// the interpret path's formatting + `output_buffer` for byte-identical,
-/// correctly-buffered output.  Args must be ≤ 64 bits (wider → bail to
-/// Cranelift, preserving correctness).  `newline` = true for `$display`.
+/// correctly-buffered output.  Each argument takes `ceil(width / 64)`
+/// consecutive words of `_v`, least significant first; `_w` holds one entry
+/// per argument.  `newline` = true for `$display`.
 fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -> Option<String> {
     let n = args.len();
     let nl = newline as u32;
@@ -4651,31 +5014,54 @@ fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -
     let mut s = format!("{{ static const unsigned char _f[] = {{ {fbytes}0 }};");
     if n == 0 {
         s.push_str(&format!(
-            " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, 0, 0, 0ul, {nl}u); }}"
+            " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, (uintptr_t){flen}u, 0, 0, (uintptr_t)0, {nl}u); }}"
         ));
         return Some(s);
     }
-    s.push_str(&format!(
-        " unsigned long long _v[{n}]; unsigned int _w[{n}];"
-    ));
+    let mut body = String::new();
+    let mut nv = 0usize;
     for (i, arg) in args.iter().enumerate() {
         let w = arg.width();
-        if w == 0 || w > 64 {
-            return None; // wide arg → bail to Cranelift
+        // The width field is 16 bits wide in the packed `_w` entry.
+        if w == 0 || w > 0xffff {
+            return None;
         }
-        let e = emit_expr(arg)?;
-        let mask = width_mask(w);
         // Pack signedness (bit 16) alongside the width so the Rust formatter
         // rebuilds the AnalyzerValue exactly as the interpreter's eval() would
         // — signedness changes %d/%s output (signed decimal) and the event
         // path must match the Cranelift/interpret path byte-for-byte.
         let packed = w | ((arg.expr_context().signed as usize) << 16);
-        s.push_str(&format!(
-            " _v[{i}] = (unsigned long long)({e}) & 0x{mask:x}ULL; _w[{i}] = {packed}u;"
-        ));
+        if w <= 64 {
+            let e = emit_expr(arg)?;
+            let mask = width_mask(w);
+            body.push_str(&format!(
+                " _v[{nv}] = (unsigned long long)({e}) & 0x{mask:x}ULL;"
+            ));
+            nv += 1;
+        } else {
+            let nw = w.div_ceil(64);
+            let mut pre = String::new();
+            let r = emit_wide_operand(arg, native_bytes(w), &mut pre)?;
+            body.push_str(&format!(" {{ {pre}"));
+            for k in 0..nw {
+                let bits = (w - 64 * k).min(64);
+                body.push_str(&format!(
+                    " _v[{}] = (unsigned long long)VW_RD({addr}, {k}) & 0x{mask:x}ULL;",
+                    nv + k,
+                    addr = r.addr,
+                    mask = width_mask(bits),
+                ));
+            }
+            body.push_str(" }");
+            nv += nw;
+        }
+        body.push_str(&format!(" _w[{i}] = {packed}u;"));
     }
     s.push_str(&format!(
-        " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, _v, _w, {n}ul, {nl}u); }}"
+        " unsigned long long _v[{nv}]; unsigned int _w[{n}];{body}"
+    ));
+    s.push_str(&format!(
+        " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, (uintptr_t){flen}u, _v, _w, (uintptr_t){n}u, {nl}u); }}"
     ));
     Some(s)
 }
@@ -4883,13 +5269,11 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
 
     let header = &lines[..chunk_starts[0]];
     let entries = &lines[entry_start..];
-    // Only the wide-op table may cross units, and only because the split gives
-    // it one definition and the rest a declaration.  Anything else exported
-    // from the header would lose its definition in the non-entry units, so
-    // leave such a source whole.
+    // Any other exported header line would lose its definition in the
+    // non-entry units.
     if header
         .iter()
-        .any(|l| l.starts_with(ENTRY_ATTR) && !l.contains(WIDEOPS_DEF) && !l.contains(WIDEOPS_SET))
+        .any(|l| l.starts_with(ENTRY_ATTR) && !CROSS_UNIT.iter().any(|x| l.contains(x)))
     {
         return None;
     }
@@ -4958,12 +5342,11 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
         };
         let mut out: Vec<String> = Vec::with_capacity(header.len() + decls.len() + (hi - lo) + 16);
         for l in header {
-            // The wide-op table has one definition, in the entry unit; the
-            // others reach it through the dynamic symbol the setter publishes.
+            // Not weak per unit: PE exports no weak definition.
             if part == 0 || !l.starts_with(ENTRY_ATTR) {
                 out.push((*l).to_string());
-            } else if l.contains(WIDEOPS_DEF) {
-                out.push(format!("extern {WIDEOPS_DEF}"));
+            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF].into_iter().find(|x| l.contains(x)) {
+                out.push(format!("extern {def}"));
             }
         }
         out.extend(decls.iter().cloned());
@@ -4986,6 +5369,9 @@ const ENTRY_ATTR: &str = "__attribute__((visibility(\"default\")))";
 const ENTRY_SECTION_MARKER: &str = "// AOT-C entry section; keep with the entry unit.";
 const WIDEOPS_DEF: &str = "veryl_wideops_t veryl_wideops;";
 const WIDEOPS_SET: &str = "void veryl_set_wideops(";
+const SYSFN_DEF: &str = "veryl_sysfn_t veryl_sysfn_cb;";
+const SYSFN_SET: &str = "void veryl_set_sysfn_cb(";
+const CROSS_UNIT: [&str; 4] = [WIDEOPS_DEF, WIDEOPS_SET, SYSFN_DEF, SYSFN_SET];
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
 const CHUNK_DEF_PREFIX: &str =
     "__attribute__((noinline,visibility(\"hidden\"))) void veryl_aot_chunk_";
@@ -5144,7 +5530,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
             // The shell, not us, owns the publish, so its pid is what tells
             // a waiter whether the lock is still live (see `owner_alive`).
             if let Some(lp) = &lock_path {
-                let _ = fs::write(lp, format!("{}\n", child.id()));
+                let _ = fs::write(lp, format!("{}\n", owner_record(child.id())));
             }
             child
                 .wait_with_output()
@@ -5183,10 +5569,15 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         }
     }
 
+    load_module(&so_path)
+}
+
+/// Opens a published `.so` and wires up its runtime hooks.
+fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
     // SAFETY: the .so was just compiled by us (or previously cached) and
     // exposes only `veryl_aot_eval`.  We never unload while the FuncPtr
     // is in use because EmittedModule keeps the library alive.
-    let lib = unsafe { libloading::Library::new(&so_path) }
+    let lib = unsafe { libloading::Library::new(so_path) }
         .map_err(|e| format!("dlopen {}: {}", so_path.display(), e))?;
     let func: FuncPtr = unsafe {
         *lib.get::<FuncPtr>(b"veryl_aot_eval\0")
@@ -5195,6 +5586,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     let coarse_func: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_coarse\0") }
         .ok()
         .map(|s| *s);
+    let counted: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_counted\0") }
+        .ok()
+        .map(|f| *f);
     // Publish the wide-op helper table into the .so so emitted wide-op calls
     // dispatch to the same `wide_ops::*` Rust helpers Cranelift uses.  The
     // setter is always present (decls emitted unconditionally) and copies the
@@ -5205,10 +5599,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         let table = wideops_table();
         unsafe { setter(&table as *const WideOpsTable as *const c_void) };
     }
-    // Event modules that emitted $display/$write expose `veryl_set_sysfn_cb`;
-    // wire it to the Rust formatter so their output goes through `output_buffer`
-    // (byte-identical, correctly buffered).  Absent on comb / sysfn-free
-    // modules, where the dlsym simply fails and we skip.
+    // Routes the module's `$display`/`$write` into `output_buffer`.
     if let Ok(setter) =
         unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_sysfn_cb\0") }
     {
@@ -5219,6 +5610,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     Ok(EmittedModule {
         func,
         coarse_func,
+        counted,
         _lib: lib,
     })
 }
@@ -5366,10 +5758,11 @@ pub fn detach_pending_compiles() {
         // `exec` keeps the pid written into the lock for the compile.
         let temps: Vec<String> = staged.temps.iter().map(|t| quote(t.as_os_str())).collect();
         let mut body = format!(
-            "rm -f \"$0\"\n[ -e {so} ] && {{ rm -f {t}; exit 0; }}\n( set -C; echo $$ > {lk} ) 2>/dev/null || {{ rm -f {t}; exit 0; }}\nexec /bin/sh -c {}",
+            "rm -f \"$0\"\n[ -e {so} ] && {{ rm -f {t}; exit 0; }}\n( set -C; {rec} > {lk} ) 2>/dev/null || {{ rm -f {t}; exit 0; }}\nexec /bin/sh -c {}",
             quote(staged.script.as_ref()),
             so = quote(so_path.as_os_str()),
             lk = quote(lock_path.as_os_str()),
+            rec = LOCK_RECORD_SH,
             t = temps.join(" "),
         );
         for a in &staged.args {
@@ -5550,18 +5943,60 @@ enum CompileTicket {
 /// taken over at once instead — see [`owner_alive`].
 const COMPILE_LOCK_STALE: Duration = Duration::from_secs(600);
 
+/// A lock file's owner record, `pid pidns starttime`: a pid alone is
+/// ambiguous across pid namespaces and after reuse.  Either extra field is
+/// empty when procfs cannot tell.
+fn owner_record(pid: u32) -> String {
+    let ns = pid_namespace().unwrap_or_default();
+    let start = proc_start_time(pid).unwrap_or_default();
+    format!("{pid} {ns} {start}")
+}
+
+/// This process's pid namespace (`pid:[inode]`), when procfs shows it.
+fn pid_namespace() -> Option<String> {
+    let ns = fs::read_link("/proc/self/ns/pid").ok()?;
+    Some(ns.to_string_lossy().into_owned())
+}
+
+/// Field 22 of `/proc/<pid>/stat`, the start time in clock ticks since boot.
+/// The command name in field 2 may itself hold spaces and parentheses, so the
+/// fields are counted from its closing parenthesis.
+fn proc_start_time(pid: u32) -> Option<String> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_whitespace().nth(19).map(str::to_string)
+}
+
+/// [`owner_record`] of the running shell, for a lock the shell takes itself.
+#[cfg(unix)]
+const LOCK_RECORD_SH: &str = r#"s=$(cat /proc/$$/stat 2>/dev/null); s=${s##*) }; set -- $s; echo "$$ $(readlink /proc/self/ns/pid 2>/dev/null) ${20}""#;
+
 /// Is the compile shell recorded in a lock file still running?
 ///
 /// The publishing shell outlives us on purpose, so its pid — not ours — is
 /// what makes a lock meaningful.  Without this check a run killed mid-compile
 /// would hold the artifact hostage for [`COMPILE_LOCK_STALE`].
-/// `None` = no pid recorded yet; fall back to the age rule.
+/// `None` = the owner cannot be identified (no pid recorded yet, or one that
+/// procfs cannot vouch for); fall back to the age rule.
 fn owner_alive(lock_path: &Path) -> Option<bool> {
-    let pid: u32 = fs::read_to_string(lock_path).ok()?.trim().parse().ok()?;
+    let text = fs::read_to_string(lock_path).ok()?;
+    let mut fields = text.split_whitespace();
+    let pid: u32 = fields.next()?.parse().ok()?;
     // Linux: procfs is authoritative and free.  Guarded by /proc/self so a
     // system without procfs doesn't read every pid as dead.
     if Path::new("/proc/self").exists() {
-        return Some(Path::new(&format!("/proc/{pid}")).exists());
+        // A pid from another pid namespace names an unrelated process here,
+        // or none; trusting a live-looking one would hold the lock forever.
+        let ns = fields.next()?;
+        if pid_namespace().as_deref() != Some(ns) {
+            return None;
+        }
+        let Some(now) = proc_start_time(pid) else {
+            return Some(false);
+        };
+        // A different start time is a reused pid; none recorded leaves the
+        // pid's existence as the only evidence.
+        return Some(fields.next().is_none_or(|start| start == now));
     }
     // Other unix: `kill -0` through the shell we already use, so this needs
     // no libc dependency.
@@ -5633,11 +6068,8 @@ fn aot_c_cache_dir() -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("VERYL_AOT_CACHE_DIR") {
         return Ok(PathBuf::from(p));
     }
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .ok_or("neither XDG_CACHE_HOME nor HOME set")?;
-    Ok(base.join("veryl").join("aot_c"))
+    let base = veryl_path::try_cache_path().ok_or("no cache directory for this platform")?;
+    Ok(base.join("aot_c"))
 }
 
 /// FNV-1a 64-bit (hex), with a 0xFF separator between parts so e.g.
@@ -6172,6 +6604,10 @@ thread_local! {
     static DF_LOCAL_WORDS: Cell<u32> = const { Cell::new(0) };
     /// FF counterpart of `DF_EVENT_MARKS`, marked at the log push.
     static DF_FF_MARKS: RefCell<Option<DataflowMarks>> = const { RefCell::new(None) };
+    /// Fingerprints of `DF_EVENT_MARKS` and `DF_FF_MARKS`, taken when they are
+    /// set: the tables span the whole module, so hashing them per event would
+    /// cost the module's event count times their size.
+    static DF_MARKS_FINGERPRINT: Cell<[u128; 2]> = const { Cell::new([0; 2]) };
     /// A push the current event makes could reach a dataflow reader without
     /// marking it: a runtime offset with no known span, or a width the change
     /// test cannot load.
@@ -6191,7 +6627,22 @@ fn df_ff_uncovered(why: usize) {
 }
 
 pub fn set_dataflow_ff_marks(marks: Option<DataflowMarks>) {
+    set_marks_fingerprint(1, marks.as_deref());
     DF_FF_MARKS.with(|m| *m.borrow_mut() = marks);
+}
+
+fn set_marks_fingerprint(slot: usize, marks: Option<&crate::ir::opt::dataflow::MarkTable>) {
+    use std::hash::Hash;
+    let fp = marks.map_or(0, |marks| {
+        let mut h = crate::backend::registry::Fp128::new();
+        marks.hash(&mut h);
+        h.finish_128()
+    });
+    DF_MARKS_FINGERPRINT.with(|x| {
+        let mut v = x.get();
+        v[slot] = fp;
+        x.set(v);
+    });
 }
 
 fn parse_offset(s: &str) -> Option<u32> {
@@ -6245,7 +6696,18 @@ fn df_ff_push_target(
     Some((slot, words))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Leaves every dataflow mark out of the event code, for tests that need
+    /// an event which misses its marks.
+    pub(crate) static DROP_DF_MARKS: Cell<bool> = const { Cell::new(false) };
+}
+
 fn df_mark_set(words: &[(u32, u64)]) -> String {
+    #[cfg(test)]
+    if DROP_DF_MARKS.with(|d| d.get()) {
+        return String::new();
+    }
     words
         .iter()
         .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
@@ -6303,6 +6765,7 @@ fn df_ff_wide_push_mark(
 }
 
 pub fn set_dataflow_event_marks(marks: Option<DataflowMarks>) {
+    set_marks_fingerprint(0, marks.as_deref());
     DF_EVENT_MARKS.with(|m| *m.borrow_mut() = marks);
 }
 
@@ -6333,10 +6796,7 @@ impl DfWatch {
     }
 
     fn set(&self) -> String {
-        self.words
-            .iter()
-            .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
-            .collect()
+        df_mark_set(&self.words)
     }
 
     /// Snapshot declaration `k`, before the first store.
@@ -6445,6 +6905,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     }
     match stmt {
         ProtoStatement::Assign(a) => {
+            if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+                return selection::assign(a);
+            }
             // A rhs_select on a plain variable is a bit-select on that variable
             // (value.select(hi, lo)); fold it into the variable's own select so
             // the wide-var select paths (emit_expr / emit_wide_expr) handle a
@@ -7203,6 +7666,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             Some(format!("{{ {} }}", inner))
         }
         ProtoStatement::AssignDynamic(a) => {
+            if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
+                return selection::assign_dynamic(a);
+            }
             // Narrow signed bare RHS sign-extends at the store; bail to the
             // Cranelift/interpreter path (see the Assign arm above).
             if a.rhs_select.is_none() && a.expr.store_sign_extend_from(a.dst_width).is_some() {
@@ -7462,6 +7928,15 @@ fn writes_offset(body: &[ProtoStatement], vo: &VarOffset) -> bool {
 /// with constant or dynamic (≤64-bit) bounds and a loop var ≤ 64 bits;
 /// mirrors the Cranelift JIT gate (`ProtoForStatement::can_build_binary`).
 /// Stepped ranges (arbitrary-op advance) stay on the interpreter.
+/// Leaves the `for` body [`FOR_DEPTH`] counts, on every return path.
+struct ForDepthGuard;
+
+impl Drop for ForDepthGuard {
+    fn drop(&mut self) {
+        FOR_DEPTH.with(|d| d.set(d.get() - 1));
+    }
+}
+
 fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     if for_stmt.var_width == 0 || for_stmt.var_width > 64 {
         return None;
@@ -7600,6 +8075,8 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         });
     }
     let mut body = String::new();
+    FOR_DEPTH.with(|d| d.set(d.get() + 1));
+    let _for_depth = ForDepthGuard;
     for s in &for_stmt.body {
         let emitted = emit_stmt(s);
         if emitted.is_none() && substitute {
@@ -7642,12 +8119,11 @@ fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
     if let Some(marks) = df_marks() {
         return emit_block_watched(stmts, &marks);
     }
-    let mut s = String::new();
+    let mut pieces = Vec::with_capacity(stmts.len());
     for st in stmts {
-        s.push_str(&emit_stmt(st)?);
-        s.push(' ');
+        pieces.push((emit_stmt(st)?, true));
     }
-    Some(s)
+    Some(outline_block(pieces))
 }
 
 /// Whether `stmt` can leave the enclosing loop body, skipping what follows it.
@@ -7691,31 +8167,36 @@ fn emit_block_watched(stmts: &[ProtoStatement], marks: &DataflowMarks) -> Option
         }
     }
     let mut seen: HashMap<(u32, u32, u32), (usize, u64)> = HashMap::default();
-    let mut s = String::new();
+    let mut pieces = Vec::with_capacity(stmts.len());
+    // Snapshots declared and not yet compared: a part cannot end while one is
+    // live, as its declaration and its compare must share a C function.
+    let mut open = 0usize;
     for (i, (st, w)) in stmts.iter().zip(&watches).enumerate() {
         let Some(w) = w.as_ref().filter(|w| count[&key(i, w)] > 1) else {
-            s.push_str(&emit_stmt(st)?);
-            s.push(' ');
+            pieces.push((emit_stmt(st)?, open == 0));
             continue;
         };
         let entry = seen.entry(key(i, w)).or_insert_with(|| (0, df_wrap_seq()));
         entry.0 += 1;
         let (n, k) = *entry;
+        let mut s = String::new();
         if n == 1 && w.compared() {
             s.push_str(&w.head(k));
+            open += 1;
         }
         s.push_str(&emit_stmt_unwatched(st)?);
         s.push(' ');
         if n == count[&key(i, w)] {
             if w.compared() {
                 s.push_str(&w.tail(k));
+                open -= 1;
             } else {
                 s.push_str(&w.set());
             }
-            s.push(' ');
         }
+        pieces.push((s, open == 0));
     }
-    Some(s)
+    Some(outline_block(pieces))
 }
 
 /// A one-hot to binary encoder, `|({W{x[k]}} & k)` over the bits of `x`, as a
@@ -8199,6 +8680,24 @@ pub fn emit_expr_root(expr: &ProtoExpression) -> Option<String> {
 }
 
 fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> {
+    if selection::handles(expr) {
+        let mut pre = String::new();
+        let value = selection::read(expr, &mut pre)?;
+        if value.width > 128 {
+            return None;
+        }
+        let ty = if value.width > 64 {
+            "__uint128_t"
+        } else {
+            "uint64_t"
+        };
+        return Some(format!(
+            "({{ {pre} {ty} _selected = 0; __builtin_memcpy(&_selected, {}, {}u); _selected; }})",
+            value.addr,
+            native_bytes(value.width)
+        ));
+    }
+
     match expr {
         ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
@@ -10079,10 +10578,6 @@ fn expr_c_type(width: usize) -> Option<&'static str> {
     }
 }
 
-/// Above this many statements a dataflow comb gets no whole-settle entry,
-/// which would repeat every statement.
-const DATAFLOW_COARSE_MAX_STMTS: usize = 20_000;
-
 /// The comb offsets each unit may keep in locals, with their widths: written
 /// in the unit and read nowhere else.
 fn local_sets_of(units: &[&[&ProtoStatement]]) -> Vec<HashSet<(isize, usize)>> {
@@ -10152,16 +10647,11 @@ pub fn emit_dataflow_function(
             }
         })
         .collect();
-    // A small comb also gets a whole-settle entry that runs every statement
-    // with no per-cell test, compare or mark, for the runtime to pick when
-    // most cells run anyway.  Its parts cut the cells' concatenated order.
-    let n_stmts: usize = cells.iter().map(|c| c.len()).sum();
-    let coarse = n_stmts <= DATAFLOW_COARSE_MAX_STMTS;
-    let all: Vec<&ProtoStatement> = if coarse {
-        cells.iter().flatten().copied().collect()
-    } else {
-        Vec::new()
-    };
+    // The comb also gets a whole-settle entry that runs every statement with
+    // no per-cell test, compare or mark, for the runtime to pick when most
+    // cells run anyway.  Its parts cut the cells' concatenated order, so no
+    // function grows with the design; only the source doubles.
+    let all: Vec<&ProtoStatement> = cells.iter().flatten().copied().collect();
     let coarse_parts: Vec<&[&ProtoStatement]> = all.chunks(PART_LEN).collect();
     let local_sets = local_sets_of(&parts.iter().map(|p| p.1).collect::<Vec<_>>());
     // A whole-settle part keeps in locals only what a cell's part does too:
@@ -10228,12 +10718,13 @@ pub fn emit_dataflow_function(
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
-         __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
-         __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+         typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
+         __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+         __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
+    body.push_str(selection::INLINE);
     body.push('\n');
     // Each cell's code, indented for a function body.
     let mut cell_code: Vec<String> = Vec::with_capacity(cells.len());
@@ -10351,52 +10842,92 @@ pub fn emit_dataflow_function(
     body.push_str("};\n");
     // A cell marks only cells after it: its own word through the return
     // value, later words in memory, read when the scan reaches them.
+    let entry = |name: &str, count: &str| {
+        format!(
+            "{ENTRY_ATTR}\n\
+             void {name}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+             \x20   (void)write_log;\n\
+             \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n\
+             \x20   for (unsigned w = 0; w < {nw}u; w++) {{\n\
+             \x20       uint64_t b = dirty[w];\n\
+             \x20       if (!b) continue;\n\
+             \x20       dirty[w] = 0;\n\
+             \x20       do {{\n\
+             \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
+             {count}\
+             \x20           b &= b - 1;\n\
+             \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
+             \x20       }} while (b);\n\
+             \x20   }}\n\
+             }}\n"
+        )
+    };
+    body.push_str(&entry("veryl_aot_eval", ""));
+    // A counting copy for the runtime to weigh against the whole-settle
+    // entry; only probes take it, as counting costs every call.
+    body.push_str(&format!(
+        "static const uint32_t veryl_cell_stmts[{n}] = {{{}}};\n",
+        cells
+            .iter()
+            .map(|c| c.len().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    body.push_str(&entry(
+        "veryl_aot_eval_counted",
+        "\x20           write_log[0] += veryl_cell_stmts[k];\n\
+         \x20           write_log[1]++;\n",
+    ));
     body.push_str(&format!(
         "{ENTRY_ATTR}\n\
-         void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+         void veryl_aot_eval_coarse(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
          \x20   (void)write_log;\n\
-         \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n\
-         \x20   for (unsigned w = 0; w < {nw}u; w++) {{\n\
-         \x20       uint64_t b = dirty[w];\n\
-         \x20       if (!b) continue;\n\
-         \x20       dirty[w] = 0;\n\
-         \x20       do {{\n\
-         \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
-         \x20           b &= b - 1;\n\
-         \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
-         \x20       }} while (b);\n\
-         \x20   }}\n\
-         }}\n"
+         \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n"
     ));
-    if coarse {
+    for q in 0..coarse_parts.len() {
         body.push_str(&format!(
-            "{ENTRY_ATTR}\n\
-             void veryl_aot_eval_coarse(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
-             \x20   (void)write_log;\n\
-             \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n"
+            "    veryl_aot_chunk_{}(ff_values, comb_values, dirty);\n",
+            coarse_base + q
         ));
-        for q in 0..coarse_parts.len() {
-            body.push_str(&format!(
-                "    veryl_aot_chunk_{}(ff_values, comb_values, dirty);\n",
-                coarse_base + q
-            ));
-        }
-        body.push_str("}\n");
     }
+    body.push_str("}\n");
     Some(body)
 }
 
-/// Emit and compile a dataflow settle: `None` when the emitter declines.
+/// Emit and compile a dataflow settle, or load the `.so` a previous run
+/// indexed for the same inputs: `None` when the emitter declines.
 pub fn prepare_dataflow(
     stmts: &[ProtoStatement],
     plan: &crate::ir::opt::dataflow::DataflowPlan,
     async_mode: bool,
 ) -> Option<AotCell> {
     LAST_LOCALIZED_BYTES.with(|b| b.borrow_mut().clear());
-    let src = emit_dataflow_function(stmts, plan)?;
+    let input = dataflow_input_key(stmts, plan);
+    match load_indexed_dataflow(input) {
+        Some(IndexedDataflow::Compiled(module, localized)) => {
+            LAST_LOCALIZED_BYTES.with(|b| *b.borrow_mut() = localized);
+            let cell = Arc::new(OnceLock::new());
+            let _ = cell.set(module);
+            return Some(cell);
+        }
+        Some(IndexedDataflow::Declined) => return None,
+        None => {}
+    }
+    let Some(src) = emit_dataflow_function(stmts, plan) else {
+        index_declined("dataflow", input);
+        return None;
+    };
+    #[cfg(test)]
+    DATAFLOW_EMITS.with(|n| n.set(n.get() + 1));
+    LAST_LOCALIZED_BYTES.with(|b| index_dataflow(input, &src, &b.borrow()));
     // A cached `.so` loads at once, so the Cranelift cells are never needed.
     let async_mode = async_mode && !is_compiled(&src);
     Some(compile_or_spawn(src, async_mode))
+}
+
+#[cfg(test)]
+thread_local! {
+    static DATAFLOW_EMITS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -10436,17 +10967,412 @@ mod tests {
              typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
              typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
              typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-             typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
-             __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
-             __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+             typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
+             __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+             __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(selection::INLINE);
         src.push_str(&format!(
             "\n{ENTRY_ATTR}\nvoid veryl_aot_eval{ENTRY_SIG} {{\n    (void)write_log;\n{}{body}}}\n",
             emit_reserve_prologue(narrow, wide)
         ));
         Some(src)
+    }
+
+    #[test]
+    fn adjusted_selections_compile_and_preserve_aliasing() {
+        if !cc_available() {
+            return;
+        }
+        for (width, window, rows) in [(64, 8, false), (129, 65, false), (8192, 8, true)] {
+            let ds = ProtoDynamicBitSelect {
+                low_adjust: 7,
+                row_elements: rows.then_some(4096),
+                index_expr: Box::new(var_expr(VarOffset::Comb(2048), 64)),
+                elem_width: 1,
+                window,
+                num_elements: if rows { 2 * 8192 } else { width },
+            };
+            let write = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0),
+                dst_width: width,
+                select: None,
+                dynamic_select: Some(ds.clone()),
+                rhs_select: None,
+                expr: var_expr(VarOffset::Comb(0), width),
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            });
+            let read = ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0),
+                select: None,
+                dynamic_select: Some(ds),
+                width: window,
+                var_full_width: width,
+                expr_context: ctx(window, false),
+            };
+            let output = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(2064),
+                dst_width: window,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: read,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            });
+            assert!(write.can_build_binary() && output.can_build_binary());
+            let statements = vec![write, output];
+            let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                &crate::ir::Config::default(),
+                statements.clone(),
+                false,
+                None,
+            )
+            .expect("adjusted field must stay in JIT");
+            let src = emit_test_function(&statements).expect("adjusted field must stay in C");
+            let tmp = std::env::temp_dir().join(format!(
+                "veryl_adjusted_{}_{}",
+                std::process::id(),
+                width
+            ));
+            let module = compile_for_test(&tmp, &src, "adjusted C");
+            for func in module.iter().map(|m| m.func).chain([jit]) {
+                let mut ff = [0; 8];
+                let mut comb = vec![0u8; 2112];
+                let nb = native_bytes(width);
+                for (i, byte) in comb[..nb].iter_mut().enumerate() {
+                    *byte = (i as u8).wrapping_mul(73).wrapping_add(11);
+                }
+                for index in [0usize, 3, 8, 71, if rows { 8192 + 9 } else { width + 6 }] {
+                    let old = comb.clone();
+                    comb[2048..2056].copy_from_slice(&(index as u64).to_le_bytes());
+                    let mut expected = old[..nb].to_vec();
+                    let (row, local, elements) = if rows {
+                        (index / 8192, index % 8192, 4096)
+                    } else {
+                        (0, index, width)
+                    };
+                    let start = local as i128 - 7;
+                    for bit in 0..window {
+                        let dst = start + bit as i128;
+                        if dst >= 0 && dst < elements as i128 {
+                            let dst = row * elements + dst as usize;
+                            let value = (old[bit / 8] >> (bit % 8)) & 1;
+                            expected[dst / 8] =
+                                (expected[dst / 8] & !(1 << (dst % 8))) | (value << (dst % 8));
+                        }
+                    }
+                    let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                    unsafe {
+                        (func)(
+                            ff.as_mut_ptr(),
+                            comb.as_mut_ptr(),
+                            &mut log as *mut _ as *mut u8,
+                            0,
+                        );
+                    }
+                    assert_eq!(&comb[..nb], expected, "width={width} index={index}");
+                    for bit in 0..window {
+                        let src = start + bit as i128;
+                        let expected = if src >= 0 && src < elements as i128 {
+                            let src = row * elements + src as usize;
+                            (comb[src / 8] >> (src % 8)) & 1
+                        } else {
+                            0
+                        };
+                        assert_eq!(
+                            (comb[2064 + bit / 8] >> (bit % 8)) & 1,
+                            expected,
+                            "read width={width} index={index} bit={bit}"
+                        );
+                    }
+                }
+            }
+            let _ = fs::remove_dir_all(&tmp);
+        }
+    }
+
+    #[test]
+    fn adjusted_ff_selections_stay_compiled_and_commit_after_the_edge() {
+        if !cc_available() {
+            return;
+        }
+        for width in [8, 64, 129] {
+            for packed in [false, true] {
+                for dynamic in [false, true] {
+                    let nb = native_bytes(width);
+                    let next = if packed { 0 } else { 2 * nb };
+                    let ds = ProtoDynamicBitSelect {
+                        low_adjust: 7,
+                        row_elements: None,
+                        index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                        elem_width: 1,
+                        window: 8,
+                        num_elements: width,
+                    };
+                    let stmt = if dynamic {
+                        ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+                            dst_base: VarOffset::Ff(next as isize),
+                            dst_stride: nb as isize,
+                            dst_num_elements: 2,
+                            dst_index_expr: const_expr(1, 1),
+                            dst_width: width,
+                            select: None,
+                            dynamic_select: Some(ds),
+                            rhs_select: None,
+                            expr: const_expr(0xa5, 8),
+                            dst_ff_current_base_offset: 0,
+                            comb_direct: false,
+                        })
+                    } else {
+                        ProtoStatement::Assign(ProtoAssignStatement {
+                            dst: VarOffset::Ff(next as isize),
+                            dst_width: width,
+                            select: None,
+                            dynamic_select: Some(ds),
+                            rhs_select: None,
+                            expr: const_expr(0xa5, 8),
+                            dst_ff_current_offset: 0,
+                            comb_direct: false,
+                            token: dummy_token(),
+                        })
+                    };
+                    assert!(stmt.can_build_binary());
+                    let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                        &crate::ir::Config::default(),
+                        vec![stmt.clone()],
+                        false,
+                        None,
+                    )
+                    .expect("adjusted FF must stay in JIT");
+                    let src = emit_test_function(&[stmt]).expect("adjusted FF must stay in C");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "veryl_adjusted_ff_{}_{width}_{packed}_{dynamic}",
+                        std::process::id()
+                    ));
+                    let module = compile_for_test(&tmp, &src, "adjusted FF C");
+                    for func in module.iter().map(|m| m.func).chain([jit]) {
+                        for index in [0usize, 15.min(width - 1), width + 6, width + 7] {
+                            let mut ff = vec![0; 4 * nb];
+                            for element in 0..4 {
+                                for bit in 0..width {
+                                    if bit % 3 != 0 {
+                                        ff[element * nb + bit / 8] |= 1 << (bit % 8);
+                                    }
+                                }
+                            }
+                            let current = if dynamic { nb } else { 0 };
+                            let old = ff[current..current + nb].to_vec();
+                            let mut expected = old.clone();
+                            for bit in 0..8 {
+                                let dst = index as i128 - 7 + bit as i128;
+                                if dst >= 0 && dst < width as i128 {
+                                    let dst = dst as usize;
+                                    expected[dst / 8] = (expected[dst / 8] & !(1 << (dst % 8)))
+                                        | (((0xa5 >> bit) & 1) << (dst % 8));
+                                }
+                            }
+                            let mut comb = index.to_le_bytes();
+                            let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                            unsafe {
+                                (func)(
+                                    ff.as_mut_ptr(),
+                                    comb.as_mut_ptr(),
+                                    &mut log as *mut _ as *mut u8,
+                                    0,
+                                );
+                            }
+                            assert_eq!(
+                                &ff[current..current + nb],
+                                old,
+                                "premature FF write width={width} packed={packed} dynamic={dynamic}"
+                            );
+                            crate::ir::write_log::ff_commit_from_log(&mut ff, &log);
+                            assert_eq!(
+                                &ff[current..current + nb],
+                                expected,
+                                "width={width} packed={packed} dynamic={dynamic} index={index}"
+                            );
+                        }
+                    }
+                    let _ = fs::remove_dir_all(tmp);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjusted_ff_selections_preserve_mixed_write_order() {
+        if !cc_available() {
+            return;
+        }
+        for width in [65, 100, 128, 129, 200] {
+            let nb = native_bytes(width);
+            for dynamic in [false, true] {
+                let selected = if dynamic {
+                    ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+                        dst_base: VarOffset::Ff((2 * nb) as isize),
+                        dst_stride: nb as isize,
+                        dst_num_elements: 2,
+                        dst_index_expr: const_expr(1, 1),
+                        dst_width: width,
+                        select: None,
+                        dynamic_select: Some(ProtoDynamicBitSelect {
+                            low_adjust: 7,
+                            row_elements: None,
+                            index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                            elem_width: 1,
+                            window: 8,
+                            num_elements: width,
+                        }),
+                        rhs_select: None,
+                        expr: const_expr(0, 8),
+                        dst_ff_current_base_offset: 0,
+                        comb_direct: false,
+                    })
+                } else {
+                    ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: VarOffset::Ff((2 * nb) as isize),
+                        dst_width: width,
+                        select: None,
+                        dynamic_select: Some(ProtoDynamicBitSelect {
+                            low_adjust: 7,
+                            row_elements: None,
+                            index_expr: Box::new(var_expr(VarOffset::Comb(0), 64)),
+                            elem_width: 1,
+                            window: 8,
+                            num_elements: width,
+                        }),
+                        rhs_select: None,
+                        expr: const_expr(0, 8),
+                        dst_ff_current_offset: 0,
+                        comb_direct: false,
+                        token: dummy_token(),
+                    })
+                };
+                let mut whole = selected.clone();
+                match &mut whole {
+                    ProtoStatement::Assign(a) => {
+                        a.dynamic_select = None;
+                        a.expr = var_expr(VarOffset::Comb(32), width);
+                    }
+                    ProtoStatement::AssignDynamic(a) => {
+                        a.dynamic_select = None;
+                        a.expr = var_expr(VarOffset::Comb(32), width);
+                    }
+                    _ => unreachable!(),
+                }
+                for reverse in [false, true] {
+                    let stmts = if reverse {
+                        vec![selected.clone(), whole.clone()]
+                    } else {
+                        vec![whole.clone(), selected.clone()]
+                    };
+                    let src = emit_event_function(&stmts, false, &[]).expect("C event must emit");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "veryl_adjusted_order_{}_{width}_{dynamic}_{reverse}",
+                        std::process::id()
+                    ));
+                    let module = compile_for_test(&tmp, &src, "adjusted C event");
+                    let (jit, _code) = crate::backend::cranelift::runtime::build_binary_marked(
+                        &crate::ir::Config::default(),
+                        stmts,
+                        false,
+                        None,
+                    )
+                    .expect("JIT event must compile");
+                    for func in module.iter().map(|m| m.func).chain([jit]) {
+                        let mut ff = vec![0; 4 * nb];
+                        let mut comb = vec![0; 32 + nb];
+                        comb[..8].copy_from_slice(&7u64.to_le_bytes());
+                        for bit in 0..width {
+                            comb[32 + bit / 8] |= 1 << (bit % 8);
+                        }
+                        let mut log = crate::ir::write_log::WriteLogBuffer::default();
+                        unsafe {
+                            func(
+                                ff.as_mut_ptr(),
+                                comb.as_mut_ptr(),
+                                &mut log as *mut _ as *mut u8,
+                                0,
+                            );
+                        }
+                        assert!(ff[..2 * nb].iter().all(|&b| b == 0));
+                        crate::ir::write_log::ff_commit_from_log(&mut ff, &log);
+                        let current = if dynamic { nb } else { 0 };
+                        let mut expected = comb[32..].to_vec();
+                        if !reverse {
+                            expected[0] = 0;
+                        }
+                        assert_eq!(
+                            &ff[current..current + nb],
+                            expected,
+                            "width={width} dynamic={dynamic} reverse={reverse}"
+                        );
+                        let other = if dynamic { 0 } else { nb };
+                        assert!(ff[other..other + nb].iter().all(|&b| b == 0));
+                        if nb <= 16 {
+                            assert_eq!(log.wide_count(), 0);
+                        } else {
+                            assert_eq!(log.narrow_count(), 0);
+                        }
+                    }
+                    let _ = fs::remove_dir_all(tmp);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjusted_selection_store_clips_a_wide_rhs() {
+        if !cc_available() {
+            return;
+        }
+        let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 7,
+                row_elements: None,
+                index_expr: Box::new(var_expr(VarOffset::Comb(16), 64)),
+                elem_width: 1,
+                window: 8,
+                num_elements: 64,
+            }),
+            rhs_select: None,
+            expr: var_expr(VarOffset::Comb(32), 128),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        });
+        let src = emit_test_function(&[stmt]).expect("C store must emit");
+        let tmp = std::env::temp_dir().join(format!("veryl_adjusted_rhs_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "adjusted C store") else {
+            let _ = fs::remove_dir_all(tmp);
+            return;
+        };
+        for index in 0..8u64 {
+            let mut comb = [0; 48];
+            comb[16..24].copy_from_slice(&index.to_le_bytes());
+            comb[32..].fill(0xff);
+            unsafe {
+                (module.func)(
+                    std::ptr::null_mut(),
+                    comb.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                );
+            }
+            let got = u64::from_le_bytes(comb[..8].try_into().unwrap());
+            assert_eq!(got, (1 << (index + 1)) - 1);
+        }
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -10688,6 +11614,8 @@ mod tests {
             dst_width: 40,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(var_expr(VarOffset::Comb(0x8), 8)),
                 elem_width: 4,
                 window: 4,
@@ -10772,6 +11700,99 @@ mod tests {
         assert!(s.contains("comb_values + 0x20"));
         assert!(s.contains("veryl_u32_ua"));
         assert!(s.contains("0xdeadbeefULL"));
+    }
+
+    #[test]
+    fn a_dataflow_settle_of_equal_inputs_loads_without_emitting() {
+        // The second prepare finds the first one's `.so` by its inputs and
+        // restores the bytes the first emission localized.
+        if !crate::tests::aot_c_loads() {
+            return;
+        }
+        let assign = |dst: isize, expr: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: 32,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            })
+        };
+        let prepare = |k: u64| {
+            let stmts = vec![
+                assign(0x10, const_expr(k, 32)),
+                assign(0x20, var_expr(VarOffset::Comb(0x10), 32)),
+            ];
+            let plan = crate::ir::opt::dataflow::DataflowPlan {
+                cells: vec![vec![0, 1]],
+                boundary: vec![Vec::new()],
+                consumers: vec![Vec::new()],
+                mark_always: vec![false],
+                ..Default::default()
+            };
+            set_localize_blocklist(HashSet::default(), Vec::new());
+            DATAFLOW_EMITS.with(|n| n.set(0));
+            let cell = prepare_dataflow(&stmts, &plan, false);
+            clear_localize_blocklist();
+            assert!(cell.expect("must emit").get().is_some());
+            (
+                DATAFLOW_EMITS.with(|n| n.get()),
+                take_last_localized_bytes(),
+            )
+        };
+        let k = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
+            & 0xffff_ffff;
+        set_test_aot_index(true);
+        let first = prepare(k);
+        let second = prepare(k);
+        let other = prepare(k ^ 1);
+        set_test_aot_index(false);
+        assert_eq!(first.0, 1);
+        assert!(!first.1.is_empty(), "the test needs a localized byte");
+        assert_eq!(second, (0, first.1.clone()));
+        assert_eq!(other.0, 1);
+    }
+
+    #[test]
+    fn dataflow_whole_settle_entry_has_no_size_cap() {
+        let stmts: Vec<ProtoStatement> = (0..40_000)
+            .map(|i| {
+                ProtoStatement::Assign(ProtoAssignStatement {
+                    dst: VarOffset::Comb(i * 8),
+                    dst_width: 32,
+                    select: None,
+                    dynamic_select: None,
+                    rhs_select: None,
+                    expr: const_expr(i as u64, 32),
+                    dst_ff_current_offset: 0,
+                    comb_direct: false,
+                    token: dummy_token(),
+                })
+            })
+            .collect();
+        let cells: Vec<Vec<u32>> = (0..stmts.len() as u32)
+            .collect::<Vec<_>>()
+            .chunks(64)
+            .map(|c| c.to_vec())
+            .collect();
+        let n = cells.len();
+        let plan = crate::ir::opt::dataflow::DataflowPlan {
+            cells,
+            boundary: vec![Vec::new(); n],
+            consumers: vec![Vec::new(); n],
+            mark_always: vec![false; n],
+            ..Default::default()
+        };
+        let src = emit_dataflow_function(&stmts, &plan).unwrap();
+        assert!(src.contains("void veryl_aot_eval_coarse("));
+        assert_eq!(src.matches("0x9c3fULL").count(), 2);
     }
 
     #[test]
@@ -10929,7 +11950,8 @@ mod tests {
     }
 
     /// Run an emitted event function over a hand-built `WriteLogBuffer` and
-    /// return the wide entries it pushed, as `(offset, payload_bytes)`.
+    /// return the entries it pushed, wide then narrow, as
+    /// `(offset, payload_bytes)`.
     fn run_wide_ff_event(src: &str, what: &str, ff: &mut [u8]) -> Option<Vec<(u32, Vec<u8>)>> {
         let mut comb = vec![0u8; 256];
         run_wide_ff_event_in(src, what, ff, &mut comb)
@@ -10995,9 +12017,46 @@ mod tests {
                 let p = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD as usize;
                 (off, e[p..p + nb].to_vec())
             })
-            .collect();
+            .collect::<Vec<_>>();
         let _ = fs::remove_dir_all(&tmp);
-        Some(out)
+        Some(
+            out.into_iter()
+                .chain(narrow_log_entries(&log, &narrow))
+                .collect(),
+        )
+    }
+
+    /// The narrow entries `run_wide_ff_event_in` left in `log`, as
+    /// `(offset, payload bytes)`.
+    fn narrow_log_entries(log: &[u8], narrow: &[u8]) -> Vec<(u32, Vec<u8>)> {
+        use crate::ir::write_log::{
+            WRITE_LOG_ENTRY_OFFSET_OFFSET, WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
+            WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
+            WRITE_LOG_NARROW_OFFSET_COUNT,
+        };
+        let field = |b: &[u8], at: i32, n: usize| b[at as usize..at as usize + n].to_vec();
+        let count = u32::from_le_bytes(
+            field(log, WRITE_LOG_NARROW_OFFSET_COUNT, 4)
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let esz = WRITE_LOG_ENTRY_SIZE as usize;
+        (0..count)
+            .map(|i| {
+                let e = &narrow[i * esz..(i + 1) * esz];
+                let off = u32::from_le_bytes(
+                    field(e, WRITE_LOG_ENTRY_OFFSET_OFFSET, 4)
+                        .try_into()
+                        .unwrap(),
+                );
+                let wc = u16::from_le_bytes(
+                    field(e, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, 2)
+                        .try_into()
+                        .unwrap(),
+                ) as usize;
+                (off, field(e, WRITE_LOG_ENTRY_OFFSET_PAYLOAD, wc))
+            })
+            .collect()
     }
 
     #[test]
@@ -11143,6 +12202,20 @@ mod tests {
         );
     }
 
+    /// A 16-byte element reassembled from its two narrow words.
+    fn element_from_words(entries: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut words: Vec<_> = entries.to_vec();
+        words.sort_by_key(|(off, _)| *off);
+        assert_eq!(
+            words
+                .iter()
+                .map(|(off, p)| (*off, p.len()))
+                .collect::<Vec<_>>(),
+            [(0, 8), (8, 8)]
+        );
+        words.into_iter().flat_map(|(_, p)| p).collect()
+    }
+
     #[test]
     fn emit_event_ff_wide_dynamic_bit_merges_at_the_runtime_index() {
         // `ff72[idx] <= bit`: a one-bit field at a runtime offset inside a
@@ -11157,6 +12230,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(70, 8)),
                 elem_width: 1,
                 window: 1,
@@ -11174,10 +12249,7 @@ mod tests {
         let Some(entries) = run_wide_ff_event(&src, "wff_dyn", &mut ff) else {
             return;
         };
-        assert_eq!(entries.len(), 1);
-        let (off, payload) = &entries[0];
-        assert_eq!(*off, 0);
-        assert_eq!(payload.len(), 16, "72 bits sits in the 128-bit size class");
+        let payload = element_from_words(&entries);
         let hi = u64::from_le_bytes(payload[8..16].try_into().unwrap());
         assert_eq!(hi, 1u64 << (70 - 64), "bit 70 set, nothing else");
         assert_eq!(
@@ -11201,6 +12273,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(71, 8)),
                 elem_width: 1,
                 window: 8,
@@ -11218,8 +12292,7 @@ mod tests {
         let Some(entries) = run_wide_ff_event(&src, "wff_spill", &mut ff) else {
             return;
         };
-        assert_eq!(entries.len(), 1);
-        let hi = u64::from_le_bytes(entries[0].1[8..16].try_into().unwrap());
+        let hi = u64::from_le_bytes(element_from_words(&entries)[8..16].try_into().unwrap());
         assert_eq!(
             hi,
             1u64 << (71 - 64),
@@ -11269,6 +12342,223 @@ mod tests {
         );
     }
 
+    /// `c[i] = c[i - 1] + 1` over comb words `1..=n`, each a separate store.
+    fn comb_chain(n: usize) -> Vec<ProtoStatement> {
+        (1..=n)
+            .map(|i| {
+                ProtoStatement::Assign(ProtoAssignStatement {
+                    dst: VarOffset::Comb(8 * i as isize),
+                    dst_width: 64,
+                    select: None,
+                    dynamic_select: None,
+                    rhs_select: None,
+                    expr: ProtoExpression::Binary {
+                        x: Box::new(var_expr(VarOffset::Comb(8 * (i as isize - 1)), 64)),
+                        op: Op::Add,
+                        y: Box::new(const_expr(1, 64)),
+                        width: 64,
+                        expr_context: ctx(64, false),
+                    },
+                    dst_ff_current_offset: 0,
+                    comb_direct: false,
+                    token: dummy_token(),
+                })
+            })
+            .collect()
+    }
+
+    fn if_on(cond_off: isize, body: Vec<ProtoStatement>) -> ProtoStatement {
+        ProtoStatement::If(ProtoIfStatement {
+            cond: Some(var_expr(VarOffset::Comb(cond_off), 1)),
+            true_side: body,
+            false_side: vec![],
+        })
+    }
+
+    #[test]
+    fn a_big_event_if_runs_as_outlined_parts_in_source_order() {
+        // A chain crossing every part boundary must still see each store
+        // before the next.
+        const N: usize = 12000;
+        let cond = 8 * (N as isize + 1);
+        let src = emit_event_function(&[if_on(cond, comb_chain(N))], false, &[])
+            .expect("must emit as a function");
+        assert!(
+            src.contains("void veryl_aot_ol1("),
+            "the block must split into parts"
+        );
+        assert!(
+            src.find("void veryl_aot_ol0(") < src.find("void veryl_aot_eval("),
+            "parts are defined ahead of the entry",
+        );
+        if !cc_available() {
+            return;
+        }
+        for taken in [true, false] {
+            let mut comb = vec![0u8; 8 * (N + 2)];
+            comb[..8].copy_from_slice(&7u64.to_le_bytes());
+            comb[cond as usize] = taken as u8;
+            let mut ff = vec![0u8; 32];
+            if run_wide_ff_event_in(&src, "outline_chain", &mut ff, &mut comb).is_none() {
+                return;
+            }
+            let last = u64::from_le_bytes(comb[8 * N..8 * N + 8].try_into().unwrap());
+            assert_eq!(last, if taken { 7 + N as u64 } else { 0 });
+        }
+    }
+
+    #[test]
+    fn a_big_block_in_a_loop_body_stays_inline() {
+        // A block under an emitted `for` may break out of it or read its C
+        // index, neither of which survives a move into another function.
+        let body = vec![if_on(8 * 13000, comb_chain(12000))];
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(8 * 13001),
+            var_width: 32,
+            var_native_bytes: 4,
+            var_signed: false,
+            token: TokenRange::default(),
+            range: ProtoForRange::Forward {
+                start: ProtoForBound::Const(0, true),
+                end: ProtoForBound::Const(2, true),
+                inclusive: false,
+                step: 1,
+            },
+            body,
+        };
+        let src = emit_event_function(&[ProtoStatement::For(for_stmt)], false, &[])
+            .expect("must emit as a function");
+        assert!(
+            !src.contains("veryl_aot_ol"),
+            "nothing under a loop is outlined"
+        );
+    }
+
+    #[test]
+    fn an_event_input_key_ignores_the_loop_token() {
+        // Reanalysis gives a loop new source tokens, which the emitter never
+        // reads, so equal loops must keep one key.
+        let event = |id: usize| {
+            let mut token = TokenRange::default();
+            token.beg.id = veryl_parser::resource_table::TokenId(id);
+            let for_stmt = ProtoForStatement {
+                var_offset: VarOffset::Comb(0x40),
+                var_width: 32,
+                var_native_bytes: 4,
+                var_signed: false,
+                token,
+                range: ProtoForRange::Forward {
+                    start: ProtoForBound::Const(0, true),
+                    end: ProtoForBound::Const(2, true),
+                    inclusive: false,
+                    step: 1,
+                },
+                body: comb_chain(4),
+            };
+            let stmts = [ProtoStatement::For(for_stmt)];
+            (
+                event_input_key(&stmts, false, &[]),
+                emit_event_function(&stmts, false, &[]),
+            )
+        };
+        let (key_a, src_a) = event(1);
+        let (key_b, src_b) = event(2);
+        assert_eq!(src_a, src_b);
+        assert!(key_a.is_some());
+        assert_eq!(key_a, key_b);
+    }
+
+    #[test]
+    fn an_event_input_key_follows_the_dataflow_marks() {
+        let marks = |w: u32| Some(Arc::new(vec![(w, w + 8, vec![(0, 0x4)])]));
+        let key = || event_input_key(&[], false, &[]);
+        let none = key();
+        set_dataflow_event_marks(marks(0x40));
+        let event_a = key();
+        assert_eq!(event_a, key());
+        set_dataflow_event_marks(marks(0x48));
+        let event_b = key();
+        set_dataflow_event_marks(None);
+        set_dataflow_ff_marks(marks(0x40));
+        let ff_a = key();
+        set_dataflow_ff_marks(None);
+        assert_eq!(none, key());
+        let keys = [none, event_a, event_b, ff_a];
+        for (i, a) in keys.iter().enumerate() {
+            for b in &keys[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn a_watched_store_run_keeps_its_snapshot_and_compare_in_one_part() {
+        // Two stores to one marked span share a snapshot taken before the
+        // first and compared after the last.
+        const N: usize = 12000;
+        let cond = 8 * (N as isize + 1);
+        let watched = 8 * (N as isize + 2);
+        let store = |v: u64| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(watched),
+                dst_width: 64,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: const_expr(v, 64),
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            })
+        };
+        let mut body = vec![store(1)];
+        body.extend(comb_chain(N));
+        body.push(store(5));
+        let w = watched as u32;
+        set_dataflow_event_marks(Some(Arc::new(vec![(w, w + 8, vec![(0, 0x4)])])));
+        let src = emit_event_function(&[if_on(cond, body)], false, &[]);
+        set_dataflow_event_marks(None);
+        let src = src.expect("must emit as a function");
+        assert!(src.contains("veryl_aot_ol0"), "the block is still outlined");
+        let part_of = |pat: &str| {
+            let at = src.find(pat).expect("emitted");
+            src[..at].rfind("void veryl_aot_ol")
+        };
+        assert_eq!(
+            part_of("uint8_t _dfs"),
+            part_of("__builtin_memcmp(_dfs"),
+            "snapshot and compare share a part",
+        );
+        if !cc_available() {
+            return;
+        }
+        let mut comb = vec![0u8; 8 * (N + 3)];
+        comb[cond as usize] = 1;
+        let mut ff = vec![0u8; 32];
+        let tmp =
+            std::env::temp_dir().join(format!("veryl_aot_outline_watch_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "outline_watch") else {
+            return;
+        };
+        let mut log = vec![0u8; 256];
+        let mut delta = [0u64; 1];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr(),
+                delta.as_mut_ptr() as isize,
+            );
+        }
+        let v = u64::from_le_bytes(
+            comb[watched as usize..watched as usize + 8]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(v, 5);
+        assert_eq!(delta[0], 0x4, "the changed span is marked");
+    }
+
     #[test]
     fn emit_event_ff_wide_dynamic_index_past_the_width_writes_nothing() {
         // `clip_select_to_width` drops the write entirely rather than clamping,
@@ -11283,6 +12573,8 @@ mod tests {
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(16, 8)), // 16 * 8 = 128 >= 72
                 elem_width: 8,
                 window: 8,
@@ -12255,6 +13547,50 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn compile_lock_owner_from_another_pid_namespace_ages_out() {
+        // Only a record procfs can vouch for decides; anything else falls
+        // back to the age rule.
+        if pid_namespace().is_none() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_lockns_{}", std::process::id()));
+        fs::create_dir_all(&tmp).unwrap();
+        let lock = tmp.join("veryl_aot_cafe.lock");
+        let me = std::process::id();
+        let ns = pid_namespace().unwrap();
+        let start = proc_start_time(me).unwrap();
+
+        fs::write(&lock, owner_record(me)).unwrap();
+        assert_eq!(owner_alive(&lock), Some(true));
+        // A reused pid: same namespace, different start time.
+        fs::write(&lock, format!("{me} {ns} {start}0")).unwrap();
+        assert_eq!(owner_alive(&lock), Some(false));
+        // Another namespace, or a bare pid with no namespace at all.
+        fs::write(&lock, format!("{me} pid:[1] {start}")).unwrap();
+        assert_eq!(owner_alive(&lock), None);
+        fs::write(&lock, format!("{me}\n")).unwrap();
+        assert_eq!(owner_alive(&lock), None);
+
+        // The detached compile writes its record from the shell.
+        fs::remove_file(&lock).unwrap();
+        let out = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "( set -C; {LOCK_RECORD_SH} > \"$0\" ) && cat \"$0\" && cut -d' ' -f22 /proc/$$/stat"
+            ))
+            .arg(&lock)
+            .output()
+            .unwrap();
+        let out = String::from_utf8(out.stdout).unwrap();
+        let mut lines = out.lines();
+        let rec: Vec<&str> = lines.next().unwrap().split_whitespace().collect();
+        assert_eq!(rec[1], ns);
+        assert_eq!(rec[2], lines.next().unwrap());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn compile_lock_ticket_states() {
         let tmp = std::env::temp_dir().join(format!("veryl_aot_lock_{}", std::process::id()));
@@ -12291,7 +13627,7 @@ mod tests {
         {
             // `kill -0 0` addresses our own process group, so name a pid that
             // cannot exist rather than 0.
-            fs::write(&lock, format!("{}\n", u32::MAX)).unwrap();
+            fs::write(&lock, format!("{}\n", owner_record(u32::MAX))).unwrap();
             assert_eq!(owner_alive(&lock), Some(false));
             let retaken = acquire_compile_lock(&tmp, "deadbeef", &so);
             assert!(matches!(retaken, CompileTicket::Owned(_)));
@@ -12772,6 +14108,8 @@ mod tests {
                 var_offset: VarOffset::Comb(base),
                 select: None,
                 dynamic_select: Some(ProtoDynamicBitSelect {
+                    low_adjust: 0,
+                    row_elements: None,
                     index_expr: Box::new(var_expr(VarOffset::Comb(idx_off), 32)),
                     elem_width: ew,
                     window: ew,
@@ -12908,6 +14246,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(var_expr(VarOffset::Comb(72), 32)),
                 elem_width: 192,
                 window: 192,
@@ -13072,6 +14412,8 @@ mod tests {
             var_offset: VarOffset::Comb(0x80),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 4,
                 window: 4,
@@ -13099,6 +14441,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 4,
                 window: 4,
@@ -13124,6 +14468,8 @@ mod tests {
             var_offset: VarOffset::Comb(0),
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(idx),
                 elem_width: 8,
                 window: 8,
@@ -13177,6 +14523,8 @@ mod tests {
             num_elements: 8,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(5, 8)),
                 elem_width: 1,
                 window: 1,
@@ -13206,6 +14554,8 @@ mod tests {
             num_elements: 4,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
+                low_adjust: 0,
+                row_elements: None,
                 index_expr: Box::new(const_expr(0, 8)),
                 elem_width: 1,
                 window: 1,
@@ -14266,6 +15616,7 @@ mod tests {
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(selection::INLINE);
         src.push_str(
             "\n__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *ff_values, uint8_t *comb_values, uint64_t *write_log, intptr_t ff_delta) {\n\
@@ -14521,6 +15872,9 @@ mod tests {
              typedef struct { int unused; } veryl_wideops_t;\n\
              __attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n\
              __attribute__((visibility(\"default\"))) void veryl_set_wideops(const void* t) { veryl_wideops = *(const veryl_wideops_t*)t; }\n\
+             typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
+             __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+             __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n\
              static inline uint32_t vw_tag(uint32_t i) { return i + 1; }\n",
         );
         for i in 0..count {
@@ -14544,6 +15898,23 @@ mod tests {
         }
         s.push_str("}\n");
         s
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn split_defines_the_exported_globals_in_the_entry_unit_only() {
+        let units = split_translation_units(&chunked_stub_source(12), 4).unwrap();
+        for (k, unit) in units.iter().enumerate() {
+            for (def, set) in [(WIDEOPS_DEF, WIDEOPS_SET), (SYSFN_DEF, SYSFN_SET)] {
+                let extern_decl = format!("extern {def}");
+                let defs = unit
+                    .lines()
+                    .filter(|l| l.contains(def) && *l != extern_decl);
+                assert_eq!(defs.count(), usize::from(k == 0), "unit {k}: {def}");
+                assert_eq!(unit.contains(set), k == 0, "unit {k}: {set}");
+                assert_eq!(unit.contains(&extern_decl), k != 0, "unit {k}: {def}");
+            }
+        }
     }
 
     #[test]
@@ -15476,6 +16847,33 @@ mod tests {
         assert!(!emit(wide(), false).contains("? 1u : 0u"));
         assert!(!emit(narrow(), true).contains("? 1u : 0u"));
         assert!(emit(narrow(), true).contains("_lc + 1u"));
+    }
+
+    #[test]
+    fn emit_event_wide_field_writes_mark_their_readers() {
+        // A field write logs from a constant offset inside its register; the
+        // push must still be placed so it marks the readers it reaches.
+        for (width, (hi, lo)) in [(100, (63, 32)), (200, (95, 64))] {
+            let a = ProtoAssignStatement {
+                dst: VarOffset::Ff(0x40),
+                dst_width: width,
+                select: Some((hi, lo)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr: const_expr(0x1234, hi - lo + 1),
+                dst_ff_current_offset: 0x40,
+                comb_direct: false,
+                token: dummy_token(),
+            };
+            set_dataflow_ff_marks(Some(std::sync::Arc::new(vec![(0x40, 0x60, vec![(0, 1)])])));
+            DF_FF_UNCOVERED.with(|c| c.set(false));
+            let src = emit_event_function(&[ProtoStatement::Assign(a)], true, &[]);
+            let uncovered = DF_FF_UNCOVERED.with(|c| c.replace(false));
+            set_dataflow_ff_marks(None);
+            let src = src.expect("must emit");
+            assert!(!uncovered, "width {width}: the push was left unplaced");
+            assert!(src.contains("_dfm[0] |= 0x1ULL"), "width {width}: {src}");
+        }
     }
 
     #[test]

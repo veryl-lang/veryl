@@ -1,5 +1,7 @@
 use crate::conv::Context;
+use crate::ir::Module;
 use crate::ir::assign_table::{AssignContext, AssignTable};
+use crate::ir::write_summary::lifted_processes;
 use crate::ir::{
     AssignDestination, Component, Comptime, Expression, FfTable, Statement, VarId, VarIndex,
     VarSelect,
@@ -354,9 +356,8 @@ pub struct InstDeclaration {
     pub hierarchy: Vec<StrId>,
     pub inputs: Vec<InstInput>,
     pub outputs: Vec<InstOutput>,
-    /// Bindings for interface members captured by imported modport functions.
-    /// These members do not appear in `inputs` or `outputs` because the
-    /// modport exposes the function rather than the underlying signal.
+    /// Reference bindings for direction-free interface members and members
+    /// captured by imported modport functions.
     pub interface_bindings: Vec<InstInterfaceBinding>,
     /// `Arc`-shared: without it, repeated instantiations of the same generic
     /// module each deep-clone the `Component`, blowing pass2 memory.
@@ -371,10 +372,14 @@ impl InstDeclaration {
                 dst.eval_assign(context, assign_table, AssignContext::Ff);
             }
         }
-
         if let Component::SystemVerilog(x) = self.component.as_ref() {
             for dst in &x.connects {
                 dst.eval_assign(context, assign_table, AssignContext::SystemVerilog);
+            }
+        }
+        for process in lifted_processes(context, self, Module::is_direction_free_member) {
+            for write in &process.writes {
+                assign_table.insert_region(context, write);
             }
         }
     }
@@ -387,6 +392,31 @@ impl InstDeclaration {
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
         for input in &self.inputs {
             input.expr.gather_ff(context, table, decl, None, false);
+        }
+        if let Component::Module(module) = self.component.as_ref() {
+            for binding in &self.interface_bindings {
+                if !module
+                    .variables
+                    .get(&binding.child)
+                    .is_some_and(|v| v.kind == crate::ir::VarKind::Inout)
+                {
+                    continue;
+                }
+                if let Some(parent) = context.get_variable_info(binding.parent) {
+                    let comptime = Comptime::from_type(
+                        parent.r#type,
+                        crate::symbol::ClockDomain::None,
+                        self.token,
+                    );
+                    let expr = Expression::Term(Box::new(crate::ir::Factor::Variable(
+                        binding.parent,
+                        binding.index.clone(),
+                        binding.select.clone(),
+                        comptime,
+                    )));
+                    expr.gather_ff(context, table, decl, None, false);
+                }
+            }
         }
     }
 }

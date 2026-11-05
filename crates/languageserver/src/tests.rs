@@ -416,7 +416,15 @@ async fn progress() {
     assert_eq!(res.method(), "window/logMessage");
     assert_eq!(res.params().unwrap()["message"], "server initialized!");
 
-    let req = build_did_open("module A {}");
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("Veryl.toml"),
+        "[project]\nname=\"progress_test\"\nversion=\"0.1.0\"\n[build]\nexclude_std=true\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("child.veryl"), "module Child {}").unwrap();
+    let uri = Url::from_file_path(project.path().join("test.veryl")).unwrap();
+    let req = Request::build("textDocument/didOpen").params(json!({"textDocument":{"uri":uri,"languageId":"veryl","version":0,"text":"module A {}"}})).finish();
     server.send_request(req).await;
 
     let res = server.recv_notification().await;
@@ -427,7 +435,10 @@ async fn progress() {
     dbg!(&res);
     assert_eq!(res.method(), "textDocument/publishDiagnostics");
 
-    let res = server.recv_notification().await;
+    let mut res = server.recv_notification().await;
+    while res.method() == "textDocument/publishDiagnostics" {
+        res = server.recv_notification().await;
+    }
     assert_eq!(res.method(), "window/workDoneProgress/create");
 
     server.send_ack(res.id().unwrap()).await;

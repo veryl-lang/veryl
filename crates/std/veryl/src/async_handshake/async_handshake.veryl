@@ -4,13 +4,13 @@
 /// Asynchronous data transmitter based on handshake protocol.
 /// Generic parameter `S` is a module name of synchrinoizer.
 pub module async_handshake::<S: synchronizer> #(
-    param WIDTH              : u32  = 8           , /// Data width
-    param TYPE               : type = logic<WIDTH>, /// Data type
-    param STAGES             : u32               = 2           , /// Stages of synchrinoizer
-    param INITIALIZE_DATA_OUT: bit               = 1           , /// Whether output data is reset
-    param INITIAL_DATA_OUT   : bit <$bits(TYPE)> = '0          , /// Reset value of output data
-    param MERGE_RESET        : bit               = '0          , /// Whether both reset are merged
-    param RESET_SYNC_STAGES  : u32               = 2           , /// Stages of reset synchronizer
+    param WIDTH              : u32   = 8           , /// Data width
+    param TYPE               : type  = logic<WIDTH>, /// Data type
+    param STAGES             : u32                = 2           , /// Stages of synchrinoizer
+    param INITIALIZE_DATA_OUT: bbool              = true        , /// Whether output data is reset
+    param INITIAL_DATA_OUT   : bit  <$bits(TYPE)> = '0          , /// Reset value of output data
+    param MERGE_RESET        : bbool              = false       , /// Whether both reset are merged
+    param RESET_SYNC_STAGES  : u32                = 2           , /// Stages of reset synchronizer
 ) (
     is_clk  : input  's clock, /// src clock
     is_rst  : input  's reset, /// src reset

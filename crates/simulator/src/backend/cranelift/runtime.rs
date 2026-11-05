@@ -35,6 +35,8 @@ pub enum HelperSig {
     /// `(log_buf, dst, src, amount, width | dst_width << 32, log_offset |
     /// in_place << 32) -> ()`: wide window store.
     WideWindowStore,
+    SelectRead,
+    SelectStore,
 }
 
 pub struct Context {
@@ -126,6 +128,11 @@ pub fn get_or_create_sig(
             sig.params.push(AbiParam::new(I32)); // offset
             sig.params.push(AbiParam::new(I64)); // src_ptr
             sig.params.push(AbiParam::new(I32)); // nb
+        }
+        HelperSig::SelectRead | HelperSig::SelectStore => {
+            for _ in 0..if kind == HelperSig::SelectRead { 8 } else { 7 } {
+                sig.params.push(AbiParam::new(I64));
+            }
         }
         HelperSig::WideWindowStore => {
             for _ in 0..6 {
@@ -542,7 +549,7 @@ pub(super) fn load_pieces(a: u32, b: u32) -> Vec<(u32, Type)> {
     out
 }
 
-fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
+pub(crate) fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
     stmts.iter().any(|s| match s {
         ProtoStatement::CompiledBlock(_) => true,
         ProtoStatement::SequentialBlock(body) => proto_contains_compiled_block(body),

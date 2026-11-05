@@ -59,6 +59,13 @@ pub enum MetadataError {
     ReservedProjectName(String),
 
     #[diagnostic(
+        code(MetadataError::InvalidPropertyName),
+        help("\"[a-zA-Z_][0-9a-zA-Z_]*\" can be used as property name")
+    )]
+    #[error("property name \"{0}\" is invalid")]
+    InvalidPropertyName(String),
+
+    #[diagnostic(
         code(MetadataError::InvalidLicense),
         help("license text should follow SPDX expression")
     )]
@@ -113,6 +120,17 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::MissingVersion), help(""))]
     #[error("Version field is required in Veryl.toml to publish")]
     MissingVersion,
+
+    #[diagnostic(code(MetadataError::SvPathNotFound), help(""))]
+    #[error("SystemVerilog file or include directory \"{0}\" is not found")]
+    SvPathNotFound(PathBuf),
+
+    #[diagnostic(
+        code(MetadataError::InvalidSvPath),
+        help("paths in [[sv.filesets]] must be relative paths without \"..\"")
+    )]
+    #[error("path \"{0}\" in [[sv.filesets]] is not allowed in a published project")]
+    InvalidSvPath(PathBuf),
 
     #[diagnostic(code(MetadataError::UnknownProperty), help(""))]
     #[error("property \"{property}\" is not defined in project \"{project}\"")]

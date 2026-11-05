@@ -3,59 +3,15 @@ use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
 use crate::conv::Context;
-use crate::symbol::{Symbol, SymbolId, SymbolKind};
+use crate::symbol::{Symbol, SymbolKind};
 use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
+use crate::utils::{InstTypeSource, resolve_inst_type};
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
-
-enum InstTypeSource {
-    Id(SymbolId),
-    Path(SymbolPathNamespace),
-}
-
-fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
-    resolve_inst_type_inner(arg, &mut Vec::new())
-}
-
-fn resolve_inst_type_inner(arg: &InstTypeSource, visited: &mut Vec<SymbolId>) -> Option<Symbol> {
-    let symbol = match arg {
-        InstTypeSource::Id(x) => symbol_table::get(*x)?,
-        InstTypeSource::Path(x) => (*symbol_table::resolve(x).ok()?.found).clone(),
-    };
-
-    // cyclic-alias guard (alias instantiated): stop if a symbol was revisited.
-    if visited.contains(&symbol.id) {
-        return None;
-    }
-    visited.push(symbol.id);
-
-    match &symbol.kind {
-        SymbolKind::AliasModule(x) => {
-            let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
-            return resolve_inst_type_inner(&InstTypeSource::Path(path), visited);
-        }
-        SymbolKind::AliasInterface(x) => {
-            let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
-            return resolve_inst_type_inner(&InstTypeSource::Path(path), visited);
-        }
-        SymbolKind::GenericInstance(x) => {
-            return resolve_inst_type_inner(&InstTypeSource::Id(x.base), visited);
-        }
-        SymbolKind::GenericParameter(x) => {
-            let proto = x.bound.resolve_proto_bound(&symbol.namespace).ok()?;
-            if let Some(symbol) = proto.get_symbol() {
-                return resolve_inst_type_inner(&InstTypeSource::Id(symbol.id), visited);
-            }
-        }
-        _ => {}
-    }
-
-    Some(symbol)
-}
 
 fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
     if let SymbolKind::Instance(ref x) = inst_symbol.kind

@@ -25,12 +25,18 @@ mod comb_loop_replication_tests;
 mod comb_loop_retained_state_tests;
 mod comb_loop_sparse_tests;
 mod comb_loop_summary_tests;
+mod comb_loop_tier_tests;
 mod constant_evaluation_tests;
+mod driver_check_tests;
 mod dynamic_packed_member_tests;
+mod generic_interface_port_tests;
 mod instantiation_note_tests;
 mod interface_array_tests;
+mod interface_instance_select_tests;
 mod modport_connection_tests;
+mod package_alias_type_tests;
 mod statement_after_if_reset_tests;
+mod unit_cache_tests;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
@@ -131,6 +137,7 @@ fn analyze_with_defines(code: &str, defines: &[&str]) -> Vec<AnalyzerError> {
         .iter()
         .map(|x| resource_table::insert_str(x))
         .collect();
+    symbol_table::set_defines(&context.config.defines);
     let mut ir = Ir::default();
 
     let mut errors = vec![];
@@ -1308,6 +1315,36 @@ fn cyclic_file_dependency() {
 }
 
 #[test]
+fn global_generic_function_argument_is_not_a_file_dependency() {
+    let inputs = vec![
+        r#"
+        package a_pkg {
+          function w (n: input u32) -> u32 {
+            return n + 1;
+          }
+        }
+        function g::<W: u32> (a: input logic<W>) -> logic {
+          return a[W - 1];
+        }
+        "#,
+        r#"
+        package b_pkg {
+          const X: u32 = a_pkg::w(3);
+          function h (a: input logic<X>) -> logic {
+            return g::<X>(a);
+          }
+        }
+        module b_module (a: input logic<4>, o: output logic) {
+          assign o = g::<b_pkg::X>(a);
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn duplicated_identifier_clock_domain_label() {
     use crate::analyzer_error::DuplicatedIdentifierKind;
 
@@ -1858,6 +1895,36 @@ fn multiple_assignment() {
         for i in 0..2 :g {
             always_comb {
             _a[i] = '0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA(
+        clk : input clock,
+        a0 : input logic<3>,
+        a1 : input logic<3>,
+        d0 : input logic,
+        d1 : input logic,
+    ) {
+        #[ifdef(FOO)]
+        {
+            // This block will not be evaluated
+        }
+        #[else]
+        {
+            #[allow(multiple_assign)]
+            var memory : logic[8];
+
+            always_ff {
+                memory[a0] = d0;
+            }
+            always_ff {
+                memory[a1] = d1;
             }
         }
     }
@@ -2569,6 +2636,69 @@ fn invalid_statement() {
     assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
 
     let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff (clk, rst) {
+            let c: logic = a;
+            if_reset {
+                b = 0;
+            } else {
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff {
+            let c: logic = a;
+            if_reset {
+                b = 0;
+            } else {
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        var c: logic;
+        always_ff {
+            {b, c} = {a, a};
+            if_reset {
+                b = 0;
+                c = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
     module ModuleA {
         function FuncA() {
             return 1;
@@ -2941,6 +3071,697 @@ fn invalid_modport_item() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn missing_modport_dependency() {
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+        var data : logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        function set_data(x: input logic) {
+            data = x;
+        }
+
+        modport mp {
+            ready   : input ,
+            valid   : input ,
+            data    : output,
+            ack     : import,
+            set_data: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // variables assigned in functions must be exported as writable
+    let code = r#"
+    interface InterfaceA {
+        var data: logic;
+
+        function set_data(x: input logic) {
+            data = x;
+        }
+
+        modport mp {
+            data    : input ,
+            set_data: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var data: tri logic;
+
+        function set_data(x: input logic) {
+            data = x;
+        }
+
+        modport mp {
+            data    : inout ,
+            set_data: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport mp {
+            ack: import,
+        }
+    }
+    module ModuleA (
+        bus: modport InterfaceA::mp,
+        o  : output logic          ,
+    ) {
+        assign o = bus.ack();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport mp {
+            ready: input ,
+            ack  : import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    // variables referenced through functions called in the same interface
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function is_ready() -> logic {
+            return ready;
+        }
+
+        function ack() -> logic {
+            return is_ready() && valid;
+        }
+
+        modport mp {
+            valid: input ,
+            ack  : import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::MissingModportDependency { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function is_ready() -> logic {
+            return ready;
+        }
+
+        function ack() -> logic {
+            return is_ready() && valid;
+        }
+
+        modport mp {
+            ready: input ,
+            valid: input ,
+            ack  : import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // function arguments, local variables, parameters and constants are not interface variables
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 8,
+    ) {
+        const C: logic<W> = 1;
+
+        function f(x: input logic<W>) -> logic<W> {
+            var y: logic<W>;
+            y = x + C;
+            return y;
+        }
+
+        modport mp {
+            f: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // functions not exported by the modport are not checked
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport mp {
+            valid: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // variables exported by modport default
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport master {
+            ready: input ,
+            valid: input ,
+            ack  : import,
+        }
+
+        modport monitor {
+            ..same(master)
+        }
+
+        modport all_input {
+            ack: import,
+            ..input
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    interface InterfaceA {
+        var ready: logic;
+        var valid: logic;
+
+        function ack() -> logic {
+            return ready && valid;
+        }
+
+        modport master {
+            ready: input ,
+            ack  : import,
+        }
+
+        modport monitor {
+            ..same(master)
+        }
+    }
+    "#;
+
+    // members copied by `..same` are reported only at the original modport
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    let AnalyzerError::MissingModportDependency { error_location, .. } = &errors[0] else {
+        panic!("{errors:?}");
+    };
+    let offset = error_location.offset();
+    assert_eq!(&code[offset..offset + error_location.len()], "ack");
+    assert!(offset > code.find("modport master").unwrap());
+    assert!(offset < code.find("modport monitor").unwrap());
+
+    let code = r#"
+    proto interface ProtoA {
+        function ack() -> logic;
+        modport mp {
+            ack: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn invalid_inline_function() {
+    use crate::analyzer_error::InvalidInlineFunctionKind;
+
+    let has_kind = |errors: &[AnalyzerError], kind: InvalidInlineFunctionKind| {
+        errors.iter().any(|e| {
+            matches!(
+                e,
+                AnalyzerError::InvalidInlineFunction { kind: x, .. } if *x == kind
+            )
+        })
+    };
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        var b: logic;
+        #[inline]
+        function f -> logic {
+            return a && b;
+        }
+        #[inline]
+        function g() -> logic {
+            return f() && a;
+        }
+        function h -> logic {
+            return a;
+        }
+        #[inline]
+        function i -> logic {
+            return h() && b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    package PackageA {
+        type T = logic<8>;
+        const C: u32 = 1;
+    }
+    proto package ProtoPackageA {
+        type T;
+    }
+    package PackageB for ProtoPackageA {
+        type T = logic<4>;
+    }
+    interface InterfaceA::<PKG: ProtoPackageA> {
+        var a: PackageA::T;
+        var b: PKG::T;
+        #[inline]
+        function f -> PackageA::T {
+            return a + PackageA::C;
+        }
+        #[inline]
+        function g -> PKG::T {
+            return b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            return a;
+        }
+        assign a = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotInInterface),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    package PackageA {
+        #[inline]
+        function f -> logic {
+            return 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotInInterface),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA #(
+        param P: bit = 1,
+    ) {
+        var a: logic;
+        if P :g {
+            #[inline]
+            function f -> logic {
+                return a;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotInInterface),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        #[inline]
+        function f(x: input logic) -> logic {
+            return x;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::HasArgument),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f {
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NoReturnType),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            if a {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            let x: logic = a;
+            return x;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            const X: u32 = 1;
+            return a == X;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            var x: logic;
+            x = a;
+            return x;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::NotSingleReturn),
+        "{errors:?}"
+    );
+
+    // Type declared in the interface, referred in the return type
+    let code = r#"
+    interface InterfaceA {
+        type T = logic<8>;
+        var a: logic<8>;
+        #[inline]
+        function f -> T {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Type declared in the interface, referred in the expression
+    let code = r#"
+    interface InterfaceA {
+        type T = logic<8>;
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<8> {
+            return a as T;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Const declared in the interface, referred in the return type
+    let code = r#"
+    interface InterfaceA {
+        const C: u32 = 8;
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<C> {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Const declared in the interface, referred in the expression
+    let code = r#"
+    interface InterfaceA {
+        const C: u32 = 1;
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<8> {
+            return a + C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Param of the interface, referred in the return type
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 8,
+    ) {
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<W> {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Param of the interface, referred in the expression
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 1,
+    ) {
+        var a: logic<8>;
+        #[inline]
+        function f -> logic<8> {
+            return a + W;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::InterfaceLocalReference),
+        "{errors:?}"
+    );
+
+    // Self recursion
+    let code = r#"
+    interface InterfaceA {
+        #[inline]
+        function f -> u32 {
+            return f();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::RecursiveCall),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            return a && f();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::RecursiveCall),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    package PackageA {
+        function g(x: input logic) -> logic {
+            return x;
+        }
+    }
+    interface InterfaceA {
+        #[inline]
+        function f -> logic {
+            return PackageA::g(f());
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        has_kind(&errors, InvalidInlineFunctionKind::RecursiveCall),
+        "{errors:?}"
+    );
+
+    // Mutual recursion is reported as a cyclic dependency
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline]
+        function f -> logic {
+            return g() && a;
+        }
+        #[inline]
+        function g -> logic {
+            return f();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CyclicTypeDependency { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -3536,6 +4357,22 @@ fn mismatch_attribute_args() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::MismatchAttributeArgs { .. }))
     );
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        #[inline(foo)]
+        function f -> logic {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAttributeArgs { .. }
+    ));
 }
 
 #[test]
@@ -4421,6 +5258,291 @@ fn incompat_proto() {
     }
     package Pkg for ProtoPkg {
         const P: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    // A type named through an import is the same type as its qualified name.
+    let code = r#"
+    package TypePkg {
+        type T = logic<4>;
+        type U = logic<4>;
+    }
+    proto package ProtoPkg {
+        const A: TypePkg::T;
+        type B = TypePkg::T;
+        function f (a: input TypePkg::T) -> TypePkg::T;
+    }
+    package Pkg for ProtoPkg {
+        import TypePkg::*;
+        const A: T = 4'd3;
+        type B = T;
+        function f (a: input T) -> T {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    package TypePkg {
+        type T = logic<4>;
+        type U = logic<4>;
+    }
+    proto package ProtoPkg {
+        const A: TypePkg::T;
+    }
+    package Pkg for ProtoPkg {
+        import TypePkg::*;
+        const A: U = 4'd3;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    // Generic arguments spelled the same can name different symbols.
+    let code = r#"
+    package A { const W: u32 = 4; }
+    package B { const W: u32 = 8; }
+    package G::<N: u32> { type S = logic<N>; }
+    proto package ProtoPkg {
+        import A::*;
+        const C: G::<W>::S;
+    }
+    package Pkg for ProtoPkg {
+        import B::*;
+        const C: prj::G::<W>::S = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    package A { const W: u32 = 4; }
+    package G::<N: u32> { type S = logic<N>; }
+    proto package ProtoPkg {
+        const C: G::<A::W>::S;
+    }
+    package Pkg for ProtoPkg {
+        import A::*;
+        const C: G::<W>::S = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    proto package ProtoPkg {
+        struct Foo { foo: u32, }
+        const FOO: Foo;
+    }
+    package Pkg::<V: u32> for ProtoPkg {
+        struct Foo { foo: u32, }
+        const FOO: Foo = Foo'{foo: V};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let inputs = vec![
+        r#"
+        package cfg_pkg {
+            const WIDTH: u32 = 8;
+        }
+        "#,
+        r#"
+        proto module ProtoModule (
+            o_data: output logic<cfg_pkg::WIDTH>,
+        );
+        "#,
+        r#"
+        import cfg_pkg::WIDTH;
+        module ModuleA for ProtoModule (
+            o_data: output logic<WIDTH>,
+        ) {
+            assign o_data = '0;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty());
+
+    let inputs = vec![
+        r#"
+        package cfg_pkg {
+            type T = logic<8>;
+        }
+        "#,
+        r#"
+        proto module ProtoModule (
+            o_data: output cfg_pkg::T,
+        );
+        "#,
+        r#"
+        import cfg_pkg::T;
+        module ModuleA for ProtoModule (
+            o_data: output T,
+        ) {
+            assign o_data = '0;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package cfg_pkg {
+        const WIDTH: u32 = 8;
+        type T = logic<8>;
+    }
+    alias package cfg_alias_pkg = cfg_pkg;
+    proto module ProtoModule (
+        o_data: output logic<cfg_pkg::WIDTH>,
+        o_t   : output cfg_pkg::T,
+    );
+    module ModuleA for ProtoModule (
+        o_data: output logic<cfg_alias_pkg::WIDTH>,
+        o_t   : output cfg_alias_pkg::T,
+    ) {
+        assign o_data = '0;
+        assign o_t    = '0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package cfg_a_pkg {
+        const WIDTH: u32 = 8;
+    }
+    package cfg_b_pkg {
+        const WIDTH: u32 = 8;
+    }
+    proto module ProtoModule (
+        o_data: output logic<cfg_a_pkg::WIDTH>,
+    );
+    module ModuleA for ProtoModule (
+        o_data: output logic<WIDTH>,
+    ) {
+        import cfg_b_pkg::WIDTH;
+        assign o_data = '0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    package G::<N: u32> {
+        const W: u32 = N;
+    }
+    proto package ProtoPkg {
+        function f::<A: u32, B: u32>() -> logic<G::<A>::W>;
+    }
+    package Pkg for ProtoPkg {
+        function f::<A: u32, B: u32>() -> logic<G::<B>::W> {
+            return 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    package cfg {
+        const W: u32 = 8;
+    }
+    proto interface P {
+        import cfg::W;
+        var _o: logic<W>;
+    }
+    interface M for P {
+        import prj::cfg::W;
+        var _o: logic<W>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    package prj {
+        const W: u32 = 8;
+    }
+    proto module P #(
+        const W: u32,
+    ) (
+        o: output logic<prj::W>,
+    );
+    module M for P #(
+        const W: u32 = 16,
+    ) (
+        o: output logic<W>,
+    ) {
+        assign o = '0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto module ProtoModule #(
+        param W: u32,
+    ) (
+        a: output logic<W>,
+        b: output logic<$clog2(8) + W>,
+    );
+    module ModuleA for ProtoModule #(
+        param W: u32 = 8,
+    ) (
+        a: output logic<W>,
+        b: output logic<$clog2(8) + W>,
+    ) {
+        assign a = '0;
+        assign b = '0;
+    }
+    proto interface ProtoInterface #(
+        param W: u32,
+    ) {
+        var _a: logic<W>;
+    }
+    interface InterfaceA for ProtoInterface #(
+        param W: u32 = 8,
+    ) {
+        var _a: logic<W>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    proto module ProtoModule #(
+        param V: u32,
+        param W: u32,
+    ) (
+        a: output logic<W>,
+    );
+    module ModuleA for ProtoModule #(
+        param V: u32 = 8,
+        param W: u32 = 8,
+    ) (
+        a: output logic<V>,
+    ) {
+        assign a = '0;
     }
     "#;
 
@@ -5723,6 +6845,111 @@ fn array_slice_shape_mismatch() {
 }
 
 #[test]
+fn mismatch_function_arg_struct_type() {
+    let code = r#"
+    package PackageA {
+        struct StructA {
+            x: logic<8>,
+            y: logic<4>,
+        }
+        struct StructB {
+            x: logic<8>,
+        }
+        type AliasB = StructB;
+        function FuncA (
+            b: input StructB,
+        ) -> logic {
+            return b.x[0];
+        }
+        function FuncB (
+            a: input  StructA,
+            b: output StructB,
+        ) {
+            b = a.x as StructB;
+        }
+    }
+    module ModuleA (
+        i_a: input  PackageA::StructA,
+        o_x: output logic,
+    ) {
+        assign o_x = PackageA::FuncA(i_a);
+    }
+    module ModuleB (
+        i_a: input  PackageA::StructA,
+        o_a: output PackageA::StructA,
+    ) {
+        always_comb {
+            PackageA::FuncB(i_a, o_a);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(
+        errors
+            .iter()
+            .all(|e| matches!(e, AnalyzerError::MismatchAssignment { .. })),
+        "{errors:?}"
+    );
+
+    // The same struct, through an alias, a member, a plain logic value or a
+    // generic package, still binds.
+    let code = r#"
+    package PackageA::<W: u32> {
+        struct StructB {
+            x: logic<W>,
+        }
+        type AliasB = StructB;
+        struct StructA {
+            b: StructB,
+            y: logic<4>,
+        }
+        function FuncA (
+            b: input AliasB,
+        ) -> logic {
+            return b.x[0];
+        }
+        function FuncB (
+            b: output StructB,
+        ) {
+            b = 0;
+        }
+    }
+    module ModuleA::<W: u32> (
+        i_a: input  PackageA::<W>::StructA,
+        i_b: input  PackageA::<W>::StructB,
+        i_l: input  logic<W>,
+        o_x: output logic<4>,
+        o_b: output PackageA::<W>::AliasB,
+    ) {
+        var s: PackageA::<W>::StructA;
+        always_comb {
+            s      = i_a;
+            o_x[0] = PackageA::<W>::FuncA(i_a.b);
+            o_x[1] = PackageA::<W>::FuncA(i_b);
+            o_x[2] = PackageA::<W>::FuncA(i_l);
+            o_x[3] = PackageA::<W>::FuncA(i_a.b as PackageA::<W>::StructB);
+            PackageA::<W>::FuncB(o_b);
+            PackageA::<W>::FuncB(s.b);
+        }
+    }
+    module ModuleB (
+        i_a: input  PackageA::<8>::StructA,
+        i_b: input  PackageA::<8>::StructB,
+        i_l: input  logic<8>,
+        o_x: output logic<4>,
+        o_b: output PackageA::<8>::StructB,
+    ) {
+        inst u: ModuleA::<8> (i_a, i_b, i_l, o_x, o_b);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn mismatch_assignment() {
     // The unpacked dimensions disagree. No SystemVerilog tool accepts that, so
     // the help says which axis is wrong, but the severity stays the warning the
@@ -6334,6 +7561,28 @@ fn missing_if_reset() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MissingIfReset { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff(clk, rst) {
+            var c: logic;
+            if_reset {
+                b = 0;
+            } else {
+                c = a;
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7086,6 +8335,32 @@ fn duplicate_enum_variant() {
 }
 
 #[test]
+fn struct_array_param_member_reference() {
+    let code = r#"
+    package PackageA {
+        struct Region {
+            base: logic<32>,
+        }
+    }
+    module ModuleA #(
+        param N: u32                  = 2,
+        param W: PackageA::Region [N] = '{0, 0},
+        param X: PackageA::Region [N] = '{
+            PackageA::Region'{ base: 1 },
+            PackageA::Region'{ base: 2 }
+        },
+    ) (
+        o: output logic,
+    ) {
+        assign o = W[0].base == X[1].base;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn invisible_identifier() {
     let code = r#"
     package Pkg::<A: u32> {}
@@ -7711,6 +8986,52 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let inputs = vec![
+        r#"
+        package cfg_pkg {
+            const WIDTH: u32 = 8;
+        }
+        "#,
+        r#"
+        import cfg_pkg::WIDTH;
+        proto module ProtoModule (
+            o_data: output logic<WIDTH>,
+        );
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn overridden_param_default_not_evaluated() {
+    let code = r#"
+    module ModuleA #(
+        param N  : u32         = 1      ,
+        param TBL: logic<8> [N] = '{8'd0},
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = TBL[N - 1];
+    }
+
+    module ModuleB (
+        o: output logic<8>,
+    ) {
+        const T: logic<8> [2] = '{8'd1, 8'd2};
+        inst u: ModuleA #(
+            N  : 2,
+            TBL: T,
+        ) (
+            o,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -8263,6 +9584,35 @@ fn referring_before_definition() {
             .iter()
             .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
     );
+}
+
+#[test]
+fn inactive_ifdef_module_is_not_analyzed() {
+    let code = r#"
+    #[ifdef(FOO)]
+    module ModuleA (
+        clk: input  clock,
+        rst: input  reset,
+        i_a: input  logic,
+        o_a: output logic,
+    ) {
+        var q: logic;
+        always_ff {
+            if_reset {
+                q = 0;
+            } else {
+                q = i_a;
+            }
+        }
+        assign o_a = q;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let errors = analyze_with_defines(code, &["FOO"]);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -9318,6 +10668,34 @@ fn unknown_member() {
         }
         modport master {
             ..converse(slave)
+        }
+    }
+    module c_module (
+        ab: modport ab_if::master,
+    ) {
+        assign ab.a = 0;
+        assign ab.b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface ab_if {
+        var a: logic;
+        var b: logic;
+        modport master {
+            ..converse(slave)
+        }
+        modport slave {
+            ..same(slave_a, slave_b)
+        }
+        modport slave_a {
+            a: input,
+        }
+        modport slave_b {
+            b: input,
         }
     }
     module c_module (
@@ -10524,6 +11902,31 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    // An array output argument assigns every element it binds.
+    let code = r#"
+    module ModuleA (
+        x: input  logic<2>       ,
+        o: output logic<2> [2]   ,
+        p: output logic<2> [2, 2],
+    ) {
+        function f (
+            a: input  logic<2>    ,
+            c: output logic<2> [2],
+        ) {
+            c[0] = a;
+            c[1] = ~a;
+        }
+        always_comb {
+            f(x, o);
+            f(x, p[0]);
+            f(x, p[1]);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -12552,6 +13955,82 @@ fn mismatch_case_label() {
 }
 
 #[test]
+fn case_label_with_unfoldable_signed_bound() {
+    let code = r#"
+    module ModuleA (
+        s: input  i32,
+        y: output logic<2>,
+        z: output logic<2> [8],
+    ) {
+        const N: i32 = $sv::N;
+        always_comb {
+            y = case s {
+                0..N   : 1,
+                default: 0,
+            };
+            for i in 0..8 {
+                z[i] = case i {
+                    0..N   : 1,
+                    default: 0,
+                };
+            }
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. })),
+        "{errors:#?}"
+    );
+
+    // An unsigned bound still makes the whole comparison unsigned.
+    let code = r#"
+    module ModuleA (
+        s: input  i32,
+        y: output logic<2>,
+    ) {
+        const N: u32 = $sv::N;
+        always_comb {
+            y = case s {
+                0..N   : 1,
+                default: 0,
+            };
+        }
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 1, "{errors:#?}");
+
+    // A variable bound can still wrap.
+    let code = r#"
+    module ModuleA (
+        s: input  i8,
+        b: input  i8,
+        y: output logic<2>,
+    ) {
+        always_comb {
+            y = case s {
+                0..b   : 1,
+                default: 0,
+            };
+        }
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 1, "{errors:#?}");
+}
+
+#[test]
 fn string_case_label() {
     let code = r#"
     module ModuleA (
@@ -12619,6 +14098,18 @@ fn invalid_operand() {
     let code = r#"
     module ModuleA {
         let _a: logic = logic + logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const W: logic<32> = 'x;
+        var a: logic<8>;
+        let _b: logic<8> = a as W;
+        assign a = 0;
     }
     "#;
 
@@ -12944,6 +14435,33 @@ fn invalid_factor() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
     assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = i<4>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 8;
+    }
+    module ModuleA {
+        const W: u32 = 8;
+        let _a: u32 = W<4>;
+        let _b: u32 = PackageA::W<4>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+    assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
 }
 
 #[test]
@@ -13081,6 +14599,484 @@ fn invalid_factor_kind() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn reset_value_literal() {
+    // input port connection for each reset type
+    let code = r#"
+    module ModuleA (
+        i_rst0: input reset,
+        i_rst1: input reset_async_high,
+        i_rst2: input reset_async_low,
+        i_rst3: input reset_sync_high,
+        i_rst4: input reset_sync_low,
+    ) {}
+    module ModuleB {
+        inst u_a0: ModuleA (
+            i_rst0: reset_active,
+            i_rst1: reset_active,
+            i_rst2: reset_inactive,
+            i_rst3: reset_inactive,
+            i_rst4: (reset_active),
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // port connection of generic instance resolved through proto module
+    let code = r#"
+    proto module ProtoA (
+        i_rst: input reset_async_low,
+    );
+    module ModuleA for ProtoA (
+        i_rst: input reset_async_low,
+    ) {}
+    module ModuleB::<M: ProtoA> {
+        inst u_a: M (
+            i_rst: reset_active,
+        );
+    }
+    module ModuleC {
+        inst u_b: ModuleB::<ModuleA>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // assignment to reset type variables
+    let code = r#"
+    module ModuleA (
+        i_rst : input  reset,
+        o_rst0: output reset,
+        o_rst1: output reset_async_low,
+        o_rst2: output reset,
+        o_rst3: output reset_sync_high,
+    ) {
+        struct StructA {
+            rst: reset,
+        }
+
+        let a: reset = reset_active;
+        var b: StructA;
+        var c: reset_sync_low[2];
+
+        assign b.rst = reset_inactive;
+        assign c[0]  = reset_active;
+
+        always_comb {
+            o_rst0 = a;
+            o_rst1 = reset_active;
+            o_rst2 = b.rst;
+        }
+
+        always_comb {
+            let d: reset_sync_low = reset_inactive;
+            c[1]   = d;
+            o_rst3 = (reset_inactive);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // assignment in interface and to modport member
+    let code = r#"
+    interface InterfaceA {
+        var rst0: reset_async_high;
+        var rst1: reset;
+
+        assign rst0 = reset_active;
+
+        modport mp {
+            rst1: output,
+        }
+    }
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {
+        assign if_a.rst1 = reset_inactive;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // equality comparison with reset type signals
+    let code = r#"
+    interface InterfaceA {
+        var rst: reset;
+        modport mp {
+            rst: input,
+        }
+    }
+    module ModuleA (
+        i_rst : input  reset,
+        i_rsts: input  reset_async_low[2],
+        if_a  : modport InterfaceA::mp,
+        o_a   : output logic<7>,
+    ) {
+        struct StructA {
+            rst: reset_sync_low,
+        }
+
+        var s: StructA;
+
+        assign s.rst = i_rst as reset_sync_low;
+
+        assign o_a[0] = i_rst == reset_active;
+        assign o_a[1] = reset_inactive != i_rst;
+        assign o_a[2] = i_rsts[1] == reset_active;
+        assign o_a[3] = if_a.rst != (reset_inactive);
+        assign o_a[4] = s.rst == reset_active;
+        assign o_a[5] = i_rst == reset_active && s.rst != reset_inactive;
+        assign o_a[6] = reset_active == i_rst == 1'b1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_reset_value_literal() {
+    #[track_caller]
+    fn check_n(code: &str, expected: usize) {
+        let errors = analyze(code);
+        let n = errors
+            .iter()
+            .filter(|x| matches!(x, AnalyzerError::InvalidFactor { .. }))
+            .count();
+        assert_eq!(n, expected);
+    }
+
+    #[track_caller]
+    fn check(code: &str) {
+        check_n(code, 1);
+    }
+
+    // assignment to non reset type
+    check(
+        r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        assign o_a = reset_active;
+    }
+    "#,
+    );
+
+    // assignment to whole array and range select
+    for exp in ["assign a = reset_active;", "assign a[1:0] = reset_active;"] {
+        check(&format!(
+            r#"
+    module ModuleA {{
+        var a: reset[2];
+        {exp}
+    }}
+    "#
+        ));
+    }
+
+    // type inference is reported by another error
+    let code = r#"
+    module ModuleA (
+        o_a: output reset,
+    ) {
+        let a = reset_active;
+        assign o_a = a;
+    }
+    "#;
+
+    check_n(code, 0);
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::TypeInferenceNotSupported { .. }))
+    );
+
+    // operator assignment
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_rst: output reset,
+    ) {
+        always_comb {
+            o_rst = i_rst;
+            o_rst |= reset_active;
+        }
+    }
+    "#,
+    );
+
+    // port default value
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input reset = reset_active,
+    ) {}
+    "#,
+    );
+
+    // connection to non reset type port
+    check(
+        r#"
+    module ModuleA (
+        i_a: input logic,
+    ) {}
+    module ModuleB {
+        inst u_a: ModuleA (
+            i_a: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to output port
+    check(
+        r#"
+    module ModuleA (
+        o_rst: output reset,
+    ) {
+        assign o_rst = 0;
+    }
+    module ModuleB {
+        inst u_a: ModuleA (
+            o_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to output port of generic instance
+    check(
+        r#"
+    proto module ProtoA (
+        o_rst: output reset,
+    );
+    module ModuleB::<M: ProtoA> {
+        inst u_a: M (
+            o_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to SystemVerilog port
+    check(
+        r#"
+    module ModuleA {
+        inst u: $sv::Module (
+            rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // unresolved counterpart is reported by another error
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleX (
+            rst: reset_active,
+        );
+    }
+    "#;
+
+    check_n(code, 0);
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::UndefinedIdentifier { .. }))
+    );
+
+    // function argument and return value
+    check(
+        r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        function f (
+            rst: input reset,
+        ) -> logic {
+            return rst;
+        }
+
+        assign o_a = f(reset_inactive);
+    }
+    "#,
+    );
+
+    check(
+        r#"
+    module ModuleA (
+        o_rst: output reset,
+    ) {
+        function f () -> reset {
+            return reset_active;
+        }
+
+        assign o_rst = f();
+    }
+    "#,
+    );
+
+    // operators other than equality comparison
+    for exp in [
+        "~reset_active",
+        "i_rst & reset_active",
+        "i_rst && reset_active",
+        "i_rst ==? reset_active",
+        "{reset_active}",
+        "reset_active as reset",
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {{
+        assign o_a = {exp};
+    }}
+    "#
+        ));
+    }
+
+    // conditional expressions
+    for exp in [
+        "if i_a ? reset_active : i_rst",
+        "case i_a { 0: reset_active, default: i_rst }",
+        "switch { i_a: reset_active, default: i_rst }",
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA (
+        i_a  : input  logic,
+        i_rst: input  reset,
+        o_rst: output reset,
+    ) {{
+        assign o_rst = {exp};
+    }}
+    "#
+        ));
+    }
+
+    // invalid counterpart of equality comparison
+    for (exp, n) in [
+        ("i_a == reset_active", 1),
+        ("reset_active == reset_inactive", 2),
+        ("(i_rst & i_rst) == reset_active", 1),
+        ("i_rst & i_rst == reset_active", 0),
+        ("i_rst == i_rst == reset_active", 1),
+        ("f() == reset_active", 1),
+    ] {
+        check_n(
+            &format!(
+                r#"
+    module ModuleA (
+        i_a  : input  logic,
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {{
+        function f () -> reset {{
+            return i_rst;
+        }}
+
+        assign o_a = {exp};
+    }}
+    "#
+            ),
+            n,
+        );
+    }
+
+    // type not declared directly by reset keyword
+    for (decl, exp) in [
+        ("var a: T;", "assign a = reset_active;"),
+        ("var a: R;", "assign a = reset_active;"),
+        ("var a: C;", "assign a = reset_active;"),
+        ("var a: S;", "assign a.rst = reset_active;"),
+        ("var a: T;", "assign o_a = a == reset_active;"),
+        ("var a: C;", "assign o_a = a == reset_active;"),
+        ("var a: S;", "assign o_a = a.rst != reset_inactive;"),
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA #(
+        param T: type = reset,
+    ) (
+        o_a: output logic,
+    ) {{
+        const C: type = reset_async_low;
+        type R = reset;
+
+        struct S {{
+            rst: T,
+        }}
+
+        {decl}
+        {exp}
+    }}
+    "#
+        ));
+    }
+
+    check(
+        r#"
+    module ModuleA #(
+        param T: type = reset,
+    ) (
+        i_rst: input T,
+    ) {}
+    module ModuleB {
+        inst u_a: ModuleA (
+            i_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    check(
+        r#"
+    proto package ProtoPkg {
+        type rst_t;
+    }
+    package PkgA for ProtoPkg {
+        type rst_t = reset_async_low;
+    }
+    module ModuleA::<P: ProtoPkg> (
+        o_rst: output P::rst_t,
+    ) {
+        assign o_rst = reset_active;
+    }
+    module ModuleB {
+        inst u_a: ModuleA::<PkgA>;
+    }
+    "#,
+    );
+
+    // case label
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {
+        always_comb {
+            case i_rst {
+                reset_active: o_a = 1;
+                default   : o_a = 0;
+            }
+        }
+    }
+    "#,
+    );
 }
 
 #[test]
@@ -16139,6 +18135,88 @@ fn parameter_override() {
 }
 
 #[test]
+fn parameter_override_unfoldable_forwarded() {
+    // An override the parent cannot fold (its default comes from `$sv::` or
+    // `$define::`) is forwarded by `Mid` to `Leaf`. It must stay unknown
+    // there, not be read through `Mid`'s own variables: `COLS` and `PORT`
+    // are the first parameters of their modules, and `Leaf` saw `64 * PORT`.
+    for default in ["$sv::cfg::COLS", "$define::COLS"] {
+        let code = format!(
+            r#"
+    module Leaf #(
+        param W   : u32 = 128,
+        param BITS: u32 = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {{
+        let _w: logic<W> = 0;
+        assign o_z = i_a[7:8 - BITS];
+    }}
+
+    module Mid #(
+        param PORT: bit<16> = 16'd10007,
+        param W   : u32     = 128,
+        param BITS: u32     = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {{
+        inst u: Leaf #(W: W, BITS: BITS) (i_a, o_z);
+    }}
+
+    module Top #(
+        param COLS: u32 = {default},
+        param BITS: u32 = {default},
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {{
+        inst u: Mid #(W: 64 * COLS, BITS: BITS) (i_a, o_z);
+    }}
+    "#
+        );
+
+        let errors = analyze(&code);
+        assert!(errors.is_empty(), "{default}: {errors:#?}");
+    }
+
+    // A value the parent does fold still reaches the grandchild.
+    let code = r#"
+    module Leaf #(
+        param BITS: u32 = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {
+        assign o_z = i_a[7:8 - BITS];
+    }
+
+    module Mid #(
+        param PORT: u32 = 1,
+        param BITS: u32 = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {
+        inst u: Leaf #(BITS: BITS) (i_a, o_z);
+    }
+
+    module Top #(
+        param BITS: u32 = 9,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {
+        inst u: Mid #(BITS: BITS) (i_a, o_z);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+}
+
+#[test]
 fn exceed_limit() {
     let code = r#"
     module ModuleA #(
@@ -16163,6 +18241,20 @@ fn exceed_limit() {
     let code = r#"
     module ModuleA {
         var _a: logic<10000000>;
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 10000000;
+    }
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as PackageA::W;
+        assign a = 0;
     }
     "#;
 
@@ -16818,6 +18910,205 @@ fn type_inference_var_conflict() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::TypeInferenceConflict { .. }))
     );
+}
+
+#[test]
+fn interface_instance_keeps_enclosing_namespace() {
+    let code = r#"
+    interface InterfaceA #(
+        param W: u32 = 1,
+    ) {
+        var a: logic<W>;
+    }
+
+    module ModuleA {
+        inst u: ModuleB;
+    }
+
+    module ModuleB {
+        inst b: InterfaceA #(W: 2);
+        assign b.a = 0;
+
+        var _x: logic;
+        for i in 0..1 :g {
+            assign _x = FuncA();
+        }
+
+        function FuncA () -> logic {
+            return 0;
+        }
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let var_names = |module: &crate::ir::Module| {
+        let mut names: Vec<_> = module
+            .variables
+            .values()
+            .map(|x| x.path.to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    let module = |name: &str| {
+        ir.components
+            .iter()
+            .find_map(|x| match x {
+                crate::ir::Component::Module(x) if x.name.to_string() == name => Some(x),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let instantiated = module("ModuleA")
+        .declarations
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Declaration::Inst(x) => match x.component.as_ref() {
+                crate::ir::Component::Module(x) => Some(x),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    // A function first called inside a generate block of its own module is
+    // converted in that block's scope.
+    assert!(var_names(instantiated).contains(&"g[0].FuncA.return".to_string()));
+    assert_eq!(var_names(instantiated), var_names(module("ModuleB")));
+}
+
+#[test]
+fn type_inference_var_chain_in_overridden_instance() {
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 8,
+    ) (
+        i: input  logic<W>,
+        o: output logic<W>,
+    ) {
+        var _a;
+        assign _a = i;
+        var _b;
+        assign _b = _a;
+        assign o  = _b;
+    }
+
+    module ModuleB (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        inst u: ModuleA #(W: 8) (i, o);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn generic_arg_forwarded_to_other_project() {
+    let inputs = [
+        (
+            "libx",
+            r#"
+    pub module ModuleA::<V: u32> (
+        o: output logic<32>,
+    ) {
+        assign o = V;
+    }
+    "#,
+        ),
+        (
+            "prj",
+            r#"
+    package PackageA {
+        const C1: u32 = 1;
+        const C2: u32 = 2;
+    }
+    "#,
+        ),
+        (
+            "prj",
+            r#"
+    module ModuleB::<V: u32> (
+        o: output logic<32>,
+    ) {
+        inst u: libx::ModuleA::<V> (o);
+    }
+
+    module ModuleC (
+        o1: output logic<32>,
+        o2: output logic<32>,
+    ) {
+        inst a: ModuleB::<PackageA::C1> (o: o1);
+        inst b: ModuleB::<PackageA::C2> (o: o2);
+    }
+    "#,
+        ),
+    ];
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let mut parsed = vec![];
+    for (i, (prj, code)) in inputs.iter().enumerate() {
+        let metadata = Metadata::create_default(prj).unwrap();
+        let parser = Parser::parse(code, &format!("test_{i}.veryl")).unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        analyzer.analyze_pass1(prj, &parser.veryl);
+        parsed.push((parser, analyzer));
+    }
+    Analyzer::analyze_post_pass1();
+
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    for (parser, analyzer) in &parsed {
+        let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    let inst_components =
+        |module: &crate::ir::Module| -> Vec<std::sync::Arc<crate::ir::Component>> {
+            module
+                .declarations
+                .iter()
+                .filter_map(|x| match x {
+                    crate::ir::Declaration::Inst(x) => Some(x.component.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+    let as_module = |x: &crate::ir::Component| match x {
+        crate::ir::Component::Module(x) => x.clone(),
+        _ => unreachable!(),
+    };
+    let top = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Component::Module(x) if x.name.to_string() == "ModuleC" => Some(x),
+            _ => None,
+        })
+        .unwrap();
+    let leaves: Vec<_> = inst_components(top)
+        .iter()
+        .map(|x| as_module(&inst_components(&as_module(x))[0]).signature)
+        .collect();
+    assert_ne!(leaves[0], leaves[1]);
 }
 
 #[test]
@@ -20536,6 +22827,69 @@ fn negative_for_step() {
 }
 
 #[test]
+fn for_step_with_bits_of_sv_reference() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<64>,
+    ) {
+        const A: u32 = $bits($sv::foo_t) / 8;
+        const B: u32 = $bits($sv::pkg::foo_t) / 8;
+        const C: u32 = $bits($sv::cfg.width) / 8;
+        always_comb {
+            o = 0;
+            for i in 0..64 step += A {
+                o[i] = 1;
+            }
+            for i in 0..64 step += B {
+                o[i] = 1;
+            }
+            for i in 0..64 step += C {
+                o[i] = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn logical_operand_with_sv_reference() {
+    let code = r#"
+    module ModuleA (
+        o: output logic,
+    ) {
+        always_comb {
+            o = 0;
+            if $sv::FLAG {
+                o = 1;
+            } else if $sv::FLAG {
+                o = 1;
+            }
+        }
+
+        let _a: logic = !$sv::FLAG;
+        let _b: logic = $sv::FLAG && true;
+        let _c: logic = if $sv::FLAG ? 1'b1 : 1'b0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidLogicalOperand { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn negative_for_range() {
     use crate::analyzer_error::InvalidForRangeKind;
     // A negative const range bound wraps through to_usize into a huge
@@ -20845,6 +23199,165 @@ fn tb_random_analyze() {
     assert!(
         errors.is_empty(),
         "expected no analyzer errors, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_queue_element_type() {
+    // `$tb::queue::<T, N>` accepts any fixed-width packed type as T and rejects
+    // the others with a MismatchType error.
+    let build = |ty: &str| {
+        format!(
+            r#"
+    package pkg {{
+        type arr_t = u32[2];
+        struct pair_t {{
+            a: logic<4>,
+            b: logic<8>,
+        }}
+    }}
+    #[test(t)]
+    module t {{
+        gen wide_t: type = bit<100>;
+        var q: $tb::queue::<{ty}>;
+        initial {{
+            q.clear();
+            $finish();
+        }}
+    }}
+    "#
+        )
+    };
+    let has_mismatch = |ty: &str| {
+        analyze(&build(ty))
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchType { .. }))
+    };
+
+    for ty in [
+        "u32",
+        "i8",
+        "bbool",
+        "lbool",
+        "f64",
+        "wide_t",
+        "pkg::pair_t",
+    ] {
+        assert!(!has_mismatch(ty), "`$tb::queue::<{ty}>` should be accepted");
+    }
+    for ty in ["pkg::arr_t", "string"] {
+        assert!(has_mismatch(ty), "`$tb::queue::<{ty}>` should be rejected");
+    }
+}
+
+#[test]
+fn tb_queue_analyze() {
+    // Valid `$tb::queue` usage, with and without the capacity, and its methods
+    // in statement, assignment and expression positions.
+    let code = r#"
+    package pkg {
+        const DEPTH: u32 = 4;
+    }
+    #[test(test_queue)]
+    module test_queue {
+        var q: $tb::queue::<u32>;
+        var b: $tb::queue::<i16, 2>;
+        var c: $tb::queue::<u8, pkg::DEPTH>;
+        var x: u32;
+        var y: i16;
+        var n: u32;
+        initial {
+            q.push_back(1);
+            q.push_front(2);
+            x = q.pop_front();
+            x = q.pop_back();
+            x = q.front();
+            x = q.back();
+            q.drop_front();
+            q.drop_back();
+            q.clear();
+            n = q.size();
+            $assert(q.is_empty() == 1);
+            $assert(b.is_full() == 0);
+            b.push_back(-1);
+            y = b.pop_front();
+            c.push_back(x as u8);
+            let z: u32 = q.pop_front() + 1;
+            $finish();
+        }
+    }
+    "#;
+    let errors: Vec<_> = analyze(code)
+        .into_iter()
+        .filter(|e| !matches!(e, AnalyzerError::UnusedVariable { .. }))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "expected no analyzer errors, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_queue_arity() {
+    // `push_back`/`push_front` take one argument and the other methods none.
+    let code = r#"
+    #[test(test_queue)]
+    module test_queue {
+        var q: $tb::queue::<u32>;
+        var n: u32;
+        initial {
+            q.push_back();
+            q.push_front(1, 2);
+            n = q.size(1);
+            $finish();
+        }
+    }
+    "#;
+    let count = analyze(code)
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::MismatchFunctionArity { .. }))
+        .count();
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn tb_var_component_as_inst() {
+    // `var`-form `$tb` components are rejected when declared with `inst`.
+    for ty in ["$tb::file", "$tb::random::<u32>", "$tb::queue::<u32>"] {
+        let code = format!(
+            r#"
+    #[test(t)]
+    module t {{
+        inst x: {ty};
+        initial {{
+            $finish();
+        }}
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+            "`inst x: {ty}` should be rejected, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn tb_queue_outside_test_module() {
+    let code = r#"
+    module ModuleA {
+        var _q: $tb::queue::<u32>;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+        "{errors:?}"
     );
 }
 
@@ -21402,6 +23915,75 @@ fn function_local_write_has_no_scheduler_side_effect() {
         !errors
             .iter()
             .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_output_in_port_connection() {
+    let code = r#"
+    module ModuleA (
+        i: input  logic,
+        o: output logic,
+    ) {
+        assign o = i;
+    }
+    module ModuleB (
+        a: input  logic,
+        o: output logic,
+        s: output logic,
+    ) {
+        function calculate (x: input logic, y: output logic) -> logic {
+            y = x;
+            return x;
+        }
+        inst u: ModuleA (
+            i: calculate(a, s) & 1'b1,
+            o                       ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInPortConnection { .. }))
+    );
+
+    // A call with an output argument inside the body of a function that is
+    // itself called from the port connection is a procedural statement.
+    let code = r#"
+    module ModuleA (
+        i: input  logic,
+        o: output logic,
+    ) {
+        assign o = i;
+    }
+    module ModuleB (
+        a: input  logic,
+        o: output logic,
+    ) {
+        function inner (x: input logic, y: output logic) -> logic {
+            y = x;
+            return x;
+        }
+        function outer::<W: u32> (x: input logic) -> logic {
+            var tmp: logic;
+            return inner(x, tmp);
+        }
+        inst u: ModuleA (
+            i: outer::<1>(a),
+            o               ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInPortConnection { .. })),
+        "{errors:?}"
     );
 }
 
@@ -22201,6 +24783,60 @@ fn concatenation_assignment_contributes_function_effects() {
 }
 
 #[test]
+fn ifdef_package_function_resolves_to_active_variant() {
+    let code = r#"
+    package PackageA {
+        #[ifdef(FEATURE)]
+        function f () -> logic<8> {
+            return 1;
+        }
+        #[else]
+        function f () -> logic<8> {
+            return 2;
+        }
+    }
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        assign o = PackageA::f();
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(errors.is_empty());
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn ifdef_struct_member_resolves_to_active_variant_before_pass2() {
+    // `s.b` is resolved when references are applied after pass1.
+    let code = r#"
+    package PackageA {
+        #[ifdef(FEATURE)]
+        struct S {
+            b: logic<8>,
+        }
+        #[else]
+        struct S {
+            a: logic<8>,
+        }
+    }
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        var s: PackageA::S;
+        assign s.b = 1;
+        assign o   = s.b;
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn inactive_function_writes_do_not_contribute_effects() {
     let code = r#"
     module ModuleA (
@@ -22835,6 +25471,227 @@ fn zero_size() {
         matches!(errors[0], AnalyzerError::ZeroSize { .. }),
         "{errors:?}"
     );
+
+    let code = r#"
+    module ModuleA {
+        const W: u32 = 0;
+        var a: logic<8>;
+        let _b: logic<8> = a as W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 0;
+    }
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as PackageA::W;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as 0;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic<8> = a as 32'd0;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn zero_size_from_proto_const_dependent_function() {
+    // Proto constants have no value inside a generic, so these functions must
+    // not fold to their initial value.
+    let code = r#"
+    proto package ProtoA {
+        const W: u32;
+        const T: u32 [W];
+    }
+    package PackageA for ProtoA {
+        const W: u32     = 2;
+        const T: u32 [W] = '{1, 1};
+    }
+    package PackageB::<CFG: ProtoA> {
+        function count () -> u32 {
+            var c: u32;
+            c = 0;
+            for p in 0..CFG::W {
+                c += CFG::T[p];
+            }
+            return c;
+        }
+        function select () -> u32 {
+            var c: u32;
+            c = 0;
+            if CFG::W == 2 {
+                c = 1;
+            }
+            return c;
+        }
+        const N: u32 = count();
+        const M: u32 = select();
+    }
+    module ModuleA::<CFG: ProtoA> (
+        i_a: input  logic [PackageB::<CFG>::N],
+        o_a: output logic [PackageB::<CFG>::N],
+        i_b: input  logic [PackageB::<CFG>::M],
+        o_b: output logic [PackageB::<CFG>::M],
+    ) {
+        assign o_a = i_a;
+        assign o_b = i_b;
+    }
+    module ModuleB (
+        i_a: input  logic [2],
+        o_a: output logic [2],
+        i_b: input  logic [1],
+        o_b: output logic [1],
+    ) {
+        inst u: ModuleA::<PackageA> (i_a, o_a, i_b, o_b);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn reset_value_from_iterator_over_proto_const_range() {
+    let code = r#"
+    proto package ProtoA {
+        const N: u32;
+    }
+    package PackageA for ProtoA {
+        const N: u32 = 4;
+    }
+    module ModuleA::<CFG: ProtoA> (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        var q: logic<8> [CFG::N];
+        always_ff {
+            if_reset {
+                for i in 0..CFG::N {
+                    q[i] = (32 + i) as 8;
+                }
+            }
+        }
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        inst u: ModuleA::<PackageA> (clk, rst);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnevaluableValue { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn zero_size_from_unevaluable_assignment_in_function() {
+    let code = r#"
+    proto package ProtoA {
+        const W: u32;
+    }
+    package PackageA for ProtoA {
+        const W: u32 = 2;
+    }
+    package PackageB::<CFG: ProtoA> {
+        function width () -> u32 {
+            var c: u32;
+            c = 0;
+            c = CFG::W;
+            return c;
+        }
+        const N: u32 = width();
+    }
+    module ModuleA::<CFG: ProtoA> (
+        i_a: input  logic [PackageB::<CFG>::N],
+        o_a: output logic [PackageB::<CFG>::N],
+    ) {
+        assign o_a = i_a;
+    }
+    module ModuleB (
+        i_a: input  logic [2],
+        o_a: output logic [2],
+    ) {
+        inst u: ModuleA::<PackageA> (i_a, o_a);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Output arguments of a nested call are not written back either.
+    let code = r#"
+    package PackageC {
+        function g (a: input u32, b: output u32) {
+            b = a;
+        }
+        function f () -> u32 {
+            var c: u32;
+            c = 0;
+            g(5, c);
+            return c;
+        }
+        const N: u32 = f();
+    }
+    module ModuleC (
+        i_a: input  logic [PackageC::N],
+        o_a: output logic [PackageC::N],
+    ) {
+        assign o_a = i_a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ZeroSize { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -23279,3 +26136,168 @@ fn loop_iteration_decision_reports_no_error_of_its_own() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn package_const_distinguishes_generic_instances() {
+    // Only `b[3]` is out of range; mixing up the instances flips that.
+    let code = r#"
+    package Pkg::<N: u32> {
+        function double(n: input u32) -> u32 {
+            return n * 2;
+        }
+        const C: u32 = double(N);
+        type T = logic<C>;
+    }
+    module ModuleA (
+        o: output logic,
+    ) {
+        var a: Pkg::<4>::T;
+        var b: Pkg::<1>::T;
+        assign a = 0;
+        assign b = 0;
+        assign o = a[7] | b[3];
+    }
+    "#;
+
+    let errors = analyze(code);
+    let selects: Vec<_> = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::InvalidSelect { .. }))
+        .collect();
+    assert_eq!(selects.len(), 1, "{errors:?}");
+
+    let code = r#"
+    package Pkg::<N: u32> {
+        struct Config {
+            width: u32,
+        }
+        function create(n: input u32) -> Config {
+            var x: Config;
+            x.width = n * 2;
+            return x;
+        }
+        const CONFIG: Config = create(N);
+        type T = logic<CONFIG.width>;
+    }
+    module ModuleA (
+        o: output logic,
+    ) {
+        var a: Pkg::<4>::T;
+        var b: Pkg::<1>::T;
+        assign a = 0;
+        assign b = 0;
+        assign o = a[7] | b[3];
+    }
+    "#;
+
+    let errors = analyze(code);
+    let selects: Vec<_> = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::InvalidSelect { .. }))
+        .collect();
+    assert_eq!(selects.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn package_const_is_evaluated_once_per_instance() {
+    let mut vars = String::new();
+    for i in 0..32 {
+        vars.push_str(&format!(
+            "var a{i}: logic<Pkg::<4>::CONFIG.width>; assign a{i} = 0;\n"
+        ));
+    }
+    let code = format!(
+        r#"
+    package Pkg::<N: u32> {{
+        struct Config {{
+            width: u32,
+        }}
+        function create(n: input u32) -> Config {{
+            var x: Config;
+            x.width = n * 2;
+            return x;
+        }}
+        const CONFIG: Config = create(N);
+    }}
+    module ModuleA {{
+        {vars}
+    }}
+    "#
+    );
+
+    crate::conv::PACKAGE_CONST_EVALUATIONS.set(0);
+    let errors = analyze(&code);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(crate::conv::PACKAGE_CONST_EVALUATIONS.get(), 1);
+}
+
+#[test]
+fn package_const_keeps_reporting_its_diagnostic() {
+    // A diagnostic raised during the evaluation must still reach the caller.
+    let code = r#"
+    package Pkg::<N: u32> {
+        const V: logic<4> = 4'b1010;
+        const C: logic = V[N];
+    }
+    module ModuleA (
+        o: output logic,
+    ) {
+        assign o = Pkg::<5>::C;
+    }
+    module ModuleB (
+        o: output logic,
+    ) {
+        assign o = Pkg::<5>::C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let selects = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::InvalidSelect { .. }))
+        .count();
+    assert_eq!(selects, 1, "{errors:#?}");
+}
+
+#[test]
+fn package_const_depth_limit_does_not_depend_on_reference_order() {
+    // The cached middle of the chain must not let the too-deep `C60` through.
+    let mut consts = String::from("const C0: u32 = 1;\n");
+    for i in 1..=60 {
+        consts.push_str(&format!("const C{i}: u32 = C{} + 1;\n", i - 1));
+    }
+    let mut ports = String::new();
+    let mut assigns = String::new();
+    for i in [10, 20, 30, 40] {
+        ports.push_str(&format!("p{i}: output logic<32>,\n"));
+        assigns.push_str(&format!("assign p{i} = Pkg::C{i};\n"));
+    }
+    let code = format!(
+        r#"
+    package Pkg {{
+        {consts}
+    }}
+    module ModuleA (
+        {ports}
+        o: output logic<32>,
+    ) {{
+        {assigns}
+        assign o = Pkg::C60;
+    }}
+    "#
+    );
+
+    let errors = analyze_with_large_stack(&code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ExceedLimit { .. })),
+        "{errors:?}"
+    );
+}
+
+mod value_regressions;
+
+mod layout_regressions;
+
+mod member_prefix_regressions;

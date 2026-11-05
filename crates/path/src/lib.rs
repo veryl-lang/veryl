@@ -19,8 +19,12 @@ pub struct PathSet {
 }
 
 pub fn cache_path() -> PathBuf {
-    let project_dir = ProjectDirs::from("org", "veryl-lang", "veryl").unwrap();
-    project_dir.cache_dir().to_path_buf()
+    try_cache_path().unwrap()
+}
+
+/// `cache_path`, or `None` where the platform gives no home directory.
+pub fn try_cache_path() -> Option<PathBuf> {
+    ProjectDirs::from("org", "veryl-lang", "veryl").map(|d| d.cache_dir().to_path_buf())
 }
 
 pub fn gather_files_with_extension<T: AsRef<Path>>(

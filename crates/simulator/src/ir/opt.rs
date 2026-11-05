@@ -130,6 +130,12 @@ pub(crate) mod dead_var_dce {
     pub fn collect_dead_offsets(_slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> {
         HashSet::default()
     }
+    pub fn collect_dead_closure(
+        _slices: &[&[ProtoStatement]],
+        _protect: &HashSet<VarOffset>,
+    ) -> HashSet<VarOffset> {
+        HashSet::default()
+    }
     pub fn apply_counting(
         stmts: Vec<ProtoStatement>,
         _dead: &HashSet<VarOffset>,

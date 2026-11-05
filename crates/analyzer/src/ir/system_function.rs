@@ -107,6 +107,25 @@ pub enum SystemFunctionKind {
 }
 
 impl SystemFunctionKind {
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        match self {
+            // IEEE 1800-2023 20.6.2/20.7: fixed-size type queries do not
+            // evaluate their first argument. The optional dimension does.
+            Self::Bits(_) => true,
+            Self::Size(_, dimension) => dimension
+                .as_mut()
+                .is_none_or(|x| x.0.eval_elaboration_const(context)),
+            Self::Clog2(x) | Self::Onehot(x) | Self::Signed(x) | Self::Unsigned(x) => {
+                x.0.eval_elaboration_const(context)
+            }
+            Self::Readmemh(..)
+            | Self::Display(_)
+            | Self::Write(_)
+            | Self::Assert { .. }
+            | Self::Finish => false,
+        }
+    }
+
     fn return_type(&self) -> Type {
         match self {
             Self::Bits(_) | Self::Size(..) | Self::Clog2(_) => {

@@ -1,0 +1,25 @@
+module function_output_in_port_connection_sub (
+    i: input  logic<8>,
+    o: output logic<8>,
+) {
+    assign o = i;
+}
+
+module function_output_in_port_connection (
+    a   : input  logic<8>,
+    o   : output logic<8>,
+    seen: output logic<8>,
+) {
+    function write_seen (
+        x: input  logic<8>,
+        y: output logic<8>,
+    ) -> logic<8> {
+        y = x;
+        return x + 8'd1;
+    }
+
+    inst u: function_output_in_port_connection_sub (
+        i: write_seen(a, seen),
+        o                     ,
+    );
+}

@@ -533,8 +533,8 @@ fn wide_constant_as_truth_value_index_and_bound() {
 
 #[test]
 fn logical_value_of_a_partly_unknown_condition() {
-    // A known 1 decides the condition whatever the x/z bits; with none, an
-    // `if` and a ternary both take the false side, as in the 2-state simulator.
+    // A known 1 decides truth despite X/Z; an ambiguous statement condition
+    // takes the false side.
     let code = r#"
     module Top (o0: output logic<4>, o1: output logic<4>, o2: output logic<4>) {
         function f (c: input logic<2>) -> logic<4> {
@@ -554,4 +554,148 @@ fn logical_value_of_a_partly_unknown_condition() {
         .map(|v| v.to_u64().unwrap())
         .collect();
     assert_eq!(values, [0b1100, 0b1010, 0b1100]);
+}
+
+#[test]
+fn part_select_width_uses_elaboration_constness() {
+    let code = r#"
+        module Top(i: input logic<32>, o: output logic<32>[2]) {
+            always_comb {
+                for j in 0..2 {
+                    o[j] = i[0+:$bits(j)];
+                }
+            }
+        }
+    "#;
+    assert!(analyze(code).is_empty());
+    for width in ["j + 1", "if 1 ? 32 : j"] {
+        let errors = analyze(&code.replace("$bits(j)", width));
+        assert!(
+            errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::NonConstantSelectWidth { .. })),
+            "{width}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn part_select_width_preserves_runtime_dependencies_through_folding() {
+    for width in [
+        "j + 1",
+        "p::WIDTHS[j]",
+        "p::identity(j + 1)",
+        "$sv::external_pkg::width(j)",
+        "if 1 ? 1 : j",
+    ] {
+        let code = format!(
+            r#"
+            package p {{
+                const WIDTHS: u32[2] = '{{1, 2}};
+                function identity(x: input u32) -> u32 {{ return x; }}
+            }}
+            module Top(i: input logic<32>, o: output logic<32>[2]) {{
+                always_comb {{
+                    for j in 0..2 {{
+                        o[j] = i[0+:({width})];
+                    }}
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert_eq!(
+            errors
+                .iter()
+                .filter(|x| matches!(x, AnalyzerError::NonConstantSelectWidth { .. }))
+                .count(),
+            1,
+            "{width}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn part_select_width_accepts_elaboration_constants_with_unknown_values() {
+    for width in [
+        "j + 1",
+        "p::WIDTH",
+        "p::identity(1)",
+        "$sv::external_pkg::WIDTH",
+        "$sv::external_pkg::width(1)",
+        "$bits(j)",
+    ] {
+        let code = format!(
+            r#"
+            package p {{
+                const WIDTH: u32 = $sv::external_pkg::WIDTH;
+                function identity(x: input u32) -> u32 {{ return x; }}
+            }}
+            module Top(i: input logic<32>, o: output logic<32>[2]) {{
+                for j in 0..2 :g {{
+                    assign o[j] = i[0+:({width})];
+                }}
+            }}
+            "#
+        );
+        assert!(analyze(&code).is_empty(), "{width}");
+    }
+}
+
+#[test]
+fn generic_argument_is_not_shadowed_by_a_caller_variable() {
+    let code = r#"
+package Pkg {
+    const W: u32 = 2;
+}
+function get::<N: u32> () -> u32 {
+    return N;
+}
+function cast::<N: u32> () -> u32 {
+    return 32'hff as N;
+}
+module Top (
+    o: output u32,
+) {
+    const N: u32 = 4;
+    const A: u32 = get::<Pkg::W>();
+    const B: u32 = get::<2>();
+    const C: u32 = cast::<Pkg::W>();
+    assign o = A + B + C;
+}
+"#;
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+    errors.extend(Analyzer::analyze_post_pass1());
+    errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.extend(Analyzer::analyze_post_pass2(&ir));
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    let module = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            Component::Module(x) if x.name.to_string() == "Top" => Some(x),
+            _ => None,
+        })
+        .unwrap();
+    for (name, expected) in [("A", 2), ("B", 2), ("C", 3)] {
+        let var = module
+            .variables
+            .values()
+            .find(|x| x.path.to_string() == name)
+            .unwrap();
+        assert_eq!(
+            var.get_value(&[0]),
+            Some(&Value::new(expected, 32, false)),
+            "{name}\n{ir}"
+        );
+    }
 }

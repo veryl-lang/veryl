@@ -1,12 +1,10 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::attribute::{AllowItem, Attribute};
-use crate::attribute_table;
 use crate::conv::Context;
-use crate::ir::{Expression, FfReset, TypeKind, VarId, VarPath, VarPathSelect};
+use crate::ir::{Expression, FfReset, TypeKind, VarPath, VarPathSelect};
 use crate::namespace::DefineContext;
 use crate::symbol::{Direction, Symbol, SymbolKind};
 use veryl_parser::token_range::TokenRange;
-use veryl_parser::veryl_grammar_trait::{AlwaysFfDeclaration, StatementBlockItem};
+use veryl_parser::veryl_grammar_trait::AlwaysFfDeclaration;
 
 pub fn check_statement_after_if_reset(
     context: &mut Context,
@@ -23,19 +21,11 @@ pub fn check_statement_after_if_reset(
         return;
     }
 
-    // eval_reset only supplies a reset when the first item is if_reset.
-    // Inspect the source before constant folding so the warning also covers
-    // constructs that remain in the emitted SystemVerilog.
+    // eval_reset only supplies a reset when the first item except declarations
+    // is if_reset. Inspect the source before constant folding so the warning
+    // also covers constructs that remain in the emitted SystemVerilog.
     let items: Vec<_> = value.statement_block.as_ref().into();
-    for item in items.into_iter().skip(1) {
-        if matches!(
-            item,
-            StatementBlockItem::VarDeclaration(_)
-                | StatementBlockItem::ConstDeclaration(_)
-                | StatementBlockItem::GenDeclaration(_)
-        ) {
-            continue;
-        }
+    for item in items.into_iter().filter(|x| !x.is_declaration()).skip(1) {
         let token: TokenRange = item.into();
         if DefineContext::from(token.beg).is_active(&context.config.defines) {
             context.insert_error(AnalyzerError::statement_after_if_reset(&token));
@@ -62,7 +52,7 @@ pub fn check_initial_assign(context: &mut Context, path: &VarPath, token: &Token
     if id >= local_base {
         return;
     }
-    if !context.variables.contains_key(&id) || allow_initial_assign(context, id) {
+    if !context.variables.contains_key(&id) || context.variables[&id].allow_initial_assign() {
         return;
     }
 
@@ -99,22 +89,4 @@ pub fn check_initial_assign_system_function_args(
             check_initial_assign(context, &dst.0, &dst.2);
         }
     }
-}
-
-pub fn allow_initial_assign(context: &Context, id: VarId) -> bool {
-    context.variables.get(&id).is_some_and(|variable| {
-        attribute_table::contains(
-            &variable.token.beg,
-            Attribute::Allow(AllowItem::InitialAssign),
-        )
-    })
-}
-
-pub fn allow_multiple_assign(context: &Context, id: VarId) -> bool {
-    context.variables.get(&id).is_some_and(|variable| {
-        attribute_table::contains(
-            &variable.token.beg,
-            Attribute::Allow(AllowItem::MultipleAssign),
-        )
-    })
 }

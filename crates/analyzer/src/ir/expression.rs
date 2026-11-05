@@ -31,9 +31,62 @@ pub enum Expression {
     StructConstructor(Box<Type>, Vec<(StrId, Expression)>, Box<Comptime>),
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static ELABORATION_CLASSIFICATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Expression {
     pub fn create_value(value: Value, token: TokenRange) -> Self {
         Self::Term(Box::new(Factor::create_value(value, token)))
+    }
+
+    /// Classify the source expression before value evaluation or folding can
+    /// erase operands. This tracks elaboration constness independently of
+    /// facts learned by unrolling a procedural loop.
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        if self.comptime().runtime_dependent {
+            return false;
+        }
+        if let Some(result) = self.comptime().elaboration_const {
+            return result;
+        }
+        #[cfg(test)]
+        ELABORATION_CLASSIFICATIONS.set(ELABORATION_CLASSIFICATIONS.get() + 1);
+        let result = match self {
+            Self::Term(x) => x.eval_elaboration_const(context),
+            Self::Unary(_, x, _) => x.eval_elaboration_const(context),
+            Self::Binary(x, _, y, _) => {
+                x.eval_elaboration_const(context) && y.eval_elaboration_const(context)
+            }
+            Self::Ternary(x, y, z, _) => {
+                x.eval_elaboration_const(context)
+                    && y.eval_elaboration_const(context)
+                    && z.eval_elaboration_const(context)
+            }
+            Self::Concatenation(items, _) => items.iter_mut().all(|(expr, repeat)| {
+                expr.eval_elaboration_const(context)
+                    && repeat
+                        .as_mut()
+                        .is_none_or(|x| x.eval_elaboration_const(context))
+            }),
+            Self::ArrayLiteral(items, _) => items.iter_mut().all(|item| match item {
+                ArrayLiteralItem::Value(expr, repeat) => {
+                    expr.eval_elaboration_const(context)
+                        && repeat
+                            .as_mut()
+                            .is_none_or(|x| x.eval_elaboration_const(context))
+                }
+                ArrayLiteralItem::Defaul(expr) => expr.eval_elaboration_const(context),
+            }),
+            Self::StructConstructor(_, items, _) => items
+                .iter_mut()
+                .all(|(_, x)| x.eval_elaboration_const(context)),
+        };
+        let comptime = self.comptime_mut();
+        comptime.runtime_dependent |= !result;
+        comptime.elaboration_const = Some(result);
+        result
     }
 }
 
@@ -169,10 +222,7 @@ impl Expression {
                             .and_then(|v| v.to_usize_saturating())
                             .unwrap_or(0),
                     };
-                    let inner = ExpressionContext {
-                        width: xc.width.max(cast_width),
-                        ..xc
-                    };
+                    let inner = xc.cast_operand(cast_width);
                     x.apply_context(context, inner);
                     (
                         x.comptime().expr_context,
@@ -214,14 +264,14 @@ impl Expression {
                 comptime.is_const = xc.is_const & yc.is_const;
                 comptime.is_global = xc.is_global & yc.is_global;
 
-                let mut ctx = op.eval_context_binary(xc, yc);
                 // A numeric width cast (`x as N`, emitted as `N'(x)`) keeps
                 // the operand's signedness. The width literal's signedness
                 // determines neither sign extension nor arithmetic shifting.
-                if *op == Op::As && !as_target_is_type {
-                    ctx.signed = xc.signed;
+                if *op == Op::As {
+                    Op::eval_context_cast(xc, yc, as_target_is_type)
+                } else {
+                    op.eval_context_binary(xc, yc)
                 }
-                ctx
             }
             Expression::Ternary(x, y, z, comptime) => {
                 // x is self-determined
@@ -479,22 +529,38 @@ impl Expression {
                 }
             }
             Expression::Ternary(x, y, z, _) => {
+                let non_integral = y.comptime().r#type.kind.is_float()
+                    || z.comptime().r#type.kind.is_float()
+                    || y.comptime().r#type.is_string()
+                    || z.comptime().r#type.is_string();
                 let x = x.eval_value(context)?;
+                if let Some(cond) = x.truth() {
+                    let (taken, untaken) = if cond { (y, z) } else { (z, y) };
+
+                    // Only the taken arm has to be evaluable: the other one may be
+                    // what the condition guards against, e.g. `i <: N ? a[i] : 0`.
+                    let ret = taken.eval_value(context)?;
+                    // An unevaluable untaken arm still sizes the result by its type.
+                    let untaken_width = untaken.eval_value(context).map_or_else(
+                        || untaken.comptime().r#type.total_width().unwrap_or(0),
+                        |x| x.width(),
+                    );
+                    let width = ret.width().max(untaken_width).max(context_width);
+                    let mut ret = ret.expand(width, signed).into_owned();
+                    ret.set_signed(signed);
+                    return Some(ret);
+                }
                 let y = y.eval_value(context)?;
                 let z = z.eval_value(context)?;
-
-                // The outer expression's signedness propagates into both
-                // branches (LRM 11.8.2), so an unsigned context must suppress
-                // sign extension even when both branches are signed.
-                let width = y.width().max(z.width()).max(context_width);
-
-                // An ambiguous condition takes the false arm, as the constant
-                // fold in conv and the 2-state simulator do, rather than the
-                // bitwise merge of LRM 11.4.11.
-                let ret = if x.is_true() { y } else { z };
-                let mut ret = ret.expand(width, signed).into_owned();
-                ret.set_signed(signed);
-                Some(ret)
+                if non_integral {
+                    let width = y.width().max(z.width()).max(context_width);
+                    let selected = if x.is_true() { y } else { z };
+                    let mut ret = selected.expand(width, signed).into_owned();
+                    ret.set_signed(signed);
+                    Some(ret)
+                } else {
+                    Some(x.conditional(&y, &z, context_width, signed))
+                }
             }
             Expression::Concatenation(x, _) => {
                 let mut ret = Value::new(0, 0, false);
@@ -554,6 +620,10 @@ impl Expression {
         context: &mut Context,
         context_width: Option<usize>,
     ) -> &Comptime {
+        // Record source legality before replacing the tree with a literal.
+        // This is monotonic: later evaluation must not promote a runtime
+        // expression to an elaboration constant.
+        let elaboration_const = self.eval_elaboration_const(context);
         if !self.comptime().evaluated {
             let mut expr_context = self.gather_context(context);
             expr_context.width = expr_context.width.max(context_width.unwrap_or(0));
@@ -574,12 +644,14 @@ impl Expression {
                 && !value.is_xz()
             {
                 let is_global = comptime.is_global;
+                let runtime_dependent = comptime.runtime_dependent;
                 let r#type = comptime.r#type.clone();
                 let expr_context = comptime.expr_context;
                 let mut expr = Expression::create_value(value.clone(), self.token_range());
 
                 let expr_comptime = expr.comptime_mut();
                 expr_comptime.is_global = is_global;
+                expr_comptime.runtime_dependent = runtime_dependent;
                 expr_comptime.r#type = r#type;
                 expr_comptime.expr_context = expr_context;
                 expr_comptime.evaluated = true;
@@ -588,6 +660,7 @@ impl Expression {
             }
         }
 
+        self.comptime_mut().elaboration_const = Some(elaboration_const);
         self.comptime()
     }
 
@@ -709,7 +782,7 @@ impl Expression {
     }
 
     pub fn comptime_mut(&mut self) -> &mut Comptime {
-        match self {
+        let comptime = match self {
             Expression::Term(x) => x.comptime_mut(),
             Expression::Unary(_, _, x) => x,
             Expression::Binary(_, _, _, x) => x,
@@ -717,7 +790,9 @@ impl Expression {
             Expression::Concatenation(_, x) => x,
             Expression::ArrayLiteral(_, x) => x,
             Expression::StructConstructor(_, _, x) => x,
-        }
+        };
+        comptime.elaboration_const = None;
+        comptime
     }
 
     pub fn token_range(&self) -> TokenRange {
@@ -744,7 +819,34 @@ pub enum Factor {
     SystemFunctionCall(SystemFunctionCall),
     FunctionCall(FunctionCall),
     Anonymous(Comptime),
+    /// Reset value literal (`reset_active` / `reset_inactive`) with the polarity
+    /// of its counterpart reset type. Its type is left unknown, and the value
+    /// is resolved by each backend.
+    ResetValue(ResetValueKind, ResetPolarity, Comptime),
     Unknown(Comptime),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetValueKind {
+    Active,
+    Inactive,
+}
+
+impl fmt::Display for ResetValueKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResetValueKind::Active => "reset_active".fmt(f),
+            ResetValueKind::Inactive => "reset_inactive".fmt(f),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetPolarity {
+    High,
+    Low,
+    /// `reset` type which follows the configuration of each backend
+    Default,
 }
 
 #[derive(Clone, Debug)]
@@ -760,6 +862,26 @@ pub struct HierVarRef {
 }
 
 impl Factor {
+    fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        match self {
+            Self::Variable(_, index, select, comptime) => {
+                comptime.is_elaboration_const()
+                    && index
+                        .expressions_mut()
+                        .all(|x| x.eval_elaboration_const(context))
+                    && select.eval_elaboration_const(context)
+            }
+            Self::Value(x) | Self::ResetValue(_, _, x) | Self::Anonymous(x) => {
+                x.is_elaboration_const()
+            }
+            Self::FunctionCall(x) => x.eval_elaboration_const(context),
+            Self::SystemFunctionCall(x) => {
+                !x.comptime.runtime_dependent && x.kind.eval_elaboration_const(context)
+            }
+            Self::HierVariable(_) | Self::Unknown(_) => false,
+        }
+    }
+
     pub fn create_value(value: Value, token: TokenRange) -> Self {
         let comptime = Comptime::create_value(value, token);
         Factor::Value(comptime)
@@ -788,7 +910,9 @@ impl Factor {
         match self {
             // SystemVerilog member is interpreted as Factor::Value, but it may be assignable.
             Factor::Value(x) => x.r#type.is_systemverilog(),
-            Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) => false,
+            Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) | Factor::ResetValue(..) => {
+                false
+            }
             _ => true,
         }
     }
@@ -869,6 +993,12 @@ impl Factor {
                 is_const: x.comptime.is_const,
                 is_global: x.comptime.is_global,
             },
+            Factor::ResetValue(_, _, x) => ExpressionContext {
+                width: 1,
+                signed: false,
+                is_const: x.is_const,
+                is_global: x.is_global,
+            },
             Factor::Anonymous(_) | Factor::Unknown(_) => ExpressionContext::default(),
         }
     }
@@ -909,6 +1039,10 @@ impl Factor {
             Factor::Anonymous(x) => {
                 x.expr_context = expr_context;
                 x.evaluated = true
+            }
+            Factor::ResetValue(_, _, x) => {
+                x.expr_context = expr_context;
+                x.evaluated = true;
             }
             Factor::Unknown(x) => {
                 x.expr_context = expr_context;
@@ -959,7 +1093,7 @@ impl Factor {
         match self {
             Factor::Variable(id, index, select, comptime) => {
                 let idx = index.eval_value(context)?;
-                let (value, r#type) = if let Some(variable) = context.variables.get(id) {
+                let (mut value, r#type) = if let Some(variable) = context.variables.get(id) {
                     (variable.get_value(&idx)?.clone(), variable.r#type.clone())
                 } else if index.indices.is_empty() && select.is_empty() && comptime.is_const {
                     // Const/param scalar refs keep their folded value in comptime;
@@ -976,7 +1110,38 @@ impl Factor {
                     // into `comptime.r#type`, whose width dimensions
                     // `gather_context` has already replaced by the selected
                     // width (mirrors `eval_assign` / `gather_ff`).
-                    let (beg, end) = select.eval_value(context, &r#type, false)?;
+                    let mut evaluated = select.clone();
+                    let mut unknown = false;
+                    for expression in evaluated
+                        .0
+                        .iter_mut()
+                        .chain(evaluated.1.iter_mut().map(|(_, end)| end))
+                    {
+                        let value = expression.eval_value(context)?;
+                        unknown |= value.is_xz();
+                        let is_const = expression.comptime().is_const;
+                        *expression = Expression::create_value(value, expression.token_range());
+                        expression.comptime_mut().is_const = is_const;
+                    }
+                    if unknown {
+                        return Some(Value::new_x(
+                            comptime.r#type.total_width()?,
+                            comptime.r#type.signed,
+                        ));
+                    }
+                    let (beg, end) = evaluated.eval_value(context, &r#type, false)?;
+                    // Rebased dynamic members may extend past their static prefix
+                    // into another field. Bound the data, without re-evaluating
+                    // side-effecting coordinates to construct another guard.
+                    if let Some(domain) = comptime.member_select_domain {
+                        let width = value.width();
+                        if domain.low > 0 && end < domain.low {
+                            value.assign(Value::new_x(width, false), domain.low - 1, 0);
+                        }
+                        if domain.high < width.saturating_sub(1) && beg > domain.high {
+                            value.assign(Value::new_x(width, false), width - 1, domain.high + 1);
+                        }
+                    }
                     let mut value = value.select(beg, end);
                     value.set_signed(comptime.r#type.signed);
                     Some(value)
@@ -989,6 +1154,7 @@ impl Factor {
             Factor::SystemFunctionCall(x) => x.eval_value(context),
             Factor::FunctionCall(x) => x.eval_value(context),
             Factor::Anonymous(_) => None,
+            Factor::ResetValue(..) => None,
             Factor::Unknown(_) => None,
         }
     }
@@ -1098,6 +1264,12 @@ impl Factor {
                 index.gather_ff(context, table, decl, assign_target, from_ff);
                 select.gather_ff(context, table, decl, assign_target, from_ff);
             }
+            Factor::HierVariable(x) => {
+                x.index
+                    .gather_ff(context, table, decl, assign_target, from_ff);
+                x.select
+                    .gather_ff(context, table, decl, assign_target, from_ff);
+            }
             Factor::FunctionCall(x) => {
                 x.gather_ff(context, table, decl, assign_target, from_ff);
             }
@@ -1132,20 +1304,24 @@ impl Factor {
             Factor::SystemFunctionCall(x) => &x.comptime,
             Factor::FunctionCall(x) => &x.comptime,
             Factor::Anonymous(x) => x,
+            Factor::ResetValue(_, _, x) => x,
             Factor::Unknown(x) => x,
         }
     }
 
     pub fn comptime_mut(&mut self) -> &mut Comptime {
-        match self {
+        let comptime = match self {
             Factor::Variable(_, _, _, x) => x,
             Factor::HierVariable(x) => &mut x.comptime,
             Factor::Value(x) => x,
             Factor::SystemFunctionCall(x) => &mut x.comptime,
             Factor::FunctionCall(x) => &mut x.comptime,
             Factor::Anonymous(x) => x,
+            Factor::ResetValue(_, _, x) => x,
             Factor::Unknown(x) => x,
-        }
+        };
+        comptime.elaboration_const = None;
+        comptime
     }
 
     pub fn token_range(&self) -> TokenRange {
@@ -1156,6 +1332,7 @@ impl Factor {
             Factor::SystemFunctionCall(x) => x.comptime.token,
             Factor::FunctionCall(x) => x.comptime.token,
             Factor::Anonymous(x) => x.token,
+            Factor::ResetValue(_, _, x) => x.token,
             Factor::Unknown(x) => x.token,
         }
     }
@@ -1318,6 +1495,7 @@ impl fmt::Display for Factor {
             Factor::SystemFunctionCall(x) => x.to_string(),
             Factor::FunctionCall(x) => x.to_string(),
             Factor::Anonymous(_) => String::from("_"),
+            Factor::ResetValue(x, _, _) => x.to_string(),
             Factor::Unknown(_) => String::from("unknown"),
         };
 

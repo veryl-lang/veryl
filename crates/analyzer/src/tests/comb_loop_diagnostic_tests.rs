@@ -98,6 +98,36 @@ fn comb_loop_diagnostic_preserves_array_elements_in_the_cycle() {
 }
 
 #[test]
+fn comb_loop_diagnostic_names_each_element_of_a_ring_in_one_variable() {
+    // The ring has more boundaries than the split keeps, so the cycle name
+    // comes from the positions the cycle passes through.
+    let code = r#"
+        module Top (o: output logic) {
+            var a: logic<8>[100];
+            for i in 0..99 :g {
+                assign a[i + 1] = a[i];
+            }
+            assign a[0] = a[99];
+            assign o = a[0][0];
+        }
+    "#;
+    let errors = analyze(code);
+    let cycle = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.clone()),
+            _ => None,
+        })
+        .expect("the ring is a loop");
+    let expected = (0..100)
+        .chain([0])
+        .map(|index| format!("a[{index}]"))
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    assert_eq!(cycle, expected);
+}
+
+#[test]
 fn comb_loop_diagnostic_preserves_bit_regions_in_the_cycle() {
     let errors = analyze(
         r#"
@@ -311,6 +341,66 @@ fn comb_loop_diagnostic_reports_every_data_carrying_statement_on_a_summarized_pa
                 "mcmd_active =\n                    valid || data_done;",
             ),
         ]
+    );
+}
+
+#[test]
+fn comb_loop_diagnostic_traces_a_child_feedthrough_beside_a_split_component() {
+    // `shift` is one storage node with a self edge, so the child graph is
+    // split. Provenance must still find the acyclic feedthrough.
+    let child = r#"
+        module Child (
+            accept: input  logic,
+            valid : input  logic,
+            passed: output logic,
+            last  : output logic,
+        ) {
+            var shift: logic<2>;
+            assign shift[1] = valid;
+            assign shift[0] = shift[1];
+            assign last = shift[0];
+            var data_done: logic;
+            always_comb {
+                data_done = accept && valid;
+                passed    = data_done;
+            }
+        }
+    "#;
+    let top = r#"
+        module Top (
+            valid : input  logic,
+            passed: output logic,
+            last  : output logic,
+        ) {
+            var accept: logic;
+            inst child: Child (
+                accept: accept,
+                valid : valid,
+                passed: passed,
+                last  : last,
+            );
+            assign accept = passed;
+        }
+    "#;
+    let errors = analyze_multiple_inputs(&[child, top]);
+    let (input, path) = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop {
+                input,
+                dependency_sites,
+                ..
+            } => Some((input, dependency_sites)),
+            _ => None,
+        })
+        .expect("the parent connection closes the child feedthrough loop");
+    let path = path
+        .iter()
+        .map(|step| diagnostic_span_text(input, step).expect("path step is in source"))
+        .collect::<Vec<_>>();
+    assert!(
+        path.contains(&("test_0.veryl", "data_done = accept && valid;")),
+        "{path:?}"
     );
 }
 
@@ -592,7 +682,8 @@ fn comb_loop_diagnostic_uses_the_closing_parallel_summary_edge() {
         })
         .expect("the direct feedthrough closes the self-loop");
 
-    // The structural graph keeps the observed two-bit identity region intact.
+    // Both identity-copied bits return to themselves; the closing step is
+    // still the identity copy.
     assert_eq!(cycle, "feedback[2:1] -> feedback[2:1]");
     assert_eq!(path.len(), 1);
     let (source, text) = diagnostic_span_text(input, &path[0]).expect("path step is in source");

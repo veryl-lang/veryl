@@ -24,6 +24,32 @@ pub(crate) fn dataflow_on() -> bool {
     crate::ir::opt::dataflow::enabled()
 }
 
+/// xorshift64*, for generated tests: deterministic across platforms.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+
+    fn chance(&mut self, percent: u64) -> bool {
+        self.next() % 100 < percent
+    }
+
+    fn shuffle<T>(&mut self, items: &mut [T]) {
+        for i in (1..items.len()).rev() {
+            items.swap(i, self.below(i + 1));
+        }
+    }
+}
+
 /// Whether the AOT-C comb can land on this host. A C compiler is not enough:
 /// where the shared object builds but does not load, the comb silently stays
 /// on Cranelift, so a test asserting native coverage must skip there.
@@ -79,7 +105,12 @@ impl Allowed {
 
 #[track_caller]
 fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, Allowed::Nothing)
+    analyze_top_inner(code, config, top, Allowed::Nothing, &[])
+}
+
+#[track_caller]
+fn analyze_with_defines(code: &str, config: &Config, defines: &[&str]) -> Ir {
+    analyze_top_inner(code, config, "Top", Allowed::Nothing, defines).unwrap()
 }
 
 /// The analyzer IR itself, for the tests that build more than one top out of
@@ -114,7 +145,7 @@ fn analyze_top_allowing_comb_loop(
     config: &Config,
     top: &str,
 ) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, Allowed::CombLoop)
+    analyze_top_inner(code, config, top, Allowed::CombLoop, &[])
 }
 
 /// For the tests targeting a port connection the analyzer already reports, at
@@ -125,7 +156,7 @@ fn analyze_top_allowing_mismatch_assignment(
     config: &Config,
     top: &str,
 ) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, Allowed::MismatchAssignment)
+    analyze_top_inner(code, config, top, Allowed::MismatchAssignment, &[])
 }
 
 #[track_caller]
@@ -134,6 +165,7 @@ fn analyze_top_inner(
     config: &Config,
     top: &str,
     allow: Allowed,
+    defines: &[&str],
 ) -> Result<Ir, SimulatorError> {
     symbol_table::clear();
 
@@ -141,6 +173,11 @@ fn analyze_top_inner(
     let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
+    context.config.defines = defines
+        .iter()
+        .map(|x| veryl_parser::resource_table::insert_str(x))
+        .collect();
+    symbol_table::set_defines(&context.config.defines);
 
     let mut errors = vec![];
     let mut ir = air::Ir::default();
@@ -559,12 +596,22 @@ where
     }
 }
 
+mod comb_order;
+mod comb_rewrite;
+mod comb_wide;
 mod component;
 mod component_sim;
 mod dataflow;
 mod derived_clock;
 mod dut_reuse;
 mod error;
+mod guarded_cover;
 mod hier_ref;
 mod simulation;
 mod testbench;
+
+mod selection_regressions;
+
+mod ff_payload_regressions;
+
+mod wide_bitwise_regressions;

@@ -609,17 +609,14 @@ impl ReferenceTable {
             // neither sees `target`'s imports nor tells whether the referred
             // symbol lives in another project.
             // A global function is emitted into the namespace that refers to
-            // it, not the one that declares it.
+            // it, so its arguments stay as written there. Qualifying them from
+            // the caller's namespace would prefix an argument seen through an
+            // import and break the match with the emitted mangled name.
             let refers_global_function =
                 symbol_table::resolve((&path.generic_path(), target_namespace))
                     .is_ok_and(|x| x.found.is_global_function());
-            let ref_namespace = if is_global_func || refers_global_function {
-                namespace
-            } else {
-                target_namespace
-            };
-            if !target.is_global_function() {
-                path.append_namespace_path(ref_namespace, &target.namespace);
+            if !is_global_func && !refers_global_function {
+                path.append_namespace_path(target_namespace, &target.namespace);
             }
 
             if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))

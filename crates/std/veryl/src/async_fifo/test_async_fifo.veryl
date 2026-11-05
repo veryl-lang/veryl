@@ -1,0 +1,108 @@
+#[test(test_async_fifo)]
+module test_async_fifo {
+    gen WIDTH: u32  = 8;
+    gen DEPTH: u32  = 8;
+    gen T    : type = logic<WIDTH>;
+
+    inst clk_s: $tb::clock_gen;
+    inst rst_s: $tb::reset_gen (
+        clk: clk_s,
+    );
+
+    inst clk_d: $tb::clock_gen;
+    inst rst_d: $tb::reset_gen (
+        clk: clk_d,
+    );
+
+    var s_full: logic;
+    var s_push: logic;
+    var s_data: T    ;
+
+    var d_empty     : logic;
+    var d_pop       : logic;
+    var d_data      : T    ;
+    var d_queue_data: T    ;
+
+    var data_gen        : $tb::random::<u8>;
+    var wait_push       : $tb::random::<u8>;
+    var wait_push_cycles: u8               ;
+    var wait_pop        : $tb::random::<u8>;
+    var wait_pop_cycles : u8               ;
+    var queue           : $tb::queue::<T>  ;
+
+    initial {
+        s_push = false;
+
+        rst_s.assert();
+        rst_d.assert();
+
+        clk_s.next(10);
+        for _i in 0..(3 * DEPTH) {
+            for _j in 0..1_000 {
+                if !s_full {
+                    break;
+                }
+                clk_s.next(1);
+            }
+
+            wait_push_cycles = wait_push.get_range(0, 10);
+            clk_s.next(wait_push_cycles);
+
+            s_push = true;
+            s_data = data_gen.get();
+
+            queue.push_back(s_data);
+            $display("push data %h", s_data);
+
+            clk_s.next(1);
+            s_push = false;
+        }
+
+        clk_s.next(1_000);
+    }
+
+    initial {
+        d_pop = false;
+
+        clk_d.next(20);
+        for _i in 0..(3 * DEPTH) {
+            for _j in 0..1_000 {
+                if !d_empty {
+                    break;
+                }
+                clk_d.next(1);
+            }
+
+            wait_pop_cycles = wait_pop.get_range(0, 10);
+            clk_d.next(wait_pop_cycles);
+
+            d_pop        = true;
+            d_queue_data = queue.pop_front();
+            $display("actual data %h expected data %h", d_data, d_queue_data);
+            $assert(d_data == d_queue_data);
+
+            clk_d.next(1);
+            d_pop = false;
+        }
+
+        $finish();
+    }
+
+    inst duv: async_fifo::<synchronizer_basic> #(
+        WIDTH      : WIDTH,
+        DEPTH      : DEPTH,
+        MERGE_RESET: true ,
+    ) (
+        is_clk        : clk_s  ,
+        is_rst        : rst_s  ,
+        os_almost_full: _      ,
+        os_full       : s_full ,
+        is_push       : s_push ,
+        is_data       : s_data ,
+        id_clk        : clk_d  ,
+        id_rst        : rst_d  ,
+        od_empty      : d_empty,
+        id_pop        : d_pop  ,
+        od_data       : d_data ,
+    );
+}

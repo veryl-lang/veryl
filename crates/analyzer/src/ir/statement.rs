@@ -112,6 +112,14 @@ impl ForRange {
         (start, end)
     }
 
+    pub fn has_const_bounds(&self) -> bool {
+        let (start, end) = self.bounds();
+        [start, end].into_iter().all(|bound| match bound {
+            ForBound::Const(..) => true,
+            ForBound::Expression(x) => x.comptime().is_const,
+        })
+    }
+
     pub fn bounds_mut(&mut self) -> (&mut ForBound, &mut ForBound) {
         let (ForRange::Forward { start, end, .. }
         | ForRange::Reverse { start, end, .. }
@@ -290,9 +298,13 @@ pub struct TbMethodCall {
     /// sizes the hoist temporary and is enforced against the value the
     /// component actually returns.
     pub ret_width: Option<u32>,
-    /// Signedness of the returned value. Only `$tb::random::<iN>` returns a
-    /// signed value; component/file methods leave this `false`.
+    /// Signedness of the returned value. Only `$tb::random::<iN>` and
+    /// `$tb::queue` of a signed element return a signed value; component/file
+    /// methods leave this `false`.
     pub ret_signed: bool,
+    /// Whether the returned value is 4-state (`$tb::queue` of a 4-state
+    /// element); sizes the hoist temporary as `logic` instead of `bit`.
+    pub ret_4state: bool,
 }
 
 #[derive(Clone)]
@@ -337,19 +349,109 @@ pub enum TbMethod {
         signed: bool,
     },
     RandomGetSeed,
+    /// `$tb::queue::<T, N>` methods. `width`/`signed`/`four_state` describe
+    /// the element type `T`, and `capacity` is `N` (`0` for unbounded).
+    /// `value` is the pushed value of `push_back`/`push_front`.
+    Queue {
+        op: QueueOp,
+        value: Option<Expression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum QueueOp {
+    PushBack,
+    PushFront,
+    PopFront,
+    PopBack,
+    DropFront,
+    DropBack,
+    Front,
+    Back,
+    Clear,
+    Size,
+    IsEmpty,
+    IsFull,
+}
+
+impl QueueOp {
+    pub fn from_method_name(name: &str) -> Option<Self> {
+        let op = match name {
+            "push_back" => QueueOp::PushBack,
+            "push_front" => QueueOp::PushFront,
+            "pop_front" => QueueOp::PopFront,
+            "pop_back" => QueueOp::PopBack,
+            "drop_front" => QueueOp::DropFront,
+            "drop_back" => QueueOp::DropBack,
+            "front" => QueueOp::Front,
+            "back" => QueueOp::Back,
+            "clear" => QueueOp::Clear,
+            "size" => QueueOp::Size,
+            "is_empty" => QueueOp::IsEmpty,
+            "is_full" => QueueOp::IsFull,
+            _ => return None,
+        };
+        Some(op)
+    }
+
+    pub fn has_return_value(&self) -> bool {
+        matches!(
+            self,
+            QueueOp::PopFront
+                | QueueOp::PopBack
+                | QueueOp::Front
+                | QueueOp::Back
+                | QueueOp::Size
+                | QueueOp::IsEmpty
+                | QueueOp::IsFull
+        )
+    }
+
+    /// Whether the returned value is the element type `T`.
+    pub fn returns_element(&self) -> bool {
+        matches!(
+            self,
+            QueueOp::PopFront | QueueOp::PopBack | QueueOp::Front | QueueOp::Back
+        )
+    }
+}
+
+impl fmt::Display for QueueOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            QueueOp::PushBack => "push_back",
+            QueueOp::PushFront => "push_front",
+            QueueOp::PopFront => "pop_front",
+            QueueOp::PopBack => "pop_back",
+            QueueOp::DropFront => "drop_front",
+            QueueOp::DropBack => "drop_back",
+            QueueOp::Front => "front",
+            QueueOp::Back => "back",
+            QueueOp::Clear => "clear",
+            QueueOp::Size => "size",
+            QueueOp::IsEmpty => "is_empty",
+            QueueOp::IsFull => "is_full",
+        };
+        text.fmt(f)
+    }
 }
 
 impl TbMethod {
     /// Whether the method yields a value usable in assignment/expression
     /// position. The remaining builtin `$tb` methods are statements only.
     pub fn has_return_value(&self) -> bool {
-        matches!(
-            self,
+        match self {
             TbMethod::Component { .. }
-                | TbMethod::RandomGet { .. }
-                | TbMethod::RandomGetRange { .. }
-                | TbMethod::RandomGetSeed
-        )
+            | TbMethod::RandomGet { .. }
+            | TbMethod::RandomGetRange { .. }
+            | TbMethod::RandomGetSeed => true,
+            TbMethod::Queue { op, .. } => op.has_return_value(),
+            _ => false,
+        }
     }
 }
 
@@ -388,9 +490,9 @@ impl Statement {
                             }
                         }
                     }
-                } else if context.comptime_for_overflow.is_none()
-                    && x.range.is_over_size_limit(context)
-                {
+                } else if !x.range.is_over_size_limit(context) {
+                    context.function_indeterminate = true;
+                } else if context.comptime_for_overflow.is_none() {
                     // Over-limit range: skipping the body would fold the const
                     // to its pre-loop value. The eval path swallows errors, so
                     // record it here for analyzer.rs to surface.
@@ -400,6 +502,11 @@ impl Statement {
             }
             Statement::SystemFunctionCall(_) => ControlFlow::Continue,
             Statement::FunctionCall(x) => {
+                // Output arguments are not written back, so their bindings
+                // would keep their previous values.
+                if !x.outputs.is_empty() {
+                    context.function_indeterminate = true;
+                }
                 x.eval_value(context);
                 ControlFlow::Continue
             }
@@ -589,6 +696,13 @@ impl fmt::Display for Statement {
                     write!(f, "{}.get_range({min}, {max});", x.inst)
                 }
                 TbMethod::RandomGetSeed => write!(f, "{}.get_seed();", x.inst),
+                TbMethod::Queue { op, value, .. } => {
+                    if let Some(v) = value {
+                        write!(f, "{}.{op}({v});", x.inst)
+                    } else {
+                        write!(f, "{}.{op}();", x.inst)
+                    }
+                }
             },
             Statement::For(x) => {
                 let range_op = if let ForRange::Reverse { .. } = &x.range {
@@ -660,6 +774,19 @@ pub struct AssignDestination {
 
 impl AssignDestination {
     pub fn total_width(&self, context: &mut Context) -> Option<usize> {
+        if !self.select.is_const_with_range() {
+            let r#type = &self.comptime.r#type;
+            let unit = if r#type.is_struct_union() || r#type.width().is_empty() {
+                1
+            } else {
+                r#type.kind.width()?
+            };
+            return self
+                .select
+                .eval_comptime(context, r#type, false)?
+                .total()?
+                .checked_mul(unit);
+        }
         let (beg, end) = self
             .select
             .eval_value(context, &self.comptime.r#type, false)?;
@@ -674,8 +801,6 @@ impl AssignDestination {
     ) {
         if let Some(variable) = context.get_variable_info(self.id) {
             let is_index_const = self.index.is_const();
-            let is_select_const = self.select.is_const_with_range();
-            let is_const = is_index_const & is_select_const;
 
             let range = if !is_index_const {
                 variable.r#type.array.calc_range(&[])
@@ -718,17 +843,7 @@ impl AssignDestination {
                                 errors.push(AnalyzerError::unassign_variable(&text, &self.token));
                             }
 
-                            let maybe = !is_const | assign_context.is_system_verilog();
-                            // Exclude SV connects: the direction may be a read.
-                            let dynamic = !is_const && !assign_context.is_system_verilog();
-                            let _ = assign_table.insert_assign(
-                                &variable,
-                                index,
-                                mask.clone(),
-                                maybe,
-                                dynamic,
-                                self.token,
-                            );
+                            assign_table.insert_assign(&variable, index, mask.clone(), self.token);
                         }
                     }
                 }
@@ -872,6 +987,21 @@ pub struct AssignStatement {
 impl AssignStatement {
     pub fn eval_value(&self, context: &mut Context) {
         if let Some(dst) = self.dst.first()
+            && let Some(variable) = context.variables.get(&dst.id)
+            && let Some(count) = variable.r#type.total_array()
+            && count > 1
+            && count <= context.config.evaluate_array_limit
+            && variable.value.len() == 1
+        {
+            // Declarations retain one template; constant execution needs element storage.
+            let template = variable.value[0].clone();
+            context
+                .variable_mut(&dst.id)
+                .unwrap()
+                .value
+                .resize(count, template);
+        }
+        if let Some(dst) = self.dst.first()
             && self.expr.comptime().r#type.is_array()
             && let Some(count) = self.expr.comptime().r#type.total_array()
             && let Some(values) = super::function::array_arg_values(context, &self.expr, count)
@@ -891,9 +1021,10 @@ impl AssignStatement {
                     variable.set_value(&index, value, range);
                 }
             }
-        } else if let Some(value) = self.expr.eval_value(context) {
+        } else {
             // TODO multiple dst
-            if let Some(index) = self.dst[0].index.eval_value(context)
+            let written = if let Some(value) = self.expr.eval_value(context)
+                && let Some(index) = self.dst[0].index.eval_value(context)
                 && let Some((beg, end)) =
                     self.dst[0]
                         .select
@@ -901,6 +1032,13 @@ impl AssignStatement {
                 && let Some(variable) = context.variable_mut(&self.dst[0].id)
             {
                 variable.set_value(&index, value, Some((beg, end)));
+                true
+            } else {
+                false
+            };
+            // A skipped write leaves the destination at its previous value.
+            if !written {
+                context.function_indeterminate = true;
             }
         }
         // `return expr;` lowers to an assignment to the function's return
@@ -993,6 +1131,8 @@ impl IfStatement {
                     }
                 }
             }
+        } else {
+            context.function_indeterminate = true;
         }
         ControlFlow::Continue
     }
@@ -1051,8 +1191,8 @@ impl IfStatement {
             true_table.check_uncoverd(context, &false_table, &base_tables);
         }
 
-        true_table.merge_by_or(context, &mut false_table, false);
-        assign_table.merge_by_or(context, &mut true_table, false);
+        true_table.merge_by_or(&mut false_table);
+        assign_table.merge_by_or(&mut true_table);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
@@ -1132,8 +1272,8 @@ impl IfResetStatement {
             true_table.check_missing_reset(context, &false_table);
         }
 
-        true_table.merge_by_or(context, &mut false_table, false);
-        assign_table.merge_by_or(context, &mut true_table, false);
+        true_table.merge_by_or(&mut false_table);
+        assign_table.merge_by_or(&mut true_table);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
@@ -1314,6 +1454,7 @@ impl CasePattern {
 impl CaseStatement {
     pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
         let Some(tgt) = self.case_target.eval_value(context) else {
+            context.function_indeterminate = true;
             return ControlFlow::Continue;
         };
         for arm in &self.arms {
@@ -1338,6 +1479,7 @@ impl CaseStatement {
                 return ControlFlow::Continue;
             }
             if undecided {
+                context.function_indeterminate = true;
                 return ControlFlow::Continue;
             }
         }
@@ -1395,10 +1537,10 @@ impl CaseStatement {
 
         let mut acc = branch_tables.pop().expect("default_table");
         for mut t in branch_tables.into_iter().rev() {
-            t.merge_by_or(context, &mut acc, false);
+            t.merge_by_or(&mut acc);
             acc = t;
         }
-        assign_table.merge_by_or(context, &mut acc, false);
+        assign_table.merge_by_or(&mut acc);
         assign_table.refernced = final_referenced;
     }
 

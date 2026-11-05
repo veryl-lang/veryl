@@ -58,6 +58,7 @@ log                 = "0.4.32"
 mdbook-driver       = "0.5.0"
 mdbook-preprocessor = "0.5.0"
 miette              = {version = "7.6"}
+mimalloc            = {version = "0.1", features = ["no_thp"]}
 num-bigint          = {version = "0.5", features = ["serde"]}
 num-traits          = "0.2.19"
 once_cell           = "1.21"

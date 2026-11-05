@@ -2,9 +2,13 @@ use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_bound;
 use crate::conv::checker::proto::check_proto;
-use crate::conv::utils::{check_module_with_unevaluable_generic_parameters, get_component};
+use crate::conv::utils::{
+    check_module_with_unevaluable_generic_parameters, get_component, get_component_body,
+    identifiers_in,
+};
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{self, IrResult, VarKind, VarPath, Variable};
+use crate::namespace::DefineContext;
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use crate::{HashMap, ir_error};
@@ -39,6 +43,14 @@ impl Conv<&Veryl> for ir::Ir {
                 x.description_group.as_ref().into()
             };
             for item in &items {
+                // An item behind an inactive `#[ifdef]` keeps its symbols, but
+                // its body has been compiled out and must not be analyzed.
+                let range: TokenRange = (*item).into();
+                let define_context: DefineContext = range.beg.into();
+                if !define_context.is_active(&context.config.defines) {
+                    continue;
+                }
+
                 // ignore IrError of generic top-level components
                 let in_generic = context.in_generic;
                 if item.is_generic() {
@@ -54,7 +66,7 @@ impl Conv<&Veryl> for ir::Ir {
                                     top_level_memo_sig(context, decl.identifier.as_ref())
                                 {
                                     let token: TokenRange = decl.identifier.as_ref().into();
-                                    if let Ok(component) = get_component(context, &sig, token)
+                                    if let Ok(component) = get_component_body(context, &sig, token)
                                         && let ir::Component::Module(m) = component.as_ref()
                                     {
                                         let mut component = m.clone();
@@ -228,6 +240,9 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         {
             context.push_namespace(symbol.found.inner_namespace());
             context.in_test_module = x.test.is_some();
+            if context.in_test_module {
+                context.body_names = Some(std::sync::Arc::new(identifiers_in(module_declaration)));
+            }
             if let Some(x) = x.default_clock {
                 let path = VarPath::new(symbol_table::get(x).unwrap().token.text);
                 context.set_default_clock(path, x);
@@ -331,6 +346,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         declarations.retain(|x| !x.is_null());
+        let write_summary = ir::WriteSummary::new(&mut context, &declarations);
         let interface_members = collect_interface_members(&context);
         let port_types = context.drain_port_types();
         let variables = context.drain_variables();
@@ -345,7 +361,10 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         context.pop_namespace();
+        // A test module's names are its own, not those of the modules after it.
+        let body_names = upper_context.body_names.take();
         upper_context.inherit(&mut context);
+        upper_context.body_names = body_names;
 
         Ok(ir::Module {
             name: module_declaration.identifier.text(),
@@ -356,6 +375,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
             variables,
             functions,
             interface_members,
+            write_summary,
             declarations,
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),
@@ -449,7 +469,6 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
             .extract_if(|_, v| v.affiliation != Affiliation::Function)
             .collect();
 
-        context.pop_namespace();
         upper_context.inherit(&mut context);
 
         ret?;
@@ -584,6 +603,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             variables,
             functions: HashMap::default(),
             interface_members,
+            write_summary: ir::WriteSummary::default(),
             declarations: vec![],
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),

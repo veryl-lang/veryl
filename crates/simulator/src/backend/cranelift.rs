@@ -5,6 +5,7 @@
 pub(crate) mod expression;
 pub(crate) mod helpers;
 pub(crate) mod runtime;
+mod selection;
 pub(crate) mod statement;
 
 use crate::backend::{Backend, ChunkArtifact, CompileCtx};

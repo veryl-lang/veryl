@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-synthesizer"
-version               = "0.22.0"
+version               = "0.22.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -15,9 +15,9 @@ fxhash         = {workspace = true}
 indent         = {workspace = true}
 log            = {workspace = true}
 thiserror      = {workspace = true}
-veryl-analyzer = {version = "0.22.0", path = "../analyzer"}
-veryl-metadata = {version = "0.22.0", path = "../metadata"}
-veryl-parser   = {version = "0.22.0", path = "../parser"}
+veryl-analyzer = {version = "0.22.1", path = "../analyzer"}
+veryl-metadata = {version = "0.22.1", path = "../metadata"}
+veryl-parser   = {version = "0.22.1", path = "../parser"}
 
 [features]
 # Enables the experimental AIG-based structural rewrite + tech-map pass.
@@ -26,8 +26,8 @@ veryl-parser   = {version = "0.22.0", path = "../parser"}
 # offline experimentation.
 aig = []
 
-[target.'cfg(target_family = "wasm")'.dependencies]
+[target.'cfg(any(target_family = "wasm", kani))'.dependencies]
 miette = {workspace = true, features = ["fancy-no-syscall"]}
 
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
+[target.'cfg(all(not(target_family = "wasm"), not(kani)))'.dependencies]
 miette = {workspace = true, features = ["fancy"]}
