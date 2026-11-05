@@ -5,7 +5,7 @@ pub module ram #(
     param DATA_TYPE    : type  = logic<DATA_WIDTH>                        ,
     param BUFFER_OUT   : bbool                   = false                                    ,
     param USE_RESET    : bbool                   = false                                    ,
-    param INITIAL_VALUE: bit  <$bits(DATA_TYPE)> = '0                                       ,
+    param INITIAL_VALUE: logic<$bits(DATA_TYPE)> = '0                                       ,
 ) (
     i_clk : input  clock                   ,
     i_rst : input  reset                   ,
