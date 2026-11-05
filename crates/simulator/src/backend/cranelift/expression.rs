@@ -2679,16 +2679,16 @@ impl ProtoExpression {
                 // `emit_wide_bit_select_read`).  A dynamic bit-select stays on
                 // the interpreter (rare).
                 if nb > 16 {
+                    let addr = match in_range {
+                        Some(c) => {
+                            let d = alloc_wide_out_of_range(builder, nb, context.use_4state);
+                            builder.ins().select(c, addr, d)
+                        }
+                        None => addr,
+                    };
                     if select.is_none() && dynamic_select.is_none() {
                         // A wide read hands back storage, so the default is a
                         // slot holding it rather than a register constant.
-                        let addr = match in_range {
-                            Some(c) => {
-                                let d = alloc_wide_out_of_range(builder, nb, context.use_4state);
-                                builder.ins().select(c, addr, d)
-                            }
-                            None => addr,
-                        };
                         let mask_xz = if context.use_4state {
                             Some(builder.ins().iadd_imm_s(addr, nb as i64))
                         } else {
@@ -2710,9 +2710,7 @@ impl ProtoExpression {
                         } else {
                             None
                         };
-                        return Some(guard_out_of_range(
-                            context, builder, in_range, *width, payload, mask_xz,
-                        ));
+                        return Some((payload, mask_xz));
                     }
                     return None;
                 }
