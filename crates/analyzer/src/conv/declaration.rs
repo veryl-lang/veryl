@@ -458,6 +458,7 @@ impl Conv<&WithParameterItem> for () {
 
             // The default is sized by the parameters as overridden, so a default
             // that fits only the default shape must not be evaluated when unused.
+            let is_overridden = overridden.is_some();
             let mut expr = if let Some(expr) = overridden {
                 expr
             } else if context.is_affiliated(Affiliation::ProtoModule) {
@@ -485,7 +486,7 @@ impl Conv<&WithParameterItem> for () {
                 token: variable_token,
             };
 
-            eval_const_assign(context, kind, &dst, &mut expr)?;
+            eval_const_assign(context, kind, &dst, &mut expr, is_overridden)?;
 
             Ok(())
         } else {
@@ -945,7 +946,7 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
                 token: variable_token,
             };
 
-            eval_const_assign(context, kind, &dst, &mut (comptime, expr))?;
+            eval_const_assign(context, kind, &dst, &mut (comptime, expr), false)?;
 
             Ok(ir::Declaration::Null)
         } else {

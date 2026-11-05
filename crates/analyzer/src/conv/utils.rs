@@ -1086,17 +1086,28 @@ fn fit_array_elements(mut values: Vec<Value>, r#type: &ir::Type) -> Vec<Value> {
     values
 }
 
+/// `overridden` tells that `expr` is a parameter override: it was built, and
+/// already folded as far as it goes, by `get_overridden_params` in the
+/// instantiating component, so its variable references index that
+/// component's variable table, not the one of `context`.
 pub fn eval_const_assign(
     context: &mut Context,
     kind: VarKind,
     dst: &ir::AssignDestination,
     expr: &mut (ir::Comptime, ir::Expression),
+    overridden: bool,
 ) -> IrResult<()> {
     let (comptime, expr) = expr;
     // Same unfolded form `get_overridden_params` handles: an indexed read of
     // an unpacked-array const arrives const but valueless, and left alone the
     // const stays unresolved.  An array literal keeps its own path.
-    if comptime.value.is_unknown()
+    //
+    // An override is not folded again here: evaluated against this
+    // component's variables, a reference to a parent's parameter the parent
+    // could not fold (a `$sv::` or `$define::` default) reads whatever
+    // variable of this component happens to have the same id.
+    if !overridden
+        && comptime.value.is_unknown()
         && comptime.is_const
         && let Some(value) = expr.eval_value(context)
     {

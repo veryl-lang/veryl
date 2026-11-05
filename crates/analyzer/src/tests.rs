@@ -18135,6 +18135,88 @@ fn parameter_override() {
 }
 
 #[test]
+fn parameter_override_unfoldable_forwarded() {
+    // An override the parent cannot fold (its default comes from `$sv::` or
+    // `$define::`) is forwarded by `Mid` to `Leaf`. It must stay unknown
+    // there, not be read through `Mid`'s own variables: `COLS` and `PORT`
+    // are the first parameters of their modules, and `Leaf` saw `64 * PORT`.
+    for default in ["$sv::cfg::COLS", "$define::COLS"] {
+        let code = format!(
+            r#"
+    module Leaf #(
+        param W   : u32 = 128,
+        param BITS: u32 = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {{
+        let _w: logic<W> = 0;
+        assign o_z = i_a[7:8 - BITS];
+    }}
+
+    module Mid #(
+        param PORT: bit<16> = 16'd10007,
+        param W   : u32     = 128,
+        param BITS: u32     = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {{
+        inst u: Leaf #(W: W, BITS: BITS) (i_a, o_z);
+    }}
+
+    module Top #(
+        param COLS: u32 = {default},
+        param BITS: u32 = {default},
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {{
+        inst u: Mid #(W: 64 * COLS, BITS: BITS) (i_a, o_z);
+    }}
+    "#
+        );
+
+        let errors = analyze(&code);
+        assert!(errors.is_empty(), "{default}: {errors:#?}");
+    }
+
+    // A value the parent does fold still reaches the grandchild.
+    let code = r#"
+    module Leaf #(
+        param BITS: u32 = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {
+        assign o_z = i_a[7:8 - BITS];
+    }
+
+    module Mid #(
+        param PORT: u32 = 1,
+        param BITS: u32 = 6,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {
+        inst u: Leaf #(BITS: BITS) (i_a, o_z);
+    }
+
+    module Top #(
+        param BITS: u32 = 9,
+    ) (
+        i_a: input  logic<8>,
+        o_z: output logic<BITS>,
+    ) {
+        inst u: Mid #(BITS: BITS) (i_a, o_z);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+}
+
+#[test]
 fn exceed_limit() {
     let code = r#"
     module ModuleA #(
