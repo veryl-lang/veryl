@@ -40,6 +40,23 @@ impl VerylGrammarTrait for CheckStatement {
         Ok(())
     }
 
+    fn let_statement(&mut self, _arg: &LetStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.statement_depth_in_always_ff += 1;
+        }
+        Ok(())
+    }
+
+    fn concatenation_assignment(
+        &mut self,
+        _arg: &ConcatenationAssignment,
+    ) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.statement_depth_in_always_ff += 1;
+        }
+        Ok(())
+    }
+
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
