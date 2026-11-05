@@ -86,7 +86,7 @@ const CELL_CAP_STMTS: u32 = 64;
 /// A byte range and the cells that read it.
 pub type Readers = Vec<(u32, u32, Vec<u32>)>;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Hash)]
 pub struct DataflowPlan {
     /// Statement indices per cell, in execution order.  Cells are numbered
     /// in a topological order: a cell only marks cells after it.

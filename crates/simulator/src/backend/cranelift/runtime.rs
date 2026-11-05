@@ -549,7 +549,7 @@ pub(super) fn load_pieces(a: u32, b: u32) -> Vec<(u32, Type)> {
     out
 }
 
-fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
+pub(crate) fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
     stmts.iter().any(|s| match s {
         ProtoStatement::CompiledBlock(_) => true,
         ProtoStatement::SequentialBlock(body) => proto_contains_compiled_block(body),

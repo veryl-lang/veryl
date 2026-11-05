@@ -1309,7 +1309,7 @@ impl ProtoForBound {
     }
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone)]
 pub struct ProtoForStatement {
     pub var_offset: VarOffset,
     pub var_width: usize,
@@ -1318,6 +1318,49 @@ pub struct ProtoForStatement {
     pub range: ProtoForRange,
     pub body: Vec<ProtoStatement>,
     pub token: TokenRange,
+}
+
+// `token` is excluded from `Debug` and `Hash` as in `ProtoAssignStatement`.
+impl std::fmt::Debug for ProtoForStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ProtoForStatement {
+            var_offset,
+            var_width,
+            var_native_bytes,
+            var_signed,
+            range,
+            body,
+            token: _,
+        } = self;
+        f.debug_struct("ProtoForStatement")
+            .field("var_offset", var_offset)
+            .field("var_width", var_width)
+            .field("var_native_bytes", var_native_bytes)
+            .field("var_signed", var_signed)
+            .field("range", range)
+            .field("body", body)
+            .finish()
+    }
+}
+
+impl std::hash::Hash for ProtoForStatement {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoForStatement {
+            var_offset,
+            var_width,
+            var_native_bytes,
+            var_signed,
+            range,
+            body,
+            token: _,
+        } = self;
+        var_offset.hash(state);
+        var_width.hash(state);
+        var_native_bytes.hash(state);
+        var_signed.hash(state);
+        range.hash(state);
+        body.hash(state);
+    }
 }
 
 #[derive(Clone, Debug, Hash)]
