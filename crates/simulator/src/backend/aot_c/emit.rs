@@ -15444,9 +15444,22 @@ mod tests {
         assert!(src.contains("comb_values + 0x10"));
     }
 
-    /// Compile `src` end-to-end; return `None` when the built `.so`
-    /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
-    /// Genuine compile failures still panic.
+    /// Writes from a child process so this process never holds a writable
+    /// descriptor: a fork by another test thread would copy it, and exec of
+    /// the file fails with ETXTBSY until that child execs or exits.
+    #[cfg(unix)]
+    fn write_executable(path: &Path, body: &str) {
+        let status = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(r#"printf '%s' "$2" > "$1" && chmod 755 "$1""#)
+            .arg("sh")
+            .arg(path)
+            .arg(body)
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to write {}", path.display());
+    }
+
     #[test]
     #[cfg(unix)]
     fn compile_script_hands_every_flag_to_the_compiler() {
@@ -15458,17 +15471,14 @@ mod tests {
         fs::create_dir_all(&tmp).unwrap();
         let seen = tmp.join("seen.txt");
         let fake_cc = tmp.join("record_cc.sh");
-        fs::write(
+        write_executable(
             &fake_cc,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n\
                  while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
                 seen.display()
             ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&fake_cc, fs::Permissions::from_mode(0o755)).unwrap();
+        );
 
         let tmp_c = tmp.join("t.c");
         let tmp_so = tmp.join("t.so");
@@ -15536,14 +15546,11 @@ mod tests {
         // does — on our pipes that is a SIGPIPE, and the compile would die
         // before writing anything.
         let slow_cc = tmp.join("slow_cc.sh");
-        fs::write(
+        write_executable(
             &slow_cc,
             "#!/bin/sh\nsleep 2\necho 'warning: probe diagnostic' >&2\n\
              while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&slow_cc, fs::Permissions::from_mode(0o755)).unwrap();
+        );
 
         let status = Command::new(std::env::current_exe().unwrap())
             .arg("aot_cache_publish_survives_process_exit")
@@ -15571,6 +15578,9 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
+    /// Compile `src` end-to-end; return `None` when the built `.so`
+    /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
+    /// Genuine compile failures still panic.
     fn compile_for_test(cache_dir: &Path, src: &str, what: &str) -> Option<EmittedModule> {
         match compile_source_in(cache_dir, src) {
             Ok(m) => Some(m),
