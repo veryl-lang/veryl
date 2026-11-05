@@ -2636,6 +2636,69 @@ fn invalid_statement() {
     assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
 
     let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff (clk, rst) {
+            let c: logic = a;
+            if_reset {
+                b = 0;
+            } else {
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff {
+            let c: logic = a;
+            if_reset {
+                b = 0;
+            } else {
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        var c: logic;
+        always_ff {
+            {b, c} = {a, a};
+            if_reset {
+                b = 0;
+                c = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
     module ModuleA {
         function FuncA() {
             return 1;
@@ -7498,6 +7561,28 @@ fn missing_if_reset() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MissingIfReset { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff(clk, rst) {
+            var c: logic;
+            if_reset {
+                b = 0;
+            } else {
+                c = a;
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -13867,6 +13952,82 @@ fn mismatch_case_label() {
             .any(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. })),
         "{errors:#?}"
     );
+}
+
+#[test]
+fn case_label_with_unfoldable_signed_bound() {
+    let code = r#"
+    module ModuleA (
+        s: input  i32,
+        y: output logic<2>,
+        z: output logic<2> [8],
+    ) {
+        const N: i32 = $sv::N;
+        always_comb {
+            y = case s {
+                0..N   : 1,
+                default: 0,
+            };
+            for i in 0..8 {
+                z[i] = case i {
+                    0..N   : 1,
+                    default: 0,
+                };
+            }
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. })),
+        "{errors:#?}"
+    );
+
+    // An unsigned bound still makes the whole comparison unsigned.
+    let code = r#"
+    module ModuleA (
+        s: input  i32,
+        y: output logic<2>,
+    ) {
+        const N: u32 = $sv::N;
+        always_comb {
+            y = case s {
+                0..N   : 1,
+                default: 0,
+            };
+        }
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 1, "{errors:#?}");
+
+    // A variable bound can still wrap.
+    let code = r#"
+    module ModuleA (
+        s: input  i8,
+        b: input  i8,
+        y: output logic<2>,
+    ) {
+        always_comb {
+            y = case s {
+                0..b   : 1,
+                default: 0,
+            };
+        }
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 1, "{errors:#?}");
 }
 
 #[test]
@@ -22661,6 +22822,69 @@ fn negative_for_step() {
         !errors
             .iter()
             .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn for_step_with_bits_of_sv_reference() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<64>,
+    ) {
+        const A: u32 = $bits($sv::foo_t) / 8;
+        const B: u32 = $bits($sv::pkg::foo_t) / 8;
+        const C: u32 = $bits($sv::cfg.width) / 8;
+        always_comb {
+            o = 0;
+            for i in 0..64 step += A {
+                o[i] = 1;
+            }
+            for i in 0..64 step += B {
+                o[i] = 1;
+            }
+            for i in 0..64 step += C {
+                o[i] = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn logical_operand_with_sv_reference() {
+    let code = r#"
+    module ModuleA (
+        o: output logic,
+    ) {
+        always_comb {
+            o = 0;
+            if $sv::FLAG {
+                o = 1;
+            } else if $sv::FLAG {
+                o = 1;
+            }
+        }
+
+        let _a: logic = !$sv::FLAG;
+        let _b: logic = $sv::FLAG && true;
+        let _c: logic = if $sv::FLAG ? 1'b1 : 1'b0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidLogicalOperand { .. })),
         "{errors:?}"
     );
 }

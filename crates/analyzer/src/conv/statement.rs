@@ -667,7 +667,7 @@ impl Conv<&IfStatement> for ir::StatementBlock {
 
         let (comptime, cond) = eval_expr(context, None, &value.expression, false)?;
 
-        if !comptime.r#type.is_binary() {
+        if !comptime.r#type.may_be_binary() {
             let token: TokenRange = value.expression.as_ref().into();
             context.insert_error(AnalyzerError::invalid_logical_operand(false, &token));
         }
@@ -694,7 +694,7 @@ impl Conv<&IfStatement> for ir::StatementBlock {
         for x in &value.if_statement_list {
             let (comptime, cond) = eval_expr(context, None, &x.expression, false)?;
 
-            if !comptime.r#type.is_binary() {
+            if !comptime.r#type.may_be_binary() {
                 let token: TokenRange = x.expression.as_ref().into();
                 context.insert_error(AnalyzerError::invalid_logical_operand(false, &token));
             }
@@ -780,7 +780,7 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
         for x in &value.if_reset_statement_list {
             let (comptime, cond) = eval_expr(context, None, &x.expression, false)?;
 
-            if !comptime.r#type.is_binary() {
+            if !comptime.r#type.may_be_binary() {
                 let token: TokenRange = x.expression.as_ref().into();
                 context.insert_error(AnalyzerError::invalid_logical_operand(false, &token));
             }
