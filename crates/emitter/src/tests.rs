@@ -775,6 +775,101 @@ endmodule
 }
 
 #[test]
+fn declaration_before_if_reset() {
+    let code = r#"module ModuleA (
+    i_clk: input clock,
+    i_rst: input reset,
+    i_dat: input logic,
+) {
+    var a: logic;
+    var b: logic;
+    var c: logic;
+
+    always_ff {
+        var x: logic;
+        if_reset {
+            a = 0;
+        } else {
+            x = i_dat;
+            a = x;
+        }
+    }
+
+    always_ff (i_clk, i_rst) {
+        var y: logic;
+        if_reset {
+            b = 0;
+        } else {
+            y = i_dat;
+            b = y;
+        }
+    }
+
+    always_ff {
+        const C: u32 = 1;
+        block {
+            var _z: logic;
+        }
+        if_reset {
+            c = 0;
+        } else {
+            c = C;
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_clk,
+    input var logic i_rst,
+    input var logic i_dat
+);
+    logic a;
+    logic b;
+    logic c;
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        logic x;
+        if (!i_rst) begin
+            a <= 0;
+        end else begin
+            x =  i_dat;
+            a <= x;
+        end
+    end
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        logic y;
+        if (!i_rst) begin
+            b <= 0;
+        end else begin
+            y =  i_dat;
+            b <= y;
+        end
+    end
+
+    always_ff @ (posedge i_clk, negedge i_rst) begin
+        localparam int unsigned C = 1;
+        logic _z;
+
+        if (!i_rst) begin
+            c <= 0;
+        end else begin
+            c <= C;
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn emit_nested_generic_instances() {
     let code = r#"proto package ProtoPkgA {
     const WIDTH: u32;

@@ -36936,7 +36936,7 @@ fn aot_c_event_reuses_the_compile_of_equal_inputs() {
         assign o = r;
     }
     "#;
-    crate::backend::aot_c::emit::set_test_event_index(true);
+    crate::backend::aot_c::emit::set_test_aot_index(true);
     let mut emitted = Vec::new();
     for _ in 0..2 {
         crate::backend::aot_c::emit::take_event_sources();
@@ -36953,7 +36953,7 @@ fn aot_c_event_reuses_the_compile_of_equal_inputs() {
             assert_eq!(sim.get("o").unwrap().payload_u64(), c * 3, "cycle {c}");
         }
     }
-    crate::backend::aot_c::emit::set_test_event_index(false);
+    crate::backend::aot_c::emit::set_test_aot_index(false);
     assert!(emitted[1].is_empty(), "the second build must not emit");
 }
 

@@ -1130,7 +1130,7 @@ impl Emitter {
                 self.space(1);
             }
             self.always_ff_reset(&x.always_ff_reset);
-        } else if self.always_ff_if_reset_exists(decl) {
+        } else if decl.has_if_reset() {
             self.always_ff_implicit_reset_event();
         }
         self.r_paren(&arg.r_paren);
@@ -1139,7 +1139,7 @@ impl Emitter {
     fn always_ff_implicit_event_list(&mut self, arg: &AlwaysFfDeclaration) {
         self.str("(");
         self.always_ff_implicit_clock_event();
-        if self.always_ff_if_reset_exists(arg) {
+        if arg.has_if_reset() {
             self.always_ff_implicit_reset_event();
         }
         self.str(")")
@@ -1170,19 +1170,6 @@ impl Emitter {
             self.str(&token.token.to_string());
         } else {
             self.str(&symbol.token.to_string());
-        }
-    }
-
-    fn always_ff_if_reset_exists(&mut self, arg: &AlwaysFfDeclaration) -> bool {
-        if let Some(x) = arg.statement_block.statement_block_list.first() {
-            let x: Vec<_> = x.statement_block_group.as_ref().into();
-            if let Some(StatementBlockItem::Statement(x)) = x.first() {
-                matches!(*x.statement, Statement::IfResetStatement(_))
-            } else {
-                false
-            }
-        } else {
-            false
         }
     }
 
