@@ -1185,6 +1185,9 @@ pub fn eval_const_assign(
                     context.insert_var_path(path.clone(), comptime);
                 }
                 ValueVariant::Unknown => {
+                    // A later reference has its own expression context, not the
+                    // initializer's width/signedness cached by eval_expr.
+                    comptime.evaluated = false;
                     // The variable behind the path is what the const-assignment
                     // check and the simulator look for.
                     insert_const_variable(context, dst, kind, r#type, comptime, vec![]);
@@ -3652,7 +3655,7 @@ impl CaseOperand {
             magnitude,
             bound: false,
             exclusive: false,
-            is_const: value.is_some(),
+            is_const: comptime.is_const,
             is_zero,
             is_min,
             known,
