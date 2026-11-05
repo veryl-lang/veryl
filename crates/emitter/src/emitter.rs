@@ -3424,8 +3424,7 @@ impl Emitter {
 
                     if inst.affiliation_symbols.contains(&associated_component) {
                         true
-                    } else if is_global_func
-                        && let Some(associated_symbol) = symbol_table::get(associated_component)
+                    } else if let Some(associated_symbol) = symbol_table::get(associated_component)
                         && let SymbolKind::GenericInstance(associated_inst) = associated_symbol.kind
                     {
                         inst.affiliation_symbols.contains(&associated_inst.base)
