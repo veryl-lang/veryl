@@ -1,9 +1,10 @@
-module Module68H (
-    i_d     : input  logic     <WIDTH>,
-    o_result: output lzc_result       ,
+module Module68H #(
+    const RESULT_WIDTH: u32 = $std::lzc_pkg::result_width(WIDTH),
+) (
+    i_d     : input  logic<WIDTH>       ,
+    o_result: output logic<RESULT_WIDTH>,
 ) {
     import Package68G::WIDTH;
-    import $std::lzc_pkg::<WIDTH>::{lzc_result, lzc};
 
-    assign o_result = lzc(i_d, true);
+    assign o_result = $std::lzc::<WIDTH>(i_d, true);
 }

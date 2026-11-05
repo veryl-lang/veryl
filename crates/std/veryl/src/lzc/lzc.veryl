@@ -1,0 +1,59 @@
+/// Leading zero counter
+///
+/// Counts the number of consecutive zero bits in `bits`.
+/// Generic parameter `N` is the width of `bits`.
+///
+/// The return value has `max($clog2(N), 1) + 1` bits.
+/// The MSB is set when all bits of `bits` are zero, and the remaining bits hold the count.
+pub function lzc::<N: p32> (
+    bits    : input logic<N>, /// Input vector
+    from_msb: input logic   , /// Counting direction (true: from MSB, false: from LSB)
+) -> logic<lzc_pkg::result_width(N)> {
+    const RESULT_WIDTH: p32 = lzc_pkg::result_width(N);
+    const COUNT_WIDTH : p32 = RESULT_WIDTH - 1;
+    const N_SPLITS    : u32 = (N + 63) / 64;
+
+    var input_bits: logic<N>           ;
+    var ret       : logic<RESULT_WIDTH>;
+
+    if from_msb {
+        input_bits = bit_reverse::<N>(bits);
+    } else {
+        input_bits = bits;
+    }
+
+    if N <= 4 {
+        var ret4: lzc_pkg::result::<4>;
+        ret4 = lzc_pkg::lzc4(input_bits as 4);
+        ret  = {ret4.all_zero, ret4.count as COUNT_WIDTH};
+    } else if N <= 8 {
+        var ret8: lzc_pkg::result::<8>;
+        ret8 = lzc_pkg::lzc8(input_bits as 8);
+        ret  = {ret8.all_zero, ret8.count as COUNT_WIDTH};
+    } else if N <= 16 {
+        var ret16: lzc_pkg::result::<16>;
+        ret16 = lzc_pkg::lzc16(input_bits as 16);
+        ret   = {ret16.all_zero, ret16.count as COUNT_WIDTH};
+    } else if N <= 32 {
+        var ret32: lzc_pkg::result::<32>;
+        ret32 = lzc_pkg::lzc32(input_bits as 32);
+        ret   = {ret32.all_zero, ret32.count as COUNT_WIDTH};
+    } else if N <= 64 {
+        var ret64: lzc_pkg::result::<64>;
+        ret64 = lzc_pkg::lzc64(input_bits as 64);
+        ret   = {ret64.all_zero, ret64.count as COUNT_WIDTH};
+    } else {
+        ret = '1;
+        for i in 0..N_SPLITS {
+            var ret64: lzc_pkg::result::<64>;
+
+            ret64 = lzc_pkg::lzc64((input_bits >> (64 * i)) as 64);
+            if !ret64.all_zero {
+                ret = ((i << 6) as RESULT_WIDTH) | (ret64.count as RESULT_WIDTH);
+                break;
+            }
+        }
+    }
+
+    return ret;
+}
