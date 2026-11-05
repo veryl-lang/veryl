@@ -2636,6 +2636,69 @@ fn invalid_statement() {
     assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
 
     let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff (clk, rst) {
+            let c: logic = a;
+            if_reset {
+                b = 0;
+            } else {
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff {
+            let c: logic = a;
+            if_reset {
+                b = 0;
+            } else {
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        var c: logic;
+        always_ff {
+            {b, c} = {a, a};
+            if_reset {
+                b = 0;
+                c = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
     module ModuleA {
         function FuncA() {
             return 1;
@@ -7498,6 +7561,28 @@ fn missing_if_reset() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MissingIfReset { .. }));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+        a  : input logic,
+    ) {
+        var b: logic;
+        always_ff(clk, rst) {
+            var c: logic;
+            if_reset {
+                b = 0;
+            } else {
+                c = a;
+                b = c;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
