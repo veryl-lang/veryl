@@ -760,15 +760,14 @@ impl Statement {
                 if let Some(var) = ret_id.and_then(|id| variables.variables.get(&id))
                     && let Some(&current) = var.current_values.first()
                 {
-                    let in_ff = (ff_base as usize..ff_base as usize + ff_len)
-                        .contains(&(current as usize));
+                    let in_ff =
+                        (ff_base as usize..ff_base as usize + ff_len).contains(&(current as usize));
                     let dst = if in_ff {
                         var.next_values.first().copied().unwrap_or(current)
                     } else {
                         current
                     };
-                    let ff_log_offset =
-                        in_ff.then(|| (current as usize - ff_base as usize) as u32);
+                    let ff_log_offset = in_ff.then(|| (current as usize - ff_base as usize) as u32);
                     *ret_binding = Some(TbReturnBinding {
                         dst,
                         width: var.width,
