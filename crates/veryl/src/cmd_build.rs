@@ -64,6 +64,7 @@ impl CmdBuild {
         let options = AnalyzeOptions {
             defines,
             output_intent: match emit_policy {
+                EmitPolicy::Always if self.opt.check => OutputIntent::Compare,
                 EmitPolicy::Always => OutputIntent::Emit,
                 EmitPolicy::SkipIfNativeOnly => OutputIntent::SkipIfNativeOnly,
             },
@@ -132,6 +133,11 @@ impl CmdBuild {
                             print_diff(&path.src, &output, emitter.as_str());
                         }
                         all_pass = false;
+                        metadata.remove_generated_file(&dst);
+                    } else {
+                        // Up to date, as if just built: lets the next run
+                        // restore the file instead of treating it as stale.
+                        metadata.add_generated_file(dst);
                     }
                 } else {
                     let written = utils::write_file_if_changed(&dst, emitter.as_str().as_bytes())?;
@@ -417,6 +423,7 @@ impl CmdBuild {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use std::time::{Duration, SystemTime};
     use veryl_analyzer::Analyzer;
 
     static BUILD_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -1432,6 +1439,114 @@ dep = {path = "../dep"}
         assert!(crate::incremental::last_restored_count() > 0);
     }
 
+    /// Drops the cache and the generated-file records but keeps the outputs,
+    /// as `rm -rf .build` does.
+    fn forget_build(metadata: &mut Metadata, project_path: &Path) {
+        fs::remove_dir_all(project_path.join(".build")).unwrap();
+        metadata.build_info.generated_files.clear();
+    }
+
+    #[test]
+    fn incremental_build_check_restores_on_warm_run() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "inc_build_check_warm");
+
+        run_build(&mut metadata, None);
+        forget_build(&mut metadata, &project_path);
+
+        assert!(run_build_check(&mut metadata));
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+
+        // The outputs matched, so they count as up to date.
+        assert!(run_build_check(&mut metadata));
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+    }
+
+    #[test]
+    fn incremental_build_check_compares_rewritten_output() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "inc_build_check_rewritten");
+
+        run_build(&mut metadata, None);
+        assert!(run_build_check(&mut metadata));
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+
+        let output = project_path.join("target/b.sv");
+        let mut content = fs::read_to_string(&output).unwrap();
+        content.push_str("// edited\n");
+        fs::write(&output, content).unwrap();
+        // As restored from a backup with its old mtime kept.
+        set_modified(&output, SystemTime::now() - Duration::from_secs(3600));
+
+        assert!(!run_build_check(&mut metadata));
+    }
+
+    fn set_modified(path: &Path, time: SystemTime) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    }
+
+    // The output's mtime comes from the filesystem clock, which may run ahead
+    // of ours; it must not make a later source change look already checked.
+    #[test]
+    fn incremental_build_check_with_output_mtime_ahead() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "inc_build_check_ahead");
+
+        run_build(&mut metadata, None);
+        let now = SystemTime::now();
+        set_modified(
+            &project_path.join("target/b.sv"),
+            now + Duration::from_secs(60),
+        );
+        assert!(run_build_check(&mut metadata));
+
+        let source = project_path.join("src/b.veryl");
+        fs::write(&source, INC_FILE_B2).unwrap();
+        set_modified(&source, now + Duration::from_secs(2));
+
+        assert!(!run_build_check(&mut metadata));
+        assert!(!run_build_check(&mut metadata));
+    }
+
+    // build --check writes no sourcemap, so a following build must not take
+    // the outputs it recorded as complete.
+    #[test]
+    fn incremental_build_after_build_check_writes_sourcemaps() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (_, project_path) = create_incremental_project(tempdir.path(), "inc_build_check_map");
+        let toml_path = project_path.join("Veryl.toml");
+        let toml = fs::read_to_string(&toml_path).unwrap().replace(
+            r#"sourcemap_target = {type = "none"}"#,
+            r#"sourcemap_target = {type = "directory", path = "map"}"#,
+        );
+        fs::write(&toml_path, toml).unwrap();
+        let mut metadata = Metadata::load(&toml_path).unwrap();
+
+        run_build(&mut metadata, None);
+        forget_build(&mut metadata, &project_path);
+        fs::remove_dir_all(project_path.join("map")).unwrap();
+
+        assert!(run_build_check(&mut metadata));
+        run_build(&mut metadata, None);
+
+        let paths = metadata.paths::<PathBuf>(&[], false, false).unwrap();
+        for path in &paths {
+            assert!(path.map.exists(), "{}", path.map.display());
+        }
+    }
+
     #[test]
     fn incremental_check_restores_warning_file_and_re_reports() {
         let _lock = BUILD_TEST_LOCK.lock().unwrap();
@@ -1814,7 +1929,7 @@ exclude_std = true
         assert!(!filelist.contains("tb.sv"), "{filelist}");
     }
 
-    /// Emitting nothing records no generated files, and `dst_is_stale` reads a
+    /// Emitting nothing records no generated files, and `output_is_stale` reads a
     /// missing record as stale — so without care every file misses on every
     /// run, in exactly the workflow the emit skip is meant to speed up.
     #[test]

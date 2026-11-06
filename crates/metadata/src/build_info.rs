@@ -10,6 +10,10 @@ use std::time::SystemTime;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BuildInfo {
     pub generated_files: BTreeMap<PathBuf, SystemTime>,
+    /// Each generated file's own mtime when recorded. Kept apart from
+    /// `generated_files` because the filesystem clock may differ from ours.
+    #[serde(default)]
+    pub generated_mtimes: BTreeMap<PathBuf, SystemTime>,
 }
 
 impl BuildInfo {
