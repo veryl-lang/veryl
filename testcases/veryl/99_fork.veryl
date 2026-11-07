@@ -1,0 +1,25 @@
+#[test(test99_fork)]
+module test99_fork {
+    var a: logic;
+    var b: logic;
+    var c: logic;
+
+    initial {
+        fork(wait_all) {
+            a = 1;
+            {
+                b = 1;
+                c = a;
+            }
+        }
+        fork(wait_any) {
+            a = 0;
+            b = 0;
+        }
+        fork(wait_none) {
+            c = 0;
+        }
+        disable fork;
+        $finish();
+    }
+}

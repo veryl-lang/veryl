@@ -510,6 +510,13 @@ pub trait VerylWalker {
         after!(self, defaul, arg);
     }
 
+    /// Semantic action for non-terminal 'Disable'
+    fn disable(&mut self, arg: &Disable) {
+        before!(self, disable, arg);
+        self.veryl_token(&arg.disable_token);
+        after!(self, disable, arg);
+    }
+
     /// Semantic action for non-terminal 'Else'
     fn r#else(&mut self, arg: &Else) {
         before!(self, r#else, arg);
@@ -564,6 +571,13 @@ pub trait VerylWalker {
         before!(self, r#for, arg);
         self.veryl_token(&arg.for_token);
         after!(self, r#for, arg);
+    }
+
+    /// Semantic action for non-terminal 'Fork'
+    fn fork(&mut self, arg: &Fork) {
+        before!(self, fork, arg);
+        self.veryl_token(&arg.fork_token);
+        after!(self, fork, arg);
     }
 
     /// Semantic action for non-terminal 'Function'
@@ -1822,6 +1836,10 @@ pub trait VerylWalker {
             Statement::ReturnStatement(x) => self.return_statement(&x.return_statement),
             Statement::BreakStatement(x) => self.break_statement(&x.break_statement),
             Statement::ForStatement(x) => self.for_statement(&x.for_statement),
+            Statement::ForkStatement(x) => self.fork_statement(&x.fork_statement),
+            Statement::DisableForkStatement(x) => {
+                self.disable_fork_statement(&x.disable_fork_statement)
+            }
             Statement::CaseStatement(x) => self.case_statement(&x.case_statement),
             Statement::SwitchStatement(x) => self.switch_statement(&x.switch_statement),
         };
@@ -1942,6 +1960,40 @@ pub trait VerylWalker {
         self.r#break(&arg.r#break);
         self.semicolon(&arg.semicolon);
         after!(self, break_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'ForkStatement'
+    fn fork_statement(&mut self, arg: &ForkStatement) {
+        before!(self, fork_statement, arg);
+        self.fork(&arg.fork);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.r_paren(&arg.r_paren);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.fork_statement_list {
+            self.fork_item(&x.fork_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, fork_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'ForkItem'
+    fn fork_item(&mut self, arg: &ForkItem) {
+        before!(self, fork_item, arg);
+        match arg {
+            ForkItem::Statement(x) => self.statement(&x.statement),
+            ForkItem::StatementBlock(x) => self.statement_block(&x.statement_block),
+        }
+        after!(self, fork_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'DisableForkStatement'
+    fn disable_fork_statement(&mut self, arg: &DisableForkStatement) {
+        before!(self, disable_fork_statement, arg);
+        self.disable(&arg.disable);
+        self.fork(&arg.fork);
+        self.semicolon(&arg.semicolon);
+        after!(self, disable_fork_statement, arg);
     }
 
     /// Semantic action for non-terminal 'ForStatement'

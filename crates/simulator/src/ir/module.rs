@@ -421,6 +421,8 @@ impl ProtoModule {
                     ProtoStatement::SequentialBlock(_) => "SeqBlock".to_string(),
                     ProtoStatement::SystemFunctionCall(_) => "SysFn".to_string(),
                     ProtoStatement::TbMethodCall { .. } => "TbMethod".to_string(),
+                    ProtoStatement::Fork(_) => "Fork".to_string(),
+                    ProtoStatement::DisableFork => "DisableFork".to_string(),
                     ProtoStatement::Break => "Break".to_string(),
                     ProtoStatement::CompiledBlock(_) => "NestedCB".to_string(),
                     &ProtoStatement::HierAssign(_) => {
@@ -1136,6 +1138,8 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
             ProtoStatement::CompiledBlock(_) => "CB",
             ProtoStatement::SequentialBlock(_) => "SeqBlock",
             ProtoStatement::TbMethodCall { .. } => "TbMethod",
+            ProtoStatement::Fork(_) => "Fork",
+            ProtoStatement::DisableFork => "DisableFork",
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -1227,6 +1231,7 @@ fn collect_event_written_comb(
                 .chain(x.default.iter())
                 .all(|s| walk(s, out)),
             ProtoStatement::SequentialBlock(inner) => inner.iter().all(|s| walk(s, out)),
+            ProtoStatement::Fork(x) => x.branches.iter().flatten().all(|s| walk(s, out)),
             ProtoStatement::CompiledBlock(cb) => {
                 // `output_offsets` compresses a dynamic array write to
                 // base + last element, hiding interior elements — walk the
@@ -1280,7 +1285,7 @@ fn collect_event_written_comb(
                     | ProtoTbMethodKind::Queue { ret: Some(_), .. }
             ),
             // No comb writes.
-            ProtoStatement::Break => true,
+            ProtoStatement::DisableFork | ProtoStatement::Break => true,
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -1346,6 +1351,7 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                 f.body.iter().all(|s| walk(s, out))
             }
             ProtoStatement::SequentialBlock(b) => b.iter().all(|s| walk(s, out)),
+            ProtoStatement::Fork(x) => x.branches.iter().flatten().all(|s| walk(s, out)),
             ProtoStatement::CompiledBlock(cb) => {
                 !cb.original_stmts.is_empty() && cb.original_stmts.iter().all(|s| walk(s, out))
             }
@@ -1379,7 +1385,7 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                     | K::RandomSeed { .. } => true,
                 }
             }
-            ProtoStatement::Break => true,
+            ProtoStatement::DisableFork | ProtoStatement::Break => true,
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -4536,6 +4542,8 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
                     ProtoStatement::CompiledBlock(_) => "CompiledBlock",
                     ProtoStatement::SequentialBlock(_) => "SequentialBlock",
                     ProtoStatement::TbMethodCall { .. } => "TbMethodCall",
+                    ProtoStatement::Fork(_) => "Fork",
+                    ProtoStatement::DisableFork => "DisableFork",
                     &ProtoStatement::HierAssign(_) => {
                         unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
                     }

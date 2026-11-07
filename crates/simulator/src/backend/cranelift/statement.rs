@@ -1273,7 +1273,9 @@ impl ProtoStatement {
             ProtoStatement::SystemFunctionCall(_) => false,
             ProtoStatement::CompiledBlock(_) => false,
             ProtoStatement::SequentialBlock(body) => body.iter().all(|s| s.can_build_binary()),
-            ProtoStatement::TbMethodCall { .. } => false,
+            ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::Fork(_)
+            | ProtoStatement::DisableFork => false,
             ProtoStatement::Break => false,
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
@@ -1372,7 +1374,9 @@ impl ProtoStatement {
                 }
                 Some(())
             }
-            ProtoStatement::TbMethodCall { .. } => None,
+            ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::Fork(_)
+            | ProtoStatement::DisableFork => None,
             ProtoStatement::Break => None,
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")

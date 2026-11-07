@@ -1640,6 +1640,34 @@ impl VerylWalker for Formatter {
         self.statement_block(&arg.statement_block);
     }
 
+    /// Semantic action for non-terminal 'ForkStatement'
+    fn fork_statement(&mut self, arg: &ForkStatement) {
+        self.fork(&arg.fork);
+        self.l_paren(&arg.l_paren);
+        self.identifier(&arg.identifier);
+        self.r_paren(&arg.r_paren);
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.fork_statement_list.iter().enumerate() {
+            self.newline_list(i);
+            self.fork_item(&x.fork_item);
+            self.align_note_statement_end();
+        }
+        self.newline_list_post(
+            arg.fork_statement_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
+        self.r_brace(&arg.r_brace);
+    }
+
+    /// Semantic action for non-terminal 'DisableForkStatement'
+    fn disable_fork_statement(&mut self, arg: &DisableForkStatement) {
+        self.disable(&arg.disable);
+        self.space(1);
+        self.fork(&arg.fork);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'CaseStatement'
     fn case_statement(&mut self, arg: &CaseStatement) {
         self.case(&arg.case);

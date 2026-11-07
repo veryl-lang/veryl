@@ -226,6 +226,10 @@ impl Conv<&Statement> for ir::StatementBlock {
             )?])),
             Statement::BreakStatement(_) => Ok(ir::StatementBlock(vec![ir::Statement::Break])),
             Statement::ForStatement(x) => Conv::conv(context, x.for_statement.as_ref()),
+            Statement::ForkStatement(x) => Conv::conv(context, x.fork_statement.as_ref()),
+            Statement::DisableForkStatement(_) => {
+                Ok(ir::StatementBlock(vec![ir::Statement::DisableFork]))
+            }
             Statement::CaseStatement(x) => Conv::conv(context, x.case_statement.as_ref()),
             Statement::SwitchStatement(x) => Conv::conv(context, x.switch_statement.as_ref()),
         }
@@ -907,6 +911,46 @@ impl Conv<&ForStatement> for ir::StatementBlock {
         let for_range = build_for_range(context, &value.range, rev, step)?;
 
         build_for_statement(context, value, &r#type, clock_domain, for_range, token)
+    }
+}
+
+impl Conv<&ForkStatement> for ir::StatementBlock {
+    fn conv(context: &mut Context, value: &ForkStatement) -> IrResult<Self> {
+        let define_context: DefineContext = (&value.fork.fork_token).into();
+        if !define_context.is_active(&context.config.defines) {
+            return Ok(ir::StatementBlock::default());
+        }
+
+        let token: TokenRange = value.into();
+        let mode = match value.identifier.identifier_token.to_string().as_str() {
+            "wait_all" => ir::ForkMode::WaitAll,
+            "wait_any" => ir::ForkMode::WaitAny,
+            "wait_none" => ir::ForkMode::WaitNone,
+            // Reported by the `fork_statement` handler.
+            _ => return Err(ir_error!(token)),
+        };
+
+        let mut branches = vec![];
+        for item in &value.fork_statement_list {
+            let block: IrResult<ir::StatementBlock> = match item.fork_item.as_ref() {
+                ForkItem::Statement(x) => {
+                    with_tb_hoist_sink(context, |context| Conv::conv(context, x.statement.as_ref()))
+                }
+                ForkItem::StatementBlock(x) => Conv::conv(context, x.statement_block.as_ref()),
+            };
+            let branch: Vec<_> = match block {
+                Ok(x) => x.0.into_iter().filter(|x| !x.is_null()).collect(),
+                Err(e) if !context.in_generic => vec![ir::Statement::Unsupported(e.token)],
+                Err(_) => vec![],
+            };
+            if !branch.is_empty() {
+                branches.push(branch);
+            }
+        }
+
+        Ok(ir::StatementBlock(vec![ir::Statement::Fork(Box::new(
+            ir::ForkStatement { mode, branches },
+        ))]))
     }
 }
 

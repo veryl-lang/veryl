@@ -680,6 +680,8 @@ impl Context {
                     Statement::SystemFunctionCall(_)
                     | Statement::FunctionCall(_)
                     | Statement::TbMethodCall(_)
+                    | Statement::Fork(_)
+                    | Statement::DisableFork
                     | Statement::Break
                     | Statement::Unsupported(_)
                     | Statement::Null => {}

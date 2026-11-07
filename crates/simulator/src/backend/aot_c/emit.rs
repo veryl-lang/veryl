@@ -552,8 +552,14 @@ impl LocalAnalysis {
                     self.poison(s);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    self.poison(s);
+                }
+            }
             ProtoStatement::SystemFunctionCall(_)
             | ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::DisableFork
             | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
@@ -718,7 +724,14 @@ impl LocalAnalysis {
             ProtoStatement::CompiledBlock(_) => {
                 self.poison(s);
             }
-            ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    self.walk_stmt(s, i, false);
+                }
+            }
+            ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::DisableFork
+            | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -2565,6 +2578,12 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
         )),
         ProtoStatement::SystemFunctionCall(_) => out.push("SysFn".to_string()),
         ProtoStatement::TbMethodCall { .. } => out.push("TbMethodCall".to_string()),
+        ProtoStatement::Fork(x) => {
+            for s in x.branches.iter().flatten() {
+                collect_uncovered(s, out);
+            }
+        }
+        ProtoStatement::DisableFork => out.push("DisableFork".to_string()),
         ProtoStatement::Break => out.push("Break".to_string()),
         ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
@@ -7876,6 +7895,8 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // Cranelift dispatch path.
             None
         }
+        // Only the testbench scheduler runs a fork.
+        ProtoStatement::Fork(_) | ProtoStatement::DisableFork => None,
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }

@@ -940,6 +940,8 @@ impl Simulator {
                 Some(Statement::SequentialBlock(_)) => "seq".into(),
                 Some(Statement::SystemFunctionCall(_)) => "sysfn".into(),
                 Some(Statement::TbMethodCall { .. }) => "tbcall".into(),
+                Some(Statement::Fork(_)) => "fork".into(),
+                Some(Statement::DisableFork) => "disable_fork".into(),
                 Some(Statement::Break) => "break".into(),
                 None => "?".into(),
             }

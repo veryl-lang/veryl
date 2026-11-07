@@ -2711,6 +2711,93 @@ fn invalid_statement() {
 }
 
 #[test]
+fn fork_statement_placement() {
+    // Allowed in the `initial` block of a test module.
+    let code = r#"
+    #[test(test_mod)]
+    module test_mod {
+        inst clk: $tb::clock_gen;
+        var a: logic;
+        var b: logic;
+        initial {
+            fork(wait_all) {
+                { clk.next(2); a = 1; }
+                b = 1;
+            }
+            fork(wait_none) {
+                clk.next(1);
+            }
+            disable fork;
+            $finish();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // A design module's `initial` block is not a testbench process.
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        initial {
+            fork(wait_all) {
+                a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA {
+        initial {
+            disable fork;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    // `final` and functions cannot wait either.
+    let code = r#"
+    #[test(test_mod)]
+    module test_mod {
+        var a: logic;
+        final {
+            fork(wait_all) {
+                a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+}
+
+#[test]
+fn unknown_fork_mode() {
+    let code = r#"
+    #[test(test_mod)]
+    module test_mod {
+        var a: logic;
+        initial {
+            fork(wait_some) {
+                a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownForkMode { .. }));
+}
+
+#[test]
 fn invalid_initial_assign() {
     let code = r#"
     module ModuleA {
