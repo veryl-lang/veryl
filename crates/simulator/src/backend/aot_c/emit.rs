@@ -10578,6 +10578,11 @@ fn expr_c_type(width: usize) -> Option<&'static str> {
     }
 }
 
+/// Above this many statements a dataflow comb gets no whole-settle entry,
+/// which would repeat every statement and double the source the C compiler
+/// has to build.
+const DATAFLOW_COARSE_MAX_STMTS: usize = 20_000;
+
 /// The comb offsets each unit may keep in locals, with their widths: written
 /// in the unit and read nowhere else.
 fn local_sets_of(units: &[&[&ProtoStatement]]) -> Vec<HashSet<(isize, usize)>> {
@@ -10647,11 +10652,21 @@ pub fn emit_dataflow_function(
             }
         })
         .collect();
-    // The comb also gets a whole-settle entry that runs every statement with
-    // no per-cell test, compare or mark, for the runtime to pick when most
-    // cells run anyway.  Its parts cut the cells' concatenated order, so no
-    // function grows with the design; only the source doubles.
-    let all: Vec<&ProtoStatement> = cells.iter().flatten().copied().collect();
+    // A small comb also gets a whole-settle entry that runs every statement
+    // with no per-cell test, compare or mark, for the runtime to pick when
+    // most cells run anyway.  Its parts cut the cells' concatenated order.
+    let n_stmts: usize = cells.iter().map(|c| c.len()).sum();
+    let coarse = n_stmts <= DATAFLOW_COARSE_MAX_STMTS;
+    if !coarse && crate::ir::opt::dataflow::diag() {
+        eprintln!(
+            "[dataflow] no whole-settle entry: {n_stmts} statements exceed {DATAFLOW_COARSE_MAX_STMTS}"
+        );
+    }
+    let all: Vec<&ProtoStatement> = if coarse {
+        cells.iter().flatten().copied().collect()
+    } else {
+        Vec::new()
+    };
     let coarse_parts: Vec<&[&ProtoStatement]> = all.chunks(PART_LEN).collect();
     let local_sets = local_sets_of(&parts.iter().map(|p| p.1).collect::<Vec<_>>());
     // A whole-settle part keeps in locals only what a cell's part does too:
@@ -10863,6 +10878,9 @@ pub fn emit_dataflow_function(
         )
     };
     body.push_str(&entry("veryl_aot_eval", ""));
+    if !coarse {
+        return Some(body);
+    }
     // A counting copy for the runtime to weigh against the whole-settle
     // entry; only probes take it, as counting costs every call.
     body.push_str(&format!(
@@ -11761,7 +11779,7 @@ mod tests {
     }
 
     #[test]
-    fn dataflow_whole_settle_entry_has_no_size_cap() {
+    fn a_dataflow_comb_over_the_cap_gets_no_whole_settle_entry() {
         let stmts: Vec<ProtoStatement> = (0..40_000)
             .map(|i| {
                 ProtoStatement::Assign(ProtoAssignStatement {
@@ -11791,8 +11809,9 @@ mod tests {
             ..Default::default()
         };
         let src = emit_dataflow_function(&stmts, &plan).unwrap();
-        assert!(src.contains("void veryl_aot_eval_coarse("));
-        assert_eq!(src.matches("0x9c3fULL").count(), 2);
+        assert!(!src.contains("veryl_aot_eval_coarse"));
+        assert!(!src.contains("veryl_aot_eval_counted"));
+        assert_eq!(src.matches("0x9c3fULL").count(), 1);
     }
 
     #[test]
