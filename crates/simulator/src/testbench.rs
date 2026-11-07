@@ -9,7 +9,7 @@ use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use crate::wave_dumper::WaveDumper;
 use smallvec::SmallVec;
-use veryl_analyzer::ir::{AssertKind, ControlFlow, QueueOp};
+use veryl_analyzer::ir::{AssertKind, ControlFlow, ForkMode, QueueOp};
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 
@@ -108,6 +108,13 @@ pub enum TestbenchStatement {
         body: Vec<TestbenchStatement>,
         loop_var: Option<LoopVariable>,
     },
+    /// fork(mode) { branches }: each branch becomes its own process.
+    Fork {
+        mode: ForkMode,
+        branches: Vec<Vec<TestbenchStatement>>,
+    },
+    /// disable fork;
+    DisableFork,
     /// $finish
     Finish,
 }
@@ -212,6 +219,11 @@ fn collect_tb_insts(
                 }
                 collect_tb_insts(&case_stmt.default, clock_insts, reset_insts);
             }
+            Statement::Fork(fork) => {
+                for branch in &fork.branches {
+                    collect_tb_insts(branch, clock_insts, reset_insts);
+                }
+            }
             _ => {}
         }
     }
@@ -272,6 +284,11 @@ fn collect_clock_periods(stmts: &[Statement], periods: &mut HashMap<StrId, u64>)
                     collect_clock_periods(&arm.body, periods);
                 }
                 collect_clock_periods(&case_stmt.default, periods);
+            }
+            Statement::Fork(fork) => {
+                for branch in &fork.branches {
+                    collect_clock_periods(branch, periods);
+                }
             }
             _ => {}
         }
@@ -433,6 +450,17 @@ fn convert_stmt(
             args: args.clone(),
         },
         Statement::SystemFunctionCall(SystemFunctionCall::Finish) => TestbenchStatement::Finish,
+        Statement::Fork(fork) => TestbenchStatement::Fork {
+            mode: fork.mode,
+            branches: fork
+                .branches
+                .iter()
+                .map(|branch| {
+                    convert_stmts(branch, event_map, clock_periods, default_reset_duration)
+                })
+                .collect(),
+        },
+        Statement::DisableFork => TestbenchStatement::DisableFork,
         Statement::If(if_stmt) => {
             let then_block = convert_stmts(
                 &if_stmt.true_side,
@@ -737,6 +765,13 @@ enum Repeat<'a> {
 enum ProcStep<'a> {
     /// Blocked on a clock: resume once the edges have been taken.
     Wait(Wait<'a>),
+    /// `fork`: spawn a process per branch.
+    Fork {
+        mode: ForkMode,
+        branches: &'a [Vec<TestbenchStatement>],
+    },
+    /// `disable fork`: kill every process this one spawned.
+    DisableFork,
     /// Ran off the end of its block (or broke out of it).
     Done,
     /// `$finish`, or a component asked to finish.
@@ -999,6 +1034,13 @@ impl<'a> Process<'a> {
                         low_time: *low_time,
                     });
                 }
+                TestbenchStatement::Fork { mode, branches } => {
+                    return ProcStep::Fork {
+                        mode: *mode,
+                        branches,
+                    };
+                }
+                TestbenchStatement::DisableFork => return ProcStep::DisableFork,
                 TestbenchStatement::Finish => return ProcStep::Finished,
                 other => match exec_simple(sim, other) {
                     ExecResult::Continue => {}
@@ -1043,12 +1085,19 @@ enum TaskState<'a> {
         remaining: u64,
         reset: Option<ResetActive<'a>>,
     },
+    /// Blocked in a `fork` until `remaining` more of its branches finish.
+    Joining {
+        fork: u64,
+        remaining: usize,
+    },
     Done,
 }
 
 struct Task<'a> {
     process: Process<'a>,
     state: TaskState<'a>,
+    /// The task that forked this one, and which of its forks.
+    parent: Option<(usize, u64)>,
 }
 
 /// The scheduler's next thing to do, earliest time first; at one instant a
@@ -1085,7 +1134,11 @@ impl Due {
 /// clock due at that instant fires in one step so domains that rise together
 /// read each other's pre-edge values.  A `$finish` anywhere ends the run.
 fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecResult {
-    if let [block] = blocks {
+    // A fork spawns processes mid-run, which only the scheduler can do.
+    let forks = blocks.iter().any(|block| has_fork(block));
+    if let [block] = blocks
+        && !forks
+    {
         return run_single_process(sim, Process::new(block));
     }
     let mut tasks: Vec<Task> = blocks
@@ -1093,8 +1146,10 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
         .map(|block| Task {
             process: Process::new(block),
             state: TaskState::Runnable { at: sim.time },
+            parent: None,
         })
         .collect();
+    let mut next_fork = 0;
     let mut clocks: Vec<TbClock> = Vec::new();
     // Pending falling edges `(time, clock)`, kept only for the waveform.
     let mut negedges: Vec<(u64, usize)> = Vec::new();
@@ -1105,7 +1160,7 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
         // of the cost per edge.  Only while at most one clock has been waited
         // on, so every later edge lands at the time the scheduler would have
         // given it.
-        if negedges.is_empty() && clocks.len() <= 1 {
+        if !forks && negedges.is_empty() && clocks.len() <= 1 {
             let mut live = tasks
                 .iter_mut()
                 .filter(|task| !matches!(task.state, TaskState::Done));
@@ -1133,7 +1188,7 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
                 TaskState::Waiting { clock, .. } => {
                     consider(Due::Edge(clocks[clock].next_edge.max(now)));
                 }
-                TaskState::Done => {}
+                TaskState::Joining { .. } | TaskState::Done => {}
             }
         }
         let Some(due) = due else {
@@ -1152,15 +1207,18 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
             }
             Due::Run(t) => {
                 let mut stop = None;
-                for task in tasks.iter_mut() {
-                    if !matches!(task.state, TaskState::Runnable { at } if at == t) {
-                        continue;
+                // A fork appends tasks that are runnable now, so the length
+                // is read afresh.
+                let mut i = 0;
+                while i < tasks.len() {
+                    if matches!(tasks[i].state, TaskState::Runnable { at } if at == t) {
+                        let result = run_task(sim, &mut tasks, i, &mut clocks, &mut next_fork);
+                        if result.should_stop() {
+                            stop = Some(result);
+                            break;
+                        }
                     }
-                    let result = run_task(sim, task, &mut clocks);
-                    if result.should_stop() {
-                        stop = Some(result);
-                        break;
-                    }
+                    i += 1;
                 }
                 if let Some(result) = stop {
                     break result;
@@ -1194,6 +1252,19 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
     result
 }
 
+fn has_fork(stmts: &[TestbenchStatement]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        TestbenchStatement::Fork { .. } | TestbenchStatement::DisableFork => true,
+        TestbenchStatement::If {
+            then_block,
+            else_block,
+            ..
+        } => has_fork(then_block) || has_fork(else_block),
+        TestbenchStatement::For { body, .. } => has_fork(body),
+        _ => false,
+    })
+}
+
 /// The one-process case needs no scheduler: its clocks are stepped in place
 /// as each wait is reached, which is also the cheapest path for the
 /// `clk.next(1)` per cycle testbenches that dominate.
@@ -1212,6 +1283,9 @@ fn run_single_process(sim: &mut Simulator, mut process: Process<'_>) -> ExecResu
             ProcStep::Done => return ExecResult::Continue,
             ProcStep::Finished => return ExecResult::Finished,
             ProcStep::Fail(msg) => return ExecResult::Fail(msg),
+            ProcStep::Fork { .. } | ProcStep::DisableFork => {
+                unreachable!("a block with a fork runs under the scheduler")
+            }
         }
     }
 }
@@ -1286,14 +1360,16 @@ fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
     result
 }
 
-/// Run one process until it waits on a clock, ends, or stops the run.
+/// Run task `idx` until it waits on a clock or a fork, ends, or stops the run.
 fn run_task<'a>(
     sim: &mut Simulator,
-    task: &mut Task<'a>,
+    tasks: &mut Vec<Task<'a>>,
+    idx: usize,
     clocks: &mut Vec<TbClock<'a>>,
+    next_fork: &mut u64,
 ) -> ExecResult {
     loop {
-        match task.process.run(sim) {
+        match tasks[idx].process.run(sim) {
             ProcStep::Wait(Wait::Clock {
                 clock,
                 count,
@@ -1305,7 +1381,7 @@ fn run_task<'a>(
                 if count == 0 {
                     continue;
                 }
-                task.state = TaskState::Waiting {
+                tasks[idx].state = TaskState::Waiting {
                     clock: clock_index(clocks, clock, high_time, low_time),
                     remaining: count,
                     reset: None,
@@ -1330,7 +1406,7 @@ fn run_task<'a>(
                     }
                     continue;
                 }
-                task.state = TaskState::Waiting {
+                tasks[idx].state = TaskState::Waiting {
                     clock: clock_index(clocks, clock, high_time, low_time),
                     remaining: duration,
                     reset: Some(ResetActive {
@@ -1340,13 +1416,76 @@ fn run_task<'a>(
                 };
                 return ExecResult::Continue;
             }
+            ProcStep::Fork { mode, branches } => {
+                if branches.is_empty() {
+                    continue;
+                }
+                let fork = *next_fork;
+                *next_fork += 1;
+                // The branches start once the forking process blocks or ends
+                // (they are appended behind every task already runnable now).
+                for branch in branches {
+                    tasks.push(Task {
+                        process: Process::new(branch),
+                        state: TaskState::Runnable { at: sim.time },
+                        parent: Some((idx, fork)),
+                    });
+                }
+                let remaining = match mode {
+                    ForkMode::WaitAll => branches.len(),
+                    ForkMode::WaitAny => 1,
+                    ForkMode::WaitNone => 0,
+                };
+                if remaining > 0 {
+                    tasks[idx].state = TaskState::Joining { fork, remaining };
+                    return ExecResult::Continue;
+                }
+            }
+            ProcStep::DisableFork => disable_fork(sim, tasks, idx),
             ProcStep::Done => {
-                task.state = TaskState::Done;
+                tasks[idx].state = TaskState::Done;
+                // A branch finishing may complete the join its parent waits in.
+                if let Some((parent, fork)) = tasks[idx].parent
+                    && let TaskState::Joining {
+                        fork: waiting,
+                        remaining,
+                    } = &mut tasks[parent].state
+                    && *waiting == fork
+                {
+                    *remaining -= 1;
+                    if *remaining == 0 {
+                        tasks[parent].state = TaskState::Runnable { at: sim.time };
+                    }
+                }
                 return ExecResult::Continue;
             }
             ProcStep::Finished => return ExecResult::Finished,
             ProcStep::Fail(msg) => return ExecResult::Fail(msg),
         }
+    }
+}
+
+/// `disable fork` in task `idx`: end every task it spawned, at any depth.
+fn disable_fork(sim: &mut Simulator, tasks: &mut [Task<'_>], idx: usize) {
+    for i in 0..tasks.len() {
+        let mut ancestor = tasks[i].parent;
+        while let Some((parent, _)) = ancestor
+            && parent != idx
+        {
+            ancestor = tasks[parent].parent;
+        }
+        if ancestor.is_none() {
+            continue;
+        }
+        // A killed `rst.assert` must not leave the reset held.
+        if let TaskState::Waiting {
+            reset: Some(hold), ..
+        } = &tasks[i].state
+            && let Some(id) = hold.reset.var_id()
+        {
+            sim.set_reset_level(&id, false);
+        }
+        tasks[i].state = TaskState::Done;
     }
 }
 
@@ -1642,6 +1781,8 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
         | TestbenchStatement::ResetAssert { .. }
         | TestbenchStatement::If { .. }
         | TestbenchStatement::For { .. }
+        | TestbenchStatement::Fork { .. }
+        | TestbenchStatement::DisableFork
         | TestbenchStatement::Finish => {
             unreachable!("control statements are executed by `Process::run`")
         }

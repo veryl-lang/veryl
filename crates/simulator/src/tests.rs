@@ -605,6 +605,7 @@ mod dataflow;
 mod derived_clock;
 mod dut_reuse;
 mod error;
+mod fork;
 mod guarded_cover;
 mod hier_ref;
 mod simulation;
