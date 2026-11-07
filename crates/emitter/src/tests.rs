@@ -6739,6 +6739,290 @@ endmodule
 }
 
 #[test]
+fn inline_function_mixin_interface() {
+    let code = r#"proto package ProtoPkgA {
+    const W: u32;
+}
+
+package PkgA::<V: u32> for ProtoPkgA {
+    const W: u32 = V;
+}
+
+alias package PkgA8 = PkgA::<8>;
+
+interface InterfaceA {
+    var a_ready: logic;
+    var a_valid: logic;
+
+    #[inline]
+    function a_ack() -> logic {
+        return a_ready && a_valid;
+    }
+
+    #[inline]
+    function a_ack_valid() -> logic {
+        return a_ack() && a_valid;
+    }
+}
+
+interface InterfaceB::<PKG: ProtoPkgA> {
+    var ready: logic        ;
+    var valid: logic        ;
+    var data : logic<PKG::W>;
+
+    #[inline]
+    function ack() -> logic {
+        return ready && valid;
+    }
+
+    #[inline]
+    function ack_zero() -> logic {
+        return ack() && data == 0;
+    }
+}
+
+interface InterfaceC::<PKG: ProtoPkgA> {
+    mixin InterfaceA;
+    mixin InterfaceB::<PKG>;
+
+    #[inline]
+    function c_ack() -> logic {
+        return a_ack() && ack_zero();
+    }
+}
+
+module ModuleA {
+    inst b_if: InterfaceB::<PkgA8>;
+    inst c_if: InterfaceC::<PkgA8>;
+
+    let _c: logic = c_if.c_ack();
+}
+"#;
+
+    let expect = r#"
+
+package prj___PkgA__8;
+    localparam int unsigned W = 8;
+endpackage
+
+
+package prj___InterfaceA__inline_types;
+    typedef logic a_ack_ret_t;
+    typedef logic a_ack_valid_ret_t;
+endpackage
+interface prj_InterfaceA;
+    logic a_ready;
+    logic a_valid;
+
+    function automatic logic a_ack() ;
+        return a_ready && a_valid;
+    endfunction
+
+    function automatic logic a_ack_valid() ;
+        return prj___InterfaceA__inline_types::a_ack_ret_t'(a_ready && a_valid) && a_valid;
+    endfunction
+endinterface
+
+package prj___InterfaceB____PkgA__8__inline_types;
+    typedef logic ack_ret_t;
+    typedef logic ack_zero_ret_t;
+endpackage
+interface prj___InterfaceB____PkgA__8;
+    logic                        ready;
+    logic                        valid;
+    logic [prj___PkgA__8::W-1:0] data ;
+
+    function automatic logic ack() ;
+        return ready && valid;
+    endfunction
+
+    function automatic logic ack_zero() ;
+        return prj___InterfaceB____PkgA__8__inline_types::ack_ret_t'(ready && valid) && data == 0;
+    endfunction
+endinterface
+
+package prj___InterfaceC____PkgA__8__inline_types;
+    typedef logic c_ack_ret_t;
+endpackage
+interface prj___InterfaceC____PkgA__8;
+    logic a_ready;
+    logic a_valid;
+
+    function automatic logic a_ack() ;
+        return a_ready && a_valid;
+    endfunction
+
+    function automatic logic a_ack_valid() ;
+        return prj___InterfaceA__inline_types::a_ack_ret_t'(a_ready && a_valid) && a_valid;
+    endfunction
+    logic                        ready;
+    logic                        valid;
+    logic [prj___PkgA__8::W-1:0] data ;
+
+    function automatic logic ack() ;
+        return ready && valid;
+    endfunction
+
+    function automatic logic ack_zero() ;
+        return prj___InterfaceB____PkgA__8__inline_types::ack_ret_t'(ready && valid) && data == 0;
+    endfunction
+
+    function automatic logic c_ack() ;
+        return prj___InterfaceA__inline_types::a_ack_ret_t'(a_ready && a_valid)
+            && prj___InterfaceB____PkgA__8__inline_types::ack_zero_ret_t'(prj___InterfaceB____PkgA__8__inline_types::ack_ret_t'(ready
+                    && valid) && data == 0);
+    endfunction
+endinterface
+
+module prj_ModuleA;
+    prj___InterfaceB____PkgA__8 b_if ();
+    prj___InterfaceC____PkgA__8 c_if ();
+
+    logic _c; always_comb _c = prj___InterfaceC____PkgA__8__inline_types::c_ack_ret_t'(prj___InterfaceA__inline_types::a_ack_ret_t'(c_if.a_ready
+            && c_if.a_valid)
+        && prj___InterfaceB____PkgA__8__inline_types::ack_zero_ret_t'(prj___InterfaceB____PkgA__8__inline_types::ack_ret_t'(c_if.ready
+                && c_if.valid) && c_if.data == 0));
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn inline_function_call_via_mixin_interface() {
+    let code = r#"proto package ProtoPkgA {
+    const W: u32;
+}
+
+package PkgA::<V: u32> for ProtoPkgA {
+    const W: u32 = V;
+}
+
+alias package PkgA8 = PkgA::<8>;
+
+interface InterfaceA::<PKG: ProtoPkgA> {
+    var ready: logic        ;
+    var valid: logic        ;
+    var data : logic<PKG::W>;
+
+    #[inline]
+    function ack() -> logic {
+        return ready && valid;
+    }
+
+    #[inline]
+    function ack_zero() -> logic {
+        return ack() && data == 0;
+    }
+}
+
+interface InterfaceB::<PKG: ProtoPkgA> {
+    mixin InterfaceA::<PKG>;
+
+    modport mp {
+        ready   : input ,
+        valid   : input ,
+        data    : input ,
+        ack     : import,
+        ack_zero: import,
+    }
+}
+
+module ModuleA (
+    b_if: modport InterfaceB::<PkgA8>::mp,
+) {
+    let _a: logic = b_if.ack();
+    let _b: logic = b_if.ack_zero();
+}
+
+module ModuleB {
+    inst b_if: InterfaceB::<PkgA8>;
+
+    let _a: logic = b_if.ack();
+    let _b: logic = b_if.ack_zero();
+}
+"#;
+
+    let expect = r#"
+
+package prj___PkgA__8;
+    localparam int unsigned W = 8;
+endpackage
+
+
+package prj___InterfaceA____PkgA__8__inline_types;
+    typedef logic ack_ret_t;
+    typedef logic ack_zero_ret_t;
+endpackage
+interface prj___InterfaceA____PkgA__8;
+    logic                        ready;
+    logic                        valid;
+    logic [prj___PkgA__8::W-1:0] data ;
+
+    function automatic logic ack() ;
+        return ready && valid;
+    endfunction
+
+    function automatic logic ack_zero() ;
+        return prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(ready && valid) && data == 0;
+    endfunction
+endinterface
+
+interface prj___InterfaceB____PkgA__8;
+    logic                        ready;
+    logic                        valid;
+    logic [prj___PkgA__8::W-1:0] data ;
+
+    function automatic logic ack() ;
+        return ready && valid;
+    endfunction
+
+    function automatic logic ack_zero() ;
+        return prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(ready && valid) && data == 0;
+    endfunction
+
+    modport mp (
+        input  ready   ,
+        input  valid   ,
+        input  data    ,
+        import ack     ,
+        import ack_zero
+    );
+endinterface
+
+module prj_ModuleA (
+    prj___InterfaceB____PkgA__8.mp b_if
+);
+    logic _a; always_comb _a = prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(b_if.ready && b_if.valid);
+    logic _b; always_comb _b = prj___InterfaceA____PkgA__8__inline_types::ack_zero_ret_t'(prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(b_if.ready
+            && b_if.valid) && b_if.data == 0);
+endmodule
+
+module prj_ModuleB;
+    prj___InterfaceB____PkgA__8 b_if ();
+
+    logic _a; always_comb _a = prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(b_if.ready && b_if.valid);
+    logic _b; always_comb _b = prj___InterfaceA____PkgA__8__inline_types::ack_zero_ret_t'(prj___InterfaceA____PkgA__8__inline_types::ack_ret_t'(b_if.ready
+            && b_if.valid) && b_if.data == 0);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn inline_function_flatten_array_interface() {
     let code = r#"interface InterfaceA {
     var ready: logic;
