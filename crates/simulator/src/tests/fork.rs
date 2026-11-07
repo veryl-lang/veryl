@@ -268,3 +268,30 @@ fn fork_wait_any_then_wait_all_ignores_the_late_branch() {
     "#;
     run_pass(code, "test_two_forks");
 }
+
+#[test]
+fn fork_in_a_long_loop_reuses_task_slots() {
+    // Every iteration forks two branches and kills them; finished tasks must
+    // not pile up in the scheduler.
+    let code = r#"
+    #[test(test_many)]
+    module test_many {
+        inst clk: $tb::clock_gen;
+        var n: logic<32>;
+        initial {
+            n = 0;
+            for _i in 0..2000 {
+                fork(wait_none) {
+                    { clk.next(1); n = n + 1; }
+                    { clk.next(1); n = n + 1; }
+                }
+                clk.next(2);
+                disable fork;
+            }
+            $assert(n == 4000);
+            $finish();
+        }
+    }
+    "#;
+    run_pass(code, "test_many");
+}

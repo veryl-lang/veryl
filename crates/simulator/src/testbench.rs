@@ -1098,6 +1098,9 @@ struct Task<'a> {
     state: TaskState<'a>,
     /// The task that forked this one, and which of its forks.
     parent: Option<(usize, u64)>,
+    /// Spawned tasks that have not been retired yet; the slot is kept for
+    /// them to name as `parent` until the count reaches zero.
+    live_children: usize,
 }
 
 /// The scheduler's next thing to do, earliest time first; at one instant a
@@ -1147,9 +1150,13 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
             process: Process::new(block),
             state: TaskState::Runnable { at: sim.time },
             parent: None,
+            live_children: 0,
         })
         .collect();
     let mut next_fork = 0;
+    // Slots of retired tasks, reused by later forks so a long loop of forks
+    // keeps the task list (scanned every step) as short as the live set.
+    let mut free: Vec<usize> = Vec::new();
     let mut clocks: Vec<TbClock> = Vec::new();
     // Pending falling edges `(time, clock)`, kept only for the waveform.
     let mut negedges: Vec<(u64, usize)> = Vec::new();
@@ -1212,7 +1219,8 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
                 let mut i = 0;
                 while i < tasks.len() {
                     if matches!(tasks[i].state, TaskState::Runnable { at } if at == t) {
-                        let result = run_task(sim, &mut tasks, i, &mut clocks, &mut next_fork);
+                        let result =
+                            run_task(sim, &mut tasks, i, &mut clocks, &mut next_fork, &mut free);
                         if result.should_stop() {
                             stop = Some(result);
                             break;
@@ -1253,6 +1261,8 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
 }
 
 fn has_fork(stmts: &[TestbenchStatement]) -> bool {
+    // Exhaustive on purpose: a new statement that nests others must be
+    // looked through here, or its fork would meet the single-process path.
     stmts.iter().any(|stmt| match stmt {
         TestbenchStatement::Fork { .. } | TestbenchStatement::DisableFork => true,
         TestbenchStatement::If {
@@ -1261,7 +1271,21 @@ fn has_fork(stmts: &[TestbenchStatement]) -> bool {
             ..
         } => has_fork(then_block) || has_fork(else_block),
         TestbenchStatement::For { body, .. } => has_fork(body),
-        _ => false,
+        TestbenchStatement::Stmt(_)
+        | TestbenchStatement::ClockNext { .. }
+        | TestbenchStatement::ResetAssert { .. }
+        | TestbenchStatement::Assert { .. }
+        | TestbenchStatement::FileOpen { .. }
+        | TestbenchStatement::FileWrite { .. }
+        | TestbenchStatement::FileClose { .. }
+        | TestbenchStatement::FileFlush { .. }
+        | TestbenchStatement::ComponentMethod { .. }
+        | TestbenchStatement::RandomSeed { .. }
+        | TestbenchStatement::RandomGet { .. }
+        | TestbenchStatement::RandomGetRange { .. }
+        | TestbenchStatement::RandomGetSeed { .. }
+        | TestbenchStatement::Queue { .. }
+        | TestbenchStatement::Finish => false,
     })
 }
 
@@ -1367,6 +1391,7 @@ fn run_task<'a>(
     idx: usize,
     clocks: &mut Vec<TbClock<'a>>,
     next_fork: &mut u64,
+    free: &mut Vec<usize>,
 ) -> ExecResult {
     loop {
         match tasks[idx].process.run(sim) {
@@ -1425,11 +1450,17 @@ fn run_task<'a>(
                 // The branches start once the forking process blocks or ends
                 // (they are appended behind every task already runnable now).
                 for branch in branches {
-                    tasks.push(Task {
+                    let task = Task {
                         process: Process::new(branch),
                         state: TaskState::Runnable { at: sim.time },
                         parent: Some((idx, fork)),
-                    });
+                        live_children: 0,
+                    };
+                    match free.pop() {
+                        Some(slot) => tasks[slot] = task,
+                        None => tasks.push(task),
+                    }
+                    tasks[idx].live_children += 1;
                 }
                 let remaining = match mode {
                     ForkMode::WaitAll => branches.len(),
@@ -1441,7 +1472,7 @@ fn run_task<'a>(
                     return ExecResult::Continue;
                 }
             }
-            ProcStep::DisableFork => disable_fork(sim, tasks, idx),
+            ProcStep::DisableFork => disable_fork(sim, tasks, idx, free),
             ProcStep::Done => {
                 tasks[idx].state = TaskState::Done;
                 // A branch finishing may complete the join its parent waits in.
@@ -1457,6 +1488,7 @@ fn run_task<'a>(
                         tasks[parent].state = TaskState::Runnable { at: sim.time };
                     }
                 }
+                retire(tasks, free, idx);
                 return ExecResult::Continue;
             }
             ProcStep::Finished => return ExecResult::Finished,
@@ -1465,9 +1497,34 @@ fn run_task<'a>(
     }
 }
 
+/// A `Done` task gives up its slot once none of its spawned tasks is left
+/// to name it as `parent`; that may in turn free its own parent.
+fn retire(tasks: &mut [Task<'_>], free: &mut Vec<usize>, mut idx: usize) {
+    while tasks[idx].live_children == 0 {
+        free.push(idx);
+        let Some((parent, _)) = tasks[idx].parent.take() else {
+            return;
+        };
+        tasks[parent].live_children -= 1;
+        if !matches!(tasks[parent].state, TaskState::Done) {
+            return;
+        }
+        idx = parent;
+    }
+}
+
 /// `disable fork` in task `idx`: end every task it spawned, at any depth.
-fn disable_fork(sim: &mut Simulator, tasks: &mut [Task<'_>], idx: usize) {
+///
+/// Only descendants die, and `idx` is running, so none of them can be the
+/// `Joining` parent of a task outside the set; a `Joining` descendant dies
+/// together with the branches it waits for, and nothing is released.
+fn disable_fork(sim: &mut Simulator, tasks: &mut [Task<'_>], idx: usize, free: &mut Vec<usize>) {
     for i in 0..tasks.len() {
+        // Retired slots (parent taken) and tasks already ended have nothing
+        // left to kill.
+        if matches!(tasks[i].state, TaskState::Done) {
+            continue;
+        }
         let mut ancestor = tasks[i].parent;
         while let Some((parent, _)) = ancestor
             && parent != idx
@@ -1486,6 +1543,7 @@ fn disable_fork(sim: &mut Simulator, tasks: &mut [Task<'_>], idx: usize) {
             sim.set_reset_level(&id, false);
         }
         tasks[i].state = TaskState::Done;
+        retire(tasks, free, i);
     }
 }
 
