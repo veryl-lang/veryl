@@ -94,7 +94,7 @@ impl Incremental {
             return None;
         }
 
-        // The global key hashes `binary_fingerprint()`, so a compiler/binary
+        // The global key includes `binary_fingerprint()`, so a compiler/binary
         // change discards every entry — no separate version check needed.
         let key = global_key(metadata, defines)?;
         let store = Store::open(&metadata.project_dot_build_path().join("cache"), &key);
