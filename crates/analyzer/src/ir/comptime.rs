@@ -516,6 +516,9 @@ pub struct Comptime {
     /// Signedness of the member that `rebase_part_select` replaced by the
     /// base type.
     pub member_signed: Option<bool>,
+    /// Clock/reset kind of the member that `rebase_part_select` replaced by
+    /// the base type. `None` for any other member.
+    pub member_clock_reset: Option<TypeKind>,
     pub clock_domain: ClockDomain,
     pub expr_context: ExpressionContext,
     pub evaluated: bool,
@@ -534,6 +537,7 @@ impl Clone for Comptime {
             part_select: self.part_select.clone(),
             member_select_domain: self.member_select_domain,
             member_signed: self.member_signed,
+            member_clock_reset: self.member_clock_reset.clone(),
             clock_domain: self.clock_domain,
             expr_context: self.expr_context,
             evaluated: self.evaluated,
@@ -563,6 +567,8 @@ impl Comptime {
             let mut member = self.r#type.clone();
             member.flatten_struct_union_enum();
             self.member_signed = Some(member.signed);
+            self.member_clock_reset = (self.r#type.is_clock() || self.r#type.is_reset())
+                .then(|| self.r#type.kind.clone());
             let own = self.r#type.array.clone();
             let mut base = part_select.base.clone();
             if own.dims() > base.array.dims() {
@@ -949,6 +955,17 @@ impl Type {
         matches!(self.kind, TypeKind::Logic | TypeKind::Bit)
             && self.total_width().unwrap_or(1) == 1
             && self.array.is_empty()
+    }
+
+    /// Restore what a member read keeps from the member's own type after the
+    /// rebased select flattened it: its sign (`None` for a part-select) and
+    /// its clock/reset kind, which a bit select of a multi-bit clock/reset
+    /// keeps as it does for a plain variable.
+    pub fn restore_member(&mut self, signed: Option<bool>, clock_reset: Option<&TypeKind>) {
+        self.signed = signed.unwrap_or(false);
+        if let Some(kind) = clock_reset {
+            self.kind = kind.clone();
+        }
     }
 
     /// INVARIANT: operated values never carry clock/reset-ness — only a

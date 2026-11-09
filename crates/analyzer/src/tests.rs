@@ -815,6 +815,43 @@ fn implicit_clock_conversion() {
         AnalyzerError::ImplicitClockConversion { .. }
     ));
 
+    // logic members of a struct mixing clock/reset and logic members wired
+    // into clock/reset ports
+    let code = r#"
+    package PackageA {
+        struct Mixed {
+            clk: clock,
+            rst: reset,
+            d  : logic<2>,
+        }
+    }
+    module ModuleA (
+        i_s: input PackageA::Mixed,
+        o_q: output logic,
+    ) {
+        inst u: ModuleB ( clk: i_s.d[0], rst: i_s.d[1], o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+    assert!(matches!(
+        errors[1],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
     // binding-point conversion: a clock-typed binding accepts a logic
     // value, and the bound clock connects to a clock port cleanly
     let code = r#"
@@ -826,6 +863,184 @@ fn implicit_clock_conversion() {
     ) {
         let w_gclk: '_ clock = i_clk & i_en;
         inst u: ModuleB ( clk: w_gclk, rst: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // clock/reset-typed struct members connect to clock/reset ports
+    // without explicit binding
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+        }
+        struct ResetBundle {
+            a: reset,
+        }
+    }
+    module ModuleA (
+        i_clk: input PackageA::ClockBundle,
+        i_rst: input PackageA::ResetBundle,
+        o_q  : output logic,
+    ) {
+        inst u: ModuleB ( clk: i_clk.a, rst: i_rst.a, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // a bit selected from a multi-bit clock/reset connects to clock/reset
+    // ports without explicit binding
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock<2>,
+        i_rst: input reset<2>,
+        o_q  : output logic,
+    ) {
+        inst u: ModuleB ( clk: i_clk[0], rst: i_rst[1], o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // same for a bit selected from a multi-bit clock/reset struct member
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock<2>,
+        }
+        struct ResetBundle {
+            a: reset<2>,
+        }
+    }
+    module ModuleA (
+        i_clk: input PackageA::ClockBundle,
+        i_rst: input PackageA::ResetBundle,
+        o_q  : output logic,
+    ) {
+        inst u: ModuleB ( clk: i_clk.a[0], rst: i_rst.a[1], o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // a multi-bit range selected from a multi-bit clock/reset connects to
+    // multi-bit clock/reset ports without explicit binding
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock<4>,
+        i_rst: input reset<4>,
+        o_q  : output logic<2>,
+    ) {
+        inst u: ModuleB ( clk: i_clk[1:0], rst: i_rst[2+:2], o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock<2>,
+        rst: input reset<2>,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk[0], rst[0]) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk[1], rst[1]) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // same for a multi-bit range selected from a clock/reset struct member
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock<4>,
+        }
+        struct ResetBundle {
+            a: reset<4>,
+        }
+    }
+    module ModuleA (
+        i_clk: input PackageA::ClockBundle,
+        i_rst: input PackageA::ResetBundle,
+        o_q  : output logic<2>,
+    ) {
+        inst u: ModuleB ( clk: i_clk.a[1:0], rst: i_rst.a[2+:2], o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock<2>,
+        rst: input reset<2>,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk[0], rst[0]) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk[1], rst[1]) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // clock/reset members of a struct mixing clock/reset and logic members
+    // connect to clock/reset ports without explicit binding
+    let code = r#"
+    package PackageA {
+        struct Mixed {
+            clk: clock,
+            rst: reset,
+            d  : logic<2>,
+        }
+    }
+    module ModuleA (
+        i_s: input PackageA::Mixed,
+        o_q: output logic,
+    ) {
+        inst u: ModuleB ( clk: i_s.clk, rst: i_s.rst, o_q: o_q );
     }
     module ModuleB (
         clk: input clock,
