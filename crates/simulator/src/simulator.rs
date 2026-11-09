@@ -453,9 +453,9 @@ fn run_gate(
                 unsafe { g.check_skip(ff, comb, &ir.write_log_buffer, n0, w0) };
             }
         }
-        GateEntry::Run { n0, w0, checked } => {
+        GateEntry::Run { n0, w0, matched } => {
             run_gate_children(ir, mask_cache, statements, gates, &g.children, g.lo, g.hi);
-            unsafe { g.exit(ff, comb, &ir.write_log_buffer, n0, w0, checked) };
+            unsafe { g.exit(ff, comb, &ir.write_log_buffer, n0, w0, matched) };
         }
     }
 }

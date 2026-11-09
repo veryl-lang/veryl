@@ -14,7 +14,7 @@ use crate::FuncPtr;
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
 use crate::ir::opt::event_gate::{
     EVENT_GATE_AUTO_OFF_STREAK, EVENT_GATE_REARM_CAP, EVENT_GATE_REARM_FIRES, EventGate,
-    GATE_COUNT, GATE_IDLE, GATE_OFF, GATE_PERIOD,
+    GATE_COUNT, GATE_HELD, GATE_IDLE, GATE_OFF, GATE_PERIOD,
 };
 use crate::ir::write_log::static_field_byte_span;
 use crate::ir::{
@@ -4730,19 +4730,15 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
         } else {
             String::new()
         };
-        // Off: the range runs plain until the re-arm period passes; the
-        // first fire after re-arming runs and takes a fresh snapshot.  On: a
-        // checked fire whose reads all matched skips; otherwise the range
-        // runs, and a run that turned out idle without having been checked
-        // snapshots its reads (a checked one refreshed them span by span).
-        // A dirty streak turns the gate off, for twice as long each time; a
-        // skip resets that.
+        // Mirrors `RtEventGate::enter`/`exit` on the same state bytes.
         units[g.lo] = format!(
             "    {{ uint8_t *eg = comb_values + {st:#x};\n\
              \x20     if (eg[{off}]) {{ uint32_t eg_n, eg_b; __builtin_memcpy(&eg_n, eg + {cnt}, 4); __builtin_memcpy(&eg_b, eg + {per}, 4);\n\
-             \x20       if (++eg_n >= eg_b) {{ eg[{off}] = 0; eg[{idle}] = 0; eg_n = 0; }} __builtin_memcpy(eg + {cnt}, &eg_n, 4);\n\
-             {calls}      }} else {{ int eg_run = 1, eg_chk = 0;\n\
-             \x20     if (eg[{idle}]) {{ eg_run = 0; eg_chk = 1;\n{cmp}      }}\n{check}\
+             \x20       if (++eg_n >= eg_b) {{ eg[{off}] = 0; eg[{idle}] = 0; eg[{held}] = 0; eg_n = 0; }} __builtin_memcpy(eg + {cnt}, &eg_n, 4);\n\
+             {calls}      }} else {{ int eg_run = 0;\n\
+             \x20     if (eg[{held}]) {{\n{cmp}      }} else {{\n{snap}        eg[{held}] = 1; eg_run = 1; }}\n\
+             \x20     int eg_match = !eg_run;\n\
+             \x20     if (!eg[{idle}]) eg_run = 1;\n{check}\
              \x20     if (eg_run) {{\n\
              \x20       uint32_t eg_stk; __builtin_memcpy(&eg_stk, eg + {cnt}, 4);\n\
              \x20       if (++eg_stk >= {streak}u) {{ uint32_t eg_b; __builtin_memcpy(&eg_b, eg + {per}, 4);\n\
@@ -4751,14 +4747,13 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
              \x20       unsigned char *eg_lb = (unsigned char*)write_log;\n\
              \x20       unsigned int eg_n0 = *(unsigned int*)(eg_lb + {ncnt}), eg_w0 = *(unsigned int*)(eg_lb + {wcnt});\n\
              {osnap}{calls}\
-             \x20       int eg_idle = (veryl_evg_unchanged(ff_values, write_log, eg_n0, eg_w0){ocmp});\n\
-             \x20       if (eg_idle && !eg_chk) {{\n{snap}        }}\n\
-             \x20       eg[{idle}] = (uint8_t)eg_idle;\n\
+             \x20       eg[{idle}] = (uint8_t)(eg_match && veryl_evg_unchanged(ff_values, write_log, eg_n0, eg_w0){ocmp});\n\
              \x20     }} else {{ uint32_t eg_z = 0; __builtin_memcpy(eg + {cnt}, &eg_z, 4); __builtin_memcpy(eg + {per}, &eg_z, 4); }} }} }}\n",
             rearm = EVENT_GATE_REARM_FIRES,
             cap = EVENT_GATE_REARM_CAP,
             st = g.state_off as usize,
             idle = GATE_IDLE,
+            held = GATE_HELD,
             off = GATE_OFF,
             cnt = GATE_COUNT,
             per = GATE_PERIOD,
@@ -16932,9 +16927,6 @@ mod tests {
 
     #[test]
     fn emit_event_gate_skips_an_idle_subtree_and_reruns_on_a_changed_read() {
-        // One gated FF write.  The gate skips only when its idle flag was
-        // set by a fire that advanced no log and the compared read matches
-        // the shadow taken at the last run.
         if !cc_available() {
             eprintln!("emit_event_gate_skips_an_idle_subtree_and_reruns_on_a_changed_read: no cc");
             return;
@@ -16987,23 +16979,24 @@ mod tests {
             7,
             "the shadow follows the run"
         );
-        // An off gate runs whatever it reads; with its period over it
-        // re-arms, and the next idle fire snapshots so the one after skips.
+        assert_eq!(comb[0x90], 0, "a changed read is not idle");
+        // An off gate runs whatever it reads; re-armed, it needs a fresh
+        // snapshot and a matching fire before it skips.
         comb[0x92] = 1;
         ff[32] ^= 0xff;
         let e = run_wide_ff_event_in(&src, "evg_off", &mut ff, &mut comb).expect("compiles");
         assert_eq!(e.len(), 1, "an off gate reruns the fire");
         assert_eq!(comb[0x92], 0, "the period passed: re-armed");
         comb[0x41] = 9;
+        let e = run_wide_ff_event_in(&src, "evg_rearm_snap", &mut ff, &mut comb).expect("compiles");
+        assert!(e.is_empty(), "same write after re-arming");
+        assert_eq!(comb[0x90], 0, "a fresh snapshot matched nothing yet");
         let e = run_wide_ff_event_in(&src, "evg_rearm_idle", &mut ff, &mut comb).expect("compiles");
-        assert!(e.is_empty(), "same write after re-arming: idle");
-        assert_eq!(comb[0x90], 1);
+        assert!(e.is_empty());
+        assert_eq!(comb[0x90], 1, "matched the snapshot: idle");
         ff[32] ^= 0xff;
         let e = run_wide_ff_event_in(&src, "evg_rearm_skip", &mut ff, &mut comb).expect("compiles");
-        assert!(
-            e.is_empty(),
-            "the unchecked idle run snapshotted, so this skips: {e:?}"
-        );
+        assert!(e.is_empty(), "idle and matched again, so this skips: {e:?}");
     }
 
     #[test]
@@ -17104,6 +17097,14 @@ mod tests {
         comb[0x41] = 7;
         run_wide_ff_event_in(&src, "evgn_rerun", &mut ff, &mut comb).unwrap();
         assert_eq!(next(&ff), 0x1234, "a changed read reruns the fire");
-        assert_eq!(comb[0x90], 1, "the rerun repeated the current value");
+        assert_eq!(
+            comb[0x90], 0,
+            "a changed read keeps the gate busy for one more fire"
+        );
+        run_wide_ff_event_in(&src, "evgn_settle", &mut ff, &mut comb).unwrap();
+        assert_eq!(
+            comb[0x90], 1,
+            "the read held and the run repeated the value"
+        );
     }
 }

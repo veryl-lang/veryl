@@ -30638,6 +30638,171 @@ fn event_gate_sees_a_comb_input_its_event_never_reads() {
 }
 
 #[test]
+fn event_gate_sees_a_comb_input_stored_earlier_in_its_event() {
+    // `s` is read only by comb, so the parent's always_ff stores it straight
+    // into comb storage, after the settle the child was evaluated in.
+    const N: usize = 64;
+    let (mut decls, mut steps) = (String::new(), String::new());
+    for i in 0..N {
+        decls.push_str(&format!("        var r{i}: logic<16>;\n"));
+    }
+    steps.push_str("                r0 = r0 + 16'd1;\n");
+    for i in 1..N {
+        steps.push_str(&format!("                r{i} = r{p} + r{i};\n", p = i - 1));
+    }
+    let code = format!(
+        r#"
+    module Idle (
+        clk: input  clock,
+        en8: input  logic<8>,
+        o:   output logic<16>,
+    ) {{
+{decls}
+        always_ff {{
+            if en8[1] {{
+{steps}
+            }}
+        }}
+        assign o = r0 + r{last};
+    }}
+
+    module Top (
+        clk:    input  clock,
+        a:      input  logic,
+        o_idle: output logic<16>,
+    ) {{
+        var s: logic;
+        always_ff {{
+            s = a;
+        }}
+        inst u: Idle (clk, en8: {{6'd0, s, 1'b0}}, o: o_idle);
+    }}
+"#,
+        last = N - 1,
+    );
+    let tick = |r: &mut [u16; N], en: bool| {
+        if en {
+            let old = *r;
+            r[0] = old[0].wrapping_add(1);
+            for i in 1..N {
+                r[i] = old[i - 1].wrapping_add(old[i]);
+            }
+        }
+    };
+    for mut config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        config.aot_c_min_stmts = 0;
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let mut r = [0u16; N];
+        let mut s = false;
+        for (phase, (a, cycles)) in [(false, 4), (true, 3), (false, 3), (true, 3)]
+            .into_iter()
+            .enumerate()
+        {
+            sim.set("a", Value::new(u64::from(a), 1, false));
+            for cycle in 0..cycles {
+                sim.step(&clk);
+                tick(&mut r, s);
+                s = a;
+                assert_eq!(
+                    sim.get("o_idle").unwrap().payload_u64(),
+                    r[0].wrapping_add(r[N - 1]) as u64,
+                    "phase {phase} cycle {cycle}, {config:?}"
+                );
+            }
+        }
+        assert!(
+            !sim.ir.event_gate_flags.is_empty(),
+            "no gate planned, {config:?}"
+        );
+    }
+}
+
+#[test]
+fn event_gate_sees_a_comb_input_stored_by_an_earlier_event() {
+    // As above, stored by another clock's event firing first in the instant.
+    const N: usize = 64;
+    let (mut decls, mut steps) = (String::new(), String::new());
+    for i in 0..N {
+        decls.push_str(&format!("        var r{i}: logic<16>;\n"));
+    }
+    steps.push_str("                r0 = r0 + 16'd1;\n");
+    for i in 1..N {
+        steps.push_str(&format!("                r{i} = r{p} + r{i};\n", p = i - 1));
+    }
+    let code = format!(
+        r#"
+    module Idle (
+        clk: input  clock,
+        en8: input  logic<8>,
+        o:   output logic<16>,
+    ) {{
+{decls}
+        always_ff {{
+            if en8[1] {{
+{steps}
+            }}
+        }}
+        assign o = r0 + r{last};
+    }}
+
+    module Top (
+        clk:    input 'd clock,
+        clk_b:  input 'd clock,
+        a:      input 'd logic,
+        o_idle: output 'd logic<16>,
+    ) {{
+        var s: 'd logic;
+        always_ff (clk_b) {{
+            s = a;
+        }}
+        inst u: Idle (clk, en8: {{6'd0, s, 1'b0}}, o: o_idle);
+    }}
+"#,
+        last = N - 1,
+    );
+    let tick = |r: &mut [u16; N], en: bool| {
+        if en {
+            let old = *r;
+            r[0] = old[0].wrapping_add(1);
+            for i in 1..N {
+                r[i] = old[i - 1].wrapping_add(old[i]);
+            }
+        }
+    };
+    for mut config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        config.aot_c_min_stmts = 0;
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let clk_b = sim.get_clock("clk_b").unwrap();
+        let mut r = [0u16; N];
+        let mut s = false;
+        for (phase, (a, cycles)) in [(false, 4), (true, 3), (false, 3), (true, 3)]
+            .into_iter()
+            .enumerate()
+        {
+            sim.set("a", Value::new(u64::from(a), 1, false));
+            for cycle in 0..cycles {
+                sim.step_events(&[clk_b.clone(), clk.clone()], &[]);
+                tick(&mut r, s);
+                s = a;
+                assert_eq!(
+                    sim.get("o_idle").unwrap().payload_u64(),
+                    r[0].wrapping_add(r[N - 1]) as u64,
+                    "phase {phase} cycle {cycle}, {config:?}"
+                );
+            }
+        }
+        assert!(
+            !sim.ir.event_gate_flags.is_empty(),
+            "no gate planned, {config:?}"
+        );
+    }
+}
+
+#[test]
 fn wide_concat_element_placement() {
     // A >128-bit concatenation places each element into the word it lands in,
     // so the two shapes that stress the position arithmetic are one element per
