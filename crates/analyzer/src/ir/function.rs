@@ -750,7 +750,7 @@ impl Arguments {
                         let expr_token = expr_comptime.token;
                         let expr_type = expr_comptime.r#type.clone();
                         check_function_arg_aggregate(context, arg_type, &expr_type, &expr_token);
-                        if arg_type.is_clock() || arg_type.is_reset() {
+                        if arg_type.include_clock_reset() {
                             let expr_comptime = expr.eval_comptime(context, None);
                             let expr_token = expr_comptime.token;
                             check_implicit_clock_conversion(

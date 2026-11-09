@@ -901,6 +901,27 @@ impl Type {
         matches!(&self.kind, TypeKind::SystemVerilog)
     }
 
+    /// Whether a struct has a clock/reset member, nested ones included.
+    pub fn has_clock_reset_member(&self) -> bool {
+        if let TypeKind::Struct(x) = &self.kind {
+            x.members.iter().any(|x| x.r#type.include_clock_reset())
+        } else {
+            false
+        }
+    }
+
+    /// Whether it is a clock/reset or a struct having one.
+    pub fn include_clock_reset(&self) -> bool {
+        self.is_clock() || self.is_reset() || self.has_clock_reset_member()
+    }
+
+    /// A struct having clock/reset members accepts only the same type, so that
+    /// the clock/reset-ness of the members is never given by a value of another
+    /// type.
+    pub fn accepts_clock_reset_aggregate(&self, src: &Type) -> bool {
+        self.kind == src.kind && self.width == src.width
+    }
+
     pub fn get_member_type(&self, name: StrId) -> Option<Type> {
         if let TypeKind::Struct(x) = &self.kind {
             for x in &x.members {
@@ -1035,6 +1056,10 @@ impl Type {
             }
         } else if self.is_type() || src.r#type.is_type() {
             self.is_type() && src.r#type.is_type()
+        } else if self.has_clock_reset_member() {
+            // Unlike a single clock/reset, no binding-point conversion: the
+            // value has to say where its clocks/resets are.
+            src.is_const || self.accepts_clock_reset_aggregate(&src.r#type)
         } else if self.is_2state() {
             src.r#type.is_2state()
         } else if self.is_array() || src.r#type.is_array() {
