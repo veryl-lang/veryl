@@ -173,9 +173,11 @@ pub struct Context {
     /// Child module bodies convert in fresh contexts (`inherit` does not
     /// carry this map), so it only holds the current module's instances.
     pub inst_components: HashMap<StrId, Arc<Component>>,
-    /// Inside an inst input-port-connection conversion; consumed by
-    /// `check_compatibility` to pick the clock/reset diagnostic.
-    pub in_inst_port: bool,
+    /// Direction of the port while converting an inst port connection;
+    /// consumed by `check_compatibility` to pick the clock/reset diagnostic
+    /// for an input port, and to take the connected variable as the
+    /// destination for an output port.
+    pub inst_port_kind: Option<VarKind>,
     pub current_clock: Option<Comptime>,
     /// Comptimes of the enclosing if/case/switch statement conditions: a
     /// condition gates the writes below it like a mux select, so its clock
