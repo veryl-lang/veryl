@@ -10164,6 +10164,93 @@ fn referring_before_definition() {
 }
 
 #[test]
+fn interface_instance_connected_before_definition() {
+    let interface = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleB (
+        p: modport InterfaceA::mp,
+    ) {}
+    "#;
+
+    // SystemVerilog declares an implicit net for an undeclared port actual.
+    let code = format!(
+        r#"{interface}
+    module ModuleA {{
+        inst u: ModuleB (p: bi);
+        inst bi: InterfaceA;
+        assign bi.a = 0;
+    }}
+    "#
+    );
+    let errors = analyze(&code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. })),
+        "{errors:?}"
+    );
+
+    // A member is a hierarchical name, resolved wherever the instance is.
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+    }
+    module ModuleB (
+        i: input logic,
+    ) {}
+    module ModuleA {
+        inst u: ModuleB (i: bi.a);
+        let b: logic = bi.a;
+        var c: logic;
+        assign c = b;
+        inst bi: InterfaceA;
+        assign bi.a = 1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. })),
+        "{errors:?}"
+    );
+
+    // A loop variable of the same name is not the instance.
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+    }
+    module ModuleB (
+        i: input  logic<32>,
+        o: output logic<32>,
+    ) {
+        assign o = i;
+    }
+    module ModuleA (
+        o: output logic<32> [2],
+    ) {
+        for bi in 0..2 :g {
+            inst u: ModuleB (i: bi, o: o[bi]);
+        }
+        inst bi: InterfaceA;
+        assign bi.a = 1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn inactive_ifdef_module_is_not_analyzed() {
     let code = r#"
     #[ifdef(FOO)]

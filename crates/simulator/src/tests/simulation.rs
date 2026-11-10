@@ -8635,6 +8635,51 @@ fn modport_function_reads_interface_struct_const() {
 }
 
 #[test]
+fn interface_member_read_before_its_instance() {
+    let code = r#"
+    interface BusIf {
+        var data: logic<8>;
+    }
+
+    module Pass (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = i;
+    }
+
+    module Top (
+        a    : input  logic<8>,
+        o_inst: output logic<8>,
+        o_let : output logic<8>,
+    ) {
+        inst u: Pass (i: u_bus.data, o: o_inst);
+        let doubled: logic<8> = u_bus.data * 2;
+        assign o_let = doubled + 1;
+        inst u_bus: BusIf;
+        assign u_bus.data = a;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(21, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o_inst").unwrap(),
+            Value::new(21, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_let").unwrap(),
+            Value::new(43, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn array_literal_comb() {
     let code = r#"
     module Top (

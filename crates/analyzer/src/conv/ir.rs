@@ -1,3 +1,4 @@
+use crate::analyzer_error::AnalyzerError;
 use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_bound;
@@ -9,9 +10,10 @@ use crate::conv::utils::{
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{self, IrResult, VarKind, VarPath, Variable};
 use crate::namespace::DefineContext;
-use crate::symbol::SymbolKind;
+use crate::symbol::{SymbolId, SymbolKind};
 use crate::symbol_table;
-use crate::{HashMap, ir_error};
+use crate::{HashMap, HashSet, ir_error};
+use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
@@ -217,6 +219,163 @@ impl Conv<&ModuleDeclaration> for ir::Module {
     }
 }
 
+/// The round each item converts in.  An interface instance's members are
+/// registered only when it converts, yet SystemVerilog resolves them, as
+/// hierarchical names, wherever the instance is declared.  Passing the
+/// instance itself to a port ahead of its declaration stays an error: there,
+/// SystemVerilog declares an implicit net.
+fn conversion_rounds(context: &mut Context, items: &[&ModuleItem]) -> Vec<usize> {
+    use veryl_parser::veryl_walker::VerylWalker;
+
+    let mut rounds = vec![0; items.len()];
+    let mut declared: HashMap<SymbolId, usize> = HashMap::default();
+    let mut names: HashSet<StrId> = HashSet::default();
+    let mut interfaces: HashSet<SymbolId> = HashSet::default();
+    for (i, item) in items.iter().enumerate() {
+        let Some(identifier) = declared_identifier(item) else {
+            continue;
+        };
+        let Ok(symbol) = symbol_table::resolve(identifier) else {
+            continue;
+        };
+        if let GenerateItem::InstDeclaration(x) = item.generate_item.as_ref()
+            && symbol_table::resolve(
+                x.inst_declaration
+                    .component_instantiation
+                    .scoped_identifier
+                    .as_ref(),
+            )
+            .is_ok_and(|x| x.found.is_interface(true))
+        {
+            interfaces.insert(symbol.found.id);
+        }
+        declared.insert(symbol.found.id, i);
+        names.insert(identifier.text());
+    }
+    if interfaces.is_empty() {
+        return rounds;
+    }
+
+    struct Refs<'a> {
+        names: &'a HashSet<StrId>,
+        declared: &'a HashMap<SymbolId, usize>,
+        found: Vec<usize>,
+    }
+    impl VerylWalker for Refs<'_> {
+        fn identifier(&mut self, arg: &Identifier) {
+            if self.names.contains(&arg.text())
+                && let Ok(symbol) = symbol_table::resolve(arg)
+                && let Some(&i) = self.declared.get(&symbol.found.id)
+            {
+                self.found.push(i);
+            }
+        }
+    }
+
+    struct WholeConnects<'a> {
+        names: &'a HashSet<StrId>,
+        declared: &'a HashMap<SymbolId, usize>,
+        interfaces: &'a HashSet<SymbolId>,
+        index: usize,
+        found: Vec<(StrId, TokenRange)>,
+    }
+    impl VerylWalker for WholeConnects<'_> {
+        fn inst_port_item(&mut self, arg: &InstPortItem) {
+            let (identifier, token): (&Identifier, TokenRange) = match &arg.inst_port_item_opt {
+                Some(x) => match x.expression.unwrap_identifier() {
+                    Some(id) if id.expression_identifier_list0.is_empty() => {
+                        match id.scoped_identifier.scoped_identifier_group.as_ref() {
+                            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(y) => {
+                                (y.identifier.as_ref(), x.expression.as_ref().into())
+                            }
+                            _ => return,
+                        }
+                    }
+                    _ => return,
+                },
+                None => (arg.identifier.as_ref(), arg.identifier.as_ref().into()),
+            };
+            if self.names.contains(&identifier.text())
+                && let Ok(symbol) = symbol_table::resolve(identifier)
+                && self.interfaces.contains(&symbol.found.id)
+                && self.declared[&symbol.found.id] > self.index
+            {
+                self.found.push((identifier.text(), token));
+            }
+        }
+    }
+
+    let mut refs: Vec<Vec<usize>> = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let mut whole = WholeConnects {
+            names: &names,
+            declared: &declared,
+            interfaces: &interfaces,
+            index: i,
+            found: Vec::new(),
+        };
+        whole.generate_item(&item.generate_item);
+        for (name, token) in whole.found {
+            context.insert_error(AnalyzerError::referring_before_definition(
+                &name.to_string(),
+                &token,
+            ));
+        }
+
+        let mut walker = Refs {
+            names: &names,
+            declared: &declared,
+            found: Vec::new(),
+        };
+        walker.generate_item(&item.generate_item);
+        refs.push(walker.found);
+    }
+
+    let is_interface: Vec<bool> = {
+        let mut v = vec![false; items.len()];
+        for (id, &i) in &declared {
+            v[i] = interfaces.contains(id);
+        }
+        v
+    };
+    // A cycle (an instance whose parameters read what reads its members)
+    // has no order.
+    for _ in 0..items.len() {
+        let mut changed = false;
+        for i in 0..items.len() {
+            for &j in &refs[i] {
+                let need = if j > i && is_interface[j] {
+                    rounds[j] + 1
+                } else if j < i {
+                    rounds[j]
+                } else {
+                    continue;
+                };
+                if need > rounds[i] {
+                    rounds[i] = need;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    rounds
+}
+
+fn declared_identifier(item: &ModuleItem) -> Option<&Identifier> {
+    let identifier = match item.generate_item.as_ref() {
+        GenerateItem::LetDeclaration(x) => &x.let_declaration.identifier,
+        GenerateItem::VarDeclaration(x) => &x.var_declaration.identifier,
+        GenerateItem::ConstDeclaration(x) => &x.const_declaration.identifier,
+        GenerateItem::InstDeclaration(x) => &x.inst_declaration.component_instantiation.identifier,
+        GenerateItem::FunctionDeclaration(x) => &x.function_declaration.identifier,
+        _ => return None,
+    };
+    Some(identifier)
+}
+
 impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
     fn conv(context: &mut Context, value: (&ModuleDeclaration, bool)) -> IrResult<Self> {
         let (module_declaration, header_only) = value;
@@ -313,11 +472,18 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
                     GenerateItem::InitialDeclaration(_) | GenerateItem::FinalDeclaration(_)
                 )
             };
+            let mut rounds = conversion_rounds(&mut context, &items);
+            let last = rounds.iter().max().copied().unwrap_or(0) + 1;
+            for (round, item) in rounds.iter_mut().zip(&items) {
+                if is_tb_block(item) {
+                    *round = last;
+                }
+            }
             let mut blocks: Vec<Vec<ir::Declaration>> = Vec::new();
             blocks.resize_with(items.len(), Vec::new);
-            for deferred in [false, true] {
+            for current in 0..=last {
                 for (i, item) in items.iter().enumerate() {
-                    if is_tb_block(item) != deferred {
+                    if rounds[i] != current {
                         continue;
                     }
                     let ret: IrResult<ir::DeclarationBlock> =
