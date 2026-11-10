@@ -3049,7 +3049,9 @@ fn reduce_unevaluable_select(
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
-        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
+        comptime
+            .r#type
+            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
     }
     comptime.token = token;
 }
@@ -3088,7 +3090,9 @@ fn fold_symbol_select(
         if let Some(width) = select.eval_comptime(context, &element, false) {
             comptime.r#type.set_concrete_width(width);
         }
-        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
+        comptime
+            .r#type
+            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
     }
 
     let flat = array.calc_index(&indices)?;
