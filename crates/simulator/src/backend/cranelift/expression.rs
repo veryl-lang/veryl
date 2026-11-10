@@ -2703,6 +2703,18 @@ impl ProtoExpression {
                         let read = |builder: &mut FunctionBuilder, base| {
                             emit_wide_bit_select_read(builder, base, nb * 8, beg, end, *width)
                         };
+                        let guarded_wide = in_range.filter(|_| is_wide_ptr(*width)).map(|c| {
+                            let valid = builder.create_block();
+                            let invalid = builder.create_block();
+                            let merge = builder.create_block();
+                            builder.append_block_param(merge, I64);
+                            if context.use_4state {
+                                builder.append_block_param(merge, I64);
+                            }
+                            builder.ins().brif(c, valid, &[], invalid, &[]);
+                            builder.switch_to_block(valid);
+                            (invalid, merge)
+                        });
                         let payload = read(builder, addr);
                         let mask_xz = if context.use_4state {
                             let mask_base = builder.ins().iadd_imm_s(addr, nb as i64);
@@ -2710,6 +2722,28 @@ impl ProtoExpression {
                         } else {
                             None
                         };
+                        if let Some((invalid, merge)) = guarded_wide {
+                            let mut args = vec![BlockArg::Value(payload)];
+                            args.extend(mask_xz.map(BlockArg::Value));
+                            builder.ins().jump(merge, &args);
+
+                            builder.switch_to_block(invalid);
+                            // Default storage scales with the slice, and is
+                            // initialized only when the index is invalid.
+                            let result_nb = calc_native_bytes(*width);
+                            let default =
+                                alloc_wide_out_of_range(builder, result_nb, context.use_4state);
+                            let mut args = vec![BlockArg::Value(default)];
+                            if context.use_4state {
+                                let mask = builder.ins().iadd_imm_s(default, result_nb as i64);
+                                emit_wide_apply_mask(context, builder, mask, result_nb, *width);
+                                args.push(BlockArg::Value(mask));
+                            }
+                            builder.ins().jump(merge, &args);
+                            builder.switch_to_block(merge);
+                            let params = builder.block_params(merge);
+                            return Some((params[0], context.use_4state.then(|| params[1])));
+                        }
                         return Some(guard_out_of_range(
                             context, builder, in_range, *width, payload, mask_xz,
                         ));
@@ -4238,6 +4272,103 @@ mod tests {
             width: w,
             var_full_width: w,
             expr_context: ctx(w),
+        }
+    }
+
+    #[test]
+    fn dynamic_wide_array_slices_bound_scratch_to_the_result() {
+        use crate::ir::variable::native_bytes;
+
+        for use_4state in [false, true] {
+            for width in [1, 64, 65, 128, 129, 189, 256] {
+                let mut reference_frame = None;
+                for source_width in [320, 4096, 65536] {
+                    let nb = native_bytes(source_width);
+                    let result_nb = native_bytes(width);
+                    let stride = nb * if use_4state { 2 } else { 1 };
+                    let base = 64;
+                    let dst = base + stride * 4;
+                    let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: VarOffset::Comb(dst as isize),
+                        dst_width: width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr: ProtoExpression::DynamicVariable {
+                            base_offset: VarOffset::Comb(base as isize),
+                            stride: stride as isize,
+                            element_native_bytes: nb,
+                            index_expr: Box::new(cvar(0, 3)),
+                            num_elements: 4,
+                            select: Some((width + 21, 22)),
+                            dynamic_select: None,
+                            width,
+                            expr_context: ctx(width),
+                        },
+                        dst_ff_current_offset: 0,
+                        comb_direct: false,
+                        token: TokenRange::default(),
+                    });
+                    let config = Config {
+                        use_4state,
+                        dump_cranelift: true,
+                        ..Default::default()
+                    };
+                    let (func, _mapping) =
+                        build_binary_marked(&config, vec![stmt], true, None).unwrap();
+                    let frame = LAST_FRAME_SLOTS.with(|c| c.get());
+                    if width <= 128 {
+                        assert_eq!(frame, (0, 0));
+                    } else {
+                        assert!(frame.1 <= (result_nb * 4) as u64);
+                    }
+                    assert_eq!(*reference_frame.get_or_insert(frame), frame);
+
+                    let mut comb = vec![0u64; (dst + result_nb * 2 + 64) / 8];
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            comb.as_mut_ptr().cast::<u8>(),
+                            comb.len() * 8,
+                        )
+                    };
+                    for (i, byte) in bytes[base..dst].iter_mut().enumerate() {
+                        *byte = (i as u8).wrapping_mul(37).wrapping_add(0x5a);
+                    }
+                    let mut ff = [0u64; 16];
+                    let mut log = [0u64; 64];
+                    for (index, unknown) in [(0, 0), (4, 0), (3, 0), (7, 0), (1, 4), (0, 0)] {
+                        bytes[0] = index;
+                        bytes[1] = if use_4state { unknown } else { 0 };
+                        bytes[dst..dst + result_nb * 2].fill(0xaa);
+                        unsafe {
+                            func(
+                                ff.as_mut_ptr().cast(),
+                                bytes.as_mut_ptr(),
+                                log.as_mut_ptr().cast(),
+                                0,
+                            );
+                        }
+                        let valid = index < 4 && (!use_4state || unknown == 0);
+                        for plane in 0..if use_4state { 2 } else { 1 } {
+                            for bit in 0..result_nb * 8 {
+                                let expected = bit < width
+                                    && if valid {
+                                        let source = base + index as usize * stride + plane * nb;
+                                        bytes[source + (bit + 22) / 8] >> ((bit + 22) % 8) & 1 != 0
+                                    } else {
+                                        plane == 1
+                                    };
+                                let actual =
+                                    bytes[dst + plane * result_nb + bit / 8] >> (bit % 8) & 1 != 0;
+                                assert_eq!(
+                                    actual, expected,
+                                    "source={source_width} width={width} four_state={use_4state} index={index} unknown={unknown} plane={plane} bit={bit}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
