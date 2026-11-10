@@ -2043,3 +2043,21 @@ fn publish_checks_disabled_sv_filesets() {
         publish_sv_project("enable_if = \"for_asic\"\nfiles = [\"<outside>/a.sv\"]").unwrap_err();
     assert!(matches!(err, MetadataError::InvalidSvPath(_)));
 }
+
+#[test]
+fn generated_file_keeps_a_clock_ahead_apart() {
+    let (mut metadata, tempdir) = create_metadata_simple();
+    let path = tempdir.path().join("out.sv");
+    fs::write(&path, "").unwrap();
+    let ahead = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(ahead)
+        .unwrap();
+
+    metadata.add_generated_file(path.clone());
+    assert!(metadata.build_info.generated_files[&path] < ahead);
+    assert_eq!(metadata.build_info.generated_mtimes[&path], ahead);
+}

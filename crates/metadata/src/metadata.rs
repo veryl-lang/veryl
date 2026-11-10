@@ -356,9 +356,18 @@ impl Metadata {
     }
 
     pub fn add_generated_file(&mut self, path: PathBuf) {
+        match fs::metadata(&path).and_then(|x| x.modified()) {
+            Ok(mtime) => self.build_info.generated_mtimes.insert(path.clone(), mtime),
+            Err(_) => self.build_info.generated_mtimes.remove(&path),
+        };
         self.build_info
             .generated_files
             .insert(path, SystemTime::now());
+    }
+
+    pub fn remove_generated_file(&mut self, path: &Path) {
+        self.build_info.generated_files.remove(path);
+        self.build_info.generated_mtimes.remove(path);
     }
 
     pub fn paths<T: AsRef<Path>>(

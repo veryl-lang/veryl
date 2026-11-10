@@ -10578,6 +10578,11 @@ fn expr_c_type(width: usize) -> Option<&'static str> {
     }
 }
 
+/// Above this many statements a dataflow comb gets no whole-settle entry,
+/// which would repeat every statement and double the source the C compiler
+/// has to build.
+const DATAFLOW_COARSE_MAX_STMTS: usize = 20_000;
+
 /// The comb offsets each unit may keep in locals, with their widths: written
 /// in the unit and read nowhere else.
 fn local_sets_of(units: &[&[&ProtoStatement]]) -> Vec<HashSet<(isize, usize)>> {
@@ -10647,11 +10652,21 @@ pub fn emit_dataflow_function(
             }
         })
         .collect();
-    // The comb also gets a whole-settle entry that runs every statement with
-    // no per-cell test, compare or mark, for the runtime to pick when most
-    // cells run anyway.  Its parts cut the cells' concatenated order, so no
-    // function grows with the design; only the source doubles.
-    let all: Vec<&ProtoStatement> = cells.iter().flatten().copied().collect();
+    // A small comb also gets a whole-settle entry that runs every statement
+    // with no per-cell test, compare or mark, for the runtime to pick when
+    // most cells run anyway.  Its parts cut the cells' concatenated order.
+    let n_stmts: usize = cells.iter().map(|c| c.len()).sum();
+    let coarse = n_stmts <= DATAFLOW_COARSE_MAX_STMTS;
+    if !coarse && crate::ir::opt::dataflow::diag() {
+        eprintln!(
+            "[dataflow] no whole-settle entry: {n_stmts} statements exceed {DATAFLOW_COARSE_MAX_STMTS}"
+        );
+    }
+    let all: Vec<&ProtoStatement> = if coarse {
+        cells.iter().flatten().copied().collect()
+    } else {
+        Vec::new()
+    };
     let coarse_parts: Vec<&[&ProtoStatement]> = all.chunks(PART_LEN).collect();
     let local_sets = local_sets_of(&parts.iter().map(|p| p.1).collect::<Vec<_>>());
     // A whole-settle part keeps in locals only what a cell's part does too:
@@ -10863,6 +10878,9 @@ pub fn emit_dataflow_function(
         )
     };
     body.push_str(&entry("veryl_aot_eval", ""));
+    if !coarse {
+        return Some(body);
+    }
     // A counting copy for the runtime to weigh against the whole-settle
     // entry; only probes take it, as counting costs every call.
     body.push_str(&format!(
@@ -11761,7 +11779,7 @@ mod tests {
     }
 
     #[test]
-    fn dataflow_whole_settle_entry_has_no_size_cap() {
+    fn a_dataflow_comb_over_the_cap_gets_no_whole_settle_entry() {
         let stmts: Vec<ProtoStatement> = (0..40_000)
             .map(|i| {
                 ProtoStatement::Assign(ProtoAssignStatement {
@@ -11791,8 +11809,9 @@ mod tests {
             ..Default::default()
         };
         let src = emit_dataflow_function(&stmts, &plan).unwrap();
-        assert!(src.contains("void veryl_aot_eval_coarse("));
-        assert_eq!(src.matches("0x9c3fULL").count(), 2);
+        assert!(!src.contains("veryl_aot_eval_coarse"));
+        assert!(!src.contains("veryl_aot_eval_counted"));
+        assert_eq!(src.matches("0x9c3fULL").count(), 1);
     }
 
     #[test]
@@ -15444,9 +15463,22 @@ mod tests {
         assert!(src.contains("comb_values + 0x10"));
     }
 
-    /// Compile `src` end-to-end; return `None` when the built `.so`
-    /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
-    /// Genuine compile failures still panic.
+    /// Writes from a child process so this process never holds a writable
+    /// descriptor: a fork by another test thread would copy it, and exec of
+    /// the file fails with ETXTBSY until that child execs or exits.
+    #[cfg(unix)]
+    fn write_executable(path: &Path, body: &str) {
+        let status = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(r#"printf '%s' "$2" > "$1" && chmod 755 "$1""#)
+            .arg("sh")
+            .arg(path)
+            .arg(body)
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to write {}", path.display());
+    }
+
     #[test]
     #[cfg(unix)]
     fn compile_script_hands_every_flag_to_the_compiler() {
@@ -15458,17 +15490,14 @@ mod tests {
         fs::create_dir_all(&tmp).unwrap();
         let seen = tmp.join("seen.txt");
         let fake_cc = tmp.join("record_cc.sh");
-        fs::write(
+        write_executable(
             &fake_cc,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n\
                  while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
                 seen.display()
             ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&fake_cc, fs::Permissions::from_mode(0o755)).unwrap();
+        );
 
         let tmp_c = tmp.join("t.c");
         let tmp_so = tmp.join("t.so");
@@ -15536,14 +15565,11 @@ mod tests {
         // does — on our pipes that is a SIGPIPE, and the compile would die
         // before writing anything.
         let slow_cc = tmp.join("slow_cc.sh");
-        fs::write(
+        write_executable(
             &slow_cc,
             "#!/bin/sh\nsleep 2\necho 'warning: probe diagnostic' >&2\n\
              while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&slow_cc, fs::Permissions::from_mode(0o755)).unwrap();
+        );
 
         let status = Command::new(std::env::current_exe().unwrap())
             .arg("aot_cache_publish_survives_process_exit")
@@ -15571,6 +15597,9 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
+    /// Compile `src` end-to-end; return `None` when the built `.so`
+    /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
+    /// Genuine compile failures still panic.
     fn compile_for_test(cache_dir: &Path, src: &str, what: &str) -> Option<EmittedModule> {
         match compile_source_in(cache_dir, src) {
             Ok(m) => Some(m),

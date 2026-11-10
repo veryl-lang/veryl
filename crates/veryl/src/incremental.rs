@@ -2,7 +2,7 @@
 //! fragment instead of parse + pass1, and maintains the on-disk store.
 //!
 //! A file misses (needs full parse + pass1, maybe pass2/emit) if its hash
-//! changed, it produced diagnostics, its output is stale (`dst_is_stale`, only
+//! changed, it produced diagnostics, its output is stale (`output_is_stale`, only
 //! when the caller emits), or anything it depends on missed (transitive, from
 //! the previous build's dependency map). The miss set is a superset of the
 //! files needing pass2/emit, so a restored file is never asked for its AST.
@@ -18,7 +18,7 @@ use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::{Analyzer, CachedDiagnostic, scope, symbol_table, type_dag};
 use veryl_cache::Store;
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, SourceMapTarget};
 use veryl_parser::resource_table;
 use veryl_parser::resource_table::StrId;
 use veryl_path::PathSet;
@@ -60,6 +60,10 @@ pub struct Incremental {
 pub enum OutputIntent {
     /// The run emits (`build`), so a stale output must be regenerated.
     Emit,
+    /// The run emits only to compare against the existing output
+    /// (`build --check`), so a stale output must be compared again. No
+    /// sourcemap is written or needed.
+    Compare,
     /// The run never emits (`check`, `doc`, `dump`, `synth`, `publish`).
     Never,
     /// The run emits only if a test needs an external simulator (`test`).
@@ -94,7 +98,7 @@ impl Incremental {
             return None;
         }
 
-        // The global key hashes `binary_fingerprint()`, so a compiler/binary
+        // The global key includes `binary_fingerprint()`, so a compiler/binary
         // change discards every entry — no separate version check needed.
         let key = global_key(metadata, defines)?;
         let store = Store::open(&metadata.project_dot_build_path().join("cache"), &key);
@@ -109,10 +113,13 @@ impl Incremental {
                     .is_some_and(|x| x.has_non_native_test)
             });
         let consider_output = match intent {
-            OutputIntent::Emit => true,
+            OutputIntent::Emit | OutputIntent::Compare => true,
             OutputIntent::Never => false,
             OutputIntent::SkipIfNativeOnly => !predicted_no_emit,
         };
+        let consider_map = consider_output
+            && intent != OutputIntent::Compare
+            && metadata.build.sourcemap_target != SourceMapTarget::None;
 
         let started_at = SystemTime::now();
         let mut miss = HashSet::new();
@@ -140,7 +147,12 @@ impl Incremental {
             let hit = entry.is_some_and(|x| x.file_hash == hash && x.fragment.is_some())
                 && (!consider_output
                     || path.example
-                    || !Self::dst_is_stale(metadata, path, entry.and_then(|x| x.updated_time)))
+                    || !Self::output_is_stale(
+                        metadata,
+                        path,
+                        entry.and_then(|x| x.updated_time),
+                        consider_map,
+                    ))
                 && !has_selected_test
                 && !forced_miss.contains(&path.src);
             if !hit {
@@ -182,21 +194,48 @@ impl Incremental {
         })
     }
 
-    /// Checked only when emitting and on a key-matched store, so
+    /// Checked only when emitting or comparing, and on a key-matched store, so
     /// `generated_files` is always from the same build environment.
     /// `updated_time` is when something the output depends on but the source
     /// does not (its generic instances) last changed.
-    fn dst_is_stale(metadata: &Metadata, path: &PathSet, updated_time: Option<SystemTime>) -> bool {
-        let Some(generated) = metadata.build_info.generated_files.get(&path.dst) else {
+    fn output_is_stale(
+        metadata: &Metadata,
+        path: &PathSet,
+        updated_time: Option<SystemTime>,
+        consider_map: bool,
+    ) -> bool {
+        let info = &metadata.build_info;
+        let mut outputs = vec![&path.dst];
+        if consider_map {
+            outputs.push(&path.map);
+        }
+        let Some(outputs) = outputs
+            .into_iter()
+            .map(|x| {
+                Some((
+                    x,
+                    *info.generated_files.get(x)?,
+                    *info.generated_mtimes.get(x)?,
+                ))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
             return true;
         };
-        if !path.dst.exists() {
-            return true;
-        }
         let modified = fs::metadata(&path.src)
             .and_then(|x| x.modified())
             .unwrap_or(SystemTime::now());
-        modified.max(updated_time.unwrap_or(modified)) > *generated
+        let modified = modified.max(updated_time.unwrap_or(modified));
+        outputs
+            .into_iter()
+            .any(|(output, generated, recorded_mtime)| {
+                // An output rewritten since it was recorded (edited, or reverted by
+                // a checkout) may no longer match, and `build --check` must compare it.
+                let Ok(output_modified) = fs::metadata(output).and_then(|x| x.modified()) else {
+                    return true;
+                };
+                output_modified != recorded_mtime || modified > generated
+            })
     }
 
     /// Takes the already-read source contents for a file.
@@ -324,7 +363,7 @@ impl Incremental {
     /// The instances of a declaration are registered by the referencing
     /// files, so a restored file may need analyzing (and emitting) for them
     /// even though neither it nor anything it depends on changed. A run that
-    /// doesn't emit records the change in `updated_time` for `dst_is_stale`,
+    /// doesn't emit records the change in `updated_time` for `output_is_stale`,
     /// so the next run doesn't analyze it again but the next build emits it.
     pub fn generic_instance_changes(&mut self) -> HashSet<PathBuf> {
         let current = self

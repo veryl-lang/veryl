@@ -35,14 +35,31 @@ pub fn global_key(parts: &[&str]) -> String {
     hasher.finalize().to_hex().to_string()
 }
 
-/// Hash of the running binary, for use as a global-key part. The version
+/// Identity of the running binary, for use as a global-key part. The version
 /// string alone cannot tell apart two binaries built from different
 /// sources (developer builds, nightlies), and cached blobs depend on the
-/// exact data layout of the binary that wrote them.
+/// exact data layout of the binary that wrote them.  A rebuild or reinstall
+/// replaces the file, so its size, modification time and location (device
+/// and inode on Unix, path elsewhere) tell binaries apart without every run
+/// reading the whole binary.
 pub fn binary_fingerprint() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
-    let data = fs::read(exe).ok()?;
-    Some(content_hash(&data))
+    let meta = fs::metadata(&exe).ok()?;
+    let modified = meta
+        .modified()
+        .ok()?
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_nanos()
+        .to_string();
+    #[cfg(unix)]
+    let location = {
+        use std::os::unix::fs::MetadataExt;
+        format!("{}:{}", meta.dev(), meta.ino())
+    };
+    #[cfg(not(unix))]
+    let location = exe.to_string_lossy().into_owned();
+    Some(global_key(&[&meta.len().to_string(), &modified, &location]))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -414,6 +431,12 @@ fn acquire_lock(root: &Path, blocking: bool) -> LockResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binary_fingerprint_is_stable_within_a_binary() {
+        let fp = binary_fingerprint().expect("the test binary has metadata");
+        assert_eq!(Some(fp), binary_fingerprint());
+    }
 
     #[test]
     fn roundtrip_and_gc() {
