@@ -1,3 +1,5 @@
+mod wide_array_slice;
+
 use crate::ir::Ir;
 use crate::ir::{Config, ModuleVariables, build_ir, parse_hex_content};
 use crate::ir::{Event, Value};
