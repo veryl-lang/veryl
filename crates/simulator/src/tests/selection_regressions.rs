@@ -1446,3 +1446,33 @@ fn a_row_range_write_in_a_loop_follows_its_operands() {
         }
     }
 }
+
+#[test]
+fn op_assign_on_struct_array_element() {
+    let code = r#"
+    module Top (
+        o: output logic<16>,
+    ) {
+        struct s_t {
+            hdr : logic<8>,
+            body: logic<8>,
+        }
+        var e: s_t<3>;
+        always_comb {
+            e    = '0;
+            e[2] = 16'h1220;
+            e[2] |= 16'h0002;
+        }
+        assign o = e[2];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x1222, 16, false),
+            "{config:?}"
+        );
+    }
+}

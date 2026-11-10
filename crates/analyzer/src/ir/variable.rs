@@ -279,7 +279,7 @@ impl VarPathSelect {
                 comptime.member_select_domain = domain;
                 select
             } else {
-                width_select
+                eval_width_select(context, &path, &comptime.r#type, width_select)?
             };
             comptime.r#type.array.drain(0..array_select.dimension());
 
