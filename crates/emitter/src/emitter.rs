@@ -2947,7 +2947,10 @@ impl Emitter {
 
         let source_map_valid = {
             let mut maps = source_path.to_generic_maps();
-            if let Some(map) = maps.pop() {
+            if let Some(mut map) = maps.pop() {
+                if matches!(source_symbol.kind, SymbolKind::GenericInstance(_)) {
+                    map.id = Some(source_symbol.id);
+                }
                 self.push_generic_map(map);
                 true
             } else {
@@ -2978,16 +2981,62 @@ impl Emitter {
         } else {
             symbol_table::resolve(identifier).ok()?
         };
+        // A function reached through an instance has the namespace of the instance's interface,
+        // so get the function from the symbol table to refer to the interface declaring it.
         let symbol = match &symbol.found.kind {
-            SymbolKind::Function(_) => Rc::clone(&symbol.found),
+            SymbolKind::Function(_) => Rc::new(symbol_table::get(symbol.found.id)?),
             SymbolKind::ModportFunctionMember(x) => Rc::new(symbol_table::get(x.function)?),
             _ => return None,
         };
         attribute_table::contains(&symbol.token, Attr::Inline).then_some(symbol)
     }
 
-    /// Returns the generic map of the interface referred by `identifier` like `a_if` of `a_if.f()`
-    fn get_inline_interface_map(&self, identifier: &ExpressionIdentifier) -> Option<GenericMap> {
+    /// Returns the generic map of `interface` declaring the inlined function
+    /// reached through the interface `found` which mixes `interface` in.
+    fn get_mixin_source_map(
+        found: &Symbol,
+        map: GenericMap,
+        interface: &Symbol,
+    ) -> Option<GenericMap> {
+        let base = match &found.kind {
+            SymbolKind::Interface(_) => found.clone(),
+            SymbolKind::GenericInstance(x) => symbol_table::get(x.base)?,
+            _ => return None,
+        };
+        if base.id == interface.id {
+            return Some(map);
+        }
+
+        let maps = vec![map];
+        for source in base.kind.get_mixin_sources() {
+            let (scope, define_context) = scope::token_scope(source.paths[0].base.id)?;
+            let (Ok(source_symbol), source_path) =
+                resolve_generic_path(source, scope, &define_context, Some(&maps))
+            else {
+                continue;
+            };
+            match &source_symbol.found.kind {
+                SymbolKind::Interface(_) if source_symbol.found.id == interface.id => {
+                    return Some(GenericMap::default());
+                }
+                SymbolKind::GenericInstance(x) if x.base == interface.id => {
+                    let mut map = source_path.to_generic_maps().pop()?;
+                    map.id = Some(source_symbol.found.id);
+                    return Some(map);
+                }
+                _ => {}
+            }
+        }
+
+        None
+    }
+
+    /// Returns the generic map of `interface` referred by `identifier` like `a_if` of `a_if.f()`
+    fn get_inline_interface_map(
+        &self,
+        identifier: &ExpressionIdentifier,
+        interface: &Symbol,
+    ) -> Option<GenericMap> {
         let symbol = symbol_table::resolve(identifier).ok()?;
         let mut path = match &symbol.found.kind {
             SymbolKind::Port(x) => match &x.r#type.kind {
@@ -3004,8 +3053,17 @@ impl Emitter {
                 return None;
             };
             match &found.found.kind {
-                SymbolKind::Interface(_) => return Some(GenericMap::default()),
-                SymbolKind::GenericInstance(_) => return found.found.generic_maps().pop(),
+                SymbolKind::Interface(_) => {
+                    return Self::get_mixin_source_map(
+                        &found.found,
+                        GenericMap::default(),
+                        interface,
+                    );
+                }
+                SymbolKind::GenericInstance(_) => {
+                    let map = found.found.generic_maps().pop()?;
+                    return Self::get_mixin_source_map(&found.found, map, interface);
+                }
                 // `a_if: modport InterfaceA::slave`
                 SymbolKind::Modport(_) => {
                     path.paths.pop();
@@ -3015,6 +3073,24 @@ impl Emitter {
         }
 
         None
+    }
+
+    /// Returns the generic map of `interface` declaring the inlined function
+    /// if it is called inside another interface which mixes `interface` in.
+    fn get_caller_interface_map(
+        &self,
+        identifier: &ExpressionIdentifier,
+        interface: &Symbol,
+    ) -> Option<GenericMap> {
+        // A function reached through a mixin has the namespace of the interface mixing it in.
+        let caller = symbol_table::resolve(identifier).ok()?.found.get_parent()?;
+        if caller.id == interface.id {
+            return None;
+        }
+
+        let map = self.get_current_interface_map(&caller);
+        let found = map.id.and_then(symbol_table::get).unwrap_or(caller);
+        Self::get_mixin_source_map(&found, map, interface)
     }
 
     /// Returns the generic map of the given interface which is currently emitted
@@ -3072,16 +3148,17 @@ impl Emitter {
         let (prefix, map) = if let Some(last) = identifier.expression_identifier_list0.last() {
             let mut prefix = identifier.clone();
             prefix.expression_identifier_list0.pop();
-            let Some(map) = self.get_inline_interface_map(&prefix) else {
+            let Some(map) = self.get_inline_interface_map(&prefix, &interface) else {
                 return false;
             };
             (Some((prefix, *last.dot.clone())), Some(map))
         } else if let Some(context) = self.inline_contexts.last() {
             // nested call in an inlined expression
-            (context.prefix.clone(), None)
+            let map = self.get_caller_interface_map(identifier, &interface);
+            (context.prefix.clone(), map)
         } else {
             // call inside the interface
-            (None, None)
+            (None, self.get_caller_interface_map(identifier, &interface))
         };
 
         let current_map = map
