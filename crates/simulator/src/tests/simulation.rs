@@ -8574,6 +8574,67 @@ fn interface_function() {
 }
 
 #[test]
+fn modport_function_reads_interface_struct_const() {
+    // Unlike a scalar, a struct constant's member is read from storage.
+    let code = r#"
+    package Info {
+        struct field_t {
+            width: u32,
+            pos  : u32,
+        }
+    }
+
+    interface BusIf #(
+        param SCALE: u32 = 3,
+    ) {
+        const INFO: Info::field_t = Info::field_t'{ width: 4, pos: 1 };
+        var data: logic<8>;
+
+        function get() -> logic<8> {
+            var x: logic<8>;
+            x = 0;
+            if INFO.width >: 0 {
+                x = (data << INFO.pos) + SCALE;
+            }
+            return x;
+        }
+
+        modport slave {
+            data: input,
+            get : import,
+        }
+    }
+
+    module Reader (
+        bus: modport BusIf::slave,
+        out: output logic<8>,
+    ) {
+        assign out = bus.get();
+    }
+
+    module Top (
+        clk: input clock,
+        out: output logic<8>,
+    ) {
+        inst u_bus: BusIf #(SCALE: 5);
+        assign u_bus.data = 21;
+        inst u_reader: Reader (bus: u_bus, out);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("out").unwrap(),
+            Value::new(47, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn array_literal_comb() {
     let code = r#"
     module Top (

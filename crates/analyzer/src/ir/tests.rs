@@ -4834,3 +4834,64 @@ fn constant_procedural_loops_keep_one_body_and_one_iterator() {
         assert!(matches!(statement.body[0], crate::ir::Statement::Assign(_)));
     }
 }
+
+#[test]
+fn modport_keeps_interface_constants_for_imported_functions() {
+    // `y` imports no function, and the loop iterator `i` is no constant.
+    let code = r#"
+    interface InterfaceA #(
+        param P: u32 = 2,
+    ) {
+        const C: u32 = 3;
+        var a: logic<8>;
+        var o: logic<2>;
+        always_comb {
+            for i in 0..2 {
+                o[i] = a[i];
+            }
+        }
+        function FuncA () -> logic<8> {
+            return a + C + P;
+        }
+        modport mp_f {
+            a    : input ,
+            FuncA: import,
+        }
+        modport mp_s {
+            a: input,
+        }
+    }
+    module ModuleA (
+        x: modport InterfaceA::mp_f,
+        y: modport InterfaceA::mp_s,
+    ) {
+        var d: logic<8>;
+        var e: logic<8>;
+        always_comb {
+            d = x.FuncA();
+            e = y.a;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  param var0(x.P): bit<32> = 32'h00000002;
+  input var1(x.a): logic<8> = 8'hxx;
+  const var2(x.C): bit<32> = 32'h00000003;
+  input var8(y.a): logic<8> = 8'hxx;
+  var var16(d): logic<8> = 8'hxx;
+  var var17(e): logic<8> = 8'hxx;
+  var var19(x.FuncA.return): logic<8> = 8'hxx;
+  func var18(x.FuncA) -> var19 {
+    var19 = ((var1 + var2) + var0);
+  }
+
+  comb {
+    var16 = var18();
+    var17 = var8;
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
