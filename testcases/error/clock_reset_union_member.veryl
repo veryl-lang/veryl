@@ -1,0 +1,9 @@
+module clock_reset_union_member {
+    union clock_union_t {
+        clk : clock   ,
+        data: logic<1>,
+    }
+
+    var u: clock_union_t;
+    assign u.data = 0;
+}

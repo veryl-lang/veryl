@@ -852,6 +852,152 @@ fn implicit_clock_conversion() {
         AnalyzerError::ImplicitClockConversion { .. }
     ));
 
+    // a logic vector wired into an input port of a struct with clock
+    // members
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_bus: input logic<2>,
+        i_rst: input reset,
+        o_q  : output logic<2>,
+    ) {
+        inst u: ModuleB ( clk: i_bus, rst: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input PackageA::ClockBundle,
+        rst: input reset,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk.a, rst) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk.b, rst) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // another struct type with the same layout is not the same type
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+        struct OtherBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_clk: input PackageA::OtherBundle,
+        i_rst: input reset,
+        o_q  : output logic<2>,
+    ) {
+        inst u: ModuleB ( clk: i_clk, rst: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input PackageA::ClockBundle,
+        rst: input reset,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk.a, rst) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk.b, rst) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // a concatenation of clocks does not carry clock-ness
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_q  : output logic<2>,
+    ) {
+        inst u: ModuleB ( clk: {i_clk, i_clk}, rst: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input PackageA::ClockBundle,
+        rst: input reset,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk.a, rst) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk.b, rst) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // a struct which has clock members through a nested struct
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+        struct Outer {
+            inner: ClockBundle,
+            d    : logic      ,
+        }
+    }
+    module ModuleA (
+        i_bus: input logic<3>,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        inst u: ModuleC ( clk: i_bus, rst: i_rst, o_q: o_q );
+    }
+    module ModuleC (
+        clk: input PackageA::Outer,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk.inner.a, rst) {
+            if_reset { o_q = 0; } else { o_q = clk.d; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
     // binding-point conversion: a clock-typed binding accepts a logic
     // value, and the bound clock connects to a clock port cleanly
     let code = r#"
@@ -1055,6 +1201,45 @@ fn implicit_clock_conversion() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // a struct with clock members accepts the same struct type (also
+    // through a typedef), an explicit cast and a constant
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+        type ClockBundleAlias = ClockBundle;
+    }
+    module ModuleA (
+        i_clk  : input PackageA::ClockBundle,
+        i_alias: input PackageA::ClockBundleAlias,
+        i_bus  : input logic<2>,
+        i_rst  : input reset,
+        o_q    : output logic<8>,
+    ) {
+        inst u0: ModuleB ( clk: i_clk, rst: i_rst, o_q: o_q[1:0] );
+        inst u1: ModuleB ( clk: i_alias, rst: i_rst, o_q: o_q[3:2] );
+        inst u2: ModuleB ( clk: i_bus as PackageA::ClockBundle, rst: i_rst, o_q: o_q[5:4] );
+        inst u3: ModuleB ( clk: 0, rst: i_rst, o_q: o_q[7:6] );
+    }
+    module ModuleB (
+        clk: input PackageA::ClockBundle,
+        rst: input reset,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk.a, rst) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk.b, rst) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -1107,6 +1292,132 @@ fn clock_binding_source_shape() {
         errors[0],
         AnalyzerError::MismatchAssignment { .. }
     ));
+
+    // a logic vector assigned to a struct with clock members
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_bus: input logic<2>,
+        o_q  : output logic<2>,
+    ) {
+        var w_clk: PackageA::ClockBundle;
+        assign w_clk = i_bus;
+        assign o_q = w_clk;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    // a logic vector bound to a struct with clock members by let
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_bus: input logic<2>,
+        o_q  : output logic<2>,
+    ) {
+        let w_clk: PackageA::ClockBundle = i_bus;
+        assign o_q = w_clk;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    // a logic output port connected to a struct with clock members
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        o_q: output logic<2>,
+    ) {
+        var w_clk: PackageA::ClockBundle;
+        inst u: ModuleB ( o_clk: w_clk );
+        assign o_q = w_clk;
+    }
+    module ModuleB (
+        o_clk: output logic<2>,
+    ) {
+        assign o_clk = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    // a struct constructor checks a clock member by the clock rules
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_bus: input logic<2>,
+        o_q  : output logic<2>,
+    ) {
+        let w_clk: PackageA::ClockBundle = PackageA::ClockBundle'{a: i_bus, b: i_bus};
+        assign o_q = w_clk;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    // a struct with clock members assigned to a logic vector, and a logic
+    // vector assigned to a struct without clock members are clean
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+        struct DataBundle {
+            a: logic,
+            b: logic,
+        }
+    }
+    module ModuleA (
+        i_clk: input PackageA::ClockBundle,
+        i_bus: input logic<2>,
+        o_q  : output logic<4>,
+    ) {
+        var w_data: PackageA::DataBundle;
+        assign w_data = i_bus;
+        assign o_q[1:0] = i_clk;
+        assign o_q[3:2] = w_data;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -1142,6 +1453,57 @@ fn implicit_clock_conversion_function_arg() {
     ) {
         function pass (
             c: input clock,
+        ) -> logic {
+            return 1'b0;
+        }
+        assign o_q = pass(i_clk);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // a logic vector passed to an argument of a struct with clock members
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_bus: input logic<2>,
+        o_q  : output logic,
+    ) {
+        function pass (
+            c: input PackageA::ClockBundle,
+        ) -> logic {
+            return 1'b0;
+        }
+        assign o_q = pass(i_bus);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // passing the same struct type is clean
+    let code = r#"
+    package PackageA {
+        struct ClockBundle {
+            a: clock,
+            b: clock,
+        }
+    }
+    module ModuleA (
+        i_clk: input PackageA::ClockBundle,
+        o_q  : output logic,
+    ) {
+        function pass (
+            c: input PackageA::ClockBundle,
         ) -> logic {
             return 1'b0;
         }
@@ -19054,6 +19416,128 @@ fn mixed_struct_union_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn clock_reset_union_member() {
+    // a clock member in a union
+    let code = r#"
+    package Pkg {
+        union UnionA {
+            a: clock   ,
+            b: logic<1>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ClockResetUnionMember { .. }
+    ));
+
+    // a reset member in a union
+    let code = r#"
+    package Pkg {
+        union UnionA {
+            a: reset   ,
+            b: logic<1>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ClockResetUnionMember { .. }
+    ));
+
+    // a union whose members are all clocks
+    let code = r#"
+    package Pkg {
+        union UnionA {
+            a: clock        ,
+            b: clock_posedge,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ClockResetUnionMember { .. }
+    ));
+
+    // a struct member which has a clock member in a union
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+            b: logic,
+        }
+        union UnionA {
+            a: StructA ,
+            b: logic<2>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ClockResetUnionMember { .. }
+    ));
+
+    // a multi-bit clock member in a union
+    let code = r#"
+    package Pkg {
+        union UnionA {
+            a: clock<2>,
+            b: logic<2>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ClockResetUnionMember { .. }
+    ));
+
+    // a clock member through a typedef in a union
+    let code = r#"
+    package Pkg {
+        type ClockAlias = clock;
+        union UnionA {
+            a: ClockAlias,
+            b: logic<1>  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ClockResetUnionMember { .. }
+    ));
+
+    // a clock member given by a generic type argument in a union
+    let code = r#"
+    module ModuleA {
+        type ClockAlias = clock;
+        union UnionA::<T: type> {
+            a: T       ,
+            b: logic<1>,
+        }
+        var _a: UnionA::<ClockAlias>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ClockResetUnionMember { .. }
+    ));
 }
 
 #[test]

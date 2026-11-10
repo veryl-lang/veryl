@@ -814,8 +814,17 @@ pub fn eval_assign_statement(
 /// the context is the max of the two: with an 8-bit `y`, `x[7:0] = (y << 4)
 /// >> 4` is 0x0d at 8 bits and 0xcd at a 32-bit `x`'s width.
 pub fn assign_rhs_context_type(context: &mut Context, dst: &ir::AssignDestination) -> ir::Type {
-    let full = dst.comptime.r#type.clone();
-    if dst.select.is_empty() || dst.comptime.part_select.is_some() {
+    let mut full = dst.comptime.r#type.clone();
+    if dst.comptime.part_select.is_some() {
+        // A member destination carries the whole variable's type. It must not
+        // be checked as a whole struct having clock/reset members, so it is
+        // flattened, which keeps the width of the RHS context.
+        if full.has_clock_reset_member() {
+            full.flatten_struct_union_enum();
+        }
+        return full;
+    }
+    if dst.select.is_empty() {
         return full;
     }
     if !matches!(full.kind, ir::TypeKind::Logic | ir::TypeKind::Bit) {
@@ -1600,6 +1609,12 @@ pub fn eval_type(
 
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
                                 check_unpacked_member(c, &member, &x.r#type.token, &r#type);
+                                check_clock_reset_union_member(
+                                    c,
+                                    &member,
+                                    &x.r#type.token,
+                                    &r#type,
+                                );
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
@@ -1904,6 +1919,24 @@ fn check_unpacked_member(
     }
 
     context.insert_error(AnalyzerError::unpacked_struct_union_member(
+        &member.token.to_string(),
+        token,
+    ));
+}
+
+/// Another member of a union could reinterpret a clock/reset member as a value
+/// of another type, which is not allowed outside an explicit cast.
+fn check_clock_reset_union_member(
+    context: &mut Context,
+    member: &Symbol,
+    token: &TokenRange,
+    r#type: &ir::Type,
+) {
+    if context.in_generic || !r#type.include_clock_reset() {
+        return;
+    }
+
+    context.insert_error(AnalyzerError::clock_reset_union_member(
         &member.token.to_string(),
         token,
     ));
@@ -5206,7 +5239,7 @@ pub fn function_call(
         // IEEE 1800-2023 13.4: a function with an output argument can't be
         // called outside a procedural statement, and a port connection is
         // emitted as an expression.
-        if c.in_inst_port
+        if c.inst_port_kind == Some(VarKind::Input)
             && !c.is_affiliated(Affiliation::Function)
             && let Some(symbol) = &symbol
             && let SymbolKind::Function(function) = &symbol.kind
@@ -5286,9 +5319,27 @@ pub fn check_compatibility(
     // overwrite, so `src` is the connected value's own type; the later
     // call on the same connection sees the overwritten (matching) type
     // and stays silent.
-    if (dst.is_clock() || dst.is_reset()) && context.in_inst_port {
-        check_implicit_clock_conversion(context, dst, src, token);
-        return;
+    match context.inst_port_kind {
+        Some(VarKind::Input) if dst.include_clock_reset() => {
+            check_implicit_clock_conversion(context, dst, src, token);
+            return;
+        }
+        // An output port is written into the connected variable, so the
+        // variable is the destination of a struct having clock/reset members.
+        Some(VarKind::Output)
+            if src.r#type.has_clock_reset_member()
+                && !src.r#type.accepts_clock_reset_aggregate(dst) =>
+        {
+            context.insert_error(AnalyzerError::mismatch_assignment(
+                &dst.to_string(),
+                &src.r#type.to_string(),
+                MismatchAssignmentKind::Normal,
+                token,
+                &[],
+            ));
+            return;
+        }
+        _ => (),
     }
     // The unpacked dimensions are asked on their own axis rather than inside
     // `compatible`, which answers from the element kind for a 2-state, clock or
@@ -5321,9 +5372,12 @@ pub fn check_function_arg_aggregate(
     src: &ir::Type,
     token: &TokenRange,
 ) {
+    // `check_implicit_clock_conversion` reports one having clock/reset
+    // members.
     if let Some(dst_id) = dst.kind.aggregate_id()
         && let Some(src_id) = src.kind.aggregate_id()
         && dst_id != src_id
+        && !dst.has_clock_reset_member()
     {
         context.insert_error(AnalyzerError::mismatch_assignment(
             &src.to_string(),
@@ -5336,27 +5390,27 @@ pub fn check_function_arg_aggregate(
 }
 
 /// Reject implicit conversion to a clock/reset-typed input port or
-/// function argument.  `$sv` ports are SystemVerilog-typed and never
-/// reach this check, which keeps the SystemVerilog boundary unchecked
-/// by design.
+/// function argument, or to a struct one having clock/reset members.
+/// `$sv` ports are SystemVerilog-typed and never reach this check, which
+/// keeps the SystemVerilog boundary unchecked by design.
 pub fn check_implicit_clock_conversion(
     context: &mut Context,
     dst: &ir::Type,
     src: &Comptime,
     token: &TokenRange,
 ) {
-    let dst_is_clock = dst.is_clock();
-    let dst_is_reset = dst.is_reset();
-    if !dst_is_clock && !dst_is_reset {
+    if !dst.include_clock_reset() {
         return;
     }
     if src.r#type.is_unknown() || src.r#type.is_systemverilog() || src.is_const {
         return;
     }
-    let ok = if dst_is_clock {
+    let ok = if dst.is_clock() {
         src.r#type.is_clock()
-    } else {
+    } else if dst.is_reset() {
         src.r#type.is_reset()
+    } else {
+        dst.accepts_clock_reset_aggregate(&src.r#type)
     };
     if !ok {
         context.insert_error(AnalyzerError::implicit_clock_conversion(
