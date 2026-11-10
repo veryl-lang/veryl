@@ -48,9 +48,14 @@ pub struct EventGate {
 /// (`RtEventGate`) and the C the AOT-C emitter writes: the two take turns on
 /// one gate's state, so they must read one layout.
 pub const GATE_STATE_HEADER_BYTES: usize = 16;
-/// The last fire's entries all repeated the current values and it changed no
-/// direct comb write.
+/// The last fire's reads matched the fire before it, its entries all
+/// repeated the current values and it changed no direct comb write.
 pub(crate) const GATE_IDLE: usize = 0;
+/// The shadows hold the last fire's reads.  A read stored after the settle
+/// (by a statement or event ahead of the gate in the same instant) is not
+/// what the subtree was evaluated with, so a skip needs two fires in a row
+/// to match.
+pub(crate) const GATE_HELD: usize = 1;
 /// The gate is off: its range runs unchecked until the period below passes.
 pub(crate) const GATE_OFF: usize = 2;
 /// The dirty streak while on, the fires since turning off while off.
@@ -856,9 +861,9 @@ pub enum GateEntry {
     Plain,
     /// Idle since the last fire and every read held.
     Skip,
-    /// The range runs and is judged from the log counts at entry; `checked`
-    /// when the reads were compared (and their shadows refreshed) on the way.
-    Run { n0: u32, w0: u32, checked: bool },
+    /// The range runs and is judged from the log counts at entry; `matched`
+    /// when every read held since the last fire.
+    Run { n0: u32, w0: u32, matched: bool },
 }
 
 impl RtEventGates {
@@ -966,50 +971,44 @@ impl RtEventGate {
         (eg, unsafe { eg.add(GATE_STATE_HEADER_BYTES) })
     }
 
-    /// Off: the range runs plain until the re-arm period passes; the first
-    /// fire after re-arming runs and takes a fresh snapshot.  On: a checked
-    /// fire whose reads all matched skips, resetting the dirty streak;
-    /// otherwise the range runs, a dirty streak turning the gate off for
-    /// twice as long each time.
+    /// A dirty streak turns the gate off, for twice as long each time.
     ///
     /// # Safety
     /// `ff` and `comb` must be valid for the gate's spans and state.
     pub unsafe fn enter(&self, ff: *const u8, comb: *mut u8, log: &WriteLogBuffer) -> GateEntry {
         let (eg, shadow) = unsafe { self.state(comb) };
-        let mut run = true;
-        let mut checked = false;
+        let mut matched = true;
         unsafe {
             if *eg.add(GATE_OFF) != 0 {
                 let mut n = read_u32(eg.add(GATE_COUNT)) + 1;
                 if n >= read_u32(eg.add(GATE_PERIOD)) {
                     *eg.add(GATE_OFF) = 0;
                     *eg.add(GATE_IDLE) = 0;
+                    *eg.add(GATE_HELD) = 0;
                     n = 0;
                 }
                 write_u32(eg.add(GATE_COUNT), n);
                 return GateEntry::Plain;
             }
-            if *eg.add(GATE_IDLE) != 0 {
-                run = false;
-                checked = true;
-                let mut sh = shadow;
-                for &(is_ff, a, b) in &self.spans {
-                    let len = (b - a) as usize;
-                    let src = if is_ff {
-                        ff.add(a as usize)
-                    } else {
-                        comb.add(a as usize)
-                    };
-                    // A mismatching span refreshes its shadow on the spot: the
-                    // run that follows leaves the compared values as they are.
-                    if !bytes_eq(sh, src, len) {
-                        std::ptr::copy_nonoverlapping(src, sh, len);
-                        run = true;
-                    }
-                    sh = sh.add(len);
+            let held = *eg.add(GATE_HELD) != 0;
+            let mut sh = shadow;
+            for &(is_ff, a, b) in &self.spans {
+                let len = (b - a) as usize;
+                let src = if is_ff {
+                    ff.add(a as usize)
+                } else {
+                    comb.add(a as usize)
+                };
+                // A mismatching span refreshes its shadow on the spot: the
+                // run that follows leaves the compared values as they are.
+                if !held || !bytes_eq(sh, src, len) {
+                    std::ptr::copy_nonoverlapping(src, sh, len);
+                    matched = false;
                 }
+                sh = sh.add(len);
             }
-            if !run {
+            *eg.add(GATE_HELD) = 1;
+            if matched && *eg.add(GATE_IDLE) != 0 {
                 write_u32(eg.add(GATE_COUNT), 0);
                 write_u32(eg.add(GATE_PERIOD), 0);
                 return GateEntry::Skip;
@@ -1032,13 +1031,11 @@ impl RtEventGate {
         GateEntry::Run {
             n0: log.narrow_count,
             w0: log.wide_count,
-            checked,
+            matched,
         }
     }
 
-    /// After a `Run`: idle when the run's entries all repeated their values
-    /// and no direct comb write changed; an idle run whose reads were not
-    /// compared on entry snapshots them now.
+    /// After a `Run`; see `GATE_IDLE`.
     ///
     /// # Safety
     /// As `enter`, and `ff` valid for the log's entries.
@@ -1049,25 +1046,10 @@ impl RtEventGate {
         log: &WriteLogBuffer,
         n0: u32,
         w0: u32,
-        checked: bool,
+        matched: bool,
     ) {
-        let (eg, shadow) = unsafe { self.state(comb) };
-        let idle = unsafe { log_unchanged(ff, log, n0, w0) && self.out_comb_held(comb) };
-        if idle && !checked {
-            let mut sh = shadow;
-            for &(is_ff, a, b) in &self.spans {
-                let len = (b - a) as usize;
-                unsafe {
-                    let src = if is_ff {
-                        ff.add(a as usize)
-                    } else {
-                        comb.add(a as usize)
-                    };
-                    std::ptr::copy_nonoverlapping(src, sh, len);
-                    sh = sh.add(len);
-                }
-            }
-        }
+        let (eg, _) = unsafe { self.state(comb) };
+        let idle = matched && unsafe { log_unchanged(ff, log, n0, w0) && self.out_comb_held(comb) };
         unsafe { *eg.add(GATE_IDLE) = u8::from(idle) };
     }
 
