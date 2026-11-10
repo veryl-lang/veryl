@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+clock_reset_union_member (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#clock_reset_union_member)
+
+  × "clk" is or has a clock/reset, which a union member can't have
+   ╭─[../../testcases/error/clock_reset_union_member.veryl:3:15]
+ 2 │     union clock_union_t {
+ 3 │         clk : clock   ,
+   ·               ──┬──
+   ·                 ╰── Error location
+ 4 │         data: logic<1>,
+   ╰────
+  help: move "clk" out of the union

@@ -25,7 +25,7 @@ module test_utils_clog2_clipped {
         $assert(C == 2);
         $assert(D == 2);
         $assert(E == 3);
-        $assert(G == 3);
+        $assert(F == 3);
         $assert(G == 3);
         $finish();
     }
