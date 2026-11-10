@@ -967,6 +967,7 @@ impl Context {
         } else {
             HashMap::default()
         };
+        let imports_function = modport_members.values().any(|x| *x == Direction::Import);
 
         let mut id_map = HashMap::default();
         for mut variable in component.variables.into_values() {
@@ -978,8 +979,12 @@ impl Context {
                         Direction::Inout => VarKind::Inout,
                         _ => variable.kind,
                     };
-                } else {
-                    // Skip non-modport member
+                } else if !(imports_function
+                    && variable.affiliation == Affiliation::Interface
+                    && matches!(variable.kind, VarKind::Const | VarKind::Param))
+                {
+                    // Skip non-modport member; an imported function may read
+                    // the constants.
                     continue;
                 }
             }
