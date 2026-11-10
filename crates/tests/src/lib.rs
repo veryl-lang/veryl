@@ -685,6 +685,7 @@ mod filelist {
         "{}/c/ip/c_ip.sv",
         "{}/a/ip/rtl/a_ip.sv",
         "{}/a/dependencies/std/axi_if/axi_pkg.sv",
+        "{}/a/dependencies/std/pkg/utils.sv",
         "{}/a/dependencies/std/ram/ram.sv",
         "{}/a/src/01_package_a.sv",
         "{}/a/src/02_package_b.sv",
