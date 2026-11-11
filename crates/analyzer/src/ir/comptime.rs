@@ -567,8 +567,7 @@ impl Comptime {
             let mut member = self.r#type.clone();
             member.flatten_struct_union_enum();
             self.member_signed = Some(member.signed);
-            self.member_clock_reset = (self.r#type.is_clock() || self.r#type.is_reset())
-                .then(|| self.r#type.kind.clone());
+            self.member_clock_reset = self.r#type.clock_reset_kind();
             let own = self.r#type.array.clone();
             let mut base = part_select.base.clone();
             if own.dims() > base.array.dims() {
@@ -577,6 +576,14 @@ impl Comptime {
             self.r#type = base;
         }
         self.r#type.array.dims()
+    }
+
+    /// The clock/reset kind a select of this keeps: the one of the member
+    /// rebased onto the whole variable, or else its own.
+    pub fn select_clock_reset(&self) -> Option<TypeKind> {
+        self.member_clock_reset
+            .clone()
+            .or_else(|| self.r#type.clock_reset_kind())
     }
 
     pub fn create_unknown(token: TokenRange) -> Self {
@@ -908,6 +915,38 @@ impl Type {
         } else {
             false
         }
+    }
+
+    /// The kinds of the leaves of a struct, nested structs expanded, or the
+    /// kind itself for any other type.
+    pub fn leaf_kinds(&self) -> Vec<&TypeKind> {
+        if let TypeKind::Struct(x) = &self.kind {
+            x.members
+                .iter()
+                .flat_map(|x| x.r#type.leaf_kinds())
+                .collect()
+        } else {
+            vec![&self.kind]
+        }
+    }
+
+    /// The clock/reset kind of a clock/reset, or of a struct whose leaves are
+    /// all of that kind. A select keeps it, since every bit has that kind.
+    pub fn clock_reset_kind(&self) -> Option<TypeKind> {
+        let kinds = self.leaf_kinds();
+        let first = *kinds.first()?;
+        let is_clock_reset = matches!(
+            first,
+            TypeKind::Clock
+                | TypeKind::ClockPosedge
+                | TypeKind::ClockNegedge
+                | TypeKind::Reset
+                | TypeKind::ResetAsyncHigh
+                | TypeKind::ResetAsyncLow
+                | TypeKind::ResetSyncHigh
+                | TypeKind::ResetSyncLow
+        );
+        (is_clock_reset && kinds.iter().all(|x| *x == first)).then(|| first.clone())
     }
 
     /// Whether it is a clock/reset or a struct having one.
