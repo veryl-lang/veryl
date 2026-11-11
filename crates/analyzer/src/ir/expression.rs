@@ -925,6 +925,8 @@ impl Factor {
                 // constructing the reference.
 
                 if !comptime.evaluated {
+                    let clock_reset = comptime.select_clock_reset();
+
                     // Struct/Union/Enum should be treated as flatten bit/logic when it is bit-selected
                     if !select.is_empty() {
                         comptime.r#type.flatten_struct_union_enum();
@@ -940,10 +942,9 @@ impl Factor {
                     // A part-select is unsigned (IEEE 1800-2023 11.8.1); a
                     // member read rebased to a select keeps the member's sign.
                     if !select.is_empty() {
-                        comptime.r#type.restore_member(
-                            comptime.member_signed,
-                            comptime.member_clock_reset.as_ref(),
-                        );
+                        comptime
+                            .r#type
+                            .restore_member(comptime.member_signed, clock_reset.as_ref());
                     }
 
                     // A select/index expression is a data-dependent read: an
