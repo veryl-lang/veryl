@@ -4,8 +4,8 @@ use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
 use crate::ir::{
-    Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, SystemFunctionInput, Type,
-    VarId, VarIndex, VarPath, VarSelect,
+    Comptime, Expression, FfTable, FunctionCall, InstanceIndex, Op, SystemFunctionCall,
+    SystemFunctionInput, Type, VarId, VarIndex, VarPath, VarSelect,
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
@@ -632,17 +632,17 @@ impl Statement {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         match self {
-            Statement::Assign(x) => x.set_index(index),
-            Statement::If(x) => x.set_index(index),
-            Statement::IfReset(x) => x.set_index(index),
-            Statement::Case(x) => x.set_index(index),
-            Statement::SystemFunctionCall(_) => (),
-            Statement::FunctionCall(x) => x.set_index(index),
+            Statement::Assign(x) => x.set_instance(instance),
+            Statement::If(x) => x.set_instance(instance),
+            Statement::IfReset(x) => x.set_instance(instance),
+            Statement::Case(x) => x.set_instance(instance),
+            Statement::SystemFunctionCall(x) => x.set_instance(instance),
+            Statement::FunctionCall(x) => x.set_instance(instance),
             Statement::For(x) => {
                 for s in &mut x.body {
-                    s.set_index(index);
+                    s.set_instance(instance);
                 }
             }
             Statement::TbMethodCall(_) | Statement::Break => (),
@@ -917,8 +917,10 @@ impl AssignDestination {
             .gather_ff(context, table, decl, assign_target, from_ff);
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
-        self.index.add_prelude(index);
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
+        if !instance.shared.contains(&self.id) {
+            self.index.add_prelude(&instance.index);
+        }
     }
 }
 
@@ -1082,11 +1084,11 @@ impl AssignStatement {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         for dst in &mut self.dst {
-            dst.set_index(index);
+            dst.set_instance(instance);
         }
-        self.expr.set_index(index);
+        self.expr.set_instance(instance);
     }
 }
 
@@ -1206,13 +1208,13 @@ impl IfStatement {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
-        self.cond.set_index(index);
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
+        self.cond.set_instance(instance);
         for x in &mut self.true_side {
-            x.set_index(index);
+            x.set_instance(instance);
         }
         for x in &mut self.false_side {
-            x.set_index(index);
+            x.set_instance(instance);
         }
     }
 }
@@ -1286,12 +1288,12 @@ impl IfResetStatement {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         for x in &mut self.true_side {
-            x.set_index(index);
+            x.set_instance(instance);
         }
         for x in &mut self.false_side {
-            x.set_index(index);
+            x.set_instance(instance);
         }
     }
 }
@@ -1577,18 +1579,18 @@ impl CaseStatement {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
-        self.case_target.set_index(index);
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
+        self.case_target.set_instance(instance);
         for arm in &mut self.arms {
             for p in &mut arm.patterns {
-                p.for_each_expr_mut(|e| e.set_index(index));
+                p.for_each_expr_mut(|e| e.set_instance(instance));
             }
             for s in &mut arm.body {
-                s.set_index(index);
+                s.set_instance(instance);
             }
         }
         for s in &mut self.default {
-            s.set_index(index);
+            s.set_instance(instance);
         }
     }
 

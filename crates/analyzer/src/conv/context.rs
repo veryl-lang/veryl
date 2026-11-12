@@ -1,12 +1,13 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, InstanceNote};
+use crate::conv::checker::modport::is_function_defined_in_interface;
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError, Reach};
 use crate::conv::package_const::{PackageConstCache, PackageConstKey, PackageConstUse};
 use crate::conv::unit_cache::{self, ChildReach, UnitEvent};
 use crate::ir::{
-    Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
-    IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
-    Variable, VariableInfo,
+    Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function,
+    InstanceIndex, Interface, IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex,
+    VarKind, VarPath, VarSelect, Variable, VariableInfo,
 };
 use crate::namespace::Namespace;
 use crate::scope;
@@ -895,10 +896,15 @@ impl Context {
     }
 
     pub fn extract_function(&mut self, context: &mut Context, base: &VarPath, array: &ShapeRef) {
+        let mut shared = HashSet::default();
         for (id, mut variable) in context.variables.drain() {
             let path_offset = variable.path.0.len();
             variable.path.add_prelude(&base.0);
-            variable.prepend_array_at_path(array, path_offset);
+            if variable.affiliation == Affiliation::Function {
+                shared.insert(id);
+            } else {
+                variable.prepend_array_at_path(array, path_offset);
+            }
             self.variables.insert(id, variable);
         }
 
@@ -909,18 +915,36 @@ impl Context {
             self.func_paths.insert(path, id);
         }
 
+        // A package function converted along does not touch the members, so
+        // one body serves every instance.
+        let replicated: HashSet<VarId> = if array.is_empty() {
+            HashSet::default()
+        } else {
+            context
+                .functions
+                .iter()
+                .filter(|(_, x)| is_function_defined_in_interface(x.path.sig.symbol))
+                .map(|(id, _)| *id)
+                .collect()
+        };
         for (id, mut function) in context.functions.drain() {
-            if !array.is_empty() {
-                let total_array = array.total();
-                let func_body = function.functions.remove(0);
-                if let Some(total_array) = total_array {
+            if replicated.contains(&id) {
+                // An inner interface array has replicated the bodies already;
+                // each of them is replicated again for the outer instances.
+                let bodies = std::mem::take(&mut function.functions);
+                if let Some(total_array) = array.total() {
                     for i in 0..total_array {
-                        let var_index = VarIndex::from_index(i, array);
-                        let mut func_body = func_body.clone();
-                        func_body.set_index(&var_index);
-                        function.functions.push(func_body);
+                        let instance = InstanceIndex::new(array.position(i), &shared, &replicated);
+                        for body in &bodies {
+                            let mut body = body.clone();
+                            body.set_instance(&instance);
+                            function.functions.push(body);
+                        }
                     }
                 }
+                let mut shape = array.to_owned();
+                shape.append(&mut function.array);
+                function.array = shape;
             }
 
             if !function.path.path.starts_with(&base.0) {

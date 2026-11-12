@@ -8635,6 +8635,234 @@ fn modport_function_reads_interface_struct_const() {
 }
 
 #[test]
+fn interface_array_function_arguments() {
+    let code = r#"
+    interface BusIf {
+        var x: logic<8>;
+        var y: logic<8>;
+
+        function helper (v: input logic<8>) {
+            x = v;
+        }
+
+        function put (v: input logic<8>) {
+            helper(v);
+        }
+
+        function get_x () -> logic<8> {
+            return x;
+        }
+
+        function put_pair (v: input logic<8> [2]) {
+            y = v[0] + v[1];
+        }
+
+        function get (o: output logic<8>) {
+            o = x + y;
+        }
+
+        modport slave {
+            x       : output,
+            y       : output,
+            helper  : import,
+            put     : import,
+            put_pair: import,
+            get     : import,
+            get_x   : import,
+        }
+    }
+
+    module Writer (
+        i_d    : input   logic<8>         ,
+        o_sum  : output  logic<8>      [2],
+        o_ret  : output  logic<8>      [2],
+        bus_if : modport BusIf::slave  [2],
+    ) {
+        for i in 0..2 :g {
+            var pair: logic<8> [2];
+            assign pair[0] = i_d;
+            assign pair[1] = i + 1;
+            always_comb {
+                bus_if[i].put(i_d + i);
+                bus_if[i].put_pair(pair);
+                bus_if[i].get(o_sum[i]);
+            }
+            assign o_ret[i] = bus_if[i].get_x();
+        }
+    }
+
+    module Top (
+        i_d : input  logic<8>,
+        o_x0: output logic<8>,
+        o_x1: output logic<8>,
+        o_y0: output logic<8>,
+        o_y1: output logic<8>,
+        o_s0: output logic<8>,
+        o_s1: output logic<8>,
+        o_r0: output logic<8>,
+        o_r1: output logic<8>,
+    ) {
+        inst u_bus: BusIf [2];
+        var sum: logic<8> [2];
+        var ret: logic<8> [2];
+        inst u_writer: Writer (i_d, o_sum: sum, o_ret: ret, bus_if: u_bus);
+        assign o_x0 = u_bus[0].x;
+        assign o_x1 = u_bus[1].x;
+        assign o_y0 = u_bus[0].y;
+        assign o_y1 = u_bus[1].y;
+        assign o_s0 = sum[0];
+        assign o_s1 = sum[1];
+        assign o_r0 = ret[0];
+        assign o_r1 = ret[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_d", Value::new(10, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        for (name, exp) in [
+            ("o_x0", 10),
+            ("o_x1", 11),
+            ("o_y0", 11),
+            ("o_y1", 12),
+            ("o_s0", 21),
+            ("o_s1", 23),
+            ("o_r0", 10),
+            ("o_r1", 11),
+        ] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(exp, 8, false),
+                "{name} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_interface_array_function_call() {
+    let code = r#"
+    interface Inner {
+        var y: logic<8>;
+
+        function put (v: input logic<8>) {
+            y = v;
+        }
+
+        function get () -> logic<8> {
+            return y;
+        }
+    }
+
+    interface Outer {
+        var base: logic<8>;
+        inst inner: Inner [2];
+
+        function set (v: input logic<8>) {
+            inner[0].put(v);
+            inner[1].put(v + 1);
+        }
+
+        function get () -> logic<8> {
+            return inner[1].get();
+        }
+
+        function ones () -> logic<8> {
+            return {7'b0, $onehot(base)};
+        }
+    }
+
+    module Top (
+        o_get1: output logic<8>,
+        o_get2: output logic<8>,
+        o_one0: output logic<8>,
+        o_one1: output logic<8>,
+    ) {
+        inst u: Outer [3];
+        assign u[0].base = 3;
+        assign u[1].base = 4;
+        assign u[2].base = 0;
+        always_comb {
+            u[0].set(0);
+            u[1].set(10);
+            u[2].set(20);
+        }
+        assign o_get1 = u[1].get();
+        assign o_get2 = u[2].get();
+        assign o_one0 = u[0].ones();
+        assign o_one1 = u[1].ones();
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        for (name, exp) in [("o_get1", 11), ("o_get2", 21), ("o_one0", 0), ("o_one1", 1)] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(exp, 8, false),
+                "{name} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn interface_array_slice_connection() {
+    let code = r#"
+    interface BusIf {
+        var x: logic<8>;
+        var y: logic<8>;
+
+        modport slave {
+            x: output,
+            y: input ,
+        }
+    }
+
+    module Adder (
+        bus_if: modport BusIf::slave [2],
+    ) {
+        for i in 0..2 :g {
+            assign bus_if[i].x = bus_if[i].y + i;
+        }
+    }
+
+    module Top (
+        i_d : input  logic<8>,
+        o_x1: output logic<8>,
+        o_x2: output logic<8>,
+    ) {
+        inst u_bus: BusIf [3];
+        assign u_bus[0].x = 0;
+        assign u_bus[0].y = 0;
+        assign u_bus[1].y = i_d;
+        assign u_bus[2].y = i_d + 1;
+        inst u_adder: Adder (bus_if: u_bus[1:2]);
+        assign o_x1 = u_bus[1].x;
+        assign o_x2 = u_bus[2].x;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_d", Value::new(10, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        for (name, exp) in [("o_x1", 10), ("o_x2", 12)] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(exp, 8, false),
+                "{name} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn array_literal_comb() {
     let code = r#"
     module Top (

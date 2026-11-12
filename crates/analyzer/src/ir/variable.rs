@@ -12,7 +12,7 @@ use crate::ir::{
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
-use crate::{BigInt, BigUint};
+use crate::{BigInt, BigUint, HashSet};
 use num_traits::ToPrimitive;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
@@ -374,6 +374,33 @@ impl std::str::FromStr for VarPath {
     }
 }
 
+/// The instance of an interface array that a copy of a function body runs
+/// on. Only the interface's members are per instance: the function's own
+/// variables are shared, as every call runs to completion before the next.
+pub struct InstanceIndex<'a> {
+    pub position: Vec<usize>,
+    pub index: VarIndex,
+    pub shared: &'a HashSet<VarId>,
+    /// Functions replicated per instance, whose calls take the position.
+    pub replicated: &'a HashSet<VarId>,
+}
+
+impl<'a> InstanceIndex<'a> {
+    pub fn new(
+        position: Vec<usize>,
+        shared: &'a HashSet<VarId>,
+        replicated: &'a HashSet<VarId>,
+    ) -> Self {
+        let index = VarIndex::from_position(&position);
+        Self {
+            position,
+            index,
+            shared,
+            replicated,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct VarIndex {
     pub indices: Vec<Expression>,
@@ -415,19 +442,14 @@ impl VarIndex {
     }
 
     pub fn from_index(index: usize, array: &ShapeRef) -> Self {
-        let mut remaining = index;
-        let mut ret = vec![];
-        for a in array.iter().rev() {
-            let a = a.unwrap_or(1);
-            ret.push(remaining % a);
-            remaining /= a;
-        }
+        Self::from_position(&array.position(index))
+    }
 
+    pub fn from_position(position: &[usize]) -> Self {
         let token = TokenRange::default();
-        let ret: Vec<_> = ret
-            .into_iter()
-            .rev()
-            .map(|x| Expression::create_value(Value::new(x as u64, 32, false), token))
+        let ret: Vec<_> = position
+            .iter()
+            .map(|x| Expression::create_value(Value::new(*x as u64, 32, false), token))
             .collect();
         Self::new(ret)
     }
@@ -919,13 +941,13 @@ impl VarSelectOp {
 pub struct VarSelect(pub Vec<Expression>, pub Option<(VarSelectOp, Expression)>);
 
 impl VarSelect {
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         for x in &mut self.0 {
-            x.set_index(index);
+            x.set_instance(instance);
         }
 
         if let Some((_, x)) = &mut self.1 {
-            x.set_index(index);
+            x.set_instance(instance);
         }
     }
 
