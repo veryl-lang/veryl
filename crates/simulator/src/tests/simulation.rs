@@ -39384,3 +39384,46 @@ fn constant_index_past_end_in_untaken_arm() {
         );
     }
 }
+
+#[test]
+fn wide_shift_left_of_signed_narrow_operand_is_aot_native() {
+    // `1 << n` in a 128-bit context is signed (the unsized literal is), so the
+    // 32-bit operand is sign-extended before the shift; a negative operand
+    // fills the bits above it with ones.
+    if !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        a: input  signed logic<32>,
+        n: input  logic<8>,
+        c: input  logic,
+        o: output logic<128>,
+        p: output logic<128>,
+    ) {
+        assign o = a << n;
+        assign p = if c ? (1 << n) : 0;
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        comb_is_aot_native(&ir),
+        "a wide shift of a signed narrow operand must be AOT-C-native",
+    );
+    let mut sim = Simulator::new(ir, None);
+    for a in [1i32, -2, i32::MIN, 0x1234_5678] {
+        for n in [0u64, 1, 31, 64, 100, 127, 128, 200] {
+            sim.set("a", Value::new(a as u32 as u64, 32, true));
+            sim.set("n", Value::new(n, 8, false));
+            sim.set("c", Value::new(1, 1, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            let expect = |x: i128| -> Value {
+                let v = if n >= 128 { 0 } else { (x << n) as u128 };
+                Value::from_u128(v, 0, 128, false)
+            };
+            assert_eq!(sim.get("o").unwrap(), expect(a as i128), "a={a} n={n}");
+            assert_eq!(sim.get("p").unwrap(), expect(1), "n={n}");
+        }
+    }
+}
