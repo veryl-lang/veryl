@@ -339,6 +339,52 @@ pub enum RetWidthCheck {
 pub enum ProtoComponentArg {
     Str(String),
     Expr(ProtoExpression),
+    /// A reference argument: the component binds a port to each member
+    /// when the method is called.
+    Ref(Box<ProtoComponentRef>),
+}
+
+/// A reference argument of a component method call.
+#[derive(Clone, Debug, Hash)]
+pub struct ProtoComponentRef {
+    /// `VRL_REF_*` kind.
+    pub kind: u32,
+    pub members: Vec<ProtoComponentRefMember>,
+}
+
+/// One referenced variable of a [`ProtoComponentRef`].
+#[derive(Clone, Debug, Hash)]
+pub struct ProtoComponentRefMember {
+    /// Reads the variable, for an input and for an output's initial value.
+    pub expr: ProtoExpression,
+    /// The variable the component drives, for an output.
+    pub output: Option<VarId>,
+    /// The clock variable, for a clock firing the component's `on_clock`.
+    pub clock: Option<VarId>,
+    /// The reset variable, for a reset firing the component's `on_reset`.
+    pub reset: Option<VarId>,
+    pub width: u32,
+    /// The port description served by `port_desc`.
+    pub desc: String,
+}
+
+impl ProtoComponentArg {
+    /// The expressions the argument reads.
+    pub fn exprs(&self) -> Vec<&ProtoExpression> {
+        match self {
+            ProtoComponentArg::Str(_) => vec![],
+            ProtoComponentArg::Expr(e) => vec![e],
+            ProtoComponentArg::Ref(r) => r.members.iter().map(|m| &m.expr).collect(),
+        }
+    }
+
+    pub fn exprs_mut(&mut self) -> Vec<&mut ProtoExpression> {
+        match self {
+            ProtoComponentArg::Str(_) => vec![],
+            ProtoComponentArg::Expr(e) => vec![e],
+            ProtoComponentArg::Ref(r) => r.members.iter_mut().map(|m| &mut m.expr).collect(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -400,6 +446,24 @@ pub enum TbMethodKind {
 pub enum ComponentArg {
     Str(String),
     Expr(Expression),
+    Ref(Box<ComponentRef>),
+}
+
+/// Pointer-bound form of [`ProtoComponentRef`].
+#[derive(Clone)]
+pub struct ComponentRef {
+    pub kind: u32,
+    pub members: Vec<ComponentRefMember>,
+}
+
+#[derive(Clone)]
+pub struct ComponentRefMember {
+    pub expr: Expression,
+    pub output: Option<VarId>,
+    pub clock: Option<VarId>,
+    pub reset: Option<VarId>,
+    pub width: u32,
+    pub desc: String,
 }
 
 #[derive(Clone)]
@@ -1609,7 +1673,7 @@ impl ProtoStatement {
                 }
                 ProtoTbMethodKind::Component { args, .. } => {
                     for a in args {
-                        if let ProtoComponentArg::Expr(e) = a {
+                        for e in a.exprs_mut() {
                             e.adjust_offsets(ff_delta, comb_delta);
                         }
                     }
@@ -1809,7 +1873,7 @@ impl ProtoStatement {
                 }
                 ProtoTbMethodKind::Component { args, .. } => {
                     for a in args {
-                        if let ProtoComponentArg::Expr(e) = a {
+                        for e in a.exprs_mut() {
                             e.remap_offsets_with(f);
                         }
                     }
@@ -2961,6 +3025,29 @@ impl ProtoStatement {
                                             use_4state,
                                         ))
                                     }
+                                    ProtoComponentArg::Ref(r) => {
+                                        ComponentArg::Ref(Box::new(ComponentRef {
+                                            kind: r.kind,
+                                            members: r
+                                                .members
+                                                .iter()
+                                                .map(|m| ComponentRefMember {
+                                                    expr: m.expr.apply_values_ptr(
+                                                        ff_values_ptr,
+                                                        ff_len,
+                                                        comb_values_ptr,
+                                                        comb_len,
+                                                        use_4state,
+                                                    ),
+                                                    output: m.output,
+                                                    clock: m.clock,
+                                                    reset: m.reset,
+                                                    width: m.width,
+                                                    desc: m.desc.clone(),
+                                                })
+                                                .collect(),
+                                        }))
+                                    }
                                 })
                                 .collect();
                             TbMethodKind::Component {
@@ -4076,10 +4163,16 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     }
                     air::TbMethod::FileClose => ProtoTbMethodKind::FileClose,
                     air::TbMethod::FileFlush => ProtoTbMethodKind::FileFlush,
-                    air::TbMethod::Component { method, args } => {
+                    air::TbMethod::Component { method, args, refs } => {
                         let args = args
                             .iter()
-                            .map(|a| {
+                            .enumerate()
+                            .map(|(index, a)| {
+                                if let Some(r) = refs.iter().find(|r| r.index == index) {
+                                    return Ok(ProtoComponentArg::Ref(Box::new(
+                                        conv_component_ref(context, r)?,
+                                    )));
+                                }
                                 if is_string_literal(&a.0)
                                     && let Some(s) = extract_string_value(&a.0)
                                 {
@@ -6175,4 +6268,58 @@ mod display_format_tests {
         assert_eq!(out.chars().count(), MAX_FIELD_WIDTH + 2);
         assert!(out.ends_with("7|9"), "{:?}", &out[out.len() - 8..]);
     }
+}
+
+/// Lowers a reference argument, describing each member for `port_desc`.
+fn conv_component_ref(
+    context: &mut Context,
+    r: &air::ComponentRef,
+) -> Result<ProtoComponentRef, SimulatorError> {
+    let (kind, interface, modport) = match &r.modport {
+        Some((interface, modport)) => (
+            veryl_component_sys::VRL_REF_MODPORT,
+            interface.clone(),
+            modport.to_string(),
+        ),
+        None => (
+            veryl_component_sys::VRL_REF_SIGNAL,
+            String::new(),
+            String::new(),
+        ),
+    };
+    let mut members = Vec::with_capacity(r.members.len());
+    for m in &r.members {
+        let expr: ProtoExpression = Conv::conv(context, &m.expr)?;
+        let list = |d: &[u32]| d.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        let dir = if m.output.is_some() {
+            "output"
+        } else if m.clock.is_some() {
+            "clock"
+        } else if m.reset.is_some() {
+            "reset"
+        } else {
+            "input"
+        };
+        let member = m.member.map(|x| x.to_string()).unwrap_or_default();
+        let desc = [
+            dir.to_string(),
+            m.width.to_string(),
+            list(&m.dims),
+            String::new(),
+            m.path.clone(),
+            member,
+            interface.clone(),
+            modport.clone(),
+        ]
+        .join(&veryl_component_sys::VRL_PORT_DESC_SEP.to_string());
+        members.push(ProtoComponentRefMember {
+            expr,
+            output: m.output.as_ref().map(|d| d.id),
+            clock: m.clock,
+            reset: m.reset,
+            width: m.width,
+            desc,
+        });
+    }
+    Ok(ProtoComponentRef { kind, members })
 }

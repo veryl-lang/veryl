@@ -327,7 +327,7 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             // file-write arguments.
             ProtoTbMethodKind::Component { args, .. } => {
                 for a in args {
-                    if let crate::ir::statement::ProtoComponentArg::Expr(e) = a {
+                    for e in a.exprs() {
                         walk_expr_reads(e, c);
                     }
                 }
