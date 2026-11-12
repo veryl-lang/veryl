@@ -669,6 +669,7 @@ impl ReferenceTable {
 
         generic_maps.push(GenericMap {
             id: None,
+            parameter_owner: Some(target.id),
             map: target.generic_table(&instance_path.arguments),
         });
 

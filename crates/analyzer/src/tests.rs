@@ -34,6 +34,7 @@ mod instantiation_note_tests;
 mod interface_array_tests;
 mod interface_instance_select_tests;
 mod modport_connection_tests;
+mod nested_generic_argument_tests;
 mod package_alias_type_tests;
 mod statement_after_if_reset_tests;
 mod unit_cache_tests;

@@ -711,8 +711,9 @@ impl Context {
     pub fn apply_generic_maps(&self, path: &mut GenericSymbolPath) -> bool {
         let mut mapped = false;
         for map in self.generic_maps.iter().rev() {
-            let head = path.paths[0].base();
-            mapped |= map.iter().any(|x| x.map.contains_key(&head));
+            mapped |= map
+                .iter()
+                .any(|x| x.argument(&path.paths[0].base).is_some());
             path.apply_map(map);
         }
         mapped
