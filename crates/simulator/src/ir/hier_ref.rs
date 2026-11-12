@@ -188,9 +188,9 @@ fn resolve_stmt(
             }
             crate::ir::statement::ProtoTbMethodKind::Component { args, .. } => {
                 for arg in args {
-                    let (crate::ir::statement::ProtoComponentArg::Expr(e)
-                    | crate::ir::statement::ProtoComponentArg::Text(crate::ir::ProtoText(e))) = arg;
-                    resolve_expr(e, context, children)?;
+                    for e in arg.exprs_mut() {
+                        resolve_expr(e, context, children)?;
+                    }
                 }
             }
             crate::ir::statement::ProtoTbMethodKind::RandomSeed { value } => {

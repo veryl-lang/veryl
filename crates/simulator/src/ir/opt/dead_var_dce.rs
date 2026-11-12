@@ -361,9 +361,9 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             // file-write arguments.
             ProtoTbMethodKind::Component { args, .. } => {
                 for a in args {
-                    let (crate::ir::statement::ProtoComponentArg::Expr(e)
-                    | crate::ir::statement::ProtoComponentArg::Text(crate::ir::ProtoText(e))) = a;
-                    walk_expr_reads(e, c);
+                    for e in a.exprs() {
+                        walk_expr_reads(e, c);
+                    }
                 }
             }
             // `$tb::random` argument signals are reads, like file-write args.

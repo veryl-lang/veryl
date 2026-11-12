@@ -3,6 +3,7 @@
 //! component instance's vtable.
 
 use crate::component::loader::ComponentError;
+use std::cell::Cell;
 use std::ffi::c_void;
 use veryl_component_sys as sys;
 
@@ -43,7 +44,13 @@ struct HostPort {
     /// Four-state mask parallel to `words` (a set bit is X or Z). All-zero
     /// under a two-state simulation.
     mask_xz: Vec<u64>,
-    dirty: bool,
+    /// Set when the port is written. Boxed so its address survives `ports`
+    /// growth: a direct writer (`port_direct`) caches the pointer at
+    /// `create`, and a method call can add reference ports afterwards.
+    dirty: Box<Cell<bool>>,
+    /// Description served by `port_desc`, for a port bound for a reference
+    /// argument of a method call; `None` for a connected port.
+    desc: Option<String>,
 }
 
 /// A component-internal signal registered for waveform dumping.
@@ -58,9 +65,18 @@ pub struct HostTraceVar {
 /// Host-side value for parameters, method arguments and returns.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum HostValue {
-    Bits { words: Vec<u64>, width: u32 },
+    Bits {
+        words: Vec<u64>,
+        width: u32,
+    },
     Str(String),
     Unit,
+    /// A reference argument: the ports bound for it (one for a signal, one
+    /// per member for a modport) and its `VRL_REF_*` kind.
+    Ref {
+        kind: u32,
+        ports: Vec<u64>,
+    },
 }
 
 impl HostValue {
@@ -98,6 +114,14 @@ impl HostValue {
                 str_: sys::VrlStr::from_str(s),
             },
             HostValue::Unit => sys::VrlValue::unit(),
+            HostValue::Ref { kind, ports } => sys::VrlValue {
+                kind: sys::VRL_VALUE_REF,
+                width: *kind,
+                words: ports.as_ptr(),
+                nwords: ports.len(),
+                mask_xz: std::ptr::null(),
+                str_: sys::VrlStr::from_str(""),
+            },
         }
     }
 }
@@ -169,11 +193,57 @@ impl HostContext {
             width,
             words: vec![0; words_for(width)],
             mask_xz: vec![0; words_for(width)],
-            dirty: false,
+            dirty: Box::new(Cell::new(false)),
+            desc: None,
         });
         self.touched.push(false);
         self.resolved_role.push(None);
         (self.ports.len() - 1) as u32
+    }
+
+    /// Adds a port bound for a reference argument of a method call. It is
+    /// resolved by index, so it counts as touched, and `port_desc` serves
+    /// `desc`. An output starts from `init` (the referenced variable's
+    /// current value), so a partial write keeps the other bits.
+    /// A clock (`role` [`PortRole::Clock`]) resolves as one, so it fires
+    /// `on_clock` like a connected clock port.
+    /// `desc` lacks the last field, the port a clock or a reset fires its
+    /// hook through: `event_port`, the port already hearing its event, else
+    /// the new port itself.
+    pub fn add_ref_port(
+        &mut self,
+        dir: PortDir,
+        role: PortRole,
+        width: u32,
+        desc: &str,
+        event_port: Option<u32>,
+        init: Option<(&[u64], &[u64])>,
+    ) -> u32 {
+        let idx = self.add_port_role(&format!("@ref{}", self.ports.len()), dir, role, width);
+        let event_port = match role {
+            PortRole::Data => String::new(),
+            _ => event_port.unwrap_or(idx).to_string(),
+        };
+        let desc = format!("{desc}{}{event_port}", sys::VRL_PORT_DESC_SEP);
+        if role != PortRole::Data {
+            self.resolved_role[idx as usize] = Some(role);
+        }
+        let port = &mut self.ports[idx as usize];
+        if let Some((words, mask_xz)) = init {
+            let n = port.words.len();
+            for i in 0..n {
+                port.words[i] = words.get(i).copied().unwrap_or(0);
+                port.mask_xz[i] = mask_xz.get(i).copied().unwrap_or(0);
+            }
+        }
+        port.desc = Some(desc);
+        self.touched[idx as usize] = true;
+        idx
+    }
+
+    /// Whether the port was bound for a reference argument.
+    pub fn is_ref_port(&self, idx: u32) -> bool {
+        self.ports[idx as usize].desc.is_some()
     }
 
     pub fn port_touched(&self, idx: u32) -> bool {
@@ -195,10 +265,6 @@ impl HostContext {
             .filter(|(_, touched)| **touched)
             .map(|(p, _)| (p.name.clone(), p.dir))
             .collect()
-    }
-
-    pub fn output_dirty_idx(&self, idx: u32) -> bool {
-        self.ports[idx as usize].dirty
     }
 
     fn decorate(&self, msg: &str) -> String {
@@ -261,12 +327,12 @@ impl HostContext {
         let idx = self
             .port_position(name, PortDir::Output)
             .expect("unknown output port");
-        self.ports[idx as usize].dirty
+        self.ports[idx as usize].dirty.get()
     }
 
     pub fn clear_output_dirty(&mut self) {
         for port in &mut self.ports {
-            port.dirty = false;
+            port.dirty.set(false);
         }
     }
 
@@ -363,7 +429,47 @@ impl HostContext {
             Some(mask_xz) => port.mask_xz.copy_from_slice(mask_xz),
             None => port.mask_xz.iter_mut().for_each(|m| *m = 0),
         }
-        port.dirty = true;
+        port.dirty.set(true);
+    }
+
+    pub(crate) fn svc_port_desc(&self, idx: u32) -> Option<&str> {
+        self.ports.get(idx as usize)?.desc.as_deref()
+    }
+
+    /// Writes `width` bits from `lsb` of an output port, leaving the other
+    /// bits as they are. `None` if the port is not an output or the range
+    /// is out of it.
+    pub(crate) fn svc_write_output_bits(
+        &mut self,
+        idx: u32,
+        lsb: u32,
+        width: u32,
+        words: &[u64],
+        mask_xz: Option<&[u64]>,
+    ) -> Option<()> {
+        let port = self.ports.get_mut(idx as usize)?;
+        if port.dir != PortDir::Output || lsb.checked_add(width)? > port.width {
+            return None;
+        }
+        for i in 0..width {
+            let src = |w: &[u64]| {
+                w.get((i / 64) as usize)
+                    .is_some_and(|x| x >> (i % 64) & 1 != 0)
+            };
+            let bit = lsb + i;
+            let (word, shift) = ((bit / 64) as usize, bit % 64);
+            let set = |dst: &mut u64, on: bool| {
+                if on {
+                    *dst |= 1 << shift;
+                } else {
+                    *dst &= !(1 << shift);
+                }
+            };
+            set(&mut port.words[word], src(words));
+            set(&mut port.mask_xz[word], mask_xz.is_some_and(src));
+        }
+        port.dirty.set(true);
+        Some(())
     }
 
     pub(crate) fn svc_is_4state(&self) -> bool {
@@ -378,7 +484,7 @@ impl HostContext {
     pub(crate) fn svc_port_direct(&mut self, idx: u32) -> Option<sys::VrlPortDirect> {
         let port = self.ports.get_mut(idx as usize)?;
         let dirty = if port.dir == PortDir::Output {
-            &mut port.dirty as *mut bool as *mut u8
+            port.dirty.as_ptr().cast::<u8>()
         } else {
             std::ptr::null_mut()
         };
@@ -747,6 +853,36 @@ extern "C" fn host_runtime_arg_value(
     copy_runtime_arg_text(host.svc_runtime_arg_value(idx), buf, cap)
 }
 
+extern "C" fn host_port_desc(ctx: *mut sys::VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64 {
+    let host = unsafe { host(ctx) };
+    let Some(desc) = host.svc_port_desc(idx) else {
+        return -1;
+    };
+    let n = desc.len().min(cap);
+    if n > 0 {
+        unsafe { std::ptr::copy_nonoverlapping(desc.as_ptr(), buf, n) };
+    }
+    desc.len() as i64
+}
+
+extern "C" fn host_write_output_bits(
+    ctx: *mut sys::VrlCtx,
+    idx: u32,
+    lsb: u32,
+    width: u32,
+    words: *const u64,
+    mask_xz: *const u64,
+) -> i32 {
+    let host = unsafe { host(ctx) };
+    let n = (width as usize).div_ceil(64);
+    let words = unsafe { std::slice::from_raw_parts(words, n) };
+    let mask_xz = (!mask_xz.is_null()).then(|| unsafe { std::slice::from_raw_parts(mask_xz, n) });
+    match host.svc_write_output_bits(idx, lsb, width, words, mask_xz) {
+        Some(()) => 0,
+        None => -1,
+    }
+}
+
 static HOST_API: sys::VrlHostApi = sys::VrlHostApi {
     size: size_of::<sys::VrlHostApi>(),
     port_index: host_port_index,
@@ -773,6 +909,8 @@ static HOST_API: sys::VrlHostApi = sys::VrlHostApi {
     runtime_arg_count: host_runtime_arg_count,
     runtime_arg_name: host_runtime_arg_name,
     runtime_arg_value: host_runtime_arg_value,
+    port_desc: host_port_desc,
+    write_output_bits: host_write_output_bits,
 };
 
 /// Capacity of the method return buffer; larger than the 64-bit values the

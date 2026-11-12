@@ -69,6 +69,21 @@ pub const VRL_DIR_RESET: u32 = 3;
 pub const VRL_VALUE_BITS: u32 = 0;
 pub const VRL_VALUE_STRING: u32 = 1;
 pub const VRL_VALUE_UNIT: u32 = 2;
+/// A reference to design variables, passed to a method argument declared
+/// as `clock`, `reset`, `input`, `output` or `modport`. `words` holds `nwords` port indices
+/// the host bound for the call, one per referenced variable (one for a
+/// signal, one per member for a modport), and `width` one of `VRL_REF_*`.
+/// [`VrlHostApi::port_desc`] describes each port. Only sent to methods whose
+/// manifest declares such an argument.
+pub const VRL_VALUE_REF: u32 = 3;
+
+/// [`VrlValue::width`] of a [`VRL_VALUE_REF`] value.
+pub const VRL_REF_SIGNAL: u32 = 0;
+pub const VRL_REF_MODPORT: u32 = 1;
+
+/// Separator of the fields of a port description, see
+/// [`VrlHostApi::port_desc`].
+pub const VRL_PORT_DESC_SEP: char = '\t';
 
 /// File open modes for [`VrlHostApi::file_open`].
 pub const VRL_FILE_READ: u32 = 0;
@@ -261,6 +276,32 @@ pub struct VrlHostApi {
     /// Returns -1 if `idx` is out of range or the argument is a flag.
     pub runtime_arg_value:
         unsafe extern "C" fn(*mut VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64,
+    /// Copies the description of a port bound for a reference argument into
+    /// `buf` (up to `cap` bytes) and returns its full length in bytes, or -1
+    /// for a port that was not bound for a reference. Callable from any hook
+    /// or method. The description is UTF-8 text, fields separated by
+    /// [`VRL_PORT_DESC_SEP`]: direction (`input`, `output`, `clock` for an
+    /// input that fires `on_clock`, or `reset` for one that fires `on_reset`),
+    /// width of one
+    /// element, packed dimensions and unpacked dimensions (each a
+    /// comma-separated list, possibly empty), hierarchical path, for a
+    /// modport member the member name, interface and modport (empty
+    /// otherwise), then for a clock or a reset the index of the port its
+    /// hook fires through (empty otherwise): the first port bound to its
+    /// event, which [`VrlHostApi::fired_clock`] reports when the event fires.
+    pub port_desc: unsafe extern "C" fn(*mut VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64,
+    /// Writes `width` bits from `lsb` of an output port from `words` and
+    /// their four-state mask from `mask_xz` (null for two-state), leaving the
+    /// other bits as they are. Returns 0, or -1 if the range is out of the
+    /// port.
+    pub write_output_bits: unsafe extern "C" fn(
+        *mut VrlCtx,
+        idx: u32,
+        lsb: u32,
+        width: u32,
+        words: *const u64,
+        mask_xz: *const u64,
+    ) -> i32,
 }
 
 /// Least [`VrlHostApi::size`] that includes the trace entries. Derived from
@@ -403,6 +444,10 @@ pub fn parse_runtime_arg_int(text: &str) -> Option<RuntimeArgInt> {
         magnitude,
     })
 }
+/// Least [`VrlHostApi::size`] that includes the reference entries
+/// ([`VrlHostApi::port_desc`] and [`VrlHostApi::write_output_bits`]).
+pub const VRL_HOST_API_REF_SIZE: usize = std::mem::offset_of!(VrlHostApi, write_output_bits)
+    + size_of::<unsafe extern "C" fn(*mut VrlCtx, u32, u32, u32, *const u64, *const u64) -> i32>();
 
 #[cfg(test)]
 mod tests {
@@ -426,13 +471,13 @@ mod tests {
 
     #[test]
     fn direct_size_covers_port_direct() {
-        assert!(VRL_HOST_API_DIRECT_SIZE <= size_of::<VrlHostApi>());
+        assert!(VRL_HOST_API_DIRECT_SIZE < size_of::<VrlHostApi>());
         assert!(VRL_HOST_API_DIRECT_SIZE > std::mem::offset_of!(VrlHostApi, port_direct));
     }
 
     #[test]
     fn runtime_arg_size_covers_runtime_arg_entries() {
-        assert_eq!(VRL_HOST_API_RUNTIME_ARG_SIZE, size_of::<VrlHostApi>());
+        assert!(VRL_HOST_API_RUNTIME_ARG_SIZE < size_of::<VrlHostApi>());
         const { assert!(VRL_HOST_API_RUNTIME_ARG_SIZE > VRL_HOST_API_DIRECT_SIZE) };
     }
 
@@ -494,6 +539,13 @@ mod tests {
         assert_eq!(v("-1").to_words(64), vec![!0]);
         assert_eq!(v("-1").to_words(70), vec![!0, 0x3f]);
         assert_eq!(v("0x1f").to_words(32), vec![0x1f]);
+    }
+
+    #[test]
+    fn ref_size_covers_ref_entries() {
+        assert_eq!(VRL_HOST_API_REF_SIZE, size_of::<VrlHostApi>());
+        assert!(VRL_HOST_API_REF_SIZE > std::mem::offset_of!(VrlHostApi, port_desc));
+        const { assert!(VRL_HOST_API_REF_SIZE > VRL_HOST_API_RUNTIME_ARG_SIZE) };
     }
 }
 

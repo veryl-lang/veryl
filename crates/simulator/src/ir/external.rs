@@ -67,6 +67,7 @@ pub struct ExternalOutput {
 }
 
 /// `instantiate`d form of [`ExternalOutput`].
+#[derive(Clone, Debug)]
 pub struct OutputTarget {
     pub offset: VarOffset,
     pub ptr: *mut u8,
