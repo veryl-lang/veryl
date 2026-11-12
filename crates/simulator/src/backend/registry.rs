@@ -374,6 +374,8 @@ fn classify_proto_stmt(s: &ProtoStatement) -> String {
         ProtoStatement::CompiledBlock(_) => "CompiledBlock".to_string(),
         ProtoStatement::SequentialBlock(b) => format!("SequentialBlock(len={})", b.len()),
         ProtoStatement::TbMethodCall { .. } => "TbMethodCall".to_string(),
+        ProtoStatement::Fork(_) => "Fork".to_string(),
+        ProtoStatement::DisableFork => "DisableFork".to_string(),
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }

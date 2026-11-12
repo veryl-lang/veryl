@@ -1,4 +1,5 @@
 use crate::handlers::check_embed_include::{EMBED_LANG, EMBED_WAY, INCLUDE_WAY};
+use crate::handlers::check_statement::FORK_MODE;
 use crate::multi_sources::{MultiSources, Source, SourceExcerpt};
 use miette::{self, Diagnostic, Severity, SourceSpan};
 use serde::{Deserialize, Serialize};
@@ -2243,6 +2244,25 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(unknown_fork_mode),
+        help("{help}"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{name}\" is not valid fork mode")]
+    UnknownForkMode {
+        name: String,
+        help: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unknown_include_way),
         help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2898,6 +2918,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownAttribute { input, .. } => input,
             AnalyzerError::UnknownEmbedLang { input, .. } => input,
             AnalyzerError::UnknownEmbedWay { input, .. } => input,
+            AnalyzerError::UnknownForkMode { input, .. } => input,
             AnalyzerError::UnknownIncludeWay { input, .. } => input,
             AnalyzerError::UnknownMember { input, .. } => input,
             AnalyzerError::UnknownMsb { input, .. } => input,
@@ -3033,6 +3054,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownAttribute { input, .. } => input,
             AnalyzerError::UnknownEmbedLang { input, .. } => input,
             AnalyzerError::UnknownEmbedWay { input, .. } => input,
+            AnalyzerError::UnknownForkMode { input, .. } => input,
             AnalyzerError::UnknownIncludeWay { input, .. } => input,
             AnalyzerError::UnknownMember { input, .. } => input,
             AnalyzerError::UnknownMsb { input, .. } => input,
@@ -3181,6 +3203,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownAttribute { instance, .. } => instance,
             AnalyzerError::UnknownEmbedLang { instance, .. } => instance,
             AnalyzerError::UnknownEmbedWay { instance, .. } => instance,
+            AnalyzerError::UnknownForkMode { instance, .. } => instance,
             AnalyzerError::UnknownIncludeWay { instance, .. } => instance,
             AnalyzerError::UnknownMember { instance, .. } => instance,
             AnalyzerError::UnknownMsb { instance, .. } => instance,
@@ -3316,6 +3339,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownAttribute { instance, .. } => instance.as_ref(),
             AnalyzerError::UnknownEmbedLang { instance, .. } => instance.as_ref(),
             AnalyzerError::UnknownEmbedWay { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownForkMode { instance, .. } => instance.as_ref(),
             AnalyzerError::UnknownIncludeWay { instance, .. } => instance.as_ref(),
             AnalyzerError::UnknownMember { instance, .. } => instance.as_ref(),
             AnalyzerError::UnknownMsb { instance, .. } => instance.as_ref(),
@@ -3451,6 +3475,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownAttribute { token_source, .. } => *token_source,
             AnalyzerError::UnknownEmbedLang { token_source, .. } => *token_source,
             AnalyzerError::UnknownEmbedWay { token_source, .. } => *token_source,
+            AnalyzerError::UnknownForkMode { token_source, .. } => *token_source,
             AnalyzerError::UnknownIncludeWay { token_source, .. } => *token_source,
             AnalyzerError::UnknownMember { token_source, .. } => *token_source,
             AnalyzerError::UnknownMsb { token_source, .. } => *token_source,
@@ -4738,6 +4763,16 @@ impl AnalyzerError {
         AnalyzerError::UnknownEmbedWay {
             name: name.to_string(),
             help: format!("valid embed ways are: {}", EMBED_WAY.join("|")),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn unknown_fork_mode(name: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnknownForkMode {
+            name: name.to_string(),
+            help: format!("valid fork modes are: {}", FORK_MODE.join("|")),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

@@ -538,6 +538,8 @@ token_with_comments!(F32);
 token_with_comments!(F64);
 token_with_comments!(False);
 token_with_comments!(Final);
+token_with_comments!(Fork);
+token_with_comments!(Disable);
 token_with_comments!(For);
 token_with_comments!(Function);
 token_with_comments!(Gen);

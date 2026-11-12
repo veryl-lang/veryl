@@ -34,9 +34,38 @@ pub enum Statement {
     SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
     TbMethodCall(TbMethodCall),
+    Fork(Box<ForkStatement>),
+    DisableFork,
     Break,
     Unsupported(TokenRange),
     Null,
+}
+
+/// How a `fork` waits for its branches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ForkMode {
+    /// Continue once every branch has finished (SV `join`).
+    WaitAll,
+    /// Continue once any branch has finished (SV `join_any`).
+    WaitAny,
+    /// Continue at once, the branches keep running (SV `join_none`).
+    WaitNone,
+}
+
+impl ForkMode {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            ForkMode::WaitAll => "wait_all",
+            ForkMode::WaitAny => "wait_any",
+            ForkMode::WaitNone => "wait_none",
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ForkStatement {
+    pub mode: ForkMode,
+    pub branches: Vec<Vec<Statement>>,
 }
 
 #[derive(Clone)]
@@ -510,7 +539,9 @@ impl Statement {
                 x.eval_value(context);
                 ControlFlow::Continue
             }
-            Statement::TbMethodCall(_) => ControlFlow::Continue,
+            Statement::TbMethodCall(_) | Statement::Fork(_) | Statement::DisableFork => {
+                ControlFlow::Continue
+            }
             Statement::Break => ControlFlow::Break,
             Statement::Unsupported(_) => ControlFlow::Continue,
             Statement::Null => ControlFlow::Continue,
@@ -557,7 +588,12 @@ impl Statement {
                     ret.eval_assign(context, assign_table, assign_context);
                 }
             }
-            Statement::Break => (),
+            Statement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.eval_assign(context, assign_table, assign_context, base_tables);
+                }
+            }
+            Statement::DisableFork | Statement::Break => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
@@ -588,7 +624,13 @@ impl Statement {
                     }
                 }
             }
+            Statement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.gather_ff(context, table, decl);
+                }
+            }
             Statement::TbMethodCall(_)
+            | Statement::DisableFork
             | Statement::Break
             | Statement::Unsupported(_)
             | Statement::Null => (),
@@ -645,7 +687,12 @@ impl Statement {
                     s.set_index(index);
                 }
             }
-            Statement::TbMethodCall(_) | Statement::Break => (),
+            Statement::Fork(x) => {
+                for s in x.branches.iter_mut().flatten() {
+                    s.set_index(index);
+                }
+            }
+            Statement::TbMethodCall(_) | Statement::DisableFork | Statement::Break => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
@@ -755,6 +802,18 @@ impl fmt::Display for Statement {
                 }
                 write!(f, "}}")
             }
+            Statement::Fork(x) => {
+                writeln!(f, "fork({}) {{", x.mode.keyword())?;
+                for branch in &x.branches {
+                    writeln!(f, "  {{")?;
+                    for s in branch {
+                        writeln!(f, "    {s}")?;
+                    }
+                    writeln!(f, "  }}")?;
+                }
+                write!(f, "}}")
+            }
+            Statement::DisableFork => "disable fork;".fmt(f),
             Statement::Break => "break;".fmt(f),
             Statement::Unsupported(_) => "/* unsupported */".fmt(f),
             Statement::Null => "".fmt(f),

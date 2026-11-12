@@ -229,7 +229,15 @@ impl Collector {
                 Statement::SystemFunctionCall(x) => {
                     self.add_system_function_call(context, x);
                 }
-                Statement::Break | Statement::Unsupported(_) | Statement::Null => {}
+                Statement::Fork(x) => {
+                    for branch in &x.branches {
+                        self.add_statements(context, branch);
+                    }
+                }
+                Statement::DisableFork
+                | Statement::Break
+                | Statement::Unsupported(_)
+                | Statement::Null => {}
             }
         }
     }

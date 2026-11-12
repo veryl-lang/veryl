@@ -6,6 +6,8 @@ use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
+pub const FORK_MODE: [&str; 3] = ["wait_all", "wait_any", "wait_none"];
+
 #[derive(Default)]
 pub struct CheckStatement {
     pub errors: Vec<AnalyzerError>,
@@ -152,6 +154,37 @@ impl VerylGrammarTrait for CheckStatement {
                 }
             }
             HandlerPoint::After => self.statement_depth_in_loop -= 1,
+        }
+        Ok(())
+    }
+
+    fn fork_statement(&mut self, arg: &ForkStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if !(self.in_initial && self.in_test_module) {
+                self.errors.push(AnalyzerError::invalid_statement(
+                    "fork",
+                    &arg.fork.fork_token.token.into(),
+                ));
+            }
+            let mode = arg.identifier.identifier_token.to_string();
+            if !FORK_MODE.contains(&mode.as_str()) {
+                self.errors.push(AnalyzerError::unknown_fork_mode(
+                    &mode,
+                    &arg.identifier.identifier_token.token.into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn disable_fork_statement(&mut self, arg: &DisableForkStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point
+            && !(self.in_initial && self.in_test_module)
+        {
+            self.errors.push(AnalyzerError::invalid_statement(
+                "disable fork",
+                &arg.disable.disable_token.token.into(),
+            ));
         }
         Ok(())
     }

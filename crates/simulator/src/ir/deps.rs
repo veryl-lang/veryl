@@ -152,7 +152,12 @@ pub fn collect_stmt_deps(stmt: &ProtoStatement, deps: &mut StmtDeps) {
                 collect_stmt_deps(s, deps);
             }
         }
-        ProtoStatement::TbMethodCall { .. } => {}
+        ProtoStatement::Fork(x) => {
+            for s in x.branches.iter().flatten() {
+                collect_stmt_deps(s, deps);
+            }
+        }
+        ProtoStatement::TbMethodCall { .. } | ProtoStatement::DisableFork => {}
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }

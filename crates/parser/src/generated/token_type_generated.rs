@@ -67,6 +67,7 @@ pub enum TokenType {
     Const,
     Converse,
     Default,
+    Disable,
     Else,
     Embed,
     Enum,
@@ -75,6 +76,7 @@ pub enum TokenType {
     False,
     Final,
     For,
+    Fork,
     Function,
     Gen,
     I8,
@@ -164,6 +166,7 @@ impl TokenType {
                 | TokenType::Const
                 | TokenType::Converse
                 | TokenType::Default
+                | TokenType::Disable
                 | TokenType::Else
                 | TokenType::Embed
                 | TokenType::Enum
@@ -172,6 +175,7 @@ impl TokenType {
                 | TokenType::False
                 | TokenType::Final
                 | TokenType::For
+                | TokenType::Fork
                 | TokenType::Function
                 | TokenType::Gen
                 | TokenType::I8
@@ -342,6 +346,7 @@ impl From<&str> for TokenType {
             "ConstTerm" => TokenType::Const,
             "ConverseTerm" => TokenType::Converse,
             "DefaultTerm" => TokenType::Default,
+            "DisableTerm" => TokenType::Disable,
             "ElseTerm" => TokenType::Else,
             "EmbedTerm" => TokenType::Embed,
             "EnumTerm" => TokenType::Enum,
@@ -350,6 +355,7 @@ impl From<&str> for TokenType {
             "FalseTerm" => TokenType::False,
             "FinalTerm" => TokenType::Final,
             "ForTerm" => TokenType::For,
+            "ForkTerm" => TokenType::Fork,
             "FunctionTerm" => TokenType::Function,
             "GenTerm" => TokenType::Gen,
             "I8Term" => TokenType::I8,
@@ -489,6 +495,7 @@ impl std::fmt::Display for TokenType {
             TokenType::Const => "const",
             TokenType::Converse => "converse",
             TokenType::Default => "default",
+            TokenType::Disable => "disable",
             TokenType::Else => "else",
             TokenType::Embed => "embed",
             TokenType::Enum => "enum",
@@ -497,6 +504,7 @@ impl std::fmt::Display for TokenType {
             TokenType::False => "false",
             TokenType::Final => "final",
             TokenType::For => "for",
+            TokenType::Fork => "fork",
             TokenType::Function => "function",
             TokenType::Gen => "gen",
             TokenType::I8 => "i8",

@@ -391,6 +391,11 @@ fn collect_clean(
                 collect_clean(else_block, spans, clean, ff_writers);
             }
             TestbenchStatement::For { body, .. } => collect_clean(body, spans, clean, ff_writers),
+            TestbenchStatement::Fork { branches, .. } => {
+                for branch in branches {
+                    collect_clean(branch, spans, clean, ff_writers);
+                }
+            }
             // Clock/reset drive design nets; the rest either write through
             // paths this filter does not model or advance time.  All keep the
             // unconditional dirty mark at their own call sites.

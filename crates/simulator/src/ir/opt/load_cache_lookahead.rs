@@ -110,9 +110,15 @@ fn walk_stmt(s: &ProtoStatement, idx: usize, reads: &mut FutureReads) {
                 walk_stmt(sub, idx, reads);
             }
         }
+        ProtoStatement::Fork(x) => {
+            for sub in x.branches.iter().flatten() {
+                walk_stmt(sub, idx, reads);
+            }
+        }
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::CompiledBlock(_)
         | ProtoStatement::TbMethodCall { .. }
+        | ProtoStatement::DisableFork
         | ProtoStatement::Break => {}
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")

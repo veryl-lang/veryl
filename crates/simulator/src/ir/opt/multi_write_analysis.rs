@@ -146,8 +146,17 @@ fn count_writes_one(
                 }
             }
         }
+        Statement::Fork(x) => {
+            // Every branch runs, so their writes add up.
+            for branch in &x.branches {
+                for (k, n) in count_writes_seq(branch, ctx, in_for) {
+                    *result.entry(k).or_insert(0) += n;
+                }
+            }
+        }
         Statement::SystemFunctionCall(_)
         | Statement::TbMethodCall(_)
+        | Statement::DisableFork
         | Statement::Break
         | Statement::Unsupported(_)
         | Statement::Null => {}

@@ -288,6 +288,11 @@ fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &mut Vec<Rang
                 stmt_ranges(t, reads, writes);
             }
         }
+        ProtoStatement::Fork(x) => {
+            for t in x.branches.iter().flatten() {
+                stmt_ranges(t, reads, writes);
+            }
+        }
         ProtoStatement::CompiledBlock(cb) => {
             for t in cb.original_stmts.iter() {
                 stmt_ranges(t, reads, writes);
@@ -295,6 +300,7 @@ fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &mut Vec<Rang
         }
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::TbMethodCall { .. }
+        | ProtoStatement::DisableFork
         | ProtoStatement::Break => {}
         ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")

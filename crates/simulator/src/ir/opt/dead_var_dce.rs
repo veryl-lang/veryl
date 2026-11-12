@@ -275,6 +275,11 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                 walk_stmt_liveness(s, c);
             }
         }
+        ProtoStatement::Fork(x) => {
+            for s in x.branches.iter().flatten() {
+                walk_stmt_liveness(s, c);
+            }
+        }
         ProtoStatement::SystemFunctionCall(x) => match x {
             ProtoSystemFunctionCall::Display { args, .. }
             | ProtoSystemFunctionCall::Write { args, .. } => {
@@ -351,7 +356,7 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             | ProtoTbMethodKind::RandomGet { .. }
             | ProtoTbMethodKind::RandomGetSeed { .. } => {}
         },
-        ProtoStatement::Break => {}
+        ProtoStatement::DisableFork | ProtoStatement::Break => {}
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }

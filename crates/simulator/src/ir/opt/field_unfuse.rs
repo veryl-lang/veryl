@@ -350,6 +350,11 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                 census_stmt(s, c, poison);
             }
         }
+        ProtoStatement::Fork(x) => {
+            for s in x.branches.iter().flatten() {
+                census_stmt(s, c, poison);
+            }
+        }
         ProtoStatement::SystemFunctionCall(x) => match x {
             ProtoSystemFunctionCall::Display { args, .. }
             | ProtoSystemFunctionCall::Write { args, .. } => {
@@ -432,7 +437,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                 c.bail = true;
             }
         }
-        ProtoStatement::Break => {}
+        ProtoStatement::DisableFork | ProtoStatement::Break => {}
         ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
@@ -693,6 +698,11 @@ impl Rewriter<'_> {
                     self.stmt(s);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter_mut().flatten() {
+                    self.stmt(s);
+                }
+            }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
@@ -712,6 +722,7 @@ impl Rewriter<'_> {
             },
             ProtoStatement::CompiledBlock(_)
             | ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::DisableFork
             | ProtoStatement::Break => {}
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")

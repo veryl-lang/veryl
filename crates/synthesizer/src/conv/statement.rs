@@ -115,6 +115,9 @@ fn process_statement(
         Statement::TbMethodCall(_) => Err(SynthesizerError::internal(
             "testbench method call reached synthesizer",
         )),
+        Statement::Fork(_) | Statement::DisableFork => Err(SynthesizerError::internal(
+            "fork statement reached synthesizer",
+        )),
         Statement::Break => Err(SynthesizerError::internal(
             "break statement reached synthesizer",
         )),
