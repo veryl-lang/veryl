@@ -9967,6 +9967,8 @@ fn referring_before_definition() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // A function may be called above the constants it uses: a constant is
+    // evaluated from its declaration.
     let code = r#"
     module ModuleA {
         let _a: u32 = func();
@@ -9979,10 +9981,22 @@ fn referring_before_definition() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::ReferringBeforeDefinition { .. }
-    ));
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA {
+        if 1 :g {
+            let _a: u32 = func();
+        }
+        const C: u32 = 5;
+        function func() -> u32 {
+            return C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 
     let code = r#"
     module ModuleA #(
@@ -10220,6 +10234,21 @@ fn referring_inactive_definition() {
     assert!(errors.is_empty());
 
     let code = r#"
+    package PkgA {
+        #[ifdef(FOO)]
+        const Y: u32 = 8;
+        const X: u32 = PkgA::Y;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    let code = r#"
     module ModuleA (
         o_a: output logic,
     ) {
@@ -10252,6 +10281,271 @@ fn referring_inactive_definition() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        assign a = 0;
+    }
+    module ModuleA {
+        #[ifdef(FOO)]
+        inst bi: InterfaceA;
+        let _a: logic = bi.a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors.is_empty()
+            && errors
+                .iter()
+                .all(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    // A reference the defines guard out is never converted.
+    let code = r#"
+    module ModuleA {
+        #[ifdef(FOO)]
+        let _x: logic = a;
+        let a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn referring_before_definition_in_any_scope() {
+    fn only_referring_before_definition(code: &str) -> bool {
+        let errors = analyze(code);
+        !errors.is_empty()
+            && errors
+                .iter()
+                .all(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    }
+
+    let code = r#"
+    interface InterfaceA {
+        let _x: logic = a;
+        var a: logic;
+        assign a = 0;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // A generic body converts where it is declared, and so does what it calls.
+    let code = r#"
+    module ModuleA {
+        function g::<W: u32> () -> u32 {
+            return f();
+        }
+        let b : u32 = 0;
+        let _a: u32 = g::<1>();
+        function f () -> u32 {
+            return b;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = prj::PkgB::Y;
+    }
+    package PkgB {
+        const Y: u32 = 1;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    package PkgA {
+        const X: u32 = PkgA::Y;
+        const Y: u32 = 8;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    module ModuleA {
+        var o: logic;
+        always_comb {
+            o = t;
+            var t: logic;
+            t = 0;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // The inner declaration is the one the name resolves to, so the outer
+    // one must not quietly stand in for it.
+    let code = r#"
+    module ModuleA {
+        let a : logic = 0;
+        let _y: logic = a;
+        if 1 :g {
+            let _x: logic = a;
+            let a : logic = 1;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleA (
+        bi: modport InterfaceA::mp,
+    ) {}
+    module ModuleB {
+        inst u: ModuleA (
+            bi,
+        );
+        inst bi: InterfaceA;
+        assign bi.a = 0;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: output,
+        }
+    }
+    module ModuleA {
+        connect bi.mp <> 0;
+        inst bi: InterfaceA;
+    }
+    "#;
+    // The connection is dropped, which leaves the member unassigned.
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    );
+    assert!(errors.iter().all(|x| matches!(
+        x,
+        AnalyzerError::ReferringBeforeDefinition { .. } | AnalyzerError::UnassignVariable { .. }
+    )));
+
+    let code = r#"
+    package PackageA {
+        function func() -> u32 {
+            return X;
+        }
+        const X: u32 = 3;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    module ModuleA {
+        var _a: T;
+        assign _a = 0;
+        const T: type = logic<2>;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // A function body sees what is declared above the first place that
+    // reaches it, which here is the call inside `g`.
+    let code = r#"
+    module ModuleA {
+        function g() -> u32 {
+            return f();
+        }
+        let b : u32 = 0;
+        let _a: u32 = g();
+        function f() -> u32 {
+            return b;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    interface InterfaceA {
+        let _a: u32 = func();
+        let b : u32 = 0;
+        function func() -> u32 {
+            return b;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // Only a module's own `initial` converts after its items; one in a
+    // generate block keeps its place.
+    let code = r#"
+    module ModuleA {
+        initial {
+            $display(a, f());
+        }
+        let a: logic = 0;
+        function f() -> logic {
+            return a;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA {
+        if 1 :g {
+            initial {
+                $display(a);
+            }
+            let a: logic = 0;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // A bind is resolved in the bound module, not where it is written.
+    let code = r#"
+    module ModuleA (
+        i: input logic,
+    ) {}
+    bind ModuleB <- u: ModuleA (
+        i: a,
+    );
+    module ModuleB {
+        var a: logic;
+        assign a = 0;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+        let b: u32 = 0;
+        function f() -> u32 {
+            return b;
+        }
+    }
+    module ModuleA {
+        inst bi: InterfaceA;
+        assign bi.a = 0;
+        let _a: u32 = bi.f();
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
