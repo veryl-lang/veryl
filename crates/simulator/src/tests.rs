@@ -1,3 +1,4 @@
+mod conditional_const_array;
 mod wide_array_slice;
 
 use crate::ir::Ir;

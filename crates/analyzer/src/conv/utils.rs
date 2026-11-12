@@ -209,10 +209,9 @@ pub fn eval_expr(
             expr.eval_comptime(context, None).clone()
         };
 
-        // `eval_comptime` doesn't evaluate an array literal, so evaluate it here
-        // to carry the element values.
-        if matches!(expr, ir::Expression::ArrayLiteral(..))
-            && !comptime.r#type.array.is_empty()
+        // Scalar evaluation cannot carry an unpacked aggregate. Resolve array
+        // literals and constant conditional arms with their destination shape.
+        if !comptime.r#type.array.is_empty()
             && let Some(values) = eval_array_literal_values(context, &comptime.r#type, &mut expr)?
         {
             comptime.value = ValueVariant::NumericArray(values);
@@ -990,6 +989,41 @@ fn eval_array_literal_values(
     r#type: &ir::Type,
     expr: &mut ir::Expression,
 ) -> IrResult<Option<Vec<Value>>> {
+    if let ir::Expression::Ternary(condition, yes, no, _) = expr {
+        if !condition.comptime().is_const {
+            return Ok(None);
+        }
+        let Some(condition) = condition.eval_value(context) else {
+            return Ok(None);
+        };
+        if let Some(taken) = condition.truth() {
+            let arm = if taken { yes } else { no };
+            return eval_array_literal_values(context, r#type, arm);
+        }
+        if r#type.is_string() || r#type.kind.is_float() {
+            return eval_array_literal_values(context, r#type, no);
+        }
+        // An unknown condition merges corresponding integral elements, not
+        // the array as one packed scalar and not an arbitrarily selected arm.
+        let Some(yes) = eval_array_literal_values(context, r#type, yes)? else {
+            return Ok(None);
+        };
+        let Some(no) = eval_array_literal_values(context, r#type, no)? else {
+            return Ok(None);
+        };
+        if yes.len() != no.len() {
+            return Ok(None);
+        }
+        let Some(width) = r#type.total_width() else {
+            return Ok(None);
+        };
+        return Ok(Some(
+            yes.iter()
+                .zip(&no)
+                .map(|(yes, no)| condition.conditional(yes, no, width, r#type.signed))
+                .collect(),
+        ));
+    }
     let Some(exprs) = eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?
     else {
         return Ok(None);
@@ -1092,6 +1126,14 @@ pub fn eval_const_assign(
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
+
+    if comptime.value.is_unknown()
+        && !r#type.array.is_empty()
+        && matches!(expr, ir::Expression::Ternary(..))
+        && let Some(values) = eval_array_literal_values(context, r#type, expr)?
+    {
+        comptime.value = ValueVariant::NumericArray(values);
+    }
 
     match expr {
         // The guard skips an override literal, which already carries its values
