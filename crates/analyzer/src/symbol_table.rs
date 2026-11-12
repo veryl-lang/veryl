@@ -3642,6 +3642,10 @@ pub fn restore_fragment(fragment: SymbolTableFragment) -> Result<(), Box<Symbol>
     ret
 }
 
+pub fn is_active(define_context: &DefineContext) -> bool {
+    SYMBOL_TABLE.with(|f| define_context.is_active(&f.borrow().defines))
+}
+
 /// Sets the defines that pick the active variant of an ifdef-ed declaration.
 pub fn set_defines(defines: &HashSet<StrId>) {
     let changed = SYMBOL_TABLE.with(|f| {

@@ -139,9 +139,6 @@ pub struct Context {
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
     pub allow_component_as_factor: bool,
-    /// Depth of `size_in_component_scope`.
-    component_sizing: usize,
-    global_func_callers: Vec<Namespace>,
     pub in_test_module: bool,
     /// In a test module and the components its hierarchical references may
     /// reach: the identifiers of the test module, which name every instance
@@ -325,11 +322,9 @@ impl Context {
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
-        std::mem::swap(&mut self.global_func_callers, &mut tgt.global_func_callers);
         self.disalbe_const_opt = tgt.disalbe_const_opt;
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
-        self.component_sizing = tgt.component_sizing;
         self.body_names = tgt.body_names.clone();
         self.config = tgt.config.clone();
         self.profiler = tgt.profiler.clone();
@@ -1289,35 +1284,6 @@ impl Context {
 
     pub fn pop_namespace(&mut self) {
         self.namespaces.pop();
-    }
-
-    pub fn push_global_func_caller(&mut self, namespace: Namespace) {
-        self.global_func_callers.push(namespace);
-    }
-
-    pub fn pop_global_func_caller(&mut self) {
-        self.global_func_callers.pop();
-    }
-
-    /// Whether the namespace is a caller's one.
-    pub fn is_global_func_caller(&self, namespace: &Namespace) -> bool {
-        self.global_func_callers
-            .iter()
-            .any(|x| namespace.included(x))
-    }
-
-    pub fn enter_component_sizing(&mut self) {
-        self.component_sizing += 1;
-    }
-
-    pub fn leave_component_sizing(&mut self) {
-        self.component_sizing -= 1;
-    }
-
-    /// Whether the component's own variables are out of reach on purpose, so
-    /// that resolving through the symbol route says nothing about order.
-    pub fn sizing_component_width(&self) -> bool {
-        self.component_sizing > 0
     }
 
     pub fn current_namespace(&self) -> Option<Namespace> {

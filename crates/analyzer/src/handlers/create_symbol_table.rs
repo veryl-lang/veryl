@@ -155,6 +155,7 @@ pub struct CreateSymbolTable {
     default_block: Option<StrId>,
     for_identifier: Option<Token>,
     anonymous_block: usize,
+    in_deferred_block_header: bool,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
     enum_member_prefix: Option<String>,
@@ -918,10 +919,26 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn initial_declaration(&mut self, _arg: &InitialDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.in_deferred_block_header = true;
+        }
+        Ok(())
+    }
+
+    fn final_declaration(&mut self, _arg: &FinalDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.in_deferred_block_header = true;
+        }
+        Ok(())
+    }
+
     fn statement_block(&mut self, _arg: &StatementBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let (_, name) = self.get_anonymous_block_name(None);
+                let prefix = std::mem::take(&mut self.in_deferred_block_header)
+                    .then(|| resource_table::insert_str(scope::DEFERRED_BLOCK_PREFIX));
+                let (_, name) = self.get_anonymous_block_name(prefix);
                 self.push_namespace(name);
                 self.affiliation.push(Affiliation::StatementBlock);
             }

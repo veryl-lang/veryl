@@ -18,13 +18,12 @@ use crate::conv::checker::port::{check_direction, check_port_default_value, chec
 use crate::conv::checker::portability::check_statement_after_if_reset;
 use crate::conv::context::{FunctionOutputBinding, RuntimeFunctionEffect};
 use crate::conv::utils::{
-    TypePosition, assign_rhs_context_type, check_assign_before_definition,
-    check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_clock,
-    eval_const_assign, eval_expr, eval_factor_symbol, eval_factor_symbol_external,
-    eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
-    expand_connect_const, get_component, get_instantiated_component, get_overridden_params,
-    get_port_connects, get_return_str, insert_port_connect, try_infer_decl_type,
-    try_infer_var_assign, var_path_to_assign_destination,
+    TypePosition, assign_rhs_context_type, check_assign_clock_domain, eval_array_range_assign,
+    eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_factor_symbol,
+    eval_factor_symbol_external, eval_generate_for_range, eval_reset, eval_size, eval_type,
+    eval_variable, expand_connect, expand_connect_const, get_component, get_instantiated_component,
+    get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
+    try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -1020,11 +1019,6 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
 
                     Ok(ir::Declaration::new_comb(statements))
                 } else {
-                    check_assign_before_definition(
-                        context,
-                        x.hierarchical_identifier.as_ref(),
-                        ident.identifier.identifier_token.token,
-                    );
                     Err(ir_error!(token))
                 }
             }
@@ -1038,11 +1032,6 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     if let Some(x) = x.to_assign_destination(context, false) {
                         dst.push(x);
                     } else {
-                        check_assign_before_definition(
-                            context,
-                            item.hierarchical_identifier.as_ref(),
-                            ident.identifier.identifier_token.token,
-                        );
                         return Err(ir_error!(token));
                     }
                 }
