@@ -388,7 +388,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
         // in the comb list the call still reaches state the census cannot
         // bound, so it bails there as before.
         ProtoStatement::TbMethodCall { method, .. } => {
-            use crate::ir::statement::{ProtoComponentArg, ProtoTbMethodKind as K};
+            use crate::ir::statement::ProtoTbMethodKind as K;
             match method {
                 K::ClockNext { count, period } => {
                     for e in count.iter().chain(period.iter()) {
@@ -407,7 +407,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                 }
                 K::Component { args, .. } => {
                     for a in args {
-                        if let ProtoComponentArg::Expr(e) = a {
+                        for e in a.exprs() {
                             census_expr(e, c, poison);
                         }
                     }

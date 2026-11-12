@@ -1542,6 +1542,10 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                         let value = e.eval(&mut sim.mask_cache);
                         host_args.push(crate::component::runtime::host_value_from(&value));
                     }
+                    ComponentArg::Ref(r) => match sim.bind_component_ref(*inst, r) {
+                        Ok(value) => host_args.push(value),
+                        Err(msg) => return ExecResult::Fail(msg),
+                    },
                 }
             }
             match sim.call_component_method(*inst, *method, &host_args) {

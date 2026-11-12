@@ -183,7 +183,7 @@ fn resolve_stmt(
             }
             crate::ir::statement::ProtoTbMethodKind::Component { args, .. } => {
                 for arg in args {
-                    if let crate::ir::statement::ProtoComponentArg::Expr(e) = arg {
+                    for e in arg.exprs_mut() {
                         resolve_expr(e, context, children)?;
                     }
                 }

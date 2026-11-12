@@ -1412,6 +1412,34 @@ impl Simulator {
         msgs
     }
 
+    /// Binds the ports of a reference argument for a method call on a
+    /// component instance; see [`crate::component::runtime::RuntimeComponent::bind_ref`].
+    pub fn bind_component_ref(
+        &mut self,
+        inst: veryl_parser::resource_table::StrId,
+        r: &crate::ir::ComponentRef,
+    ) -> Result<crate::component::host::HostValue, String> {
+        let Some(idx) = self.components.iter().position(|c| c.name_id == inst) else {
+            let name = veryl_parser::resource_table::get_str_value(inst).unwrap_or_default();
+            return Err(format!("unknown component instance `{name}`"));
+        };
+        let mut other_drivers = crate::HashMap::default();
+        for (i, c) in self.components.iter().enumerate() {
+            if i != idx {
+                for var in c.output_vars() {
+                    other_drivers.insert(var, c.name.clone());
+                }
+            }
+        }
+        self.components[idx].bind_ref(
+            r,
+            &self.ir.rtl_driven,
+            &other_drivers,
+            &self.ir.derived_clock_schedule,
+            &mut self.mask_cache,
+        )
+    }
+
     /// Zero-time method call on a component instance. An `Err` carries the
     /// failure messages the component reported (the test fails
     /// immediately).
