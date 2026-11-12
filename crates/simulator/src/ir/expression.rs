@@ -3066,6 +3066,36 @@ fn packed_write_coordinate_valid(
     }
 }
 
+/// Converts `expr`, wrapping the statements its inlined function calls push
+/// into `pending_statements` in an `if` on `guard`, so they run only when
+/// `guard`'s truthiness equals `when`. Without calls this is a plain conversion.
+fn conv_guarded(
+    context: &mut Context,
+    expr: &air::Expression,
+    guard: &ProtoExpression,
+    when: bool,
+) -> Result<ProtoExpression, SimulatorError> {
+    let outer = std::mem::take(&mut context.pending_statements);
+    let result = Conv::conv(context, expr);
+    let inner = std::mem::replace(&mut context.pending_statements, outer);
+    let result = result?;
+    if !inner.is_empty() {
+        let (true_side, false_side) = if when {
+            (inner, vec![])
+        } else {
+            (vec![], inner)
+        };
+        context
+            .pending_statements
+            .push(ProtoStatement::If(super::statement::ProtoIfStatement {
+                cond: Some(guard.clone()),
+                true_side,
+                false_side,
+            }));
+    }
+    Ok(result)
+}
+
 /// Inlines a call into `context.pending_statements` and returns the offset of
 /// every element of its return variable (one entry unless the return type is
 /// an array).
@@ -4029,7 +4059,14 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let x_kind = x.comptime().r#type.kind.clone();
                 let y_kind = y.comptime().r#type.kind.clone();
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
-                let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
+                // `&&` / `||` evaluate the right operand only when the left
+                // one does not decide the result, so its inlined calls run
+                // under that condition.
+                let y: ProtoExpression = match op {
+                    Op::LogicAnd => conv_guarded(context, y.as_ref(), &x, true)?,
+                    Op::LogicOr => conv_guarded(context, y.as_ref(), &x, false)?,
+                    _ => Conv::conv(context, y.as_ref())?,
+                };
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
                 let operand_signed =
@@ -4211,8 +4248,8 @@ impl Conv<&air::Expression> for ProtoExpression {
             }
             air::Expression::Ternary(cond, true_expr, false_expr, comptime) => {
                 let cond: ProtoExpression = Conv::conv(context, cond.as_ref())?;
-                let true_expr: ProtoExpression = Conv::conv(context, true_expr.as_ref())?;
-                let false_expr: ProtoExpression = Conv::conv(context, false_expr.as_ref())?;
+                let true_expr = conv_guarded(context, true_expr.as_ref(), &cond, true)?;
+                let false_expr = conv_guarded(context, false_expr.as_ref(), &cond, false)?;
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
