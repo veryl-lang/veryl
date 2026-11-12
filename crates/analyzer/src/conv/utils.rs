@@ -4708,10 +4708,12 @@ pub fn get_port_connects(
                     // array dims go to the variable's index, the rest to a bit select.
                     let (array_select, width_select) =
                         dst_select.clone().split(comptime.r#type.array.dims());
-                    comptime.r#type.array.drain(0..array_select.dimension());
+                    let index = array_select.to_index();
+                    comptime.r#type.array =
+                        index.selected_shape(context, &comptime.r#type.array, token)?;
                     ir::Expression::Term(Box::new(ir::Factor::Variable(
                         var_id,
-                        array_select.to_index(),
+                        index,
                         width_select,
                         comptime,
                     )))

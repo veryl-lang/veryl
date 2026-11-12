@@ -5,8 +5,9 @@ use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::utils::convert_cast;
 use crate::ir::{
-    Comptime, ExpressionContext, FfTable, FunctionCall, Op, Signature, SystemFunctionCall,
-    SystemFunctionKind, Type, TypeKind, ValueVariant, VarId, VarIndex, VarPath, VarSelect,
+    Comptime, ExpressionContext, FfTable, FunctionCall, InstanceIndex, Op, Signature,
+    SystemFunctionCall, SystemFunctionKind, Type, TypeKind, ValueVariant, VarId, VarIndex, VarPath,
+    VarSelect,
 };
 use crate::symbol::{ClockDomain, Symbol, SymbolKind};
 use crate::value::{Value, ValueBigUint};
@@ -738,30 +739,30 @@ impl Expression {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         match self {
-            Expression::Term(x) => x.set_index(index),
-            Expression::Unary(_, x, _) => x.set_index(index),
+            Expression::Term(x) => x.set_instance(instance),
+            Expression::Unary(_, x, _) => x.set_instance(instance),
             Expression::Binary(x, _, y, _) => {
-                x.set_index(index);
-                y.set_index(index);
+                x.set_instance(instance);
+                y.set_instance(instance);
             }
             Expression::Ternary(x, y, z, _) => {
-                x.set_index(index);
-                y.set_index(index);
-                z.set_index(index);
+                x.set_instance(instance);
+                y.set_instance(instance);
+                z.set_instance(instance);
             }
             Expression::Concatenation(x, _) => {
                 for (x, y) in x {
-                    x.set_index(index);
+                    x.set_instance(instance);
                     if let Some(y) = y {
-                        y.set_index(index);
+                        y.set_instance(instance);
                     }
                 }
             }
             Expression::StructConstructor(_, exprs, _) => {
                 for (_, expr) in exprs {
-                    expr.set_index(index);
+                    expr.set_instance(instance);
                 }
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
@@ -1283,17 +1284,22 @@ impl Factor {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         match self {
-            Factor::Variable(_, i, select, _) => {
+            Factor::Variable(id, i, select, _) => {
                 for expression in i.expressions_mut() {
-                    expression.set_index(index);
+                    expression.set_instance(instance);
                 }
-                select.set_index(index);
-                i.add_prelude(index);
+                select.set_instance(instance);
+                if !instance.shared.contains(id) {
+                    i.add_prelude(&instance.index);
+                }
             }
             Factor::FunctionCall(x) => {
-                x.set_index(index);
+                x.set_instance(instance);
+            }
+            Factor::SystemFunctionCall(x) => {
+                x.set_instance(instance);
             }
             _ => (),
         }
