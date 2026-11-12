@@ -2102,41 +2102,23 @@ impl ProtoExpression {
                         }
                     }
                     Op::Eq | Op::Ne => {
-                        let is_onezero_x = match (x_mask_xz, y_mask_xz) {
-                            (Some(x_mask_xz), Some(y_mask_xz)) => {
-                                let x0 = builder.ins().bnot(x_mask_xz);
-                                let x1 = builder.ins().band(x_payload, x0);
-                                let x2 = builder.ins().bnot(y_mask_xz);
-                                let x3 = builder.ins().band(y_payload, x2);
-                                let x4 = builder.ins().icmp(IntCC::NotEqual, x1, x3);
-
-                                let x5 =
-                                    icmp_const(builder, IntCC::NotEqual, x_mask_xz, 0, needs_wide);
-                                let x6 =
-                                    icmp_const(builder, IntCC::NotEqual, y_mask_xz, 0, needs_wide);
-                                let x7 = builder.ins().bor(x5, x6);
-                                Some((x4, x7))
-                            }
-                            (Some(x_mask_xz), None) => {
-                                let x0 = builder.ins().bnot(x_mask_xz);
-                                let x1 = builder.ins().band(x_payload, x0);
-                                let x2 = builder.ins().icmp(IntCC::NotEqual, x1, y_payload);
-
-                                let x3 =
-                                    icmp_const(builder, IntCC::NotEqual, x_mask_xz, 0, needs_wide);
-                                Some((x2, x3))
-                            }
-                            (None, Some(y_mask_xz)) => {
-                                let x0 = builder.ins().bnot(y_mask_xz);
-                                let x1 = builder.ins().band(y_payload, x0);
-                                let x2 = builder.ins().icmp(IntCC::NotEqual, x_payload, x1);
-
-                                let x3 =
-                                    icmp_const(builder, IntCC::NotEqual, y_mask_xz, 0, needs_wide);
-                                Some((x2, x3))
-                            }
+                        let unknown = match (x_mask_xz, y_mask_xz) {
+                            (Some(x), Some(y)) => Some(builder.ins().bor(x, y)),
+                            (Some(x), None) | (None, Some(x)) => Some(x),
                             (None, None) => None,
                         };
+                        // Only positions known in BOTH operands can establish
+                        // inequality. Clearing each operand's unknown bits
+                        // separately mistakes X compared with 1 for a mismatch.
+                        let is_onezero_x = unknown.map(|mask| {
+                            let diff = builder.ins().bxor(x_payload, y_payload);
+                            let known = builder.ins().bnot(mask);
+                            let diff = builder.ins().band(diff, known);
+                            let mismatch =
+                                icmp_const(builder, IntCC::NotEqual, diff, 0, needs_wide);
+                            let unknown = icmp_const(builder, IntCC::NotEqual, mask, 0, needs_wide);
+                            (mismatch, unknown)
+                        });
                         if let Some((is_onezero, is_x)) = is_onezero_x {
                             let one = builder.ins().iconst(I64, 1);
 
@@ -3147,7 +3129,7 @@ impl ProtoExpression {
 
         if is_cmp {
             let nb_val = builder.ins().iconst(I32, op_nb as i64);
-            let payload = match op {
+            let mut payload = match op {
                 Op::Eq | Op::EqWildcard => call_helper_ret(
                     context,
                     builder,
@@ -3286,6 +3268,45 @@ impl ProtoExpression {
                 y_width,
             );
             if let Some(mut is_xz) = mask_xz {
+                if matches!(op, Op::Eq | Op::Ne) {
+                    let mut diff = emit_wide_binary_op(
+                        context,
+                        builder,
+                        wide_fn_addrs::bxor(),
+                        x_ptr,
+                        y_ptr,
+                        op_nb,
+                    );
+                    for (mask, operand, operand_width) in
+                        [(x_mask_xz, x, x_width), (y_mask_xz, y, y_width)]
+                    {
+                        if let Some(mask) = mask {
+                            let mask = marshal_wide_operand(
+                                context,
+                                builder,
+                                returns_wide_pointer(operand),
+                                mask,
+                                operand_width,
+                                op_nb,
+                                signed,
+                            );
+                            diff = emit_wide_binary_op(
+                                context,
+                                builder,
+                                wide_fn_addrs::band_not(),
+                                diff,
+                                mask,
+                                op_nb,
+                            );
+                        }
+                    }
+                    let mismatch = emit_wide_is_nonzero(context, builder, diff, op_nb);
+                    let equal = builder.ins().bnot(mismatch);
+                    is_xz = builder.ins().band(is_xz, equal);
+                    // A known unequal bit dominates unknown bits elsewhere.
+                    let known = builder.ins().iconst(I64, i64::from(*op == Op::Ne));
+                    payload = builder.ins().select(mismatch, known, payload);
+                }
                 if matches!(op, Op::LogicAnd | Op::LogicOr) {
                     let not_one = builder.ins().icmp_imm_s(IntCC::Equal, payload, 0);
                     is_xz = builder.ins().band(is_xz, not_one);
