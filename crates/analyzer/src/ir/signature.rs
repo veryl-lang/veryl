@@ -222,9 +222,20 @@ impl Signature {
 
                         let base = symbol_table::get(inst.base).unwrap();
                         let params = base.generic_parameters();
-                        if inst.arguments.len() == params.len() {
+                        // A global function instance is shared by every caller
+                        // passing the same argument text, so its arguments name
+                        // the first caller's symbols.
+                        let arguments = match path.paths.last() {
+                            Some(x) if base.is_global_function() => x
+                                .arguments
+                                .iter()
+                                .map(|x| context.canonical_generic_argument(x))
+                                .collect(),
+                            _ => inst.arguments.clone(),
+                        };
+                        if arguments.len() == params.len() {
                             for (i, (name, _)) in params.iter().enumerate() {
-                                let mut arg = inst.arguments[i].clone();
+                                let mut arg = arguments[i].clone();
                                 if let Some(current_namespace) = &current_namespace {
                                     arg.append_namespace_path(current_namespace, &base.namespace);
                                 }

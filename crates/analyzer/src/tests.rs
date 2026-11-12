@@ -20279,6 +20279,97 @@ fn generic_arg_forwarded_to_other_project() {
 }
 
 #[test]
+fn other_project_global_function_generic_arg() {
+    let inputs = [
+        (
+            "prj",
+            r#"
+    module ModuleA #(
+        param W: u32 = 2,
+    ) (
+        o: output logic<32>,
+    ) {
+        assign o = libx::width::<W>() + libx::width::<W>();
+    }
+
+    module ModuleB #(
+        param W: u32 = 2,
+    ) (
+        o: output logic<32>,
+    ) {
+        assign o = libx::width::<W>();
+    }
+
+    module ModuleC (
+        o1: output logic<32>,
+        o2: output logic<32>,
+    ) {
+        inst a: ModuleA #(W: 5) (o: o1);
+        inst b: ModuleB #(W: 9) (o: o2);
+    }
+    "#,
+        ),
+        (
+            "libx",
+            r#"
+    pub function width::<N: u32> () -> u32 {
+        return N;
+    }
+    "#,
+        ),
+    ];
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let mut parsed = vec![];
+    for (i, (prj, code)) in inputs.iter().enumerate() {
+        let metadata = Metadata::create_default(prj).unwrap();
+        let parser = Parser::parse(code, &format!("test_{i}.veryl")).unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        analyzer.analyze_pass1(prj, &parser.veryl);
+        parsed.push((parser, analyzer));
+    }
+    Analyzer::analyze_post_pass1();
+
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    for (parser, analyzer) in &parsed {
+        let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    let top = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Component::Module(x) if x.name.to_string() == "ModuleC" => Some(x),
+            _ => None,
+        })
+        .unwrap();
+    let outputs: Vec<_> = top
+        .declarations
+        .iter()
+        .filter_map(|x| match x {
+            crate::ir::Declaration::Inst(x) => Some(x.component.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        outputs[0].contains("var1 = 32'h0000000a;"),
+        "{}",
+        outputs[0]
+    );
+    assert_eq!(outputs[0].matches("func ").count(), 1, "{}", outputs[0]);
+    assert!(
+        outputs[1].contains("var1 = 32'h00000009;"),
+        "{}",
+        outputs[1]
+    );
+}
+
+#[test]
 fn type_inference_not_supported() {
     // Binary arithmetic is not an inferable expression shape.
     let code = r#"
