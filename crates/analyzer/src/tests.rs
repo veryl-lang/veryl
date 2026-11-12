@@ -815,43 +815,6 @@ fn implicit_clock_conversion() {
         AnalyzerError::ImplicitClockConversion { .. }
     ));
 
-    // logic members of a struct mixing clock/reset and logic members wired
-    // into clock/reset ports
-    let code = r#"
-    package PackageA {
-        struct Mixed {
-            clk: clock,
-            rst: reset,
-            d  : logic<2>,
-        }
-    }
-    module ModuleA (
-        i_s: input PackageA::Mixed,
-        o_q: output logic,
-    ) {
-        inst u: ModuleB ( clk: i_s.d[0], rst: i_s.d[1], o_q: o_q );
-    }
-    module ModuleB (
-        clk: input clock,
-        rst: input reset,
-        o_q: output logic,
-    ) {
-        always_ff (clk, rst) {
-            if_reset { o_q = 0; } else { o_q = ~o_q; }
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::ImplicitClockConversion { .. }
-    ));
-    assert!(matches!(
-        errors[1],
-        AnalyzerError::ImplicitClockConversion { .. }
-    ));
-
     // a logic vector wired into an input port of a struct with clock
     // members
     let code = r#"
@@ -971,7 +934,7 @@ fn implicit_clock_conversion() {
         }
         struct Outer {
             inner: ClockBundle,
-            d    : logic      ,
+            c    : clock      ,
         }
     }
     module ModuleA (
@@ -987,7 +950,7 @@ fn implicit_clock_conversion() {
         o_q: output logic,
     ) {
         always_ff (clk.inner.a, rst) {
-            if_reset { o_q = 0; } else { o_q = clk.d; }
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
         }
     }
     "#;
@@ -1172,21 +1135,41 @@ fn implicit_clock_conversion() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
-    // clock/reset members of a struct mixing clock/reset and logic members
-    // connect to clock/reset ports without explicit binding
+    // a bit or a range selected from a struct with clock/reset members
+    // (nested ones and arrays of it included) keeps the kind of the members
     let code = r#"
     package PackageA {
-        struct Mixed {
-            clk: clock,
-            rst: reset,
-            d  : logic<2>,
+        struct ClockBundle {
+            a: clock   ,
+            b: clock<2>,
+        }
+        struct ResetBundle {
+            a: reset,
+            b: reset,
+        }
+        struct NestedBundle {
+            a: ClockBundle,
+            b: clock      ,
+        }
+        struct PosedgeBundle {
+            a: clock_posedge,
+            b: clock_posedge,
         }
     }
     module ModuleA (
-        i_s: input PackageA::Mixed,
-        o_q: output logic,
+        i_clk : input PackageA::ClockBundle     ,
+        i_rst : input PackageA::ResetBundle     ,
+        i_nest: input PackageA::NestedBundle    ,
+        i_arr : input PackageA::ClockBundle  [2],
+        i_pos : input PackageA::PosedgeBundle   ,
+        o_q   : output logic<7>,
     ) {
-        inst u: ModuleB ( clk: i_s.clk, rst: i_s.rst, o_q: o_q );
+        inst u0: ModuleB ( clk: i_clk[0], rst: i_rst[1], o_q: o_q[0] );
+        inst u1: ModuleB ( clk: i_nest[3], rst: i_rst[0], o_q: o_q[1] );
+        inst u2: ModuleB ( clk: i_arr[1][2], rst: i_rst[0], o_q: o_q[2] );
+        inst u3: ModuleC ( clk: i_clk[2:1], rst: i_rst[1:0], o_q: o_q[4:3] );
+        inst u4: ModuleC ( clk: i_nest.a[1+:2], rst: i_rst[1:0], o_q: o_q[6:5] );
+        inst u5: ModuleD ( clk: i_pos[1] );
     }
     module ModuleB (
         clk: input clock,
@@ -1195,6 +1178,26 @@ fn implicit_clock_conversion() {
     ) {
         always_ff (clk, rst) {
             if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    module ModuleC (
+        clk: input clock<2>,
+        rst: input reset<2>,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk[0], rst[0]) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk[1], rst[1]) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    module ModuleD (
+        clk: input clock_posedge,
+    ) {
+        var q: logic;
+        always_ff (clk) {
+            q = ~q;
         }
     }
     "#;
@@ -19767,7 +19770,7 @@ fn clock_reset_union_member() {
     package Pkg {
         struct StructA {
             a: clock,
-            b: logic,
+            b: clock,
         }
         union UnionA {
             a: StructA ,
@@ -19832,6 +19835,176 @@ fn clock_reset_union_member() {
         errors[0],
         AnalyzerError::ClockResetUnionMember { .. }
     ));
+}
+
+#[test]
+fn mixed_clock_reset_struct_member() {
+    let is_error = |errors: &[AnalyzerError]| {
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MixedClockResetStructMember { .. }))
+    };
+
+    // a clock and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+            b: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a reset and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: reset   ,
+            b: logic<2>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // clocks of different edges
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock        ,
+            b: clock_posedge,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock and a reset
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+            b: reset,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // resets of different kinds
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: reset_async_high,
+            b: reset_async_low ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock in a nested struct and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+        }
+        struct StructB {
+            a: StructA,
+            b: logic  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock in a nested struct and a reset
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+        }
+        struct StructB {
+            a: StructA,
+            b: reset  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock through a typedef and a logic
+    let code = r#"
+    package Pkg {
+        type ClockAlias = clock;
+        struct StructA {
+            a: ClockAlias,
+            b: logic     ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock given by a generic type argument and a logic
+    let code = r#"
+    module ModuleA {
+        type ClockAlias = clock;
+        struct StructA::<T: type> {
+            a: T    ,
+            b: logic,
+        }
+        var _a: StructA::<ClockAlias>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // the same kind of clocks/resets of any width, nested or through a
+    // typedef, and a struct without clock/reset are clean
+    let code = r#"
+    package Pkg {
+        type ClockAlias = clock;
+        struct StructA {
+            a: clock     ,
+            b: clock<2>  ,
+            c: ClockAlias,
+        }
+        struct StructB {
+            a: StructA,
+            b: clock  ,
+        }
+        struct StructC {
+            a: reset_sync_low   ,
+            b: reset_sync_low<2>,
+        }
+        struct StructD {
+            a: logic   ,
+            b: logic<2>,
+        }
+    }
+    module ModuleA {
+        struct StructE::<T: type> {
+            a: T    ,
+            b: clock,
+        }
+        let _a: StructE::<Pkg::ClockAlias> = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

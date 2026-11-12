@@ -139,7 +139,10 @@ fn arm_type(context: &mut Context, arm: &ir::Expression) -> Option<ir::Type> {
             let mut r#type = comptime.r#type.clone();
             r#type.flatten_struct_union_enum();
             r#type.set_concrete_width(Shape::new(vec![Some(beg - end + 1)]));
-            r#type.restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
+            r#type.restore_member(
+                comptime.member_signed,
+                comptime.select_clock_reset().as_ref(),
+            );
             Some(r#type)
         }
         _ => None,
