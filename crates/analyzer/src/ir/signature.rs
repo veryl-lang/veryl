@@ -279,7 +279,10 @@ impl Signature {
     }
 
     pub fn to_generic_map(&self) -> Vec<GenericMap> {
-        let mut ret = GenericMap::default();
+        let mut ret = GenericMap {
+            parameter_owner: Some(self.symbol),
+            ..Default::default()
+        };
 
         for (key, val) in &self.generic_parameters {
             ret.map.insert(*key, val.clone());

@@ -27,7 +27,13 @@ pub struct PackageConstKey {
     symbol: SymbolId,
     usage: PackageConstUse,
     in_generic: bool,
-    generic_maps: Vec<Vec<Vec<(StrId, CanonicalArg)>>>,
+    generic_maps: Vec<Vec<CanonicalMap>>,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct CanonicalMap {
+    owner: Option<SymbolId>,
+    entries: Vec<(StrId, CanonicalArg)>,
 }
 
 /// An identifier is keyed by the symbol it resolves to, not its text: its
@@ -76,7 +82,10 @@ impl PackageConstKey {
                             .map(|(name, arg)| Some((*name, canonical_arg(arg)?)))
                             .collect::<Option<Vec<_>>>()?;
                         entries.sort_by_key(|(name, _)| *name);
-                        Some(entries)
+                        Some(CanonicalMap {
+                            owner: map.parameter_owner,
+                            entries,
+                        })
                     })
                     .collect::<Option<Vec<_>>>()
             })
