@@ -7190,7 +7190,11 @@ impl Conv<&air::Module> for ProtoModule {
                 } else {
                     stmts
                 };
-                if tb_ff_store {
+                // precompile_tb_bodies is the only safe initial-block chunker:
+                // it preserves a settle boundary after a DUT-visible write.
+                // The general event chunker below can recombine that write
+                // with a following guard, which then polls stale comb state.
+                if event.is_initial() || tb_ff_store {
                     let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
                     return (event, stmts);
                 }
