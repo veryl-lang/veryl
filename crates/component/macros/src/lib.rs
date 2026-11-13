@@ -461,15 +461,10 @@ fn expand_derive(input: DeriveInput) -> syn::Result<TokenStream2> {
         }
     }
 
-    // A `ClockPort` field is what makes a component clocked, so the kind is
-    // inferred from it; an explicit declaration must agree.
+    // A `ClockPort` field makes a component clocked, so the kind is inferred
+    // from it. A clocked component may also take its clocks only through
+    // methods (a `ClockPort` argument), so it declares the kind explicitly.
     let (kind_variant, kind_str) = match declared_kind.as_deref() {
-        Some("clocked") if !has_clock_port => {
-            return Err(syn::Error::new(
-                spec.kind.unwrap().span(),
-                "clocked components declare their clock with a ClockPort field",
-            ));
-        }
         Some("clocked") => (quote!(Clocked), "clocked"),
         Some("method_only") => (quote!(MethodOnly), "method_only"),
         None if has_clock_port => (quote!(Clocked), "clocked"),
@@ -543,6 +538,10 @@ fn expand_derive(input: DeriveInput) -> syn::Result<TokenStream2> {
             #[doc(hidden)]
             pub const __COMPONENT_KIND: ::veryl_component::ComponentKind =
                 ::veryl_component::ComponentKind::#kind_variant;
+            /// Whether a `ClockPort` field can fire `on_clock`; checked by
+            /// `#[component_impl]`, which sees the methods.
+            #[doc(hidden)]
+            pub const __COMPONENT_HAS_CLOCK_PORT: bool = #has_clock_port;
             #[doc(hidden)]
             pub const __COMPONENT_DECL_JSON: &'static str = #decl_json;
             #[doc(hidden)]
@@ -826,6 +825,19 @@ fn arg_conversion(ty: &Type, idx: usize) -> syn::Result<(String, TokenStream2)> 
         };
     }
     let seg = last_segment(ty).unwrap_or_default();
+    // References to design variables: the host binds a port for each when the
+    // method is called, and `SimCtx` turns the argument into a handle.
+    let reference = match seg.as_str() {
+        "InputPort" => Some(("input", quote!(ctx.__input_ref(&args[#idx])?))),
+        "OutputPort" => Some(("output", quote!(ctx.__output_ref(&args[#idx])?))),
+        "ClockPort" => Some(("clock", quote!(ctx.__clock_ref(&args[#idx])?))),
+        "ResetPort" => Some(("reset", quote!(ctx.__reset_ref(&args[#idx])?))),
+        "ModportRef" => Some(("modport", quote!(ctx.__modport_ref(&args[#idx])?))),
+        _ => None,
+    };
+    if let Some((ty_str, conv)) = reference {
+        return Ok((ty_str.to_string(), conv));
+    }
     let conv = match seg.as_str() {
         "String" => quote!(args[#idx].as_str()?.to_string()),
         "u64" => quote!(args[#idx].as_u64()?),
@@ -837,7 +849,8 @@ fn arg_conversion(ty: &Type, idx: usize) -> syn::Result<(String, TokenStream2)> 
         _ => {
             return Err(syn::Error::new(
                 ty.span(),
-                "unsupported method argument type; use &str, String, an integer, bool or Value",
+                "unsupported method argument type; use &str, String, an integer, bool, Value, \
+                 ClockPort, ResetPort, InputPort, OutputPort or ModportRef",
             ));
         }
     };
@@ -1160,12 +1173,31 @@ fn expand_component_impl(mut item_impl: ItemImpl) -> syn::Result<TokenStream2> {
     let hook_forwards = hook_forwards(self_ty, &hooks);
     let dispatch = method_dispatch(self_ty, &methods);
 
+    // A clocked component takes a clock through a `ClockPort` field or a
+    // `ClockPort` method argument; with neither, `on_clock` could never fire.
+    // The derive knows the fields and this block the methods, so the check
+    // runs where `KIND` is evaluated, which exporting the component always does.
+    let has_clock_arg = methods
+        .iter()
+        .any(|m| m.args.iter().any(|a| a.ty == "clock"));
+
     let (impl_generics, _, where_clause) = item_impl.generics.split_for_impl();
     Ok(quote! {
         #item_impl
 
         impl #impl_generics ::veryl_component::Component for #self_ty #where_clause {
-            const KIND: ::veryl_component::ComponentKind = <#self_ty>::__COMPONENT_KIND;
+            const KIND: ::veryl_component::ComponentKind = {
+                ::core::assert!(
+                    !::core::matches!(
+                        <#self_ty>::__COMPONENT_KIND,
+                        ::veryl_component::ComponentKind::Clocked
+                    ) || <#self_ty>::__COMPONENT_HAS_CLOCK_PORT
+                        || #has_clock_arg,
+                    "clocked components take a clock through a ClockPort field or a ClockPort \
+                     method argument"
+                );
+                <#self_ty>::__COMPONENT_KIND
+            };
 
             const MANIFEST_JSON: ::core::option::Option<&'static str> = {
                 const PARTS: &[&str] =
@@ -1199,15 +1231,20 @@ mod tests {
 
     #[test]
     fn kind_must_agree_with_port_fields() {
-        let err = expand_derive(parse_quote! {
+        // Without a `ClockPort` field a clocked component takes its clocks
+        // through methods; `#[component_impl]` checks that it has one.
+        let ok = expand_derive(parse_quote! {
             #[component(kind = clocked)]
             struct C {
                 d: InputPort,
             }
         })
-        .unwrap_err()
+        .unwrap()
         .to_string();
-        assert!(err.contains("ClockPort field"), "{err}");
+        assert!(
+            ok.contains("__COMPONENT_HAS_CLOCK_PORT : bool = false"),
+            "{ok}"
+        );
 
         let err = expand_derive(parse_quote! {
             #[component(kind = method_only)]

@@ -8,7 +8,7 @@ use crate::component::host::{ExternalInstance, HostContext, HostValue, PortDir, 
 use crate::component::loader::{ComponentError, lookup_component_backend};
 use crate::ir::ModuleVariables;
 use crate::ir::variable::{read_payload, write_payload};
-use crate::ir::{Event, Expression, Ir, VarId};
+use crate::ir::{ComponentRef, Event, Expression, Ir, VarId};
 use num_bigint::BigUint;
 use veryl_analyzer::value::{MaskCache, Value, ValueBigUint, ValueU64};
 use veryl_component_sys as sys;
@@ -41,6 +41,10 @@ pub struct RuntimeComponent {
     /// Reused by `stage_inputs` so staging allocates no words per port/step.
     words_scratch: Vec<u64>,
     mask_scratch: Vec<u64>,
+    /// Ports bound for reference arguments, keyed by their description
+    /// (path, direction and shape), so passing the same reference again
+    /// reuses the port.
+    ref_ports: HashMap<String, u32>,
 }
 
 /// How an input port's value is produced each step. A direct read of a plain
@@ -605,7 +609,17 @@ pub fn build_components(
         reset_events
             .retain(|(_, in_idx)| host.port_resolved_role(*in_idx) == Some(PortRole::Reset));
 
-        if kind == sys::VRL_KIND_CLOCKED && clock_events.is_empty() {
+        // A clocked component may take its clocks through methods instead
+        // (a `clock` argument); it then has none until such a call.
+        let takes_clock_arg = manifest.as_ref().is_some_and(|m| {
+            m.methods.iter().any(|method| {
+                method
+                    .args
+                    .iter()
+                    .any(|a| a.ref_kind() == Some(veryl_metadata::ManifestRefKind::Clock))
+            })
+        });
+        if kind == sys::VRL_KIND_CLOCKED && clock_events.is_empty() && !takes_clock_arg {
             return Err(ComponentError::NoClockPortResolved {
                 inst: inst_name.clone(),
                 type_name: type_name.clone(),
@@ -744,12 +758,154 @@ pub fn build_components(
             fire_count: 0,
             words_scratch: Vec::new(),
             mask_scratch: Vec::new(),
+            ref_ports: HashMap::default(),
         });
     }
     Ok(result)
 }
 
 impl RuntimeComponent {
+    /// Variables this component drives through output ports.
+    pub fn output_vars(&self) -> impl Iterator<Item = VarId> + '_ {
+        self.outputs.iter().map(|o| o.var_id)
+    }
+
+    /// Binds a port for each member of a reference argument of a method
+    /// call and returns the argument for the component. As with port
+    /// connections, a variable may be read through any number of
+    /// references, which share one port, but driven through one only: an
+    /// output must not be driven yet, by the design (`rtl_driven`), another
+    /// component (`other_drivers`) or this one. An input is staged right
+    /// away, so the method itself reads the current value; an output starts
+    /// from the variable's current value.
+    pub fn bind_ref(
+        &mut self,
+        r: &ComponentRef,
+        rtl_driven: &crate::HashSet<VarId>,
+        other_drivers: &HashMap<VarId, String>,
+        derived: &crate::ir::DerivedClockSchedule,
+        mask_cache: &mut MaskCache,
+    ) -> Result<HostValue, String> {
+        let use_4state = self.host.use_4state;
+        let path_of = |desc: &str| {
+            desc.split(sys::VRL_PORT_DESC_SEP)
+                .nth(4)
+                .unwrap_or_default()
+                .to_string()
+        };
+        // Check every output before binding anything, so a rejected modport
+        // leaves no member bound.
+        for m in &r.members {
+            let Some(var_id) = m.output else {
+                continue;
+            };
+            let path = path_of(&m.desc);
+            if rtl_driven.contains(&var_id) {
+                return Err(format!(
+                    "component `{}` cannot drive `{path}`: the design drives it",
+                    self.name
+                ));
+            }
+            if let Some(other) = other_drivers.get(&var_id) {
+                return Err(format!(
+                    "component `{}` cannot drive `{path}`: component `{other}` drives it",
+                    self.name
+                ));
+            }
+            if self.outputs.iter().any(|o| o.var_id == var_id) {
+                return Err(format!("component `{}` already drives `{path}`", self.name));
+            }
+        }
+        let mut ports = Vec::with_capacity(r.members.len());
+        let mut staged = false;
+        for m in &r.members {
+            if m.output.is_none()
+                && let Some(&idx) = self.ref_ports.get(&m.desc)
+            {
+                ports.push(u64::from(idx));
+                continue;
+            }
+            let idx = match m.output {
+                None => {
+                    let role = if m.clock.is_some() {
+                        PortRole::Clock
+                    } else if m.reset.is_some() {
+                        PortRole::Reset
+                    } else {
+                        PortRole::Data
+                    };
+                    let idx =
+                        self.host
+                            .add_ref_port(PortDir::Input, role, m.width, m.desc.clone(), None);
+                    // A clock fires `on_clock` from now on, on the event its
+                    // edges are scheduled under.
+                    if let Some(var_id) = m.clock {
+                        self.clock_events
+                            .push((Event::clock(derived.source_of(var_id)), idx));
+                    }
+                    // A reset fires `on_reset` on its event: its assertion,
+                    // and the clock edges of a `rst.assert()` window.
+                    if let Some(var_id) = m.reset {
+                        self.reset_events.push((Event::reset(var_id), idx));
+                    }
+                    let mut source = InputSource::classify(m.expr.clone());
+                    if let InputSource::DirectScalar {
+                        dst_words,
+                        dst_mask,
+                        ..
+                    }
+                    | InputSource::DirectWide {
+                        dst_words,
+                        dst_mask,
+                        ..
+                    } = &mut source
+                    {
+                        let d = self.host.svc_port_direct(idx).expect("port exists");
+                        *dst_words = d.words;
+                        *dst_mask = d.mask_xz;
+                    }
+                    self.inputs.push((idx, source, m.width));
+                    staged = true;
+                    idx
+                }
+                Some(var_id) => {
+                    let nwords = (m.width as usize).div_ceil(64).max(1);
+                    let value = m.expr.eval(mask_cache);
+                    let mut words = Vec::new();
+                    let mut mask_xz = Vec::new();
+                    value_to_words_into(&value, nwords, &mut words);
+                    if use_4state {
+                        value_to_mask_xz_into(&value, nwords, &mut mask_xz);
+                    }
+                    let idx = self.host.add_ref_port(
+                        PortDir::Output,
+                        PortRole::Data,
+                        m.width,
+                        m.desc.clone(),
+                        Some((&words, &mask_xz)),
+                    );
+                    let mut out = OutputBinding::new(idx, var_id);
+                    let d = self.host.svc_port_direct(idx).expect("port exists");
+                    out.src_words = d.words.cast_const();
+                    out.src_mask = d.mask_xz.cast_const();
+                    self.outputs.push(out);
+                    idx
+                }
+            };
+            if m.output.is_none() {
+                self.ref_ports.insert(m.desc.clone(), idx);
+            }
+            ports.push(u64::from(idx));
+        }
+        if staged {
+            self.stage_inputs(mask_cache);
+        }
+        Ok(HostValue::Ref {
+            kind: r.kind,
+            ports,
+        })
+    }
+
     /// Moves accumulated `ctx.log` messages into the per-test output
     /// buffer (joining `$display` output).
     pub fn drain_logs(&mut self) {

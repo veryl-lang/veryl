@@ -47,6 +47,8 @@ struct MockPort {
     /// Set by the direct scalar write path so its pointer is valid; the mock
     /// reads output words directly, so the flag is otherwise unused.
     dirty: bool,
+    /// Description served by `port_desc` for a reference port.
+    desc: Option<String>,
 }
 
 struct MockTraceVar {
@@ -127,7 +129,111 @@ impl MockSim {
             words: vec![0; words_for(width)],
             mask_xz: vec![0; words_for(width)],
             dirty: false,
+            desc: None,
         });
+    }
+
+    /// Binds a port named `name` for a signal reference argument, as the
+    /// host does when a testbench passes `dut.<name>`, and returns the
+    /// argument to give [`Self::call`]. `dims` are the packed dimensions,
+    /// outermost first (`&[8]` for `logic<8>`). Drive and observe it with
+    /// [`Self::set`] and [`Self::get`] like any port.
+    pub fn signal_ref(&mut self, name: &str, output: bool, dims: &[u32]) -> Value {
+        let port = self.add_ref_port(name, output, dims, "", "", "");
+        Value::Ref {
+            kind: sys::VRL_REF_SIGNAL,
+            ports: vec![port],
+        }
+    }
+
+    /// Binds a clock port named `name` for a clock reference argument and
+    /// returns the argument to give [`Self::call`]. Fire it with
+    /// [`Self::set_fired_clock`] and [`Self::clock`] like a connected clock.
+    pub fn clock_ref(&mut self, name: &str) -> Value {
+        self.add_port(name, Dir::Input, Role::Clock, 1);
+        let sep = sys::VRL_PORT_DESC_SEP.to_string();
+        let desc = ["clock", "1", "1", "", name, "", "", ""].join(&sep);
+        let port = self.ports.last_mut().expect("just added");
+        port.desc = Some(desc);
+        Value::Ref {
+            kind: sys::VRL_REF_SIGNAL,
+            ports: vec![(self.ports.len() - 1) as u32],
+        }
+    }
+
+    /// Binds a reset port named `name` for a reset reference argument and
+    /// returns the argument to give [`Self::call`]. Fire it with
+    /// [`Self::reset`] like a connected reset.
+    pub fn reset_ref(&mut self, name: &str) -> Value {
+        self.add_port(name, Dir::Input, Role::Reset, 1);
+        let sep = sys::VRL_PORT_DESC_SEP.to_string();
+        let desc = ["reset", "1", "1", "", name, "", "", ""].join(&sep);
+        let port = self.ports.last_mut().expect("just added");
+        port.desc = Some(desc);
+        Value::Ref {
+            kind: sys::VRL_REF_SIGNAL,
+            ports: vec![(self.ports.len() - 1) as u32],
+        }
+    }
+
+    /// Binds the members of a modport for a modport reference argument and
+    /// returns the argument to give [`Self::call`]. Each member is
+    /// `(name, output, packed dims)` from the component's side; its port is
+    /// named `<instance>.<name>` for [`Self::set`] and [`Self::get`].
+    pub fn modport_ref(
+        &mut self,
+        instance: &str,
+        interface: &str,
+        modport: &str,
+        members: &[(&str, bool, &[u32])],
+    ) -> Value {
+        let ports = members
+            .iter()
+            .map(|(member, output, dims)| {
+                self.add_ref_port(
+                    &format!("{instance}.{member}"),
+                    *output,
+                    dims,
+                    member,
+                    interface,
+                    modport,
+                )
+            })
+            .collect();
+        Value::Ref {
+            kind: sys::VRL_REF_MODPORT,
+            ports,
+        }
+    }
+
+    fn add_ref_port(
+        &mut self,
+        name: &str,
+        output: bool,
+        dims: &[u32],
+        member: &str,
+        interface: &str,
+        modport: &str,
+    ) -> u32 {
+        let width = dims.iter().product::<u32>().max(1);
+        let dir = if output { Dir::Output } else { Dir::Input };
+        self.add_port(name, dir, Role::Data, width);
+        let list = |d: &[u32]| d.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        let sep = sys::VRL_PORT_DESC_SEP.to_string();
+        let desc = [
+            if output { "output" } else { "input" }.to_string(),
+            width.to_string(),
+            list(dims),
+            String::new(),
+            name.to_string(),
+            member.to_string(),
+            interface.to_string(),
+            modport.to_string(),
+        ]
+        .join(&sep);
+        let port = self.ports.last_mut().expect("just added");
+        port.desc = Some(desc);
+        (self.ports.len() - 1) as u32
     }
 
     fn port_position(&self, name: &str, dir: Dir) -> Option<usize> {
@@ -322,6 +428,54 @@ extern "C" fn mock_write_output(
             std::ptr::copy_nonoverlapping(mask_xz, port.mask_xz.as_mut_ptr(), n);
         }
     }
+}
+
+extern "C" fn mock_port_desc(ctx: *mut sys::VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64 {
+    let sim = unsafe { mock(ctx) };
+    let Some(desc) = sim.ports.get(idx as usize).and_then(|p| p.desc.as_deref()) else {
+        return -1;
+    };
+    let n = desc.len().min(cap);
+    if n > 0 {
+        unsafe { std::ptr::copy_nonoverlapping(desc.as_ptr(), buf, n) };
+    }
+    desc.len() as i64
+}
+
+extern "C" fn mock_write_output_bits(
+    ctx: *mut sys::VrlCtx,
+    idx: u32,
+    lsb: u32,
+    width: u32,
+    words: *const u64,
+    mask_xz: *const u64,
+) -> i32 {
+    let sim = unsafe { mock(ctx) };
+    let Some(port) = sim.ports.get_mut(idx as usize) else {
+        return -1;
+    };
+    if port.dir != Dir::Output || lsb.checked_add(width).is_none_or(|end| end > port.width) {
+        return -1;
+    }
+    let n = (width as usize).div_ceil(64);
+    let words = unsafe { std::slice::from_raw_parts(words, n) };
+    let mask_xz = (!mask_xz.is_null()).then(|| unsafe { std::slice::from_raw_parts(mask_xz, n) });
+    for i in 0..width {
+        let src = |w: &[u64]| w[(i / 64) as usize] >> (i % 64) & 1 != 0;
+        let bit = lsb + i;
+        let (word, shift) = ((bit / 64) as usize, bit % 64);
+        let set = |dst: &mut u64, on: bool| {
+            if on {
+                *dst |= 1 << shift;
+            } else {
+                *dst &= !(1 << shift);
+            }
+        };
+        set(&mut port.words[word], src(words));
+        set(&mut port.mask_xz[word], mask_xz.is_some_and(src));
+    }
+    port.dirty = true;
+    0
 }
 
 extern "C" fn mock_port_direct(
@@ -558,6 +712,8 @@ static MOCK_API: sys::VrlHostApi = sys::VrlHostApi {
     trace_write: mock_trace_write,
     is_4state: mock_is_4state,
     port_direct: mock_port_direct,
+    port_desc: mock_port_desc,
+    write_output_bits: mock_write_output_bits,
 };
 
 #[cfg(test)]

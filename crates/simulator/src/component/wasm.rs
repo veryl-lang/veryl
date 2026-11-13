@@ -493,6 +493,16 @@ impl WasmInstance {
                     kind: sys::VRL_VALUE_UNIT,
                     ..Default::default()
                 },
+                HostValue::Ref { kind, ports } => {
+                    let ptr = self.alloc_tracked(&words_to_bytes(ports), allocs)?;
+                    VrlValue32 {
+                        kind: sys::VRL_VALUE_REF,
+                        width: *kind,
+                        words: ptr,
+                        nwords: ports.len() as u32,
+                        ..Default::default()
+                    }
+                }
             };
             encoded.extend_from_slice(&v32.to_le_bytes());
         }
@@ -694,6 +704,56 @@ fn add_host_imports(linker: &mut Linker<StoreCtx>) -> WResult<()> {
     )?;
     linker.func_wrap(
         m,
+        "port_desc",
+        |mut caller: Caller<'_, StoreCtx>, idx: u32, buf: u32, cap: u32| -> WResult<i64> {
+            let memory = memory_of(&mut caller)?;
+            let Some(desc) = host_of(&caller)
+                .and_then(|h| h.svc_port_desc(idx))
+                .map(|d| d.as_bytes().to_vec())
+            else {
+                return Ok(-1);
+            };
+            let n = desc.len().min(cap as usize);
+            memory.write(&mut caller, buf as usize, &desc[..n])?;
+            Ok(desc.len() as i64)
+        },
+    )?;
+    linker.func_wrap(
+        m,
+        "write_output_bits",
+        |mut caller: Caller<'_, StoreCtx>,
+         idx: u32,
+         lsb: u32,
+         width: u32,
+         words_ptr: u32,
+         mask_xz_ptr: u32|
+         -> WResult<i32> {
+            let memory = memory_of(&mut caller)?;
+            let bytes = (width as usize).div_ceil(64) as u32 * 8;
+            let words = bytes_to_words(&guest_bytes(memory, &caller, words_ptr, bytes)?);
+            let mask_xz = if mask_xz_ptr == 0 {
+                None
+            } else {
+                Some(bytes_to_words(&guest_bytes(
+                    memory,
+                    &caller,
+                    mask_xz_ptr,
+                    bytes,
+                )?))
+            };
+            let Some(host) = host_of(&caller) else {
+                return Ok(-1);
+            };
+            Ok(
+                match host.svc_write_output_bits(idx, lsb, width, &words, mask_xz.as_deref()) {
+                    Some(()) => 0,
+                    None => -1,
+                },
+            )
+        },
+    )?;
+    linker.func_wrap(
+        m,
         "param_get",
         |mut caller: Caller<'_, StoreCtx>,
          name_ptr: u32,
@@ -730,7 +790,8 @@ fn add_host_imports(linker: &mut Linker<StoreCtx>) -> WResult<()> {
                         ..Default::default()
                     },
                 ),
-                HostValue::Unit => (
+                // Parameters are never references.
+                HostValue::Unit | HostValue::Ref { .. } => (
                     vec![],
                     VrlValue32 {
                         kind: sys::VRL_VALUE_UNIT,

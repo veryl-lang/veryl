@@ -50,6 +50,14 @@ mod host {
         pub fn file_close(handle: i32);
         pub fn trace_var(name_ptr: *const u8, name_len: usize, width: u32) -> i32;
         pub fn trace_write(handle: i32, words: *const u64);
+        pub fn port_desc(idx: u32, buf: *mut u8, cap: usize) -> i64;
+        pub fn write_output_bits(
+            idx: u32,
+            lsb: u32,
+            width: u32,
+            words: *const u64,
+            mask_xz: *const u64,
+        ) -> i32;
     }
 }
 
@@ -180,6 +188,21 @@ unsafe extern "C" fn port_direct(_: *mut sys::VrlCtx, _: u32, _: *mut sys::VrlPo
     0
 }
 
+unsafe extern "C" fn port_desc(_: *mut sys::VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64 {
+    unsafe { host::port_desc(idx, buf, cap) }
+}
+
+unsafe extern "C" fn write_output_bits(
+    _: *mut sys::VrlCtx,
+    idx: u32,
+    lsb: u32,
+    width: u32,
+    words: *const u64,
+    mask_xz: *const u64,
+) -> i32 {
+    unsafe { host::write_output_bits(idx, lsb, width, words, mask_xz) }
+}
+
 static HOST_API: sys::VrlHostApi = sys::VrlHostApi {
     size: size_of::<sys::VrlHostApi>(),
     port_index,
@@ -203,6 +226,8 @@ static HOST_API: sys::VrlHostApi = sys::VrlHostApi {
     trace_write,
     is_4state,
     port_direct,
+    port_desc,
+    write_output_bits,
 };
 
 /// One live component instance; its box pointer is the `u32` handle

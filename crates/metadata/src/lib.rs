@@ -27,8 +27,8 @@ pub use component::{
     Component, component_crate_name, read_committed_manifests, sidecar_manifest_path,
 };
 pub use component_manifest::{
-    COMMITTED_MANIFEST_FILE, ComponentManifest, WidthExpr, eval_width_expr, parse_library_manifest,
-    parse_width_expr,
+    COMMITTED_MANIFEST_FILE, ComponentManifest, ManifestRefKind, WidthExpr, eval_width_expr,
+    parse_library_manifest, parse_width_expr,
 };
 pub use condition::Condition;
 pub use doc::Doc;

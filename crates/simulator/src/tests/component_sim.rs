@@ -672,6 +672,155 @@ static MP_CLOCKED: sys::VrlComponentVTable = export::vtable::<MpClocked>();
 static TRACER: sys::VrlComponentVTable = export::vtable::<Tracer>();
 static MANIFESTED: sys::VrlComponentVTable = export::vtable::<Manifested>();
 static WIDE: sys::VrlComponentVTable = export::vtable::<Wide>();
+/// Takes its signals as reference arguments of method calls instead of
+/// connections: each clock it drives `out` with `inp + 1`, overwrites
+/// element 3 of `out` (its top byte, as in SystemVerilog) with element 0 of
+/// `inp` (its bottom byte), and answers
+/// the bus's `req` with `req * 2` on `ack`.
+#[derive(veryl_component::Component)]
+#[component(kind = clocked)]
+struct RefProbe {
+    clk: ClockPort,
+    #[state]
+    inp: Option<InputPort>,
+    #[state]
+    out: Option<OutputPort>,
+    #[state]
+    bus: Option<veryl_component::ModportRef>,
+}
+
+#[veryl_component::component_impl]
+impl RefProbe {
+    fn on_clock(&mut self, ctx: &mut SimCtx) -> CompResult<()> {
+        let _ = self.clk;
+        if let (Some(inp), Some(out)) = (self.inp, self.out) {
+            let v = ctx.read_u64(inp);
+            ctx.write(out, veryl_component::Value::from_u64(v + 1, out.width()));
+            let low = ctx.read_elem(inp, &[0])?;
+            ctx.write_elem(out, &[3], low)?;
+        }
+        if let Some(bus) = &self.bus {
+            let req = ctx.read_u64(bus.input("req")?);
+            ctx.write_u64(bus.output("ack")?, req * 2);
+        }
+        Ok(())
+    }
+
+    fn probe(&mut self, _ctx: &mut SimCtx, sig: InputPort) -> CompResult<()> {
+        self.inp = Some(sig);
+        Ok(())
+    }
+
+    fn drive(&mut self, _ctx: &mut SimCtx, sig: OutputPort) -> CompResult<()> {
+        self.out = Some(sig);
+        Ok(())
+    }
+
+    fn attach(&mut self, _ctx: &mut SimCtx, bus: veryl_component::ModportRef) -> CompResult<()> {
+        if bus.modport() != "tb" || bus.members().len() != 2 {
+            bail!("unexpected modport {bus:?}");
+        }
+        self.bus = Some(bus);
+        Ok(())
+    }
+
+    /// The probed signal's shape: packed dims as `d0 * 100 + d1`, and
+    /// whether its path names it.
+    fn shape(&mut self, ctx: &mut SimCtx) -> CompResult<u64> {
+        let Some(inp) = self.inp else {
+            bail!("nothing probed");
+        };
+        let dims = inp.dims();
+        if inp.path() != "x" || !inp.unpacked_dims().is_empty() {
+            bail!("unexpected path `{}`", inp.path());
+        }
+        // A method reads the value the reference had when it was bound.
+        let _ = ctx.read(inp);
+        Ok(u64::from(dims[0]) * 100 + u64::from(dims[1]))
+    }
+}
+
+static REF_PROBE: sys::VrlComponentVTable = export::vtable::<RefProbe>();
+
+/// A clocked component without a clock port: each `watch` passes a clock
+/// and a counter it drives with the number of that clock's edges.
+#[derive(veryl_component::Component)]
+#[component(kind = clocked)]
+struct ClockWatch {
+    #[state]
+    watched: Vec<(ClockPort, OutputPort, u64)>,
+}
+
+#[veryl_component::component_impl]
+impl ClockWatch {
+    fn on_clock(&mut self, ctx: &mut SimCtx) -> CompResult<()> {
+        for (clk, out, count) in &mut self.watched {
+            if ctx.fired(*clk) {
+                *count += 1;
+                ctx.write_u64(*out, *count);
+            }
+        }
+        Ok(())
+    }
+
+    fn watch(&mut self, _ctx: &mut SimCtx, clk: ClockPort, out: OutputPort) -> CompResult<()> {
+        self.watched.push((clk, out, 0));
+        Ok(())
+    }
+}
+
+static CLOCK_WATCH: sys::VrlComponentVTable = export::vtable::<ClockWatch>();
+
+/// Counts the hooks a clock and a reset passed through methods fire.
+#[derive(veryl_component::Component)]
+#[component(kind = clocked)]
+struct ResetRefWatch {
+    #[state]
+    clocks: Option<(OutputPort, u64)>,
+    #[state]
+    resets: Option<(OutputPort, u64)>,
+}
+
+#[veryl_component::component_impl]
+impl ResetRefWatch {
+    fn on_clock(&mut self, ctx: &mut SimCtx) -> CompResult<()> {
+        if let Some((out, n)) = &mut self.clocks {
+            *n += 1;
+            ctx.write_u64(*out, *n);
+        }
+        Ok(())
+    }
+
+    fn on_reset(&mut self, ctx: &mut SimCtx) -> CompResult<()> {
+        if let Some((out, n)) = &mut self.resets {
+            *n += 1;
+            ctx.write_u64(*out, *n);
+        }
+        Ok(())
+    }
+
+    fn count_clocks(
+        &mut self,
+        _ctx: &mut SimCtx,
+        _clk: ClockPort,
+        out: OutputPort,
+    ) -> CompResult<()> {
+        self.clocks = Some((out, 0));
+        Ok(())
+    }
+
+    fn count_resets(
+        &mut self,
+        _ctx: &mut SimCtx,
+        _rst: ResetPort,
+        out: OutputPort,
+    ) -> CompResult<()> {
+        self.resets = Some((out, 0));
+        Ok(())
+    }
+}
+
+static RESET_WATCH_REF: sys::VrlComponentVTable = export::vtable::<ResetRefWatch>();
 static WIDE_BUS: sys::VrlComponentVTable = export::vtable::<WideBus>();
 static DUAL_BUS: sys::VrlComponentVTable = export::vtable::<DualBus>();
 static EXTRA_BUS: sys::VrlComponentVTable = export::vtable::<ExtraBus>();
@@ -715,6 +864,9 @@ const COMPONENTS: &[&str] = &[
     "dual_bus",
     "extra_bus",
     "raw_names",
+    "ref_probe",
+    "clock_watch",
+    "reset_watch_ref",
     // wasm transport e2e fixtures; only looked up when a test routes them
     // to a wasm library via `Config::component_libraries`.
     "fixture_mirror",
@@ -751,6 +903,17 @@ static REGISTER: LazyLock<()> = LazyLock::new(|| {
     register_manifested("dual_bus", &DUAL_BUS, &DualBus::manifest().unwrap());
     register_manifested("extra_bus", &EXTRA_BUS, &ExtraBus::manifest().unwrap());
     register_manifested("raw_names", &RAW_NAMES, &RawNames::manifest().unwrap());
+    register_manifested("ref_probe", &REF_PROBE, &RefProbe::manifest().unwrap());
+    register_manifested(
+        "clock_watch",
+        &CLOCK_WATCH,
+        &ClockWatch::manifest().unwrap(),
+    );
+    register_manifested(
+        "reset_watch_ref",
+        &RESET_WATCH_REF,
+        &ResetRefWatch::manifest().unwrap(),
+    );
     crate::component::loader::register_static_manifest(
         "manifested",
         &Manifested::manifest().unwrap(),
@@ -793,6 +956,9 @@ fn insert_test_manifests() {
     insert("dual_bus", &DualBus::manifest().unwrap());
     insert("extra_bus", &ExtraBus::manifest().unwrap());
     insert("raw_names", &RawNames::manifest().unwrap());
+    insert("ref_probe", &RefProbe::manifest().unwrap());
+    insert("clock_watch", &ClockWatch::manifest().unwrap());
+    insert("reset_watch_ref", &ResetRefWatch::manifest().unwrap());
     insert("edge", &EdgePorts::manifest().unwrap());
     // Synthetic kind-only manifest for the declaration-form check.
     insert("svc_manifested", r#"{"kind":"method_only"}"#);
@@ -4254,4 +4420,409 @@ mod wasm_transport {
             );
         }
     }
+}
+
+const REF_PROBE_SRC: &str = r#"
+    interface PairIf {
+        var req: logic<8>;
+        var ack: logic<8>;
+        modport tb {
+            req: input ,
+            ack: output,
+        }
+    }
+"#;
+
+#[test]
+fn method_reference_arguments_bind_like_ports() {
+    // Signals and a modport passed to methods are read before the edge and
+    // driven with the FFs, like connected ports; a partial write keeps the
+    // other bits of the same hook's write.
+    let code = format!(
+        "{REF_PROBE_SRC}{}",
+        r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst bus: PairIf;
+        var x: logic<4, 8>;
+        var y: logic<4, 8>;
+        var s: u32;
+
+        inst c: $comp::ref_probe ( clk );
+
+        initial {
+            x = 32'h0102_0304;
+            bus.req = 8'd21;
+            c.probe(x);
+            c.drive(y);
+            c.attach(bus.tb);
+            s = c.shape();
+            $assert(s == 408, "packed dims of x");
+            clk.next();
+            $assert(y == 32'h0402_0305, "y = x + 1 with element 3 from x's element 0");
+            $assert(bus.ack == 8'd42, "ack = req * 2");
+            x = 32'h0000_0010;
+            bus.req = 8'd5;
+            c.probe(x);
+            clk.next();
+            $assert(y == 32'h1000_0011, "rebinding reuses the port");
+            $assert(bus.ack == 8'd10, "ack follows req");
+            $finish();
+        }
+    }
+    "#
+    );
+    assert_all_pass(&run_component_test(&code, "comp_test"));
+}
+
+#[test]
+fn method_reference_argument_cannot_drive_a_design_driven_variable() {
+    let code = format!(
+        "{REF_PROBE_SRC}{}",
+        r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        var y: logic<4, 8>;
+
+        assign y = 32'h1;
+
+        inst c: $comp::ref_probe ( clk );
+
+        initial {
+            c.drive(y);
+            clk.next();
+            $finish();
+        }
+    }
+    "#
+    );
+    for (config, result, _) in run_component_test(&code, "comp_test") {
+        let TestResult::Fail(msg) = &result else {
+            panic!("expected failure for {config:?}, got {result:?}");
+        };
+        assert!(
+            msg.contains("cannot drive `y`: the design drives it"),
+            "unexpected message for {config:?}: {msg}"
+        );
+    }
+}
+
+#[test]
+fn method_reference_arguments_must_name_variables() {
+    let code = format!(
+        "{REF_PROBE_SRC}{}",
+        r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst bus: PairIf;
+        var x: logic<4, 8>;
+        var y: logic<4, 8>;
+
+        inst c: $comp::ref_probe ( clk );
+
+        initial {
+            c.probe(x + 1);
+            c.drive(y[0]);
+            c.probe(bus.tb);
+            c.attach(x);
+            $finish();
+        }
+    }
+    "#
+    );
+    let text = errors_text(&analyze_component_errors(&code));
+    for what in [
+        "argument 1 of method `probe` takes a reference: pass a variable, without an expression or a select",
+        "argument 1 of method `drive` takes a reference: pass a variable, without an expression or a select",
+        "argument 1 of method `probe` takes a reference: pass a variable, not a modport",
+        "argument 1 of method `attach` takes a reference: pass a modport",
+    ] {
+        assert!(text.contains(what), "missing `{what}` in:\n{text}");
+    }
+}
+
+#[test]
+fn method_reference_argument_reads_inside_the_design() {
+    let code = format!(
+        "{REF_PROBE_SRC}{}",
+        r#"
+    module RefDut {
+        var x: logic<4, 8>;
+        assign x = 32'h0102_0304;
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst dut: RefDut;
+        var y: logic<4, 8>;
+
+        inst c: $comp::ref_probe ( clk );
+
+        initial {
+            c.probe(dut.x);
+            c.drive(y);
+            clk.next();
+            $assert(y == 32'h0402_0305, "y follows dut.x");
+            $finish();
+        }
+    }
+    "#
+    );
+    assert_all_pass(&run_component_test(&code, "comp_test"));
+}
+
+#[test]
+fn method_reference_argument_cannot_drive_inside_the_design() {
+    let code = format!(
+        "{REF_PROBE_SRC}{}",
+        r#"
+    module RefDut {
+        var x: logic<4, 8>;
+        assign x = 32'h0102_0304;
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst dut: RefDut;
+
+        inst c: $comp::ref_probe ( clk );
+
+        initial {
+            c.drive(dut.x);
+            $finish();
+        }
+    }
+    "#
+    );
+    let text = errors_text(&analyze_component_errors(&code));
+    let what = "argument 1 of method `drive` takes a reference: a variable inside a child instance can only be read";
+    assert!(text.contains(what), "missing `{what}` in:\n{text}");
+}
+
+#[test]
+fn method_reference_output_binds_only_once() {
+    // As with port connections, a variable is driven through one reference
+    // only: passing an output signal, or a modport with an output member,
+    // a second time fails, while input references may repeat.
+    for (call, what) in [
+        (
+            "c.drive(y); c.drive(y);",
+            "component `c` already drives `y`",
+        ),
+        (
+            "c.attach(bus.tb); c.attach(bus.tb);",
+            "component `c` already drives `bus.ack`",
+        ),
+        (
+            "c.drive(y); d.drive(y);",
+            "component `d` cannot drive `y`: component `c` drives it",
+        ),
+    ] {
+        let code = format!(
+            "{REF_PROBE_SRC}{}",
+            r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst bus: PairIf;
+        var y: logic<4, 8>;
+
+        inst c: $comp::ref_probe ( clk );
+        inst d: $comp::ref_probe ( clk );
+
+        initial {
+            CALL
+            clk.next();
+            $finish();
+        }
+    }
+    "#
+            .replace("CALL", call)
+        );
+        for (config, result, _) in run_component_test(&code, "comp_test") {
+            let TestResult::Fail(msg) = &result else {
+                panic!("expected failure of `{call}` for {config:?}, got {result:?}");
+            };
+            assert!(
+                msg.contains(what),
+                "unexpected message of `{call}` for {config:?}: {msg}"
+            );
+        }
+    }
+}
+
+#[test]
+fn method_clock_references_fire_on_clock() {
+    // A component with no clock port fires on clocks passed through a
+    // method: `clk` and a clock divided by two outside the test module.
+    let code = r#"
+    module RefDiv (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_clk: output '_ clock,
+    ) {
+        var toggle: logic;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                toggle = 0;
+            } else {
+                toggle = ~toggle;
+            }
+        }
+        assign o_clk = i_clk & toggle;
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk : $tb::clock_gen;
+        inst rst : $tb::reset_gen (clk);
+        var  dclk: clock        ;
+        inst div : RefDiv (
+            i_clk: clk ,
+            i_rst: rst ,
+            o_clk: dclk,
+        );
+        var fast: logic<8>;
+        var slow: logic<8>;
+
+        inst c: $comp::clock_watch;
+
+        initial {
+            rst.assert();
+            c.watch(clk, fast);
+            c.watch(dclk, slow);
+            clk.next(8);
+            $assert(fast == 8, "fired on every edge of clk");
+            $assert(slow == 4, "fired on every edge of the divided clock");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn method_clock_reference_must_be_a_clock() {
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        var  x  : logic<8>;
+        var  y  : logic<8>;
+
+        inst c: $comp::clock_watch;
+
+        initial {
+            c.watch(x, y);
+            $finish();
+        }
+    }
+    "#;
+    let text = errors_text(&analyze_component_errors(code));
+    let what = "argument 1 of method `watch` takes a reference: pass a clock";
+    assert!(text.contains(what), "missing `{what}` in:\n{text}");
+}
+
+#[test]
+fn method_clock_references_follow_the_clock_edge_type() {
+    // A `clock_posedge` fires on the rising edges and a `clock_negedge` on
+    // the falling ones, counted alongside RTL flops on the same clocks.
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk  : $tb::clock_gen;
+        inst rst  : $tb::reset_gen (clk);
+        let  clk_p: '_ clock_posedge = clk;
+        let  clk_n: '_ clock_negedge = clk;
+        var  pos  : logic<8>;
+        var  neg  : logic<8>;
+        var  pos_rtl: logic<8>;
+        var  neg_rtl: logic<8>;
+
+        always_ff (clk_p, rst) {
+            if_reset {
+                pos_rtl = 0;
+            } else {
+                pos_rtl += 1;
+            }
+        }
+        always_ff (clk_n, rst) {
+            if_reset {
+                neg_rtl = 0;
+            } else {
+                neg_rtl += 1;
+            }
+        }
+
+        inst c: $comp::clock_watch;
+
+        initial {
+            rst.assert();
+            c.watch(clk_p, pos);
+            c.watch(clk_n, neg);
+            clk.next(5);
+            $assert(pos == pos_rtl, "rising edges of the clock_posedge");
+            $assert(neg == neg_rtl, "falling edges of the clock_negedge");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn method_reset_references_fire_on_reset() {
+    // The edges of a `rst.assert(3)` window fire `on_reset` instead of
+    // `on_clock`, as for a connected reset port; later edges `on_clock`.
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk   : $tb::clock_gen;
+        inst rst   : $tb::reset_gen (clk);
+        var  clocks: logic<8>;
+        var  resets: logic<8>;
+
+        inst c: $comp::reset_watch_ref;
+
+        initial {
+            c.count_clocks(clk, clocks);
+            c.count_resets(rst, resets);
+            rst.assert(3);
+            clk.next(5);
+            $assert(resets == 3, "on_reset on each edge of the reset window");
+            $assert(clocks == 5, "on_clock on the edges after it");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn method_reset_reference_must_be_a_reset() {
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        var  x  : logic<8>;
+        var  y  : logic<8>;
+        var  z  : logic<8>;
+
+        inst c: $comp::reset_watch_ref;
+
+        initial {
+            c.count_resets(x, y);
+            c.count_clocks(clk, z);
+            $finish();
+        }
+    }
+    "#;
+    let text = errors_text(&analyze_component_errors(code));
+    let what = "argument 1 of method `count_resets` takes a reference: pass a reset";
+    assert!(text.contains(what), "missing `{what}` in:\n{text}");
 }

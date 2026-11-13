@@ -4941,6 +4941,12 @@ pub enum ComponentInterfaceMismatchKind {
         declared: u32,
         max: u32,
     },
+    #[error("argument {position} of method `{method}` takes a reference: {reason}")]
+    InvalidReference {
+        method: String,
+        position: usize,
+        reason: String,
+    },
     #[error(
         "interface port `{group}` is bound to interface `{expected}`, but a different interface is connected"
     )]
