@@ -1,14 +1,26 @@
+/// Leading zero counter package
+///
+/// Provides a leading zero counter function `lzc` and its related types.
+/// Generic parameter `N` is the width of the input vector.
 pub package lzc_pkg::<N: p32> {
     const COUNT_WIDTH      : p32 = if N >= 2 ? $clog2(N) : 1;
     const COUNT_UPPER_WIDTH: p32 = if N >: 64 ? COUNT_WIDTH - 6 : 1;
     const N_SPLITS         : p32 = if N >: 64 ? (N + 63) / 64 : 2; // 2 is to prevent verilator warning
 
-    type lzc_result = lzc_common_pkg::result::<N>             ;
-    type lzc_count  = logic                      <COUNT_WIDTH>;
+    /// Result type of `lzc`
+    ///
+    /// `all_zero` is set when all bits of the input vector are zero,
+    /// and `count` holds the number of consecutive zero bits.
+    type lzc_result = lzc_common_pkg::result::<N>;
+    /// Type of the count value
+    type lzc_count = logic<COUNT_WIDTH>;
 
+    /// Leading zero counter
+    ///
+    /// Counts the number of consecutive zero bits in `bits`.
     function lzc (
-        bits    : input logic<N>,
-        from_msb: input logic   ,
+        bits    : input logic<N>, /// Input vector
+        from_msb: input logic   , /// Counting direction (true: from MSB, false: from LSB)
     ) -> lzc_result {
         var input_bits: logic     <N>;
         var ret       : lzc_result   ;
