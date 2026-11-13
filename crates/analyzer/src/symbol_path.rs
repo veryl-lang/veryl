@@ -539,8 +539,8 @@ impl GenericSymbolPath {
                 );
                 alias_target.apply_map(&generic_maps);
                 if (i + 1) < self.len() {
-                    for j in (i + 1)..self.len() {
-                        alias_target.paths.push(self.paths[j].clone());
+                    for path in self.paths.iter().skip(i + 1) {
+                        alias_target.paths.push(path.clone());
                     }
                 }
                 alias_target.unalias_inner(Some(&generic_maps), visited);

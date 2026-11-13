@@ -27,7 +27,6 @@ toml                = {workspace = true}
 url                 = {workspace = true}
 uuid                = {version = "1.23", default-features = false, features = ["v5", "serde"]}
 veryl-component-sys = {version = "0.1.2", path = "../component/sys"}
-veryl-parser        = {version = "0.22.1", path = "../parser"}
 veryl-path          = {version = "0.22.1", path = "../path"}
 veryl-std           = {version = "0.22.1", path = "../std"}
 walkdir             = {workspace = true}
