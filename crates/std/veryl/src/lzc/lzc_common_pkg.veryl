@@ -1,4 +1,10 @@
 pub package lzc_common_pkg {
+    function result_width (
+        n: input u32,
+    ) -> u32 {
+        return 1 + utils::clog2_clipped(n, 1);
+    }
+
     struct result::<N: p32> {
         all_zero: logic           ,
         count   : logic<$clog2(N)>,

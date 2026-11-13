@@ -1,5 +1,173 @@
 #[test(test_lzc_4)]
 module test_lzc_4 {
+    const RESULT_WIDTH: p32 = lzc_common_pkg::result_width(4);
+
+    var bits  : logic<4>           ;
+    var result: logic<RESULT_WIDTH>;
+
+    initial {
+        bits   = '0;
+        result = lzc::<4>(bits, true);
+        $assert(result[msb]);
+
+        for i in 0..4 {
+            var exp: logic<2>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc::<4>(bits, true);
+
+            exp = 3 - i;
+            $assert(!result[msb]);
+            $assert(result[msb - 1:0] == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_8)]
+module test_lzc_8 {
+    const RESULT_WIDTH: p32 = lzc_common_pkg::result_width(8);
+
+    var bits  : logic<8>           ;
+    var result: logic<RESULT_WIDTH>;
+
+    initial {
+        bits   = '0;
+        result = lzc::<8>(bits, true);
+        $assert(result[msb]);
+
+        for i in 0..8 {
+            var exp: logic<3>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc::<8>(bits, true);
+
+            exp = 7 - i;
+            $assert(!result[msb]);
+            $assert(result[msb - 1:0] == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_16)]
+module test_lzc_16 {
+    const RESULT_WIDTH: p32 = lzc_common_pkg::result_width(16);
+
+    var bits  : logic<16>          ;
+    var result: logic<RESULT_WIDTH>;
+
+    initial {
+        bits   = '0;
+        result = lzc::<16>(bits, true);
+        $assert(result[msb]);
+
+        for i in 0..16 {
+            var exp: logic<4>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc::<16>(bits, true);
+
+            exp = 15 - i;
+            $assert(!result[msb]);
+            $assert(result[msb - 1:0] == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_32)]
+module test_lzc_32 {
+    const RESULT_WIDTH: p32 = lzc_common_pkg::result_width(32);
+
+    var bits  : logic<32>          ;
+    var result: logic<RESULT_WIDTH>;
+
+    initial {
+        bits   = '0;
+        result = lzc::<32>(bits, true);
+        $assert(result[msb]);
+
+        for i in 0..32 {
+            var exp: logic<5>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc::<32>(bits, true);
+
+            exp = 31 - i;
+            $assert(!result[msb]);
+            $assert(result[msb - 1:0] == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_64)]
+module test_lzc_64 {
+    const RESULT_WIDTH: p32 = lzc_common_pkg::result_width(64);
+
+    var bits  : logic<64>          ;
+    var result: logic<RESULT_WIDTH>;
+
+    initial {
+        bits   = '0;
+        result = lzc::<64>(bits, true);
+        $assert(result[msb]);
+
+        for i in 0..64 {
+            var exp: logic<6>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc::<64>(bits, true);
+
+            exp = 63 - i;
+            $assert(!result[msb]);
+            $assert(result[msb - 1:0] == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_128)]
+module test_lzc_128 {
+    const RESULT_WIDTH: p32 = lzc_common_pkg::result_width(128);
+
+    var bits  : logic<128>         ;
+    var result: logic<RESULT_WIDTH>;
+
+    initial {
+        bits   = '0;
+        result = lzc::<128>(bits, true);
+        $assert(result[msb]);
+
+        for i in 0..128 {
+            var exp: logic<7>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc::<128>(bits, true);
+
+            exp = 127 - i;
+            $assert(!result[msb]);
+            $assert(result[msb - 1:0] == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_pkg_4)]
+module test_lzc_pkg_4 {
     import lzc_pkg::<4>::*;
 
     var bits  : logic     <4>;
@@ -26,8 +194,8 @@ module test_lzc_4 {
     }
 }
 
-#[test(test_lzc_8)]
-module test_lzc_8 {
+#[test(test_lzc_pkg_8)]
+module test_lzc_pkg_8 {
     import lzc_pkg::<8>::*;
 
     var bits  : logic     <8>;
@@ -54,8 +222,8 @@ module test_lzc_8 {
     }
 }
 
-#[test(test_lzc_16)]
-module test_lzc_16 {
+#[test(test_lzc_pkg_16)]
+module test_lzc_pkg_16 {
     import lzc_pkg::<16>::*;
 
     var bits  : logic     <16>;
@@ -82,8 +250,8 @@ module test_lzc_16 {
     }
 }
 
-#[test(test_lzc_32)]
-module test_lzc_32 {
+#[test(test_lzc_pkg_32)]
+module test_lzc_pkg_32 {
     import lzc_pkg::<32>::*;
 
     var bits  : logic     <32>;
@@ -110,8 +278,8 @@ module test_lzc_32 {
     }
 }
 
-#[test(test_lzc_64)]
-module test_lzc_64 {
+#[test(test_lzc_pkg_64)]
+module test_lzc_pkg_64 {
     import lzc_pkg::<64>::*;
 
     var bits  : logic     <64>;
@@ -138,8 +306,8 @@ module test_lzc_64 {
     }
 }
 
-#[test(test_lzc_128)]
-module test_lzc_128 {
+#[test(test_lzc_pkg_128)]
+module test_lzc_pkg_128 {
     import lzc_pkg::<128>::*;
 
     var bits  : logic     <128>;
