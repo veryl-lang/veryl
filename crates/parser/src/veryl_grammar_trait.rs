@@ -500,10 +500,7 @@ impl Expression {
         match factor {
             Factor::IdentifierFactor(x) => {
                 // Function call
-                if x.identifier_factor.identifier_factor_opt.is_some() {
-                    return false;
-                }
-                true
+                x.identifier_factor.identifier_factor_opt.is_none()
             }
             Factor::LBraceConcatenationListRBrace(x) => {
                 let items: Vec<_> = x.concatenation_list.as_ref().into();

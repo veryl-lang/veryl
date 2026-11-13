@@ -866,8 +866,13 @@ impl ConvContext {
         // Prefix child net origins with the instance name so a flattened
         // critical path localizes to its source (e.g. `u_fp_sqrt.reg_r_exp`).
         let inst_name = veryl_parser::resource_table::get_str_value(inst.name);
-        for ci in (RESERVED_NETS as usize)..child_gate.nets.len() {
-            let new_origin = match (&inst_name, child_gate.nets[ci].origin) {
+        for net in child_gate
+            .nets
+            .iter()
+            .take(child_gate.nets.len())
+            .skip(RESERVED_NETS as usize)
+        {
+            let new_origin = match (&inst_name, net.origin) {
                 (Some(iname), Some((name, bit))) => {
                     let cname = veryl_parser::resource_table::get_str_value(name)
                         .unwrap_or_else(|| format!("{}", name));

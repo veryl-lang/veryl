@@ -15,13 +15,13 @@ veryl-metadata  = {version = "0.22.1", path = "../metadata"}
 veryl-parser    = {version = "0.22.1", path = "../parser"}
 veryl-path      = {version = "0.22.1", path = "../path"}
 veryl-simulator = {version = "0.22.1", path = "../simulator"}
-# skip veryl's gitoxide in benchmark builds (a full `cargo test` unifies it back in)
-veryl           = {version = "0.22.1", path = "../veryl", default-features = false}
 
 [dev-dependencies]
 criterion = {workspace = true}
 insta     = "1.47"
 mimalloc  = {workspace = true}
+# skip veryl's gitoxide in benchmark builds (a full `cargo test` unifies it back in)
+veryl     = {version = "0.22.1", path = "../veryl", default-features = false}
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pprof = {workspace = true}

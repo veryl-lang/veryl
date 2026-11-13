@@ -2113,7 +2113,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7518b930f6aeb75e871d32ce873c2ae46e35cef19b5a0b039d4337f651d897cd"
 dependencies = [
  "bstr",
- "hashbrown 0.15.5",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -6394,7 +6394,6 @@ dependencies = [
  "async-channel",
  "dashmap",
  "futures",
- "glob",
  "miette",
  "mimalloc",
  "ntest",
@@ -6434,7 +6433,6 @@ dependencies = [
  "uuid",
  "veryl-component-sys",
  "veryl-metadata",
- "veryl-parser",
  "veryl-path",
  "veryl-std",
  "walkdir",
