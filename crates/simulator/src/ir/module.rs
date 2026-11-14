@@ -2175,6 +2175,34 @@ fn analyze_dependency_at(
             .collect();
         return Ok((sorted, Some(1), true));
     }
+
+    // Flatten only the hazard blocks on a cycle.  The full flatten below
+    // exposes every block's sequential reassignment to the statement-level
+    // sort, whose pass proof is weaker than keeping a block atomic, so one
+    // block on a false cycle would otherwise cost the proof for all of them.
+    let on_cycle = entries_on_cycle(&fast);
+    if on_cycle.iter().any(|&c| c) {
+        let mut mid: Vec<ProtoStatement> = Vec::new();
+        let mut mid_block_of: Vec<usize> = Vec::new();
+        for (i, stmt) in fast.iter().enumerate() {
+            let block = matches!(
+                stmt,
+                ProtoStatement::SequentialBlock(_) | ProtoStatement::CompiledBlock(_)
+            );
+            if on_cycle[i] && block {
+                flatten(stmt, &mut mid);
+            } else {
+                mid.push((*stmt).clone());
+            }
+            mid_block_of.resize(mid.len(), i);
+        }
+        let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(mid, &mid_block_of);
+        stage.mark("phase2-cycle");
+        if !fell_back && passes_hint == Some(1) {
+            pass_diag_phase("phase2-cycle: hazard-flatten, cyclic blocks split");
+            return Ok((sorted, passes_hint, true));
+        }
+    }
     drop(fast);
 
     // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
@@ -2568,6 +2596,52 @@ fn analyze_dependency_at(
 /// `Assign.select` convention. Overlap: two ranges overlap if their
 /// bit intervals intersect.
 pub(crate) type BitRange = Option<(usize, usize)>;
+
+/// Whether each entry sits on a cycle of the bipartite writer-to-reader graph
+/// `analyze_dependency`'s `try_topo_sort` builds, at whole-variable grain.
+fn entries_on_cycle(table: &[&ProtoStatement]) -> Vec<bool> {
+    use daggy::petgraph::Graph;
+    use daggy::petgraph::algo::tarjan_scc;
+
+    let n = table.len();
+    let read_offsets = ReadOffsets::collect(table.iter().copied());
+    let mut graph: Graph<(), ()> = Graph::new();
+    let stmt_nodes: Vec<_> = (0..n).map(|_| graph.add_node(())).collect();
+    let mut var_nodes: HashMap<VarOffset, daggy::petgraph::graph::NodeIndex> = HashMap::default();
+    let mut ins = vec![];
+    let mut outs = vec![];
+    for (i, stmt) in table.iter().enumerate() {
+        ins.clear();
+        outs.clear();
+        stmt.gather_variable_offsets(&mut ins, &mut outs);
+        read_offsets.interior_writes(stmt, &mut outs);
+        let out_set: HashSet<VarOffset> = outs.iter().copied().collect();
+        let in_set: HashSet<VarOffset> = ins
+            .iter()
+            .copied()
+            .filter(|key| !out_set.contains(key))
+            .collect();
+        for key in in_set {
+            let v = *var_nodes.entry(key).or_insert_with(|| graph.add_node(()));
+            graph.add_edge(v, stmt_nodes[i], ());
+        }
+        for &key in &out_set {
+            let v = *var_nodes.entry(key).or_insert_with(|| graph.add_node(()));
+            graph.add_edge(stmt_nodes[i], v, ());
+        }
+    }
+    let mut on_cycle = vec![false; n];
+    for scc in tarjan_scc(&graph) {
+        if scc.len() > 1 {
+            for node in scc {
+                if node.index() < n {
+                    on_cycle[node.index()] = true;
+                }
+            }
+        }
+    }
+    on_cycle
+}
 
 /// A write to a comb var an earlier statement of the block read or wrote
 /// (WAR/WAW/reassignment): those statements need their program order.

@@ -39959,3 +39959,128 @@ fn isunknown() {
         }
     }
 }
+
+#[test]
+fn a_block_on_a_false_cycle_keeps_other_blocks_atomic() {
+    // The first block writes `ra` and reads `rd`, which `Rf` reads back
+    // combinationally from `ra`: a cycle only as whole blocks.  Its loop
+    // rewrites `k`, so the block cannot be split without sequential
+    // semantics.  The second block's `t` is written and read under the same
+    // selector in each iteration, which is one pass only while the block
+    // stays atomic.  Splitting every block to cut the first one's cycle used
+    // to cost the second one its pass proof.
+    let code = r#"
+    module Rf (
+        clk : input  clock       ,
+        rst : input  reset       ,
+        i_wa: input  logic<2>    ,
+        i_wd: input  logic<8>    ,
+        i_ra: input  logic<2> [2],
+        o_rd: output logic<8> [2],
+    ) {
+        var mem: logic<8> [4];
+        always_ff {
+            if_reset {
+                mem = '{default: 0};
+            } else {
+                mem[i_wa] = i_wd;
+            }
+        }
+        for r in 0..2 :g {
+            assign o_rd[r] = mem[i_ra[r]];
+        }
+    }
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        wa : input  logic<2>,
+        wd : input  logic<8>,
+        s0 : input  logic<3>,
+        s1 : input  logic<3>,
+        c0 : input  logic<2>,
+        c1 : input  logic<2>,
+        x0 : input  logic<8>,
+        x1 : input  logic<8>,
+        o0 : output logic<8>,
+        o1 : output logic<8>,
+        p0 : output logic<8>,
+        p1 : output logic<8>,
+    ) {
+        var sel: logic<3> [2];
+        var c  : logic<2> [2];
+        var x  : logic<8> [2];
+        var o  : logic<8> [2];
+        var p  : logic<8> [2];
+        var ra : logic<2> [2];
+        var rd : logic<8> [2];
+        assign sel = '{s0, s1};
+        assign c   = '{c0, c1};
+        assign x   = '{x0, x1};
+        assign o0  = o[0];
+        assign o1  = o[1];
+        assign p0  = p[0];
+        assign p1  = p[1];
+
+        always_comb {
+            for l in 0..2 {
+                var k: logic<3>;
+                k     = sel[l];
+                ra[l] = k[1:0];
+                o[l]  = if k[2] ? rd[l] : 8'd0;
+            }
+        }
+        inst u: Rf (
+            clk       ,
+            rst       ,
+            i_wa: wa  ,
+            i_wd: wd  ,
+            i_ra: ra  ,
+            o_rd: rd  ,
+        );
+        always_comb {
+            for l in 0..2 {
+                var t: logic<8>;
+                case c[l] {
+                    2'd3   : t = x[l];
+                    default: {}
+                }
+                case c[l] {
+                    2'd3   : p[l] = t;
+                    2'd2   : p[l] = 8'h01;
+                    default: p[l] = 8'h00;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "Top") {
+            Ok(ir) => ir,
+            Err(e) => panic!("config={config:?}: {e:?}"),
+        };
+        assert_eq!(ir.required_comb_passes, 1, "config={config:?}");
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.set("wa", Value::new(1, 2, false));
+        sim.set("wd", Value::new(0x5a, 8, false));
+        sim.step(&clk);
+        sim.set("s0", Value::new(0b101, 3, false));
+        sim.set("s1", Value::new(0b100, 3, false));
+        sim.set("c0", Value::new(3, 2, false));
+        sim.set("c1", Value::new(2, 2, false));
+        sim.set("x0", Value::new(0x22, 8, false));
+        sim.set("x1", Value::new(0x11, 8, false));
+        sim.step(&clk);
+        let expect = [("o0", 0x5a), ("o1", 0x00), ("p0", 0x22), ("p1", 0x01)];
+        for (name, value) in expect {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(value, 8, false),
+                "{name} config={config:?}"
+            );
+        }
+    }
+}

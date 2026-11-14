@@ -831,6 +831,102 @@ fn compare_named(
     (session.hier_conversions(), session.hier_matched())
 }
 
+/// A template whose hazard block sits on a false cycle orders in one pass by
+/// splitting only that block, like the flat build.
+#[test]
+fn a_template_splits_its_block_on_a_false_cycle() {
+    let code = r#"
+    module Rf (
+        clk : input  clock       ,
+        rst : input  reset       ,
+        i_wa: input  logic<2>    ,
+        i_wd: input  logic<8>    ,
+        i_ra: input  logic<2> [2],
+        o_rd: output logic<8> [2],
+    ) {
+        var mem: logic<8> [4];
+        always_ff {
+            if_reset {
+                mem = '{default: 0};
+            } else {
+                mem[i_wa] = i_wd;
+            }
+        }
+        for r in 0..2 :g {
+            assign o_rd[r] = mem[i_ra[r]];
+        }
+    }
+    module Lane (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        q  : output logic<8>,
+    ) {
+        var sel: logic<3> [2];
+        var c  : logic<2> [2];
+        var x  : logic<8> [2];
+        var o  : logic<8> [2];
+        var p  : logic<8> [2];
+        var ra : logic<2> [2];
+        var rd : logic<8> [2];
+        assign sel = '{a[4:2], a[7:5]};
+        assign c   = '{a[1:0], a[3:2]};
+        assign x   = '{a, ~a};
+        assign q   = o[0] ^ o[1] ^ p[0] ^ p[1];
+
+        always_comb {
+            for l in 0..2 {
+                var k: logic<3>;
+                k     = sel[l];
+                ra[l] = k[1:0];
+                o[l]  = if k[2] ? rd[l] : 8'd0;
+            }
+        }
+        inst u: Rf (
+            clk         ,
+            rst         ,
+            i_wa: a[1:0],
+            i_wd: a     ,
+            i_ra: ra    ,
+            o_rd: rd    ,
+        );
+        always_comb {
+            for l in 0..2 {
+                var t: logic<8>;
+                case c[l] {
+                    2'd3   : t = x[l];
+                    default: {}
+                }
+                case c[l] {
+                    2'd3   : p[l] = t;
+                    2'd2   : p[l] = 8'h01;
+                    default: p[l] = 8'h00;
+                }
+            }
+        }
+    }
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        q0 : output logic<8>,
+        q1 : output logic<8>,
+    ) {
+        var na: logic<8>;
+        assign na = ~a;
+        inst l0: Lane (clk, rst, a, q: q0);
+        inst l1: Lane (clk, rst, a: na, q: q1);
+    }
+    "#;
+    let flat = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    let inputs = [0x5f, 0xa7, 0x3c, 0xff, 0x81, 0x24, 0xdb, 0x66];
+    let (conversions, _) = compare_named(code, flat, &["Lane"], &["q0", "q1"], &inputs);
+    assert!(conversions > 0, "not a template");
+}
+
 /// Specializations of a named module that differ only in a parameter read as
 /// a value, here through a child of their own, run one template.
 #[test]
