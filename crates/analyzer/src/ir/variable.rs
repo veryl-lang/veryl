@@ -14,6 +14,7 @@ use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
 use crate::{BigInt, BigUint, HashSet};
 use num_traits::ToPrimitive;
+use std::borrow::Cow;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
@@ -1307,9 +1308,11 @@ impl VarSelect {
         };
 
         let r#type = if is_array {
-            &r#type.array
+            Cow::Borrowed(&r#type.array)
+        } else if r#type.is_struct_union() {
+            Cow::Owned(Shape::new(vec![Some(storage)]))
         } else {
-            r#type.width()
+            Cow::Borrowed(r#type.width())
         };
 
         let mut beg: usize = 0;

@@ -1476,3 +1476,129 @@ fn op_assign_on_struct_array_element() {
         );
     }
 }
+
+fn check_struct_array(body: &str, inputs: &[(&str, &str)], expected: &[(&str, &str)]) {
+    let code = format!(
+        r#"
+    module Top (
+        i: input logic<2>,
+        src: input logic<3, 16>,
+        o: output logic<96>,
+        p: output logic<16>,
+    ) {{
+        struct s_t {{
+            hdr : logic<8>,
+            body: logic<8>,
+        }}
+        union u_t {{
+            x: logic<16>,
+            y: logic<16>,
+        }}
+        {body}
+    }}
+    "#
+    );
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(&code, &config), None);
+        sim.set("i", Value::new(1, 2, false));
+        sim.set("src", Value::new(0, 48, false));
+        for (name, value) in inputs {
+            sim.set(name, Value::from_str(value).unwrap());
+        }
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        for (name, value) in expected {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::from_str(value).unwrap(),
+                "{name} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn multidimensional_struct_array_element_write() {
+    check_struct_array(
+        r#"
+        var a: s_t<2, 3>;
+        always_comb {
+            a       = '0;
+            a[1][2] = 16'h1222;
+            a[0][1] = 16'h0111;
+        }
+        assign o = a;
+        assign p = a[1][2];
+        "#,
+        &[],
+        &[("o", "96'h122200000000000001110000"), ("p", "16'h1222")],
+    );
+}
+
+#[test]
+fn multidimensional_struct_array_dynamic_read() {
+    check_struct_array(
+        r#"
+        var a: s_t<2, 3>;
+        always_comb {
+            a       = '0;
+            a[0][1] = 16'h0111;
+        }
+        assign o = 0;
+        assign p = a[0][i];
+        "#,
+        &[],
+        &[("p", "16'h0111")],
+    );
+}
+
+#[test]
+fn multidimensional_struct_array_generate_write() {
+    check_struct_array(
+        r#"
+        var g: s_t<2, 3>;
+        for k in 0..3 :g_src {
+            assign g[1][k] = src[k];
+            assign g[0][k] = 0;
+        }
+        assign o = g;
+        assign p = 0;
+        "#,
+        &[("src", "48'hccccbbbbaaaa")],
+        &[("o", "96'hccccbbbbaaaa000000000000")],
+    );
+}
+
+#[test]
+fn multidimensional_struct_array_member_select() {
+    check_struct_array(
+        r#"
+        var a: s_t<2, 3>;
+        always_comb {
+            a       = '0;
+            a[1][2] = 16'h1222;
+            a[0][1] = 16'h0111;
+        }
+        assign o = 0;
+        assign p = {a[1][2].hdr, a[0][i].body};
+        "#,
+        &[],
+        &[("p", "16'h1211")],
+    );
+}
+
+#[test]
+fn multidimensional_union_array_member_write() {
+    check_struct_array(
+        r#"
+        var u: u_t<2, 2>;
+        always_comb {
+            u         = '0;
+            u[1][1].y = 16'h4444;
+        }
+        assign o = u;
+        assign p = 0;
+        "#,
+        &[],
+        &[("o", "96'h4444000000000000")],
+    );
+}
