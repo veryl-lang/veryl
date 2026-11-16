@@ -280,6 +280,136 @@ fn path_to_toml_str(path: &Path) -> String {
     path.to_string_lossy().replace("\\", "/")
 }
 
+fn create_metadata_transitive_override() -> (Metadata, TempDir) {
+    let directory = tempfile::tempdir().unwrap();
+    let leaf = r#"
+[project]
+name = "leaf"
+version = "0.1.0"
+[publish]
+bump_commit = true
+publish_commit = true
+[metadata.origin]
+value = "remote"
+"#;
+    create_project(directory.path(), "leaf", leaf, true);
+    create_project(
+        directory.path(),
+        "local_leaf",
+        &leaf.replace("remote", "local"),
+        false,
+    );
+    let parent = r#"
+[project]
+name = "parent"
+version = "0.1.0"
+[publish]
+bump_commit = true
+publish_commit = true
+[dependencies]
+leaf = {git = "file://{}/leaf", version = "=0.1.0"}
+"#;
+    create_project(directory.path(), "parent", parent, true);
+    let root = r#"
+[project]
+name = "root"
+version = "0.1.0"
+[dependencies]
+local_leaf = {git = "file://{}/leaf", project = "leaf", version = "=0.1.0", path = "../local_leaf"}
+parent = {git = "file://{}/parent", version = "=0.1.0"}
+"#;
+    let mut metadata = create_project(directory.path(), "root", root, false);
+    metadata.update_lockfile().unwrap();
+    (metadata, directory)
+}
+
+#[test]
+fn transitive_override_source_identity() {
+    let (metadata, directory) = create_metadata_transitive_override();
+    let projects = metadata.lockfile.projects();
+    assert_eq!(projects.len(), 2);
+    let leaf = projects.iter().find(|p| p.name == "local_leaf").unwrap();
+    let parent = projects.iter().find(|p| p.name == "parent").unwrap();
+    let edge = &parent.dependencies[0];
+    assert_eq!(leaf.source, edge.source);
+    let sources = std::collections::HashSet::from([&leaf.source, &edge.source]);
+    assert_eq!(sources.len(), 1);
+    // Location is retained for loading/serialization, not dependency identity.
+    assert!(toml::to_string(&leaf.source).unwrap().contains("override"));
+    let selected = metadata.lockfile.get_metadata(&leaf.source).unwrap();
+    assert_eq!(selected.metadata["origin"]["value"].as_str(), Some("local"));
+    fs::rename(
+        directory.path().join("local_leaf"),
+        directory.path().join("local_gone"),
+    )
+    .unwrap();
+    let fallback = metadata.lockfile.get_metadata(&leaf.source).unwrap();
+    assert_eq!(
+        fallback.metadata["origin"]["value"].as_str(),
+        Some("remote")
+    );
+}
+
+#[test]
+fn transitive_override_metadata_uses_resolved_alias() {
+    let (metadata, directory) = create_metadata_transitive_override();
+    let output = MetadataOutputV2::from_metadata(&metadata).unwrap();
+    let leaf = output
+        .dependencies
+        .iter()
+        .find(|p| p.name == "local_leaf")
+        .unwrap();
+    let parent = output
+        .dependencies
+        .iter()
+        .find(|p| p.name == "parent")
+        .unwrap();
+    assert_eq!(
+        leaf.local_path,
+        directory.path().join("local_leaf").canonicalize().unwrap()
+    );
+    assert_eq!(parent.dependencies, ["dep:local_leaf"]);
+    assert!(
+        output
+            .dependencies
+            .iter()
+            .all(|p| p.dependencies.iter().all(|id| output
+                .dependencies
+                .iter()
+                .any(|candidate| &candidate.id == id)))
+    );
+}
+
+#[test]
+fn transitive_override_keeps_other_source_identity_fields() {
+    let (metadata, _directory) = create_metadata_transitive_override();
+    let projects = metadata.lockfile.projects();
+    let source = &projects
+        .iter()
+        .find(|p| p.name == "local_leaf")
+        .unwrap()
+        .source;
+    let original = toml::to_string(source).unwrap();
+    for (field, replacement) in [
+        ("uuid", "00000000-0000-0000-0000-000000000000"),
+        ("url", "https://example.com/other"),
+        ("path", "other"),
+        ("project", "other"),
+        ("version", "0.2.0"),
+        ("revision", "other"),
+    ] {
+        let mut value: toml::Table = toml::from_str(&original).unwrap();
+        value.insert(field.to_string(), replacement.into());
+        let other: crate::lockfile::LockSource = value.try_into().unwrap();
+        assert_ne!(source, &other, "{field} is still part of the identity");
+    }
+    let mut value: toml::Table = toml::from_str(&original).unwrap();
+    value.insert("override".to_string(), "../another_location".into());
+    let other: crate::lockfile::LockSource = value.try_into().unwrap();
+    assert_eq!(source, &other);
+    assert_eq!(std::collections::HashSet::from([source, &other]).len(), 1);
+}
+
 #[test]
 fn check_toml() {
     let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
