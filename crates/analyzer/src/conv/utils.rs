@@ -1549,6 +1549,7 @@ pub fn eval_type(
                         }
 
                         check_struct_union_members(c, &members, &symbol.found);
+                        check_clock_reset_struct_members(c, &members, &symbol.found);
                         Ok(members)
                     });
 
@@ -1906,6 +1907,29 @@ fn check_clock_reset_union_member(
         &member.token.to_string(),
         token,
     ));
+}
+
+/// A struct having a clock/reset member, nested ones included, has to be made
+/// of that kind only, so that any bit of it is of that kind.
+fn check_clock_reset_struct_members(
+    context: &mut Context,
+    members: &[ir::TypeKindMember],
+    symbol: &Symbol,
+) {
+    if context.in_generic {
+        return;
+    }
+
+    let kinds: Vec<_> = members.iter().flat_map(|x| x.r#type.leaf_kinds()).collect();
+    if kinds.contains(&&ir::TypeKind::Unknown) {
+        return;
+    }
+
+    let has_clock_reset = members.iter().any(|x| x.r#type.include_clock_reset());
+    if has_clock_reset && kinds.iter().any(|x| *x != kinds[0]) {
+        let token: TokenRange = symbol.token.into();
+        context.insert_error(AnalyzerError::mixed_clock_reset_struct_member(&token));
+    }
 }
 
 fn check_struct_union_members(
@@ -3041,13 +3065,14 @@ fn reduce_unevaluable_select(
 
     comptime.r#type.array.drain(0..array_select.dimension());
     if !width_select.is_empty() {
+        let clock_reset = comptime.select_clock_reset();
         comptime.r#type.flatten_struct_union_enum();
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
         comptime
             .r#type
-            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
+            .restore_member(comptime.member_signed, clock_reset.as_ref());
     }
     comptime.token = token;
 }
@@ -3081,6 +3106,7 @@ fn fold_symbol_select(
     // replaces its width dimensions by the selected width.
     let mut element = comptime.r#type.clone();
     if !select.is_empty() {
+        let clock_reset = comptime.select_clock_reset();
         element.flatten_struct_union_enum();
         comptime.r#type = element.clone();
         if let Some(width) = select.eval_comptime(context, &element, false) {
@@ -3088,7 +3114,7 @@ fn fold_symbol_select(
         }
         comptime
             .r#type
-            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
+            .restore_member(comptime.member_signed, clock_reset.as_ref());
     }
 
     let flat = array.calc_index(&indices)?;
