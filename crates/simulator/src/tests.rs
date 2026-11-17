@@ -1,3 +1,4 @@
+mod equality_unknown;
 mod wide_array_slice;
 
 use crate::ir::Ir;
