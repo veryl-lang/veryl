@@ -81,6 +81,9 @@ jobs:
           # stats stay in the job log via the explicit step below; keep them off
           # the run-summary annotations
           disable_annotations: true
+          # Since 0.17, sccache expands Cargo's `@argfile` and exceeds Windows' command-line limit:
+          # https://github.com/mozilla/sccache/issues/2397
+          version: ${{ runner.os == 'Windows' && 'v0.16.0' || '' }}
       - uses: actions/cache/restore@v4
         continue-on-error: true
         with:
