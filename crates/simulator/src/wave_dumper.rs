@@ -140,8 +140,14 @@ impl DirtyMap {
         if end <= g0 {
             return;
         }
-        for wi in (g0 >> 6)..end.div_ceil(64) {
-            let mut word = self.bits[wi];
+        for (wi, word) in self
+            .bits
+            .iter()
+            .enumerate()
+            .take(end.div_ceil(64))
+            .skip(g0 >> 6)
+        {
+            let mut word = *word;
             if wi == g0 >> 6 {
                 word &= !0u64 << (g0 & 63);
             }

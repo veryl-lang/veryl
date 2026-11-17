@@ -9400,18 +9400,25 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     _ => None,
                 };
                 if let Some(c_op) = direct {
-                    // 65..128-bit unsigned shift-LEFT with a narrow (≤64-bit) left
-                    // operand: `(uint64_t)xs << ys` truncates to 64 bits, so promote
-                    // xs to __uint128_t first. Placed before the `wide_truncates`
-                    // bail below, which would otherwise send this to the interpreter.
+                    // 65..128-bit shift-LEFT with a narrow (≤64-bit) left operand:
+                    // `(uint64_t)xs << ys` truncates to 64 bits, so promote xs to
+                    // __uint128_t first, sign-extending it in a signed context (an
+                    // unsized literal such as the `1` of `1 << n` is signed). Placed
+                    // before the `wide_truncates` bail below, which would otherwise
+                    // send this to the interpreter.
                     if expr_context.width > 64
                         && expr_context.width <= 128
                         && matches!(op, Op::LogicShiftL | Op::ArithShiftL)
+                        && x.width() > 0
                         && x.width() <= 64
-                        && !expr_context.signed
                     {
                         let w = expr_context.width;
-                        let xm = if x.width() >= 64 {
+                        let xm = if expr_context.signed {
+                            let sh = 64 - x.width();
+                            format!(
+                                "((__uint128_t)(__int128)(((int64_t)(((uint64_t)({xs})) << {sh})) >> {sh}))"
+                            )
+                        } else if x.width() >= 64 {
                             format!("((__uint128_t)((uint64_t)({xs})))")
                         } else {
                             format!(

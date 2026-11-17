@@ -698,6 +698,71 @@ pub fn name_path(scope: ScopeId) -> Vec<StrId> {
     SCOPE_ARENA.with(|f| f.borrow().name_path(scope))
 }
 
+/// Name prefix of the anonymous scope opened by an `initial`/`final` body.
+pub const DEFERRED_BLOCK_PREFIX: &str = "deferred";
+
+/// How a scope sits under one of its ancestors.
+pub struct Enclosure {
+    /// The scope right below the ancestor on the way down, `None` when the
+    /// scope is the ancestor itself.
+    pub child: Option<ScopeId>,
+    /// The innermost function below the ancestor that the scope lies in.
+    pub function: Option<SymbolId>,
+}
+
+/// `None` unless `ancestor` is `scope` or one of its parents.
+pub fn enclosure(scope: ScopeId, ancestor: ScopeId) -> Option<Enclosure> {
+    SCOPE_ARENA.with(|f| {
+        let arena = f.borrow();
+        let mut ret = Enclosure {
+            child: None,
+            function: None,
+        };
+        let mut current = scope;
+        while current != ancestor {
+            let s = &arena.scopes[current.0 as usize];
+            if s.kind == ScopeKind::Function && ret.function.is_none() {
+                ret.function = s.owner;
+            }
+            ret.child = Some(current);
+            current = s.parent?;
+        }
+        Some(ret)
+    })
+}
+
+/// The innermost function `scope` lies in.
+pub fn enclosing_function(scope: ScopeId) -> Option<SymbolId> {
+    SCOPE_ARENA.with(|f| {
+        let arena = f.borrow();
+        let mut current = Some(scope);
+        while let Some(id) = current {
+            let s = &arena.scopes[id.0 as usize];
+            if s.kind == ScopeKind::Function {
+                return s.owner;
+            }
+            current = s.parent;
+        }
+        None
+    })
+}
+
+/// Whether `scope` is an `initial`/`final` body placed directly in a module,
+/// which converts after every other module item.
+pub fn is_deferred_block(scope: ScopeId) -> bool {
+    SCOPE_ARENA.with(|f| {
+        let arena = f.borrow();
+        let s = &arena.scopes[scope.0 as usize];
+        s.parent
+            .is_some_and(|p| arena.scopes[p.0 as usize].kind == ScopeKind::Module)
+            && s.name.is_some_and(|x| {
+                x.to_string()
+                    .strip_prefix(DEFERRED_BLOCK_PREFIX)
+                    .is_some_and(|x| x.starts_with('@'))
+            })
+    })
+}
+
 /// The `Namespace` a scope corresponds to: its structural name path plus the
 /// given ifdef context.
 pub fn namespace(scope: ScopeId, define_context: &DefineContext) -> Namespace {

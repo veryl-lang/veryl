@@ -815,43 +815,6 @@ fn implicit_clock_conversion() {
         AnalyzerError::ImplicitClockConversion { .. }
     ));
 
-    // logic members of a struct mixing clock/reset and logic members wired
-    // into clock/reset ports
-    let code = r#"
-    package PackageA {
-        struct Mixed {
-            clk: clock,
-            rst: reset,
-            d  : logic<2>,
-        }
-    }
-    module ModuleA (
-        i_s: input PackageA::Mixed,
-        o_q: output logic,
-    ) {
-        inst u: ModuleB ( clk: i_s.d[0], rst: i_s.d[1], o_q: o_q );
-    }
-    module ModuleB (
-        clk: input clock,
-        rst: input reset,
-        o_q: output logic,
-    ) {
-        always_ff (clk, rst) {
-            if_reset { o_q = 0; } else { o_q = ~o_q; }
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::ImplicitClockConversion { .. }
-    ));
-    assert!(matches!(
-        errors[1],
-        AnalyzerError::ImplicitClockConversion { .. }
-    ));
-
     // a logic vector wired into an input port of a struct with clock
     // members
     let code = r#"
@@ -971,7 +934,7 @@ fn implicit_clock_conversion() {
         }
         struct Outer {
             inner: ClockBundle,
-            d    : logic      ,
+            c    : clock      ,
         }
     }
     module ModuleA (
@@ -987,7 +950,7 @@ fn implicit_clock_conversion() {
         o_q: output logic,
     ) {
         always_ff (clk.inner.a, rst) {
-            if_reset { o_q = 0; } else { o_q = clk.d; }
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
         }
     }
     "#;
@@ -1172,21 +1135,41 @@ fn implicit_clock_conversion() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
-    // clock/reset members of a struct mixing clock/reset and logic members
-    // connect to clock/reset ports without explicit binding
+    // a bit or a range selected from a struct with clock/reset members
+    // (nested ones and arrays of it included) keeps the kind of the members
     let code = r#"
     package PackageA {
-        struct Mixed {
-            clk: clock,
-            rst: reset,
-            d  : logic<2>,
+        struct ClockBundle {
+            a: clock   ,
+            b: clock<2>,
+        }
+        struct ResetBundle {
+            a: reset,
+            b: reset,
+        }
+        struct NestedBundle {
+            a: ClockBundle,
+            b: clock      ,
+        }
+        struct PosedgeBundle {
+            a: clock_posedge,
+            b: clock_posedge,
         }
     }
     module ModuleA (
-        i_s: input PackageA::Mixed,
-        o_q: output logic,
+        i_clk : input PackageA::ClockBundle     ,
+        i_rst : input PackageA::ResetBundle     ,
+        i_nest: input PackageA::NestedBundle    ,
+        i_arr : input PackageA::ClockBundle  [2],
+        i_pos : input PackageA::PosedgeBundle   ,
+        o_q   : output logic<7>,
     ) {
-        inst u: ModuleB ( clk: i_s.clk, rst: i_s.rst, o_q: o_q );
+        inst u0: ModuleB ( clk: i_clk[0], rst: i_rst[1], o_q: o_q[0] );
+        inst u1: ModuleB ( clk: i_nest[3], rst: i_rst[0], o_q: o_q[1] );
+        inst u2: ModuleB ( clk: i_arr[1][2], rst: i_rst[0], o_q: o_q[2] );
+        inst u3: ModuleC ( clk: i_clk[2:1], rst: i_rst[1:0], o_q: o_q[4:3] );
+        inst u4: ModuleC ( clk: i_nest.a[1+:2], rst: i_rst[1:0], o_q: o_q[6:5] );
+        inst u5: ModuleD ( clk: i_pos[1] );
     }
     module ModuleB (
         clk: input clock,
@@ -1195,6 +1178,26 @@ fn implicit_clock_conversion() {
     ) {
         always_ff (clk, rst) {
             if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    module ModuleC (
+        clk: input clock<2>,
+        rst: input reset<2>,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk[0], rst[0]) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk[1], rst[1]) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    module ModuleD (
+        clk: input clock_posedge,
+    ) {
+        var q: logic;
+        always_ff (clk) {
+            q = ~q;
         }
     }
     "#;
@@ -9967,6 +9970,8 @@ fn referring_before_definition() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // A function may be called above the constants it uses: a constant is
+    // evaluated from its declaration.
     let code = r#"
     module ModuleA {
         let _a: u32 = func();
@@ -9979,10 +9984,22 @@ fn referring_before_definition() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::ReferringBeforeDefinition { .. }
-    ));
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA {
+        if 1 :g {
+            let _a: u32 = func();
+        }
+        const C: u32 = 5;
+        function func() -> u32 {
+            return C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 
     let code = r#"
     module ModuleA #(
@@ -10220,6 +10237,21 @@ fn referring_inactive_definition() {
     assert!(errors.is_empty());
 
     let code = r#"
+    package PkgA {
+        #[ifdef(FOO)]
+        const Y: u32 = 8;
+        const X: u32 = PkgA::Y;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    let code = r#"
     module ModuleA (
         o_a: output logic,
     ) {
@@ -10252,6 +10284,271 @@ fn referring_inactive_definition() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        assign a = 0;
+    }
+    module ModuleA {
+        #[ifdef(FOO)]
+        inst bi: InterfaceA;
+        let _a: logic = bi.a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors.is_empty()
+            && errors
+                .iter()
+                .all(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    // A reference the defines guard out is never converted.
+    let code = r#"
+    module ModuleA {
+        #[ifdef(FOO)]
+        let _x: logic = a;
+        let a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn referring_before_definition_in_any_scope() {
+    fn only_referring_before_definition(code: &str) -> bool {
+        let errors = analyze(code);
+        !errors.is_empty()
+            && errors
+                .iter()
+                .all(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    }
+
+    let code = r#"
+    interface InterfaceA {
+        let _x: logic = a;
+        var a: logic;
+        assign a = 0;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // A generic body converts where it is declared, and so does what it calls.
+    let code = r#"
+    module ModuleA {
+        function g::<W: u32> () -> u32 {
+            return f();
+        }
+        let b : u32 = 0;
+        let _a: u32 = g::<1>();
+        function f () -> u32 {
+            return b;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = prj::PkgB::Y;
+    }
+    package PkgB {
+        const Y: u32 = 1;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    package PkgA {
+        const X: u32 = PkgA::Y;
+        const Y: u32 = 8;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    module ModuleA {
+        var o: logic;
+        always_comb {
+            o = t;
+            var t: logic;
+            t = 0;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // The inner declaration is the one the name resolves to, so the outer
+    // one must not quietly stand in for it.
+    let code = r#"
+    module ModuleA {
+        let a : logic = 0;
+        let _y: logic = a;
+        if 1 :g {
+            let _x: logic = a;
+            let a : logic = 1;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleA (
+        bi: modport InterfaceA::mp,
+    ) {}
+    module ModuleB {
+        inst u: ModuleA (
+            bi,
+        );
+        inst bi: InterfaceA;
+        assign bi.a = 0;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: output,
+        }
+    }
+    module ModuleA {
+        connect bi.mp <> 0;
+        inst bi: InterfaceA;
+    }
+    "#;
+    // The connection is dropped, which leaves the member unassigned.
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    );
+    assert!(errors.iter().all(|x| matches!(
+        x,
+        AnalyzerError::ReferringBeforeDefinition { .. } | AnalyzerError::UnassignVariable { .. }
+    )));
+
+    let code = r#"
+    package PackageA {
+        function func() -> u32 {
+            return X;
+        }
+        const X: u32 = 3;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    module ModuleA {
+        var _a: T;
+        assign _a = 0;
+        const T: type = logic<2>;
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // A function body sees what is declared above the first place that
+    // reaches it, which here is the call inside `g`.
+    let code = r#"
+    module ModuleA {
+        function g() -> u32 {
+            return f();
+        }
+        let b : u32 = 0;
+        let _a: u32 = g();
+        function f() -> u32 {
+            return b;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    let code = r#"
+    interface InterfaceA {
+        let _a: u32 = func();
+        let b : u32 = 0;
+        function func() -> u32 {
+            return b;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // Only a module's own `initial` converts after its items; one in a
+    // generate block keeps its place.
+    let code = r#"
+    module ModuleA {
+        initial {
+            $display(a, f());
+        }
+        let a: logic = 0;
+        function f() -> logic {
+            return a;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA {
+        if 1 :g {
+            initial {
+                $display(a);
+            }
+            let a: logic = 0;
+        }
+    }
+    "#;
+    assert!(only_referring_before_definition(code));
+
+    // A bind is resolved in the bound module, not where it is written.
+    let code = r#"
+    module ModuleA (
+        i: input logic,
+    ) {}
+    bind ModuleB <- u: ModuleA (
+        i: a,
+    );
+    module ModuleB {
+        var a: logic;
+        assign a = 0;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+        let b: u32 = 0;
+        function f() -> u32 {
+            return b;
+        }
+    }
+    module ModuleA {
+        inst bi: InterfaceA;
+        assign bi.a = 0;
+        let _a: u32 = bi.f();
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
@@ -19473,7 +19770,7 @@ fn clock_reset_union_member() {
     package Pkg {
         struct StructA {
             a: clock,
-            b: logic,
+            b: clock,
         }
         union UnionA {
             a: StructA ,
@@ -19538,6 +19835,176 @@ fn clock_reset_union_member() {
         errors[0],
         AnalyzerError::ClockResetUnionMember { .. }
     ));
+}
+
+#[test]
+fn mixed_clock_reset_struct_member() {
+    let is_error = |errors: &[AnalyzerError]| {
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MixedClockResetStructMember { .. }))
+    };
+
+    // a clock and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+            b: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a reset and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: reset   ,
+            b: logic<2>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // clocks of different edges
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock        ,
+            b: clock_posedge,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock and a reset
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+            b: reset,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // resets of different kinds
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: reset_async_high,
+            b: reset_async_low ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock in a nested struct and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+        }
+        struct StructB {
+            a: StructA,
+            b: logic  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock in a nested struct and a reset
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+        }
+        struct StructB {
+            a: StructA,
+            b: reset  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock through a typedef and a logic
+    let code = r#"
+    package Pkg {
+        type ClockAlias = clock;
+        struct StructA {
+            a: ClockAlias,
+            b: logic     ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock given by a generic type argument and a logic
+    let code = r#"
+    module ModuleA {
+        type ClockAlias = clock;
+        struct StructA::<T: type> {
+            a: T    ,
+            b: logic,
+        }
+        var _a: StructA::<ClockAlias>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // the same kind of clocks/resets of any width, nested or through a
+    // typedef, and a struct without clock/reset are clean
+    let code = r#"
+    package Pkg {
+        type ClockAlias = clock;
+        struct StructA {
+            a: clock     ,
+            b: clock<2>  ,
+            c: ClockAlias,
+        }
+        struct StructB {
+            a: StructA,
+            b: clock  ,
+        }
+        struct StructC {
+            a: reset_sync_low   ,
+            b: reset_sync_low<2>,
+        }
+        struct StructD {
+            a: logic   ,
+            b: logic<2>,
+        }
+    }
+    module ModuleA {
+        struct StructE::<T: type> {
+            a: T    ,
+            b: clock,
+        }
+        let _a: StructE::<Pkg::ClockAlias> = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -1,5 +1,4 @@
 use crate::AnalyzerError;
-use crate::HashSet;
 use crate::generic_inference_table;
 use crate::namespace::{DefineContext, Namespace};
 use crate::scope;
@@ -7,6 +6,7 @@ use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind, TbCompo
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
+use crate::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -132,6 +132,81 @@ pub struct ReferenceTable {
     /// that exact path only, not for aliases or generic arguments resolved
     /// recursively under it.
     testbench_hier_root: Option<TokenId>,
+    /// Begin token of the candidate path checked against declaration order:
+    /// aliases and generic arguments resolved under it are written elsewhere.
+    declaration_order_root: Option<TokenId>,
+    declaration_order: DeclarationOrder,
+}
+
+/// What the declaration order check needs to judge a call site, which may
+/// precede the body of the function it calls.
+#[derive(Default, Debug)]
+struct DeclarationOrder {
+    /// Variables and instances outside a function that its body refers to.
+    function_dependencies: HashMap<SymbolId, Vec<Rc<Symbol>>>,
+    function_callees: HashMap<SymbolId, Vec<SymbolId>>,
+    call_sites: Vec<CallSite>,
+}
+
+#[derive(Debug)]
+struct CallSite {
+    callee: SymbolId,
+    token: TokenRange,
+    scope: scope::ScopeId,
+}
+
+impl DeclarationOrder {
+    fn transitive_dependencies(&self, function: SymbolId) -> Vec<Rc<Symbol>> {
+        let mut ret: Vec<Rc<Symbol>> = Vec::new();
+        let mut seen = HashSet::default();
+        let mut visited = HashSet::default();
+        let mut stack = vec![function];
+        while let Some(x) = stack.pop() {
+            if !visited.insert(x) {
+                continue;
+            }
+            if let Some(deps) = self.function_dependencies.get(&x) {
+                for dep in deps {
+                    if seen.insert(dep.id) {
+                        ret.push(Rc::clone(dep));
+                    }
+                }
+            }
+            if let Some(callees) = self.function_callees.get(&x) {
+                stack.extend(callees.iter().copied());
+            }
+        }
+        ret
+    }
+}
+
+fn is_declared_after(declaration: &Token, reference: &Token) -> bool {
+    match (declaration.source, reference.source) {
+        (TokenSource::File { path: x, .. }, TokenSource::File { path: y, .. }) => {
+            x == y && (declaration.line, declaration.column) > (reference.line, reference.column)
+        }
+        _ => false,
+    }
+}
+
+/// The IR registers declarations in source order, except that the
+/// `initial`/`final` bodies of a module convert after the module's items.
+fn is_declared_too_late(
+    declaration: &Symbol,
+    reference: &Token,
+    enclosure: &scope::Enclosure,
+) -> bool {
+    is_declared_after(&declaration.token, reference)
+        && !enclosure.child.is_some_and(scope::is_deferred_block)
+        && !is_written_outside(declaration.scope, reference)
+}
+
+/// A bind connection is resolved in the bound module but written elsewhere,
+/// so its position says nothing about the module's declaration order.
+fn is_written_outside(scope: scope::ScopeId, reference: &Token) -> bool {
+    scope::owner_of(scope)
+        .and_then(symbol_table::get)
+        .is_some_and(|owner| is_declared_after(&owner.token, reference))
 }
 
 /// A path whose first segment is a module instance inside a `#[test]` module
@@ -238,30 +313,100 @@ impl ReferenceTable {
         }
     }
 
-    fn check_pacakge_reference(&mut self, symbol: &Symbol, token_range: &TokenRange) {
-        if !matches!(symbol.kind, SymbolKind::Package(ref x) if !x.is_proto) {
+    /// A name is visible throughout its scope, but a variable, constant,
+    /// instance or package must be declared above where it is used, as in
+    /// SystemVerilog.
+    fn check_declaration_order(
+        &mut self,
+        symbol: &Rc<Symbol>,
+        token: &TokenRange,
+        scope: scope::ScopeId,
+        define_context: &DefineContext,
+    ) {
+        let is_function = matches!(symbol.kind, SymbolKind::Function(ref x) if !x.is_proto);
+        let is_ordered = match &symbol.kind {
+            SymbolKind::Variable(_) | SymbolKind::Instance(_) => true,
+            SymbolKind::Parameter(x) => !x.is_proto,
+            SymbolKind::Package(x) => !x.is_proto,
+            _ => false,
+        };
+        if !is_function && !is_ordered {
             return;
         }
 
-        let base_token = token_range.end;
-        let package_token = symbol.token;
-        if let (
-            TokenSource::File {
-                path: package_file, ..
-            },
-            TokenSource::File {
-                path: base_file, ..
-            },
-        ) = (package_token.source, base_token.source)
+        if !symbol_table::is_active(define_context) {
+            return;
+        }
+
+        if is_function {
+            // A function body converts where the function is first called or
+            // else declared, and sees only what is declared above that point.
+            let caller = scope::enclosing_function(scope);
+            if let Some(caller) = caller {
+                self.declaration_order
+                    .function_callees
+                    .entry(caller)
+                    .or_default()
+                    .push(symbol.id);
+            }
+            if caller != Some(symbol.id) {
+                self.declaration_order.call_sites.push(CallSite {
+                    callee: symbol.id,
+                    token: *token,
+                    scope,
+                });
+            }
+            return;
+        }
+
+        let Some(enclosure) = scope::enclosure(scope, symbol.scope) else {
+            return;
+        };
+        let define_context: DefineContext = symbol.token.into();
+        if !symbol_table::is_active(&define_context) {
+            self.errors
+                .push(AnalyzerError::referring_inactive_definition(
+                    &symbol.token.to_string(),
+                    token,
+                ));
+        } else if is_declared_too_late(symbol, &token.beg, &enclosure) {
+            self.errors.push(AnalyzerError::referring_before_definition(
+                &symbol.token.to_string(),
+                token,
+            ));
+        }
+
+        // A constant is evaluated from its declaration wherever it is used, so
+        // only what the IR registers in source order binds the call sites.
+        if let Some(function) = enclosure.function
+            && matches!(
+                symbol.kind,
+                SymbolKind::Variable(_) | SymbolKind::Instance(_)
+            )
         {
-            let referecne_before_definition = package_file == base_file
-                && (package_token.line > base_token.line
-                    || package_token.line == base_token.line
-                        && package_token.column > base_token.column);
-            if referecne_before_definition {
+            self.declaration_order
+                .function_dependencies
+                .entry(function)
+                .or_default()
+                .push(Rc::clone(symbol));
+        }
+    }
+
+    fn check_call_sites(&mut self) {
+        let order = std::mem::take(&mut self.declaration_order);
+        let mut dependencies: HashMap<SymbolId, Vec<Rc<Symbol>>> = HashMap::default();
+        for site in &order.call_sites {
+            let deps = dependencies
+                .entry(site.callee)
+                .or_insert_with(|| order.transitive_dependencies(site.callee));
+            let late = deps.iter().find(|dep| {
+                scope::enclosure(site.scope, dep.scope)
+                    .is_some_and(|x| is_declared_too_late(dep, &site.token.beg, &x))
+            });
+            if let Some(dep) = late {
                 self.errors.push(AnalyzerError::referring_before_definition(
-                    &package_token.to_string(),
-                    token_range,
+                    &dep.token.to_string(),
+                    &site.token,
                 ));
             }
         }
@@ -290,7 +435,14 @@ impl ReferenceTable {
             match symbol_table::resolve_base_path(&path, i, (scope, define_context.clone())) {
                 Ok(symbol) => {
                     if !impoted_path {
-                        self.check_pacakge_reference(&symbol.found, &path.range);
+                        if self.declaration_order_root == Some(path.range.beg.id) {
+                            self.check_declaration_order(
+                                &symbol.found,
+                                &path.range,
+                                scope,
+                                define_context,
+                            );
+                        }
                         symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
                     }
 
@@ -736,9 +888,15 @@ impl ReferenceTable {
         path: &SymbolPathNamespace,
         token: &TokenRange,
         struct_token: Option<&Token>,
+        written_here: bool,
     ) {
         match symbol_table::resolve(path) {
             Ok(symbol) => {
+                if written_here
+                    && let Some((scope, define_context)) = scope::token_scope(token.beg.id)
+                {
+                    self.check_declaration_order(&symbol.found, token, scope, &define_context);
+                }
                 for id in symbol.full_path.iter().copied() {
                     symbol_table::add_reference(id, &token.beg);
                 }
@@ -786,6 +944,7 @@ impl ReferenceTable {
         in_import_declaration: bool,
     ) {
         let (scope, define_context) = scope::token_scope(token.id).unwrap();
+        self.declaration_order_root = Some(path.range.beg.id);
         self.generic_symbol_path(
             path,
             scope,
@@ -794,6 +953,7 @@ impl ReferenceTable {
             None,
             None,
         );
+        self.declaration_order_root = None;
     }
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
@@ -804,7 +964,7 @@ impl ReferenceTable {
         for x in &candidates {
             match x {
                 ReferenceCandidate::Identifier { arg } => {
-                    self.check_simple_identifier(&arg.into(), &arg.into(), None);
+                    self.check_simple_identifier(&arg.into(), &arg.into(), None, false);
                 }
                 ReferenceCandidate::HierarchicalIdentifier { arg } => {
                     let token = arg.identifier.identifier_token.token;
@@ -862,25 +1022,35 @@ impl ReferenceTable {
 
                     let path: SymbolPathNamespace =
                         (arg, &base_symbol.found.inner_namespace()).into();
-                    self.check_simple_identifier(&path, &arg.into(), None);
+                    self.check_simple_identifier(&path, &arg.into(), None, false);
                 }
                 ReferenceCandidate::ModportItem { arg } => {
                     let mut path: SymbolPathNamespace = arg.identifier.as_ref().into();
                     path.pop_namespace();
-                    self.check_simple_identifier(&path, &arg.into(), None);
+                    self.check_simple_identifier(&path, &arg.into(), None, false);
                 }
                 ReferenceCandidate::InstParameterItem { arg } => {
                     if arg.inst_parameter_item_opt.is_none() {
                         // implicit port connection by name
                         let identifier = arg.identifier.as_ref();
-                        self.check_simple_identifier(&identifier.into(), &identifier.into(), None);
+                        self.check_simple_identifier(
+                            &identifier.into(),
+                            &identifier.into(),
+                            None,
+                            true,
+                        );
                     }
                 }
                 ReferenceCandidate::InstPortItem { arg } => {
                     if arg.inst_port_item_opt.is_none() {
                         // implicit port connection by name
                         let identifier = arg.identifier.as_ref();
-                        self.check_simple_identifier(&identifier.into(), &identifier.into(), None);
+                        self.check_simple_identifier(
+                            &identifier.into(),
+                            &identifier.into(),
+                            None,
+                            true,
+                        );
                     }
                 }
                 ReferenceCandidate::StructConstructorItem { arg, r#type } => {
@@ -896,6 +1066,7 @@ impl ReferenceTable {
                             &path,
                             &identifier.into(),
                             Some(&symbol.found.token),
+                            false,
                         );
                     }
                 }
@@ -910,11 +1081,18 @@ impl ReferenceTable {
                         let namespace = func_symbol.inner_namespace();
                         let path: SymbolPath = arg.into();
                         let path: SymbolPathNamespace = (&path, &namespace).into();
-                        self.check_simple_identifier(&path, &arg.into(), Some(&func_symbol.token));
+                        self.check_simple_identifier(
+                            &path,
+                            &arg.into(),
+                            Some(&func_symbol.token),
+                            false,
+                        );
                     }
                 }
             }
         }
+
+        self.check_call_sites();
 
         symbol_table::resume_cache_clear();
         std::mem::take(&mut self.errors)

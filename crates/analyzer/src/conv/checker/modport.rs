@@ -3,7 +3,7 @@ use crate::attribute::ExpandItem;
 use crate::attribute_table;
 use crate::conv::{Affiliation, Context};
 use crate::symbol::Direction as SymDirection;
-use crate::symbol::{Symbol, SymbolKind, TypeKind};
+use crate::symbol::{Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use veryl_parser::resource_table::StrId;
@@ -83,9 +83,10 @@ fn is_unexpandable_modport(context: &mut Context, symbol: &Symbol) -> bool {
     false
 }
 
-fn is_function_defined_in_interface(symbol: &Symbol) -> bool {
-    match &symbol.kind {
-        SymbolKind::Function(x) => x.affiliation == Affiliation::Interface,
+pub(crate) fn is_function_defined_in_interface(id: SymbolId) -> bool {
+    match symbol_table::get(id).map(|x| x.kind) {
+        Some(SymbolKind::Function(x)) => x.affiliation == Affiliation::Interface,
+        Some(SymbolKind::GenericInstance(x)) => is_function_defined_in_interface(x.base),
         _ => false,
     }
 }
@@ -110,7 +111,7 @@ pub fn check_modport(context: &mut Context, arg: &ModportItem) {
         match &*arg.direction {
             Direction::Modport(_) => {}
             Direction::Import(_) => {
-                if !is_function_defined_in_interface(&symbol.found) {
+                if !is_function_defined_in_interface(symbol.found.id) {
                     context.insert_error(AnalyzerError::invalid_modport_item(
                         InvalidModportItemKind::Function,
                         &arg.identifier.identifier_token.token.to_string(),

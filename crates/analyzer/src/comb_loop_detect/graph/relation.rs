@@ -1047,11 +1047,10 @@ impl PieceStates {
             .entry(piece_key(&piece))
             .or_default()
             .insert(piece);
-        for axis in 0..2 {
+        for (axis, runs) in self.runs.iter_mut().enumerate() {
             if let Some((start, end)) = axis_start(piece.axis(axis)) {
                 let key = piece.with_axis(axis, with_start(piece.axis(axis), None));
-                self.runs[axis]
-                    .entry((key, condition.clone()))
+                runs.entry((key, condition.clone()))
                     .or_default()
                     .insert(start, end);
             }
@@ -1075,10 +1074,10 @@ impl PieceStates {
                 group.remove(piece);
             }
         }
-        for axis in 0..2 {
+        for (axis, runs) in self.runs.iter_mut().enumerate() {
             if let Some((start, _)) = axis_start(piece.axis(axis)) {
                 let key = piece.with_axis(axis, with_start(piece.axis(axis), None));
-                if let Some(runs) = self.runs[axis].get_mut(&(key, condition.clone())) {
+                if let Some(runs) = runs.get_mut(&(key, condition.clone())) {
                     runs.remove(&start);
                 }
             }

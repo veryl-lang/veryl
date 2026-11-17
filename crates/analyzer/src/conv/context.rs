@@ -1,12 +1,13 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, InstanceNote};
+use crate::conv::checker::modport::is_function_defined_in_interface;
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError, Reach};
 use crate::conv::package_const::{PackageConstCache, PackageConstKey, PackageConstUse};
 use crate::conv::unit_cache::{self, ChildReach, UnitEvent};
 use crate::ir::{
-    Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
-    IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
-    Variable, VariableInfo,
+    Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function,
+    InstanceIndex, Interface, IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex,
+    VarKind, VarPath, VarSelect, Variable, VariableInfo,
 };
 use crate::namespace::Namespace;
 use crate::scope;
@@ -139,9 +140,6 @@ pub struct Context {
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
     pub allow_component_as_factor: bool,
-    /// Depth of `size_in_component_scope`.
-    component_sizing: usize,
-    global_func_callers: Vec<Namespace>,
     pub in_test_module: bool,
     /// In a test module and the components its hierarchical references may
     /// reach: the identifiers of the test module, which name every instance
@@ -325,11 +323,9 @@ impl Context {
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
-        std::mem::swap(&mut self.global_func_callers, &mut tgt.global_func_callers);
         self.disalbe_const_opt = tgt.disalbe_const_opt;
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
-        self.component_sizing = tgt.component_sizing;
         self.body_names = tgt.body_names.clone();
         self.config = tgt.config.clone();
         self.profiler = tgt.profiler.clone();
@@ -900,10 +896,15 @@ impl Context {
     }
 
     pub fn extract_function(&mut self, context: &mut Context, base: &VarPath, array: &ShapeRef) {
+        let mut shared = HashSet::default();
         for (id, mut variable) in context.variables.drain() {
             let path_offset = variable.path.0.len();
             variable.path.add_prelude(&base.0);
-            variable.prepend_array_at_path(array, path_offset);
+            if variable.affiliation == Affiliation::Function {
+                shared.insert(id);
+            } else {
+                variable.prepend_array_at_path(array, path_offset);
+            }
             self.variables.insert(id, variable);
         }
 
@@ -914,18 +915,36 @@ impl Context {
             self.func_paths.insert(path, id);
         }
 
+        // A package function converted along does not touch the members, so
+        // one body serves every instance.
+        let replicated: HashSet<VarId> = if array.is_empty() {
+            HashSet::default()
+        } else {
+            context
+                .functions
+                .iter()
+                .filter(|(_, x)| is_function_defined_in_interface(x.path.sig.symbol))
+                .map(|(id, _)| *id)
+                .collect()
+        };
         for (id, mut function) in context.functions.drain() {
-            if !array.is_empty() {
-                let total_array = array.total();
-                let func_body = function.functions.remove(0);
-                if let Some(total_array) = total_array {
+            if replicated.contains(&id) {
+                // An inner interface array has replicated the bodies already;
+                // each of them is replicated again for the outer instances.
+                let bodies = std::mem::take(&mut function.functions);
+                if let Some(total_array) = array.total() {
                     for i in 0..total_array {
-                        let var_index = VarIndex::from_index(i, array);
-                        let mut func_body = func_body.clone();
-                        func_body.set_index(&var_index);
-                        function.functions.push(func_body);
+                        let instance = InstanceIndex::new(array.position(i), &shared, &replicated);
+                        for body in &bodies {
+                            let mut body = body.clone();
+                            body.set_instance(&instance);
+                            function.functions.push(body);
+                        }
                     }
                 }
+                let mut shape = array.to_owned();
+                shape.append(&mut function.array);
+                function.array = shape;
             }
 
             if !function.path.path.starts_with(&base.0) {
@@ -1289,35 +1308,6 @@ impl Context {
 
     pub fn pop_namespace(&mut self) {
         self.namespaces.pop();
-    }
-
-    pub fn push_global_func_caller(&mut self, namespace: Namespace) {
-        self.global_func_callers.push(namespace);
-    }
-
-    pub fn pop_global_func_caller(&mut self) {
-        self.global_func_callers.pop();
-    }
-
-    /// Whether the namespace is a caller's one.
-    pub fn is_global_func_caller(&self, namespace: &Namespace) -> bool {
-        self.global_func_callers
-            .iter()
-            .any(|x| namespace.included(x))
-    }
-
-    pub fn enter_component_sizing(&mut self) {
-        self.component_sizing += 1;
-    }
-
-    pub fn leave_component_sizing(&mut self) {
-        self.component_sizing -= 1;
-    }
-
-    /// Whether the component's own variables are out of reach on purpose, so
-    /// that resolving through the symbol route says nothing about order.
-    pub fn sizing_component_width(&self) -> bool {
-        self.component_sizing > 0
     }
 
     pub fn current_namespace(&self) -> Option<Namespace> {

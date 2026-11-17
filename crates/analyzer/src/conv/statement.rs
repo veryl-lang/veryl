@@ -2,9 +2,9 @@ use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
 use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::utils::{
     CaseOperand, TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type,
-    build_for_range, build_for_statement, case_patterns, check_assign_before_definition,
-    check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_case_target,
-    eval_expr, eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
+    build_for_range, build_for_statement, case_patterns, check_assign_clock_domain,
+    eval_array_range_assign, eval_assign_statement, eval_case_target, eval_expr, eval_variable,
+    expand_connect, expand_connect_const, function_call, get_return_str,
     hoist_component_method_call, single_function_call_factor, switch_condition, tb_method_call,
     to_hier_assign_destination, try_infer_decl_type, try_infer_var_assign,
 };
@@ -167,11 +167,6 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
             if let Some(x) = x.to_assign_destination(context, false) {
                 dst.push(x);
             } else {
-                check_assign_before_definition(
-                    context,
-                    item.hierarchical_identifier.as_ref(),
-                    ident.identifier.identifier_token.token,
-                );
                 return Err(ir_error!(token));
             }
         }
@@ -389,8 +384,6 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                                 eval_assign_statement(context, &mut dst, &mut expr, token)?;
                             Ok(ir::StatementBlock(statements))
                         } else {
-                            check_assign_before_definition(context, expr, expr.identifier().token);
-
                             // check expression even if dst can't be determined
                             let _ = eval_expr(context, None, &x.assignment.expression, false)?;
 
@@ -438,8 +431,6 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             let statement = ir::Statement::Assign(statement);
                             Ok(ir::StatementBlock(vec![statement]))
                         } else {
-                            check_assign_before_definition(context, expr, expr.identifier().token);
-
                             // check expression even if dst can't be determined
                             let _ = eval_expr(context, None, &x.assignment.expression, false)?;
 

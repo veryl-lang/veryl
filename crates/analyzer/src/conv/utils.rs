@@ -18,7 +18,6 @@ use crate::ir::{
     ShapeRef, Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex,
     VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
-use crate::namespace::DefineContext;
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, GenericMap, ProtoBound,
     Symbol, SymbolKind, TbComponentKind, TypeKind,
@@ -34,7 +33,6 @@ use std::sync::Arc;
 use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::Token;
 
 /// True for "atomic" expressions whose result type is unambiguous:
 /// variable references, sized / real / boolean literals, function
@@ -662,38 +660,6 @@ pub fn eval_size(
         }
     } else {
         Ok((comptime, None))
-    }
-}
-
-/// A declaration the active defines guard out is not one placed further down,
-/// and saying so sends the reader to the wrong line.
-fn report_unreachable_definition(context: &mut Context, definition: Token, reference: &TokenRange) {
-    let define_context: DefineContext = definition.into();
-    let error = if define_context.is_active(&context.config.defines) {
-        AnalyzerError::referring_before_definition(&definition.to_string(), reference)
-    } else {
-        AnalyzerError::referring_inactive_definition(&definition.to_string(), reference)
-    };
-    context.insert_error(error);
-}
-
-/// A write to a variable declared further down is invisible to every analysis,
-/// while the emitter still emits it.
-pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
-    context: &mut Context,
-    identifier: T,
-    token: Token,
-) {
-    if let Ok(symbol) = symbol_table::resolve(identifier)
-        && let SymbolKind::Variable(x) = &symbol.found.kind
-        && x.affiliation == Affiliation::Module
-        // A module-level variable is registered under its bare name, so a miss
-        // means the declaration is still ahead of the write.
-        && context
-            .find_path(&VarPath::new(symbol.found.token.text))
-            .is_none()
-    {
-        report_unreachable_definition(context, symbol.found.token, &token.into());
     }
 }
 
@@ -1583,6 +1549,7 @@ pub fn eval_type(
                         }
 
                         check_struct_union_members(c, &members, &symbol.found);
+                        check_clock_reset_struct_members(c, &members, &symbol.found);
                         Ok(members)
                     });
 
@@ -1940,6 +1907,29 @@ fn check_clock_reset_union_member(
         &member.token.to_string(),
         token,
     ));
+}
+
+/// A struct having a clock/reset member, nested ones included, has to be made
+/// of that kind only, so that any bit of it is of that kind.
+fn check_clock_reset_struct_members(
+    context: &mut Context,
+    members: &[ir::TypeKindMember],
+    symbol: &Symbol,
+) {
+    if context.in_generic {
+        return;
+    }
+
+    let kinds: Vec<_> = members.iter().flat_map(|x| x.r#type.leaf_kinds()).collect();
+    if kinds.contains(&&ir::TypeKind::Unknown) {
+        return;
+    }
+
+    let has_clock_reset = members.iter().any(|x| x.r#type.include_clock_reset());
+    if has_clock_reset && kinds.iter().any(|x| *x != kinds[0]) {
+        let token: TokenRange = symbol.token.into();
+        context.insert_error(AnalyzerError::mixed_clock_reset_struct_member(&token));
+    }
 }
 
 fn check_struct_union_members(
@@ -2511,7 +2501,7 @@ enum HierReference {
     },
     /// First segment is a scalar module instance that has not been
     /// converted yet (declared after the referencing statement).
-    NotDeclaredYet(StrId),
+    NotDeclaredYet,
     InstanceArray(StrId),
     NotHier,
 }
@@ -2638,7 +2628,7 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
     }
 
     if prop.array.is_empty() {
-        HierReference::NotDeclaredYet(segs[0])
+        HierReference::NotDeclaredYet
     } else {
         HierReference::InstanceArray(segs[0])
     }
@@ -2915,13 +2905,10 @@ fn eval_factor_path_inner(
                     &token,
                 ));
             }
-            HierReference::NotDeclaredYet(name) => {
-                if context.in_tb_block {
-                    context.insert_error(AnalyzerError::referring_before_definition(
-                        &name.to_string(),
-                        &token,
-                    ));
-                } else {
+            HierReference::NotDeclaredYet => {
+                // In a testbench name resolution reports the instance declared
+                // below; elsewhere a hierarchical reference is never visible.
+                if !context.in_tb_block {
                     context.insert_error(AnalyzerError::invisible_identifier(
                         &path.0[1].to_string(),
                         &token,
@@ -3078,13 +3065,14 @@ fn reduce_unevaluable_select(
 
     comptime.r#type.array.drain(0..array_select.dimension());
     if !width_select.is_empty() {
+        let clock_reset = comptime.select_clock_reset();
         comptime.r#type.flatten_struct_union_enum();
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
         comptime
             .r#type
-            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
+            .restore_member(comptime.member_signed, clock_reset.as_ref());
     }
     comptime.token = token;
 }
@@ -3118,6 +3106,7 @@ fn fold_symbol_select(
     // replaces its width dimensions by the selected width.
     let mut element = comptime.r#type.clone();
     if !select.is_empty() {
+        let clock_reset = comptime.select_clock_reset();
         element.flatten_struct_union_enum();
         comptime.r#type = element.clone();
         if let Some(width) = select.eval_comptime(context, &element, false) {
@@ -3125,7 +3114,7 @@ fn fold_symbol_select(
         }
         comptime
             .r#type
-            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
+            .restore_member(comptime.member_signed, clock_reset.as_ref());
     }
 
     let flat = array.calc_index(&indices)?;
@@ -3248,17 +3237,6 @@ pub fn eval_factor_symbol(
 ) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
         SymbolKind::Parameter(x) if !x.is_proto => {
-            // Parameter should be found through context.find_path from the
-            // defined namespace. Not while sizing a declared width, where a
-            // component instantiating itself would name its own scope.
-            if !context.sizing_component_width()
-                && !context.is_global_func_caller(&symbol.found.namespace)
-                && let Some(namespace) = context.current_namespace()
-                && symbol.found.namespace.included(&namespace)
-            {
-                report_unreachable_definition(context, symbol.found.token, &token);
-            }
-
             // Reached while a width names a parameter of a component whose body
             // has not been converted yet, so the declaration default is not
             // what that parameter stands for.
@@ -3477,18 +3455,6 @@ pub fn eval_factor_symbol(
             }
         }
         SymbolKind::StructMember(_) => {
-            // Module local variable should be found through context.find_path
-            let module_variable = symbol.full_path.iter().any(|x| {
-                let symbol = symbol_table::get(*x).unwrap();
-                if let SymbolKind::Variable(x) = symbol.kind {
-                    x.affiliation == Affiliation::Module
-                } else {
-                    false
-                }
-            });
-            if module_variable {
-                report_unreachable_definition(context, symbol.found.token, &token);
-            }
             return eval_struct_member(context, &symbol.found, &path, VarPath::default(), token);
         }
         SymbolKind::SystemVerilog => {
@@ -3562,11 +3528,6 @@ pub fn eval_factor_symbol(
             ));
         }
         SymbolKind::Variable(x) => {
-            // Module local variable should be found through context.find_path
-            if x.affiliation == Affiliation::Module {
-                report_unreachable_definition(context, symbol.found.token, &token);
-            }
-
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
             let x = Comptime::from_type(r#type, x.clock_domain, token);
 
@@ -4543,9 +4504,7 @@ fn size_in_component_scope(
 ) -> IrResult<ir::Type> {
     let mut external = Context::default();
     external.inherit(context);
-    external.enter_component_sizing();
     let ret = external.block(|c| r#type.to_ir_type(c, TypePosition::Variable));
-    external.leave_component_sizing();
     context.inherit(&mut external);
     ret
 }
@@ -4775,10 +4734,12 @@ pub fn get_port_connects(
                     // array dims go to the variable's index, the rest to a bit select.
                     let (array_select, width_select) =
                         dst_select.clone().split(comptime.r#type.array.dims());
-                    comptime.r#type.array.drain(0..array_select.dimension());
+                    let index = array_select.to_index();
+                    comptime.r#type.array =
+                        index.selected_shape(context, &comptime.r#type.array, token)?;
                     ir::Expression::Term(Box::new(ir::Factor::Variable(
                         var_id,
-                        array_select.to_index(),
+                        index,
                         width_select,
                         comptime,
                     )))
@@ -5053,14 +5014,14 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
 
     if !context.func_paths.contains_key(path) {
         let symbol = symbol_table::get(path.sig.symbol).unwrap();
-        let (definition, is_global) = match &symbol.kind {
-            SymbolKind::Function(x) => (x.definition.unwrap(), x.is_global()),
+        let definition = match &symbol.kind {
+            SymbolKind::Function(x) => x.definition.unwrap(),
             SymbolKind::ModportFunctionMember(x) => {
                 let symbol = symbol_table::get(x.function).unwrap();
                 let SymbolKind::Function(x) = symbol.kind else {
                     unreachable!();
                 };
-                (x.definition.unwrap(), false)
+                x.definition.unwrap()
             }
             _ => return Err(ir_error!(token)),
         };
@@ -5084,18 +5045,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             local_context.inherit(context);
             local_context.extract_var_paths(context, &path.path, &array);
 
-            let caller = is_global
-                .then(|| local_context.current_namespace())
-                .flatten();
-            if let Some(namespace) = &caller {
-                local_context.push_global_func_caller(namespace.clone());
-            }
-
             let ret = conv_function(&mut local_context, definition, path);
-
-            if caller.is_some() {
-                local_context.pop_global_func_caller();
-            }
 
             context.extract_function(&mut local_context, &path.path, &array);
             context.inherit(&mut local_context);

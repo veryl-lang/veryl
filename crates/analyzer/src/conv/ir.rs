@@ -302,11 +302,12 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
                 items.extend(group);
             }
 
-            // Module items are order-free: initial/final bodies consume
-            // state that other declarations register during conversion
-            // (component parameters, elaborated instance components), so
-            // they convert after everything else. The declaration order in
-            // the resulting IR still follows the source.
+            // initial/final bodies consume state that other declarations
+            // register during conversion (component parameters, elaborated
+            // instance components), so they convert after everything else,
+            // which `scope::is_deferred_block` mirrors for declaration order.
+            // The declaration order in the resulting IR still follows the
+            // source.
             let is_tb_block = |item: &&ModuleItem| {
                 matches!(
                     item.generate_item.as_ref(),
