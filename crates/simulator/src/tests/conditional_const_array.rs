@@ -72,3 +72,48 @@ fn conditional_const_array_merges_unknown_condition_per_element() {
         }
     }
 }
+
+#[test]
+fn conditional_array_parameter_keeps_caller_values_through_instances() {
+    for (select, first) in [
+        ("1'b0", "4'b1001"),
+        ("1'b1", "4'b1010"),
+        ("1'bx", "4'b10xx"),
+        ("1'bz", "4'b10xx"),
+    ] {
+        let code = format!(
+            r#"
+        module Leaf #(
+            param PORT: u32 = 0,
+            param XS: logic<4>[2] = '{{0, 0}},
+        ) (index: input logic, o: output logic<4>) {{
+            assign o = XS[index];
+        }}
+        module Mid #(param SEL: logic = 1'b1)
+        (index: input logic, o: output logic<4>) {{
+            inst u: Leaf #(
+                XS: if SEL ? '{{4'b1010, 4'b1100}} : '{{4'b1001, 4'b1100}},
+            ) (index, o);
+        }}
+        module Top (index: input logic, o: output logic<4>) {{
+            inst u: Mid #(SEL: {select}) (index, o);
+        }}
+        "#
+        );
+        for config in Config::all()
+            .into_iter()
+            .filter(|c| c.use_4state || !select.contains(['x', 'z']))
+        {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            for (index, expected) in [(0, first), (1, "4'b1100")] {
+                sim.set("index", Value::new(index, 1, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("o"),
+                    Some(expected.parse().unwrap()),
+                    "select={select}, index={index}, config={config:?}"
+                );
+            }
+        }
+    }
+}

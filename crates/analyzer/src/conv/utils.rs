@@ -1127,7 +1127,10 @@ pub fn eval_const_assign(
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
 
-    if comptime.value.is_unknown()
+    // As with scalar overrides above, an unresolved conditional array still
+    // refers to the caller's variables, not this component's variable table.
+    if !overridden
+        && comptime.value.is_unknown()
         && !r#type.array.is_empty()
         && matches!(expr, ir::Expression::Ternary(..))
         && let Some(values) = eval_array_literal_values(context, r#type, expr)?

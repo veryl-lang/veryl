@@ -2,6 +2,62 @@ use super::*;
 use crate::ir::{Component, Declaration, Statement};
 use crate::value::Value;
 
+fn conditional_array_parameter_source(selector: &str, port: u32, arrays: &str) -> String {
+    format!(
+        r#"
+module Leaf #(
+    param PORT: u32 = {port},
+    param XS: u32 [2] = '{{1, 1}},
+) (
+    a: input logic<8>,
+    o: output logic<8>,
+) {{
+    assign o = a[7:8 - XS[0]];
+}}
+
+module Top #(
+    param SEL: u32 = {selector},
+) (
+    a: input logic<8>,
+    o: output logic<8>,
+) {{
+    inst u: Leaf #(
+        XS: if SEL == 1 ? {arrays},
+    ) (a, o);
+}}
+"#
+    )
+}
+
+#[test]
+fn conditional_array_parameter_with_external_condition() {
+    for selector in ["$define::SEL", "$sv::pkg::SEL"] {
+        // The parent's SEL and child's PORT have the same local VarId. If an
+        // unresolved override is folded in the child, either PORT value must
+        // expose the wrong substitution rather than accidentally pass.
+        for (port, arrays) in [(0, "'{1, 1} : '{9, 9}"), (1, "'{9, 9} : '{1, 1}")] {
+            let code = conditional_array_parameter_source(selector, port, arrays);
+            assert!(analyze(&code).is_empty(), "{selector}, PORT={port}");
+        }
+    }
+}
+
+#[test]
+fn conditional_array_parameter_checks_known_condition() {
+    for (selector, valid) in [("1", true), ("0", false)] {
+        let code = conditional_array_parameter_source(selector, 0, "'{1, 1} : '{9, 9}");
+        let errors = analyze(&code);
+        if valid {
+            assert!(errors.is_empty());
+        } else {
+            assert!(matches!(
+                errors.as_slice(),
+                [AnalyzerError::InvalidSelect { .. }]
+            ));
+        }
+    }
+}
+
 #[test]
 fn array_slice_narrow_constant_index_preserves_valid_elements() {
     for kind in ["logic", "bit"] {
