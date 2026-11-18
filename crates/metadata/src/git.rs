@@ -99,14 +99,12 @@ pub enum Git {
 impl Git {
     pub fn exists() -> bool {
         #[cfg(gitoxide_enabled)]
-        if gitoxide::Git::exists() {
-            return true;
-        }
+        let exists = gitoxide::Git::exists();
+        #[cfg(not(gitoxide_enabled))]
+        let exists = false;
         #[cfg(feature = "git-command")]
-        if command::Git::exists() {
-            return true;
-        }
-        false
+        let exists = exists || command::Git::exists();
+        exists
     }
 
     pub fn init(path: &Path) -> Result<Self, MetadataError> {
