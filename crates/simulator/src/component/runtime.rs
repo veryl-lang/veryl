@@ -877,42 +877,55 @@ impl RuntimeComponent {
 
     /// Writes dirty outputs into variable storage. Runs after FF commit so
     /// the same edge's RTL saw pre-edge values (NBA semantics). Returns
-    /// true when anything was written (the caller marks comb dirty).
+    /// true when a stored value changed (the caller marks comb dirty).
     pub fn apply_outputs(&mut self, use_4state: bool) -> bool {
         let mut wrote = false;
         for out in &mut self.outputs {
             if !self.host.output_dirty_idx(out.idx) {
                 continue;
             }
+            // A component may write an output every edge whether or not it
+            // changed; only a changed value has to re-settle the design.
             let ptr = out.dest;
+            let mut changed = false;
             if out.width <= 64 && matches!(out.native_bytes, 1 | 2 | 4 | 8) {
                 let mask = width_mask(out.width);
                 let payload = unsafe { *out.src_words } & mask;
-                write_payload(ptr, out.native_bytes, payload);
+                if read_payload(ptr, out.native_bytes) != payload {
+                    write_payload(ptr, out.native_bytes, payload);
+                    changed = true;
+                }
                 if use_4state {
                     let mask_xz = unsafe { *out.src_mask } & mask;
                     let mask_ptr = unsafe { ptr.add(out.native_bytes) };
-                    write_payload(mask_ptr, out.native_bytes, mask_xz);
+                    if read_payload(mask_ptr, out.native_bytes) != mask_xz {
+                        write_payload(mask_ptr, out.native_bytes, mask_xz);
+                        changed = true;
+                    }
                 }
             } else {
                 // Wide destination: the port buffer and DUT storage share the
                 // LSB-first word layout and the payload is already masked to the
                 // width (by `write_words` or `to_port_words`), so copy it across
                 // directly. Two-state storage has no mask slot.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        out.src_words as *const u8,
-                        ptr,
-                        out.native_bytes,
-                    );
-                    if use_4state {
-                        std::ptr::copy_nonoverlapping(
-                            out.src_mask as *const u8,
-                            ptr.add(out.native_bytes),
-                            out.native_bytes,
-                        );
+                let len = out.native_bytes;
+                let slots = [(out.src_words, ptr)]
+                    .into_iter()
+                    .chain(use_4state.then(|| (out.src_mask, unsafe { ptr.add(len) })));
+                for (src, dst) in slots {
+                    let src = src as *const u8;
+                    let same = unsafe {
+                        std::slice::from_raw_parts(src, len)
+                            == std::slice::from_raw_parts(dst.cast_const(), len)
+                    };
+                    if !same {
+                        unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
+                        changed = true;
                     }
                 }
+            }
+            if !changed {
+                continue;
             }
             wrote = true;
         }

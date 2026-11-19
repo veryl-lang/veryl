@@ -1175,6 +1175,63 @@ fn component_reads_dut_internal_signal() {
 }
 
 #[test]
+fn unchanged_component_output_is_not_a_write() {
+    // A component writing the same output value again leaves the design
+    // settled; a changed value, including an X/Z-only change, is a write.
+    for (component, width) in [("mirror", 8), ("wide_mirror", 100)] {
+        let code = format!(
+            r#"
+    #[test(comp_test)]
+    module comp_test {{
+        inst clk: $tb::clock_gen;
+
+        var d: logic<{width}>;
+        var q: logic<{width}>;
+
+        inst m: $comp::{component} ( clk, d, q );
+
+        initial {{
+            d = 1;
+            clk.next();
+            $assert(q == 1, "mirrored");
+            $finish();
+        }}
+    }}
+    "#
+        );
+        for (config, result, mut sim) in run_component_test(&code, "comp_test") {
+            assert_eq!(result, TestResult::Pass, "failed for {config:?}");
+            let event =
+                build_event_map(&sim.ir)[&veryl_parser::resource_table::insert_str("clk")].clone();
+            let d = *sim
+                .ir
+                .module_variables
+                .variables
+                .iter()
+                .find(|(_, x)| x.path.to_string() == "d")
+                .unwrap()
+                .0;
+            let use_4state = sim.ir.use_4state;
+            let fire = |sim: &mut Simulator| {
+                let component = &mut sim.components[0];
+                component.stage_inputs(&mut veryl_analyzer::value::MaskCache::default());
+                component.fire(&event, 0);
+                assert!(component.host.output_dirty("q"));
+                component.apply_outputs(use_4state)
+            };
+            assert!(!fire(&mut sim), "unchanged {component} for {config:?}");
+            sim.set_var_by_id(&d, Value::new(2, width, false));
+            assert!(fire(&mut sim), "changed {component} for {config:?}");
+            if use_4state {
+                sim.set_var_by_id(&d, Value::new_x(width, false));
+                assert!(fire(&mut sim), "X {component} for {config:?}");
+                assert!(!fire(&mut sim), "unchanged X {component} for {config:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn multiple_component_instances_are_independent() {
     let code = r#"
     #[test(comp_test)]
