@@ -4,10 +4,11 @@ use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{
     ExpressionContext, build_dynamic_write_select, dynamic_ranges_contain,
 };
-use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
+use crate::ir::external::{ExternalOutput, ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{
     BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
 };
+use crate::ir::nested_tb::{self, TbVariable};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
@@ -17,8 +18,8 @@ use crate::ir::statement::{
     size_literal_rhs,
 };
 use crate::ir::variable::{
-    ModuleVariableMeta, VarOffset, align_up_64, collect_string_widths, create_variable_meta,
-    ff_cacheline_pad_enabled,
+    ModuleVariableMeta, VarOffset, VariableMeta, align_up_64, collect_string_widths,
+    create_variable_meta, ff_cacheline_pad_enabled,
 };
 use crate::ir::{Event, ProtoExpression, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
@@ -26,6 +27,7 @@ use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 
 /// Read of an `always_ff` reset net, as the `if_reset` condition.  Built as a
@@ -1351,8 +1353,11 @@ pub struct ProtoDeclaration {
     /// the top module sees every derived clock and internally produced
     /// reset across the hierarchy, not just its own locals.
     pub derived_clock_candidates: Vec<EdgeCandidate>,
-    /// User-defined component instances declared at this level.
+    /// User-defined component instances declared at this level, and those
+    /// of nested test modules under their hierarchical names.
     pub external_components: Vec<ProtoExternalComponent>,
+    /// Testbench-facing variables of nested test modules.
+    pub tb_variables: Vec<TbVariable>,
 }
 
 impl Conv<&air::Declaration> for ProtoDeclaration {
@@ -1422,6 +1427,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
                     external_components: vec![],
+                    tb_variables: vec![],
                 })
             }
             air::Declaration::Ff(x) => {
@@ -1497,6 +1503,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
                     external_components: vec![],
+                    tb_variables: vec![],
                 })
             }
             air::Declaration::Inst(x) => Conv::conv(context, x.as_ref()),
@@ -1529,6 +1536,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
                     external_components: vec![],
+                    tb_variables: vec![],
                 })
             }
             air::Declaration::Final(x) => {
@@ -1546,6 +1554,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
                     external_components: vec![],
+                    tb_variables: vec![],
                 })
             }
             air::Declaration::Unsupported(token) => {
@@ -1557,18 +1566,35 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     let expr: ProtoExpression = Conv::conv(context, &c.expr)?;
                     // Only a plain (unindexed, unselected) variable
                     // connection can serve as a component output.
-                    let output = c.output.as_ref().and_then(|dst| {
+                    let output_id = c.output.as_ref().and_then(|dst| {
                         (dst.index.indices.is_empty()
                             && dst.select.0.is_empty()
                             && dst.select.1.is_none())
                         .then_some(dst.id)
                     });
+                    let output = match output_id {
+                        Some(id) => {
+                            let meta = context.scope().variable_meta.get(&id);
+                            let Some((meta, element)) =
+                                meta.and_then(|x| Some((x, x.elements.first()?)))
+                            else {
+                                return Err(SimulatorError::unsupported_description(&c.token));
+                            };
+                            Some(ExternalOutput {
+                                offset: element.current,
+                                native_bytes: meta.native_bytes,
+                                width: meta.width,
+                                name: resource_table::insert_str(&meta.path.to_string()),
+                            })
+                        }
+                        None => None,
+                    };
                     // Clock/reset events fire on the connected variable;
                     // input-only (modport) connections carry it in the
                     // expression rather than `output`. Hierarchical
                     // references have no VarId here; their event key is
                     // recovered after hier resolution in module conv.
-                    let event_var = output.or_else(|| {
+                    let event_var = output_id.or_else(|| {
                         if !(c.is_clock || c.is_reset) {
                             return None;
                         }
@@ -1608,6 +1634,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                         is_var_form: x.is_var_form,
                         token: x.token,
                     }],
+                    tb_variables: vec![],
                 })
             }
             air::Declaration::Null => Ok(ProtoDeclaration {
@@ -1617,6 +1644,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 child_modules: vec![],
                 derived_clock_candidates: vec![],
                 external_components: vec![],
+                tb_variables: vec![],
             }),
         }
     }
@@ -2342,12 +2370,17 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // to, eliminating the inter-module copy at settle_comb.  De-aliased only
         // for the reuse-target DUT boundary — see `port_alias_enabled`.
         let component_key = Arc::as_ptr(&src.component);
+        // A reused subtree replays its statements only, not the testbench
+        // handles renamed below.
+        let reusable = context.config.dut_reuse
+            && !has_reference_aliases
+            && !nested_tb::has_testbench(context, &src.component);
         let alias_enabled = context.dut_reuse.port_alias_enabled(
             component_key,
             child_ff_count,
             child_comb_count,
             context.in_reuse_dut,
-            context.config.dut_reuse && !has_reference_aliases,
+            reusable,
         );
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
@@ -2461,6 +2494,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut all_derived_clock_candidates: Vec<EdgeCandidate> = vec![];
+        let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
+        let mut all_tb_variables: Vec<TbVariable> = vec![];
 
         // Cross-test DUT reuse: if this component was already converted (earlier
         // test/instance), restore its subtree relocated to this instance's
@@ -2471,7 +2506,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             alias_enabled,
             ff_start,
             comb_start,
-            context.config.dut_reuse && !has_reference_aliases,
+            reusable,
         ) {
             ReuseOutcome::Hit(r) => (Some(r), None),
             ReuseOutcome::Compute(g) => (None, Some(g)),
@@ -2481,10 +2516,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // Re-key the cached subtree's grandchild derived-clock event ids
             // (minted near u32::MAX) to fresh ones, else they collide with ids
             // this context mints for its own parts.  Small per-scope ids pass through.
-            let threshold = air::VarId::from_raw(u32::MAX / 2);
             let mut id_map: HashMap<air::VarId, air::VarId> = HashMap::default();
             let mut intern = |vid: air::VarId, ctx: &mut Context| {
-                if vid > threshold {
+                if Context::is_internal_event_id(vid) {
                     id_map
                         .entry(vid)
                         .or_insert_with(|| ctx.alloc_internal_event_id());
@@ -2557,6 +2591,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 all_post_comb_fns.extend(proto_decl.post_comb_fns);
                 all_child_modules.extend(proto_decl.child_modules);
                 all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
+                all_external_components.extend(proto_decl.external_components);
+                all_tb_variables.extend(proto_decl.tb_variables);
             }
 
             // A nested test module's initial/final statements merge into the
@@ -2567,6 +2603,13 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 context,
                 &mut all_event_statements,
                 &all_child_modules,
+            )?;
+            crate::ir::hier_ref::resolve_component_connects(
+                context,
+                &mut all_external_components,
+                &all_child_modules,
+                &all_derived_clock_candidates,
+                &nested_tb::signal_offsets(all_tb_variables.iter().map(|x| (&x.id, &x.meta))),
             )?;
 
             context.in_reuse_dut = prev_in_reuse_dut;
@@ -3093,6 +3136,34 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let child_port_var_set: HashSet<air::VarId> =
             child_module.ports.values().copied().collect();
         let mut child_inst_reset_kinds = None;
+        // A clock or reset of the child's `$tb` generators gets an id too,
+        // but the testbench fires its events itself, so no edge monitor.
+        let generators: HashMap<air::VarId, StrId> = child_module
+            .tb_handles
+            .generators
+            .iter()
+            .map(|(name, id)| (*id, *name))
+            .collect();
+        let prefixed = |name: StrId| nested_tb::hierarchical_name(&src.hierarchy, src.name, name);
+        let prefixed_path = |path: &air::VarPath| {
+            air::VarPath::new(prefixed(resource_table::insert_str(&path.to_string())))
+        };
+        let tb_variable = |meta: &VariableMeta, id: air::VarId, handle: Option<StrId>| {
+            let mut meta = meta.clone();
+            meta.path = prefixed_path(&meta.path);
+            TbVariable {
+                id,
+                meta,
+                handle: handle.map(prefixed),
+            }
+        };
+        for x in &mut all_tb_variables {
+            x.meta.path = prefixed_path(&x.meta.path);
+            x.handle = x.handle.map(prefixed);
+        }
+        // The id each clock and reset is re-keyed to, for the component
+        // connections that fire on it.
+        let mut rekeyed: HashMap<air::VarId, air::VarId> = HashMap::default();
         for (vid, var) in &child_module.variables {
             let is_clock = var.r#type.is_clock();
             let is_reset = var.r#type.is_reset();
@@ -3107,15 +3178,25 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             let Some(meta) = child_variable_meta.get(vid) else {
                 continue;
             };
+            let handle = generators.get(vid).copied();
             if is_reset {
                 let mut reset_kind = None;
                 for (elem_idx, elem) in meta.elements.iter().enumerate() {
-                    let Some(stmts) = remapped_events.remove(&Event::Reset(*vid, elem_idx as u32))
-                    else {
+                    let stmts = remapped_events.remove(&Event::Reset(*vid, elem_idx as u32));
+                    if stmts.is_none() && handle.is_none() {
                         continue;
-                    };
+                    }
                     let unique_id = context.alloc_internal_event_id();
-                    remapped_events.insert(Event::reset(unique_id), stmts);
+                    if let Some(stmts) = stmts {
+                        remapped_events.insert(Event::reset(unique_id), stmts);
+                    }
+                    if elem_idx == 0 {
+                        rekeyed.insert(*vid, unique_id);
+                    }
+                    if handle.is_some() {
+                        all_tb_variables.push(tb_variable(meta, unique_id, handle));
+                        continue;
+                    }
                     let (active_low, is_async) = *reset_kind.get_or_insert_with(|| {
                         let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
                             crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
@@ -3143,6 +3224,13 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid, elem_idx as u32)) {
                     remapped_events.insert(Event::clock(unique_id), stmts);
                 }
+                if elem_idx == 0 {
+                    rekeyed.insert(*vid, unique_id);
+                }
+                if handle.is_some() {
+                    all_tb_variables.push(tb_variable(meta, unique_id, handle));
+                    continue;
+                }
                 all_derived_clock_candidates.push((
                     unique_id,
                     elem.current,
@@ -3150,6 +3238,44 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     None,
                     matches!(var.r#type.kind, air::TypeKind::ClockNegedge),
                 ));
+            }
+        }
+
+        nested_tb::rename_handles(&mut remapped_events, &src.hierarchy, src.name);
+        // A re-keyed id passes through every boundary unchanged.
+        let mut returns: HashMap<air::VarId, air::VarId> = HashMap::default();
+        nested_tb::remap_returns(&mut remapped_events, |id| {
+            if Context::is_internal_event_id(id) {
+                return id;
+            }
+            *returns.entry(id).or_insert_with(|| {
+                let new_id = context.alloc_internal_event_id();
+                if let Some(meta) = child_variable_meta.get(&id) {
+                    all_tb_variables.push(tb_variable(meta, new_id, None));
+                }
+                new_id
+            })
+        });
+        for component in &mut all_external_components {
+            component.name = nested_tb::hierarchical_name(&src.hierarchy, src.name, component.name);
+            for connect in &mut component.connects {
+                if let Some(output) = &mut connect.output {
+                    output.name =
+                        nested_tb::hierarchical_name(&src.hierarchy, src.name, output.name);
+                }
+                // Left unset, the event source is recovered from the
+                // connected storage at the top.
+                connect.event_var =
+                    connect
+                        .event_var
+                        .and_then(|id| match child_to_parent_var.get(&id) {
+                            Some((parent, 0)) => Some(*parent),
+                            Some(_) => None,
+                            None => rekeyed
+                                .get(&id)
+                                .copied()
+                                .or_else(|| Context::is_internal_event_id(id).then_some(id)),
+                        });
             }
         }
 
@@ -3166,7 +3292,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             post_comb_fns: all_post_comb_fns,
             child_modules: vec![child_module_meta],
             derived_clock_candidates: all_derived_clock_candidates,
-            external_components: vec![],
+            external_components: all_external_components,
+            tb_variables: all_tb_variables,
         })
     }
 }

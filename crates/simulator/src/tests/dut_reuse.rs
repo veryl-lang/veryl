@@ -205,3 +205,68 @@ fn dut_reuse_top_caches_are_bound_to_ir_and_config() {
         assert_output(b, 19);
     }
 }
+
+#[test]
+fn dut_reuse_keeps_nested_testbench_reset_deasserted() {
+    // `Wrap` is shared by both tests; the reset of the test module under it
+    // is driven by the testbench even when the second test replays `Wrap`.
+    let code = r#"
+    #[test(inner)]
+    module Inner (
+        clk  : input  clock    ,
+        state: output logic<8>,
+    ) {
+        inst rst: $tb::reset_gen(clk);
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 1; }
+            else { r = 2; }
+        }
+        assign state = r;
+    }
+    module Wrap (
+        clk  : input  clock       ,
+        state: output logic<8>   ,
+        pad  : output logic<2048>,
+    ) {
+        inst i: Inner (clk, state);
+        assign pad = 2048'd0;
+    }
+    #[test(first)]
+    module First {
+        inst clk: $tb::clock_gen;
+        var state: logic<8>;
+        var pad  : logic<2048>;
+        inst w: Wrap (clk, state, pad);
+        initial {
+            clk.next();
+            $assert(state == 2, "not in reset");
+        }
+    }
+    #[test(second)]
+    module Second {
+        inst clk: $tb::clock_gen;
+        var state: logic<8>;
+        var pad  : logic<2048>;
+        inst w: Wrap (clk, state, pad);
+        initial {
+            clk.next();
+            $assert(state == 2, "not in reset");
+        }
+    }
+    "#;
+    let ir = analyze_air(code);
+    let tops = ["First".into(), "Second".into()];
+    let config = Config {
+        dut_reuse: true,
+        abstract_reset_active_high: false,
+        ..Default::default()
+    };
+    let session = BuildSession::new(&ir, &config, &tops);
+    for top in tops {
+        let built = session.build_ir(top).unwrap();
+        let module_name = built.name.to_string();
+        let result = run_native_testbench(built, None, module_name).unwrap();
+        assert_eq!(result, TestResult::Pass, "{top}");
+    }
+}

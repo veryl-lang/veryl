@@ -1237,7 +1237,7 @@ pub fn eval_variable(
     r#type: &ir::Type,
     clock_domain: ClockDomain,
     token: TokenRange,
-) {
+) -> ir::VarId {
     let comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
     let signed = comptime.r#type.signed;
     let id = context.insert_var_path(path.clone(), comptime);
@@ -1272,6 +1272,7 @@ pub fn eval_variable(
         array_limit,
     );
     context.insert_variable(id, variable);
+    id
 }
 
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
@@ -5584,7 +5585,8 @@ fn conv_external_method_call(
                 }
 
                 let inst_params = context
-                    .tb_component_params
+                    .tb_handles
+                    .component_params
                     .get(&inst_name)
                     .cloned()
                     .unwrap_or_default();
@@ -5692,6 +5694,25 @@ pub fn tb_method_call(
 
     let tb_kind = match &type_symbol.found.kind {
         SymbolKind::TbComponent(x) => &x.kind,
+        SymbolKind::Module(_) => {
+            // An instance array element or generate block would need an
+            // index the instance path does not carry.
+            let has_index = is_array(&inst_symbol.found.kind)
+                || !expr_id.expression_identifier_list.is_empty()
+                || expr_id
+                    .expression_identifier_list0
+                    .iter()
+                    .any(|x| !x.expression_identifier_list0_list.is_empty());
+            return hierarchical_component_method_call(
+                context,
+                &path,
+                &type_symbol.found,
+                has_index,
+                func_call,
+                position,
+                token,
+            );
+        }
         _ => {
             return Ok(None);
         }
@@ -5863,6 +5884,97 @@ fn self_determined_arg(context: &mut Context, arg: &ir::Expression) -> ir::Expre
     let mut expr = arg.clone();
     expr.eval_comptime(context, None);
     expr
+}
+
+fn is_array(kind: &SymbolKind) -> bool {
+    match kind {
+        SymbolKind::Instance(x) => !x.array.is_empty(),
+        SymbolKind::Variable(x) => !x.r#type.array.is_empty(),
+        _ => false,
+    }
+}
+
+/// `u.csr.method(...)`: a method of a `$comp` instance inside a child
+/// instance. The call names the component by its instance path, as the
+/// simulator names a nested test module's components.
+fn hierarchical_component_method_call(
+    context: &mut Context,
+    path: &GenericSymbolPath,
+    module: &Symbol,
+    mut has_index: bool,
+    func_call: &FunctionCall,
+    position: TbMethodCallPosition,
+    token: TokenRange,
+) -> IrResult<Option<ir::Statement>> {
+    let method = path.paths.len() - 1;
+    let mut namespace = module.inner_namespace();
+    let mut names = vec![path.paths[0].base.text];
+    for (i, segment) in path.paths.iter().enumerate().take(method).skip(1) {
+        let Ok(inst) = symbol_table::resolve((&SymbolPath::new(&[segment.base.text]), &namespace))
+        else {
+            return Ok(None);
+        };
+        let type_path = match &inst.found.kind {
+            SymbolKind::Instance(x) => &x.type_name,
+            SymbolKind::Variable(x) => match &x.r#type.kind {
+                TypeKind::UserDefined(x) => &x.path,
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        let Ok(type_symbol) =
+            symbol_table::resolve_generic_structural(type_path, &inst.found.namespace)
+        else {
+            return Ok(None);
+        };
+        has_index |= is_array(&inst.found.kind);
+        names.push(segment.base.text);
+        match &type_symbol.found.kind {
+            SymbolKind::Module(_) => namespace = type_symbol.found.inner_namespace(),
+            SymbolKind::TbComponent(x) if i + 1 == method => {
+                let TbComponentKind::External(component) = x.kind else {
+                    return Ok(None);
+                };
+                if has_index || path.paths[..i].iter().any(|x| !x.arguments.is_empty()) {
+                    context.insert_error(AnalyzerError::component_interface_mismatch(
+                        ComponentInterfaceMismatchKind::MethodCallForm,
+                        Some(component),
+                        &token,
+                    ));
+                    return Err(ir_error!(token));
+                }
+                let inst_name = names
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let inst_name = resource_table::insert_str(&inst_name);
+                let args = if let Some(ref arg_list) = func_call.function_call_opt {
+                    Some(argument_list(context, arg_list.argument_list.as_ref())?)
+                } else {
+                    None
+                };
+                let call_path = GenericSymbolPath {
+                    paths: path.paths[i..].to_vec(),
+                    ..path.clone()
+                };
+                let (method, ret_width) = conv_external_method_call(
+                    context, component, &call_path, args, inst_name, position, token,
+                )?;
+                return Ok(Some(ir::Statement::TbMethodCall(TbMethodCall {
+                    inst: inst_name,
+                    method,
+                    ret: None,
+                    ret_strict: false,
+                    ret_width,
+                    ret_signed: false,
+                    ret_4state: false,
+                })));
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(None)
 }
 
 /// Captures the `i`-th positional argument of a `$tb::random` method as a

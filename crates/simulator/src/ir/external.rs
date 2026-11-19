@@ -8,6 +8,7 @@
 //! into pointer-bound `Expression`s at `instantiate` time.
 
 use crate::ir::expression::{Expression, ProtoExpression};
+use crate::ir::variable::VarOffset;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::ExternalParamValue;
 use veryl_parser::resource_table::StrId;
@@ -34,7 +35,7 @@ pub struct ProtoExternalConnect {
     /// The connected variable when the connection is a plain (unindexed,
     /// unselected) variable reference — the only form usable as a
     /// component output.
-    pub output: Option<air::VarId>,
+    pub output: Option<ExternalOutput>,
     /// Whether the port is offered to the component as an input (false
     /// for modport output members).
     pub input: bool,
@@ -53,6 +54,27 @@ pub struct ProtoExternalConnect {
     pub token: TokenRange,
 }
 
+/// The variable a component output drives, located by storage rather than
+/// by id: a component of a nested test module drives a variable of a child
+/// scope, whose id means nothing at the top.
+#[derive(Clone, Debug)]
+pub struct ExternalOutput {
+    pub offset: VarOffset,
+    pub native_bytes: usize,
+    pub width: usize,
+    /// Hierarchical variable name, for diagnostics.
+    pub name: StrId,
+}
+
+/// `instantiate`d form of [`ExternalOutput`].
+pub struct OutputTarget {
+    pub offset: VarOffset,
+    pub ptr: *mut u8,
+    pub native_bytes: usize,
+    pub width: usize,
+    pub name: StrId,
+}
+
 /// `instantiate`d form: input expressions are pointer-bound.
 pub struct ExternalComponentInst {
     pub name: StrId,
@@ -66,7 +88,7 @@ pub struct ExternalComponentInst {
 pub struct ExternalConnectInst {
     pub port: StrId,
     pub expr: Expression,
-    pub output: Option<air::VarId>,
+    pub output: Option<OutputTarget>,
     pub input: bool,
     pub group: Option<StrId>,
     pub member: Option<StrId>,
@@ -98,7 +120,16 @@ impl ProtoExternalComponent {
                     c.expr
                         .apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
                 },
-                output: c.output,
+                output: c.output.as_ref().map(|x| OutputTarget {
+                    offset: x.offset,
+                    ptr: unsafe {
+                        let base = if x.offset.is_ff() { ff_ptr } else { comb_ptr };
+                        base.add(x.offset.raw() as usize)
+                    },
+                    native_bytes: x.native_bytes,
+                    width: x.width,
+                    name: x.name,
+                }),
                 input: c.input,
                 group: c.group,
                 member: c.member,

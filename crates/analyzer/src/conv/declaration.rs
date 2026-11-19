@@ -1555,7 +1555,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 t.set_concrete_width(ir::Shape::new(vec![Some(1)]));
                 t
             };
-            eval_variable(
+            let id = eval_variable(
                 context,
                 &var_path,
                 ir::VarKind::Variable,
@@ -1563,6 +1563,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 ClockDomain::None,
                 inst_token,
             );
+            context.tb_handles.generators.insert(inst_name, id);
 
             // Suppress UnassignVariable for $tb component variables
             attribute_table::insert(inst_token, Attribute::Allow(AllowItem::UnassignVariable));
@@ -1698,6 +1699,14 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         let component_arc = component?;
         match component_arc.as_ref() {
             ir::Component::Module(component) => {
+                let inst = value.identifier.text();
+                for (name, params) in &component.tb_handles.component_params {
+                    let path = resource_table::insert_str(&format!("{inst}.{name}"));
+                    context
+                        .tb_handles
+                        .component_params
+                        .insert(path, params.clone());
+                }
                 let mut inputs = vec![];
                 let mut outputs = vec![];
                 let mut interface_bindings = vec![];
@@ -1941,7 +1950,7 @@ fn insert_component_params(
             ir::ExternalParamValue::Str(_) => None,
         })
         .collect();
-    context.tb_component_params.insert(inst, numeric);
+    context.tb_handles.component_params.insert(inst, numeric);
 }
 
 /// What an interface port's modport connection is actually bound to.
@@ -1986,7 +1995,8 @@ fn insert_group_params(
     }
     if !resolved.is_empty() {
         context
-            .tb_component_params
+            .tb_handles
+            .component_params
             .entry(inst)
             .or_default()
             .extend(resolved);

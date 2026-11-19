@@ -280,7 +280,7 @@ fn tb_integration_counter() {
 
         let mut sim = Simulator::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         // Get initial block statements and convert to testbench
@@ -347,7 +347,7 @@ fn tb_clock_next_zero_count() {
 
         let mut sim = Simulator::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
@@ -424,7 +424,7 @@ fn tb_clock_next_binary_count() {
 
         let mut sim = Simulator::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
@@ -498,7 +498,7 @@ fn tb_reset_assert_binary_duration() {
 
         let mut sim = Simulator::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
@@ -669,7 +669,7 @@ fn tb_readonly_cache_fill() {
         };
 
         let mut sim = Simulator::new(ir, None);
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
         let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
@@ -733,7 +733,7 @@ fn tb_function_inline() {
 
         let mut sim = Simulator::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
@@ -1451,7 +1451,7 @@ fn testbench_vcd_comb_only_clock_reset() {
         let dumper = WaveDumper::new_vcd(Box::new(SharedVec(dump_buf.clone())));
         let mut sim = Simulator::new(ir, Some(dumper));
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
@@ -2504,7 +2504,7 @@ fn tb_file_native() {
             Err(_) => continue,
         };
         let mut sim = Simulator::new(ir, None);
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
         if let Some(stmts) = initial_stmts {
@@ -2524,7 +2524,7 @@ fn run_random_tb(code: &str, top: &str) {
     let config = Config::default();
     let ir = analyze_top(code, &config, top).expect("analyze");
     let mut sim = Simulator::new(ir, None);
-    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+    let event_map = build_event_map(&sim.ir);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
     let stmts = sim
         .ir
@@ -2859,7 +2859,7 @@ fn tb_file_write_without_open_is_dropped() {
             Err(_) => continue,
         };
         let mut sim = Simulator::new(ir, None);
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
         if let Some(stmts) = initial_stmts {
@@ -2925,7 +2925,7 @@ fn tb_file_write_keeps_comb_read_only_by_write() {
             Err(_) => continue,
         };
         let mut sim = Simulator::new(ir, None);
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
         if let Some(stmts) = initial_stmts {
@@ -3037,7 +3037,7 @@ fn if_in_initial_cond_hoist_temp_4state() {
             Err(_) => continue,
         };
         let mut sim = Simulator::new(ir, None);
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
         let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
@@ -3299,7 +3299,7 @@ fn tb_dirty_filter_skips_private_writes() {
 fn tb_clean_count(code: &str, config: &Config, top: &str) -> Option<usize> {
     let ir = analyze_top(code, config, top).expect("analyze");
     let sim = Simulator::new(ir, None);
-    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+    let event_map = build_event_map(&sim.ir);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
     let initial_stmts = sim
         .ir
@@ -3446,7 +3446,7 @@ fn tb_chunk_does_not_outrun_the_settle() {
             Err(_) => continue,
         };
         let mut sim = Simulator::new(ir, None);
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let stmts = sim
             .ir
@@ -3746,5 +3746,194 @@ fn slow_clock_process_resumes_after_the_fast_clock_edges() {
             TestResult::Pass,
             "config: {config:?}"
         );
+    }
+}
+
+#[test]
+fn nested_test_module_drives_its_own_clock_and_reset() {
+    // Each instance runs its own `$tb` clock and reset under the same
+    // instance names, and counts only its own edges.
+    let code = r#"
+    #[test(harness)]
+    module harness #(
+        param N: u32 = 3,
+    ) {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<32>;
+
+        always_ff (clk, rst) {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+
+        initial {
+            rst.assert();
+            clk.next(N);
+            $assert(cnt == N, "nested clock");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u1: harness #(N: 5);
+        inst u2: harness #(N: 7);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "top").unwrap();
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn twice_nested_test_modules_drive_their_own_clocks() {
+    // Handle names accumulate the instance path at each boundary.
+    let code = r#"
+    #[test(harness)]
+    module harness #(
+        param N: u32 = 3,
+    ) {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<32>;
+
+        always_ff (clk, rst) {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+
+        initial {
+            rst.assert();
+            clk.next(N);
+            $assert(cnt == N, "innermost clock");
+        }
+    }
+
+    #[test(mid)]
+    module mid {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<32>;
+
+        always_ff (clk, rst) {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+
+        inst h: harness #(N: 5);
+
+        initial {
+            rst.assert();
+            clk.next(4);
+            $assert(cnt == 4, "middle clock");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u1: mid;
+        inst u2: mid;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "top").unwrap();
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn reset_assert_takes_edges_of_a_clock_never_advanced() {
+    // The reset window clocks `clk` although no `clk.next()` names it.
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var d: logic<8>;
+        var q: logic<8>;
+
+        always_ff (clk) {
+            q = d;
+        }
+
+        initial {
+            d = 8'h5a;
+            rst.assert(clk, 1);
+            $assert(q == 8'h5a, "edge in reset");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+    }
+    "#;
+
+    for config in Config::all() {
+        for top in ["harness", "top"] {
+            let ir = analyze_top(code, &config, top).unwrap();
+            let module_name = ir.name.to_string();
+            let result = run_native_testbench(ir, None, module_name);
+            assert_eq!(
+                result.unwrap(),
+                TestResult::Pass,
+                "{top}, config: {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_test_module_reset_starts_deasserted() {
+    // Before its first assert, a nested testbench reset reads deasserted,
+    // as the same module's reset does when it runs as the top.
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var state: logic<8>;
+
+        always_ff (clk, rst) {
+            if_reset { state = 1; }
+            else { state = 2; }
+        }
+
+        initial {
+            clk.next();
+            $assert(state == 2, "not in reset");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+    }
+    "#;
+
+    for mut config in Config::all() {
+        config.abstract_reset_active_high = false;
+        for top in ["harness", "top"] {
+            let ir = analyze_top(code, &config, top).unwrap();
+            let module_name = ir.name.to_string();
+            let result = run_native_testbench(ir, None, module_name);
+            assert_eq!(
+                result.unwrap(),
+                TestResult::Pass,
+                "{top}, config: {config:?}"
+            );
+        }
     }
 }

@@ -99,7 +99,7 @@ fn main() {
     let mut sim = Simulator::new(built, None);
     sim.init_components(0, TOP).unwrap();
 
-    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+    let event_map = build_event_map(&sim.ir);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
     let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
     let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);

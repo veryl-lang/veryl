@@ -90,7 +90,7 @@ fn run_hier_test_named(code: &str, top: &str) -> Vec<(Config, TestResult, Simula
             .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
         let mut sim = Simulator::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
         let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
@@ -1275,7 +1275,7 @@ fn hier_ref_runtime_select_past_the_variable() {
             let ir = analyze_top(&source, &config, "hier_select")
                 .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
             let mut sim = Simulator::new(ir, None);
-            let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+            let event_map = build_event_map(&sim.ir);
             let clock_periods = build_clock_periods(&sim.ir.event_statements);
             let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
             let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
