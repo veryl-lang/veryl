@@ -2680,6 +2680,42 @@ fn tb_random_always_ff_native() {
     );
 }
 
+#[test]
+fn tb_random_always_ff_reads_pre_edge_values() {
+    let code = r#"
+    #[test(test_random_ff_pre_edge)]
+    module test_random_ff_pre_edge {
+        inst clk: $tb::clock_gen;
+        var r: $tb::random::<u32>;
+        var bound: u32;
+        var x: u32;
+        var y: u32;
+
+        always_ff (clk) {
+            bound = 20;
+            x = r.get_range(bound, bound);
+            y = x;
+        }
+
+        initial {
+            r.seed(1234);
+            clk.next();
+            $assert(bound == 20, "clocked bound assignment failed");
+            $assert(x == 0, "random call did not read the pre-edge bound");
+            $assert(y == 0, "random return was not read as a pre-edge value");
+            $finish();
+        }
+    }
+    "#;
+    let config = Config::default();
+    let ir = analyze_top(code, &config, "test_random_ff_pre_edge").expect("analyze");
+    let module_name = ir.name.to_string();
+    assert_eq!(
+        run_native_testbench(ir, None, module_name).unwrap(),
+        TestResult::Pass
+    );
+}
+
 fn run_queue_tb(code: &str, top: &str, config: &Config) -> TestResult {
     let ir = analyze_top(code, config, top).expect("analyze");
     let module_name = ir.name.to_string();
