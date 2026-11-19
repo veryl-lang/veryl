@@ -173,10 +173,47 @@ pub type GenericTables = HashMap<(ScopeId, DefineContext), GenericTable>;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GenericMap {
     pub id: Option<SymbolId>,
+    /// Definition whose parameters this map binds, not the emitted instance.
+    pub parameter_owner: Option<SymbolId>,
     pub map: GenericTable,
 }
 
 impl GenericMap {
+    pub fn argument(&self, token: &Token) -> Option<&GenericSymbolPath> {
+        let argument = self.map.get(&token.text)?;
+        if let Some(owner) = self.parameter_owner {
+            let parameter = symbol_table::resolve(token).ok()?;
+            if !matches!(
+                parameter.found.kind,
+                SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
+            ) {
+                return None;
+            }
+            let mut owner = symbol_table::get(owner)?;
+            if let SymbolKind::GenericInstance(instance) = &owner.kind {
+                owner = symbol_table::get(instance.base)?;
+            }
+            let namespace = owner.inner_namespace();
+            let matches = match &parameter.found.kind {
+                // A function's signature can also bind parameters inherited
+                // from its enclosing package. Resolve in its lexical scope.
+                SymbolKind::GenericParameter(_) => {
+                    let path = SymbolPath::new(&[token.text]);
+                    symbol_table::resolve((&path, &namespace))
+                        .is_ok_and(|bound| bound.found.id == parameter.found.id)
+                }
+                // A component collects gen declarations in generate blocks
+                // too; those declarations need not be its immediate children.
+                SymbolKind::GenericConst(_) => parameter.found.namespace.included(&namespace),
+                _ => false,
+            };
+            if !matches {
+                return None;
+            }
+        }
+        Some(argument)
+    }
+
     pub fn generic(&self) -> bool {
         !self.map.is_empty()
     }
@@ -379,7 +416,11 @@ impl Symbol {
         } else {
             self.generic_table(arguments)
         };
-        GenericMap { id, map }
+        GenericMap {
+            id,
+            parameter_owner: Some(self.id),
+            map,
+        }
     }
 
     pub fn generic_table(&self, arguments: &[GenericSymbolPath]) -> GenericTable {
