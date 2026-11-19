@@ -57,8 +57,8 @@ pub use system_function::{
 };
 pub use utils::convert_cast;
 pub use variable::{
-    VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, VarSelectOp, Variable,
-    VariableInfo,
+    InstanceIndex, VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, VarSelectOp,
+    Variable, VariableInfo,
 };
 pub use width_expr::{WidthExpr, WidthOp};
 pub use write_summary::{ProcessWrites, RegionWrite, WriteSummary};
