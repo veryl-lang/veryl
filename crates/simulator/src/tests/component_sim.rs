@@ -1807,6 +1807,58 @@ fn method_return_value_assignment() {
 }
 
 #[test]
+fn method_argument_expression() {
+    // An argument expression is evaluated at its own width, not folded to 0.
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        const BASE: u32 = 32'h0080_0000;
+        var g: $comp::golden;
+        var x: logic<32>;
+
+        initial {
+            g.set(32'h10 + 32'h1);
+            x = g.get();
+            $assert(x == 32'h11, "literal sum");
+            g.set(16 + 1);
+            x = g.get();
+            $assert(x == 17, "unsized sum");
+            for i in 0..2 {
+                g.set(BASE | i);
+                x = g.get();
+                $assert(x == (BASE | i), "loop variable");
+            }
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn method_argument_unsized_literal_is_rejected() {
+    // A self-determined argument gives `'1` no width to fill.
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        var g: $comp::golden;
+
+        initial {
+            g.set('1);
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze_component_errors(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidUnsizedLiteral { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn method_returning_unit_fails_assignment() {
     let code = r#"
     #[test(comp_test)]

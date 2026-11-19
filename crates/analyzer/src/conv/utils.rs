@@ -5527,7 +5527,7 @@ fn conv_external_method_call(
     let args: Vec<SystemFunctionInput> = match args {
         Some(ir::Arguments::Positional(ref positional)) => positional
             .iter()
-            .map(|arg| SystemFunctionInput(arg.0.clone()))
+            .map(|arg| SystemFunctionInput(self_determined_arg(context, &arg.0)))
             .collect(),
         None | Some(ir::Arguments::Null) => Vec::new(),
         // The ABI carries values only, no argument names.
@@ -5715,12 +5715,7 @@ pub fn tb_method_call(
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && !positional.is_empty()
             {
-                // Self-determine the width (as for $display args): otherwise a
-                // binary count like `clk.next(DW / 2)` keeps a width-0 comptime
-                // type and folds to 0 in the simulator.
-                let mut count = positional[0].0.clone();
-                count.eval_comptime(context, None);
-                Some(count)
+                Some(self_determined_arg(context, &positional[0].0))
             } else {
                 None
             };
@@ -5740,11 +5735,7 @@ pub fn tb_method_call(
             let duration = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && let Some(arg) = positional.first()
             {
-                // Self-determine the width like the count above — else a binary
-                // `rst.assert(DW / 2)` folds to 0 (then clamps to 1 cycle).
-                let mut duration = arg.0.clone();
-                duration.eval_comptime(context, None);
-                Some(duration)
+                Some(self_determined_arg(context, &arg.0))
             } else {
                 context.tb_reset_cycles.get(&inst_name).cloned()
             };
@@ -5778,7 +5769,7 @@ pub fn tb_method_call(
             let args = if let Some(ir::Arguments::Positional(ref positional)) = args {
                 positional
                     .iter()
-                    .map(|arg| SystemFunctionInput(arg.0.clone()))
+                    .map(|arg| SystemFunctionInput(self_determined_arg(context, &arg.0)))
                     .collect()
             } else {
                 Vec::new()
@@ -5864,6 +5855,16 @@ pub fn tb_method_call(
     })))
 }
 
+/// A testbench method argument has no context to size it, so like a
+/// `$display` argument it takes its own width. Without that, a binary
+/// expression keeps a width-0 comptime type and folds to 0 in the simulator.
+fn self_determined_arg(context: &mut Context, arg: &ir::Expression) -> ir::Expression {
+    arg.check_self_determined_unsized(context);
+    let mut expr = arg.clone();
+    expr.eval_comptime(context, None);
+    expr
+}
+
 /// Captures the `i`-th positional argument of a `$tb::random` method as a
 /// self-determined expression (its width folds from the argument, as for
 /// `$display`). Emits an arity error and fails when the argument is missing.
@@ -5878,9 +5879,7 @@ fn random_arg(
     if let Some(ir::Arguments::Positional(positional)) = args
         && let Some(arg) = positional.get(i)
     {
-        let mut expr = arg.0.clone();
-        expr.eval_comptime(context, None);
-        Ok(expr)
+        Ok(self_determined_arg(context, &arg.0))
     } else {
         let actual = if let Some(ir::Arguments::Positional(positional)) = args {
             positional.len()

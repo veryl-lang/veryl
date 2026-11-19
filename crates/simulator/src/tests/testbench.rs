@@ -2483,6 +2483,7 @@ fn tb_file_native() {
         initial {{
             f.open("{0}");
             f.write("hex=%h dec=%d\n", 8'hAB, 8'd42);
+            f.write("sum=%h\n", 8'h10 + 8'h1);
             f.write("plain\n");
             f.close();
             f.append("{0}");
@@ -2514,7 +2515,7 @@ fn tb_file_native() {
             panic!("No initial block found");
         }
         let content = std::fs::read_to_string(&out_path).unwrap();
-        assert_eq!(content, "hex=ab dec=42\nplain\nappended\n");
+        assert_eq!(content, "hex=ab dec=42\nsum=11\nplain\nappended\n");
     }
     let _ = std::fs::remove_file(&out_path);
 }
