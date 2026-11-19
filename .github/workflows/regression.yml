@@ -152,6 +152,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: Check metadata Git backend feature subsets
+        run: |
+          for features in git-command git-gitoxide git-command,git-gitoxide; do
+            cargo clippy --locked -p veryl-metadata --lib --no-default-features --features "$features" -- -D warnings
+          done
 
   # Build the release-verylup veryl binary once and share it via an artifact;
   # std / heliodor / cocotb consume it instead of each rebuilding (less redundant
