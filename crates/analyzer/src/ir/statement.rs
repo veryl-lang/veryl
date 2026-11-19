@@ -313,6 +313,12 @@ pub enum TbMethod {
         count: Option<Expression>,
         period: Option<Box<Expression>>,
     },
+    /// `clk.start(N)`: lets the clock run free from here on; `max_cycles`
+    /// is the optional number of its edges after which the test fails.
+    ClockStart {
+        max_cycles: Option<Expression>,
+        period: Option<Box<Expression>>,
+    },
     ResetAssert {
         clock: StrId,
         duration: Option<Expression>,
@@ -667,6 +673,13 @@ impl fmt::Display for Statement {
                         write!(f, "{}.next({c});", x.inst)
                     } else {
                         write!(f, "{}.next();", x.inst)
+                    }
+                }
+                TbMethod::ClockStart { max_cycles, .. } => {
+                    if let Some(c) = max_cycles {
+                        write!(f, "{}.start({c});", x.inst)
+                    } else {
+                        write!(f, "{}.start();", x.inst)
                     }
                 }
                 TbMethod::ResetAssert { clock, duration } => {

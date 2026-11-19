@@ -2340,7 +2340,8 @@ fn run_blocks_keeping_sim(
 /// the clock in place or several run by the scheduler, and whether the
 /// statement is in an `always_ff` with other writes, in one with none, or in
 /// an `always_comb`.  Dumping a waveform, which settles the comb after each
-/// edge, does not move the stop.
+/// edge, does not move the stop, nor does a clock run by `start` instead of
+/// `next`.
 #[test]
 fn design_assert_and_finish_stop_at_their_cycle() {
     let template = r#"
@@ -2369,8 +2370,7 @@ fn design_assert_and_finish_stop_at_their_cycle() {
 
         initial {
             rst.assert();
-            clk.next(100);
-            $finish();
+            DRIVE
         }
         EXTRA_INITIAL
     }
@@ -2407,19 +2407,24 @@ fn design_assert_and_finish_stop_at_their_cycle() {
             21,
         ),
     ];
+    let drives = ["clk.next(100); $finish();", "clk.start();"];
     let extras = ["", "initial { clk.next(200); }"];
     for (ff_body, other, fails, cnt) in cases {
-        for extra in extras {
+        for (drive, extra) in drives
+            .iter()
+            .flat_map(|d| extras.iter().map(move |e| (d, e)))
+        {
             let code = template
                 .replace("FF_BODY", ff_body)
                 .replace("OTHER", other)
+                .replace("DRIVE", drive)
                 .replace("EXTRA_INITIAL", extra);
             for (config, dump) in Config::all()
                 .into_iter()
                 .flat_map(|c| [(c.clone(), false), (c, true)])
             {
                 let (result, mut sim) = run_blocks_keeping_sim(&code, "test_stop", &config, dump);
-                let label = format!("{ff_body} {other} {extra} dump={dump} {config:?}");
+                let label = format!("{ff_body} {other} {drive} {extra} dump={dump} {config:?}");
                 match (&result, fails) {
                     (TestResult::Fail(msg), true) => {
                         assert_eq!(msg, "assertion failed", "{label}");
@@ -4109,5 +4114,211 @@ fn nested_test_module_reset_starts_deasserted() {
                 "{top}, config: {config:?}"
             );
         }
+    }
+}
+
+const START_COUNTER: &str = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+"#;
+
+#[track_caller]
+fn run_start_tb(code: &str, top: &str, config: &Config) -> TestResult {
+    let code = format!("{START_COUNTER}{code}");
+    let ir = analyze_top(&code, config, top)
+        .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+    let module_name = ir.name.to_string();
+    run_native_testbench(ir, None, module_name).unwrap()
+}
+
+/// `clk.start()` returns at once and the clock runs free: a later
+/// `clk.next(N)` waits for N of its edges, whether the process waiting is
+/// the one that started it or another one, and the edges are not doubled.
+/// Up to the limit given to `start`, the run passes.
+#[test]
+fn started_clock_is_waited_on_by_next() {
+    let single = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            clk.start(8);
+            rst.assert();
+            clk.next(5);
+            $assert(o_cnt == 8'd5, "eight edges, three of them in reset: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    let shared = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            rst.assert();
+            clk.start();
+        }
+
+        initial {
+            clk.next(8);
+            $assert(o_cnt == 8'd5, "eight shared edges, three of them in reset: %d", o_cnt);
+            clk.next(4);
+            $assert(o_cnt == 8'd9, "the clock kept running after its process ended: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    for code in [single, shared] {
+        for config in Config::all() {
+            assert_eq!(
+                run_start_tb(code, "test_start", &config),
+                TestResult::Pass,
+                "config: {config:?}\n{code}"
+            );
+        }
+    }
+}
+
+/// A started clock taking more edges than the limit given to `start` fails
+/// the test, whether a process waits on it, it runs free after every process
+/// has ended, or another process started it.
+#[test]
+fn started_clock_exceeding_its_limit_fails() {
+    let waiting = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            clk.start(8);
+            rst.assert();
+            clk.next(6);
+            $finish();
+        }
+    }
+    "#;
+    let free = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            rst.assert();
+            clk.start(8);
+        }
+    }
+    "#;
+    let other = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            clk.start(8);
+        }
+
+        initial {
+            rst.assert();
+            clk.next(6);
+            $finish();
+        }
+    }
+    "#;
+    for code in [waiting, free, other] {
+        for config in Config::all() {
+            let result = run_start_tb(code, "test_start", &config);
+            let TestResult::Fail(msg) = &result else {
+                panic!("expected failure for {config:?}, got {result:?}\n{code}");
+            };
+            assert!(
+                msg.contains("clock `clk` exceeded the cycle limit of 8 set by `start`"),
+                "unexpected message for {config:?}: {msg}\n{code}"
+            );
+        }
+    }
+}
+
+/// A process that started one clock and then waits on another hands the
+/// started clock over to the scheduler, which keeps it running alongside.
+#[test]
+fn started_clock_runs_beside_a_clock_waited_on() {
+    let code = r#"
+    module DualCounter (
+        clk_a: input  'a clock    ,
+        rst_a: input  'a reset    ,
+        clk_b: input  'b clock    ,
+        rst_b: input  'b reset    ,
+        cnt_a: output 'a logic<8> ,
+        cnt_b: output 'b logic<8> ,
+    ) {
+        always_ff (clk_a, rst_a) {
+            if_reset { cnt_a = 0; }
+            else     { cnt_a += 1; }
+        }
+        always_ff (clk_b, rst_b) {
+            if_reset { cnt_b = 0; }
+            else     { cnt_b += 1; }
+        }
+    }
+
+    #[test(test_start)]
+    module test_start {
+        inst ga: $tb::clock_gen #(period: 10);
+        inst gb: $tb::clock_gen #(period: 2);
+        inst ra: $tb::reset_gen (clk: ga);
+        inst rb: $tb::reset_gen (clk: gb);
+        var cnt_a: logic<8>;
+        var cnt_b: logic<8>;
+        inst dut: DualCounter (
+            clk_a: ga, rst_a: ra, clk_b: gb, rst_b: rb, cnt_a, cnt_b,
+        );
+
+        initial {
+            ra.assert(1);
+            rb.assert(1);
+            // ga runs free from t=12: edges at 12 and 22 while gb takes its
+            // ten edges from 12 to 30.
+            ga.start();
+            gb.next(10);
+            $assert(cnt_a == 8'd2, "cnt_a: %d", cnt_a);
+            $assert(cnt_b == 8'd10, "cnt_b: %d", cnt_b);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        assert_eq!(
+            run_start_tb(code, "test_start", &config),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
     }
 }

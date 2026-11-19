@@ -390,7 +390,11 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
         ProtoStatement::TbMethodCall { method, .. } => {
             use crate::ir::statement::{ProtoComponentArg, ProtoTbMethodKind as K};
             match method {
-                K::ClockNext { count, period } => {
+                K::ClockNext { count, period }
+                | K::ClockStart {
+                    max_cycles: count,
+                    period,
+                } => {
                     for e in count.iter().chain(period.iter()) {
                         census_expr(e, c, poison);
                     }

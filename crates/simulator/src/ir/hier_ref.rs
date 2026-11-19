@@ -166,7 +166,11 @@ fn resolve_stmt(
             ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::TbMethodCall { method, .. } => match method {
-            crate::ir::statement::ProtoTbMethodKind::ClockNext { count, period } => {
+            crate::ir::statement::ProtoTbMethodKind::ClockNext { count, period }
+            | crate::ir::statement::ProtoTbMethodKind::ClockStart {
+                max_cycles: count,
+                period,
+            } => {
                 for expr in [count, period].into_iter().flatten() {
                     resolve_expr(expr, context, children)?;
                 }
