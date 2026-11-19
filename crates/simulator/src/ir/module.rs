@@ -1371,6 +1371,7 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                     | K::RandomGetSeed { ret }
                     | K::Queue { ret, .. } => ret.is_none(),
                     K::ClockNext { .. }
+                    | K::ClockStart { .. }
                     | K::ResetAssert { .. }
                     | K::FileOpen { .. }
                     | K::FileWrite { .. }

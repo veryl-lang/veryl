@@ -219,6 +219,13 @@ fn insert_clock_gen(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
         &[("count", Direction::Input)],
         None,
     );
+    insert_method(
+        symbol_table,
+        &ns,
+        "start",
+        &[("max_cycles", Direction::Input)],
+        None,
+    );
 }
 
 fn insert_reset_gen(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
