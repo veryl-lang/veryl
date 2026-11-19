@@ -310,7 +310,11 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                     walk_expr_reads(a, c);
                 }
             }
-            ProtoTbMethodKind::ClockNext { count, period } => {
+            ProtoTbMethodKind::ClockNext { count, period }
+            | ProtoTbMethodKind::ClockStart {
+                max_cycles: count,
+                period,
+            } => {
                 if let Some(e) = count {
                     walk_expr_reads(e, c);
                 }

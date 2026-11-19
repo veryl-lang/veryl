@@ -705,7 +705,11 @@ fn collect_summary_statement_variables(
                     collect_summary_destination_variables(module, destination, ids);
                 }
                 match &call.method {
-                    TbMethod::ClockNext { count, period } => {
+                    TbMethod::ClockNext { count, period }
+                    | TbMethod::ClockStart {
+                        max_cycles: count,
+                        period,
+                    } => {
                         if let Some(count) = count {
                             collect_summary_expression_variables(module, count, ids);
                         }
