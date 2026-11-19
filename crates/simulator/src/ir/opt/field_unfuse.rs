@@ -440,6 +440,12 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                 K::FileOpen { path, .. } => {
                     census_expr(&path.0, c, poison);
                 }
+                K::RuntimeArg { name, op, .. } => {
+                    census_expr(&name.0, c, poison);
+                    if let Some(e) = op.default_expr() {
+                        census_expr(e, c, poison);
+                    }
+                }
                 K::FileClose | K::FileFlush | K::RandomGet { .. } | K::RandomGetSeed { .. } => {}
             }
             if !poison {

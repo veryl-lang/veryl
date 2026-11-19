@@ -1301,6 +1301,7 @@ fn collect_event_written_comb(
                     | ProtoTbMethodKind::RandomGetRange { ret: Some(_), .. }
                     | ProtoTbMethodKind::RandomGetSeed { ret: Some(_) }
                     | ProtoTbMethodKind::Queue { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RuntimeArg { ret: Some(_), .. }
             ),
             // No comb writes.
             ProtoStatement::Break => true,
@@ -1392,7 +1393,8 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                     | K::RandomGet { ret, .. }
                     | K::RandomGetRange { ret, .. }
                     | K::RandomGetSeed { ret }
-                    | K::Queue { ret, .. } => ret.is_none(),
+                    | K::Queue { ret, .. }
+                    | K::RuntimeArg { ret, .. } => ret.is_none(),
                     K::ClockNext { .. }
                     | K::ClockStart { .. }
                     | K::ResetAssert { .. }
