@@ -3,8 +3,8 @@ use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::FfTable;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, Factor, HierVarRef, IrResult, Shape, Type, TypeKind,
-    ValueVariant, VarPathSelect,
+    AssignDestination, Comptime, Expression, Factor, HierVarRef, InstanceIndex, IrResult, Shape,
+    Type, TypeKind, ValueVariant, VarPathSelect,
 };
 use crate::symbol::Affiliation;
 use crate::value::Value;
@@ -545,6 +545,42 @@ impl fmt::Display for SystemFunctionCall {
 }
 
 impl SystemFunctionCall {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
+        match &mut self.kind {
+            SystemFunctionKind::Bits(x)
+            | SystemFunctionKind::Clog2(x)
+            | SystemFunctionKind::Onehot(x)
+            | SystemFunctionKind::Signed(x)
+            | SystemFunctionKind::Unsigned(x) => x.0.set_instance(instance),
+            SystemFunctionKind::Size(x, dimension) => {
+                x.0.set_instance(instance);
+                if let Some(dimension) = dimension {
+                    dimension.0.set_instance(instance);
+                }
+            }
+            SystemFunctionKind::Readmemh(x, output) => {
+                x.0.set_instance(instance);
+                if let Output::Local(destinations) = output {
+                    for destination in destinations {
+                        destination.set_instance(instance);
+                    }
+                }
+            }
+            SystemFunctionKind::Display(args) | SystemFunctionKind::Write(args) => {
+                for arg in args {
+                    arg.0.set_instance(instance);
+                }
+            }
+            SystemFunctionKind::Assert { cond, args, .. } => {
+                cond.0.set_instance(instance);
+                for arg in args {
+                    arg.0.set_instance(instance);
+                }
+            }
+            SystemFunctionKind::Finish => {}
+        }
+    }
+
     pub fn gather_ff(
         &self,
         context: &mut Context,

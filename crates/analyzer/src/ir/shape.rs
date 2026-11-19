@@ -104,6 +104,24 @@ impl ShapeRef {
         self.0.last_mut()
     }
 
+    /// The per-dimension index of the `index`-th element, the inverse of
+    /// [`Self::calc_index`].
+    pub fn position(&self, index: usize) -> Vec<usize> {
+        let mut remaining = index;
+        let mut ret: Vec<usize> = self
+            .iter()
+            .rev()
+            .map(|extent| {
+                let extent = extent.unwrap_or(1);
+                let x = remaining % extent;
+                remaining /= extent;
+                x
+            })
+            .collect();
+        ret.reverse();
+        ret
+    }
+
     pub fn calc_index(&self, index: &[usize]) -> Option<usize> {
         if self.is_empty() || (self.dims() == 1 && self[0] == Some(1) && index.is_empty()) {
             Some(0)

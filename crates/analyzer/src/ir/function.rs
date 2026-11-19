@@ -6,8 +6,8 @@ use crate::conv::utils::{
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
-    ValueVariant, VarId, VarIndex, VarPath, VarPathSelect,
+    AssignDestination, Comptime, Expression, FfTable, InstanceIndex, IrResult, Shape, Signature,
+    Statement, ValueVariant, VarId, VarIndex, VarPath, VarPathSelect,
 };
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
@@ -84,9 +84,9 @@ impl Function {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         for x in &mut self.functions {
-            x.set_index(index);
+            x.set_instance(instance);
         }
     }
 
@@ -131,9 +131,9 @@ impl FunctionBody {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
         for x in &mut self.statements {
-            x.set_index(index);
+            x.set_instance(instance);
         }
     }
 }
@@ -483,13 +483,19 @@ impl FunctionCall {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_instance(&mut self, instance: &InstanceIndex) {
+        // The callee's bodies are laid out for the outer instances first.
+        if instance.replicated.contains(&self.id) {
+            let mut index = instance.position.clone();
+            index.extend(self.index.take().unwrap_or_default());
+            self.index = Some(index);
+        }
         for x in self.inputs.values_mut() {
-            x.set_index(index);
+            x.set_instance(instance);
         }
         for x in self.outputs.values_mut() {
             for x in x {
-                x.set_index(index);
+                x.set_instance(instance);
             }
         }
     }
