@@ -277,6 +277,14 @@ pub struct OptTest {
     #[arg(long)]
     pub seed: Option<u64>,
 
+    /// Runtime argument passed to every test run: `NAME` gives a flag,
+    /// `NAME:VALUE` a value (split at the first `:`). Can be specified
+    /// multiple times; the last one given for a name wins. Read with
+    /// `$tb::runtime_arg_*`, by components, and passed to SystemVerilog
+    /// simulators as `+NAME` / `+NAME=VALUE`.
+    #[arg(long = "runtime-arg", value_name = "NAME[:VALUE]")]
+    pub runtime_arg: Vec<String>,
+
     /// Run native tests in four-state (X/Z) mode. Also settable via
     /// `[test].four_state`.
     #[arg(long = "4state")]

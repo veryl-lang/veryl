@@ -298,6 +298,9 @@ pub struct VariableMeta {
     /// All elements share one buffer kind, giving the array a single stride for
     /// runtime indexing; false for a genuinely mixed comb/FF array.
     pub uniform_buffer: bool,
+    /// A `string` variable holding a `string_pool` handle rather than the
+    /// bytes of its text (see `collect_string_widths`).
+    pub string_handle: bool,
 }
 
 impl VariableMeta {
@@ -349,6 +352,19 @@ fn report_subject(v: &air::Variable) -> String {
     }
 }
 
+/// Storage of the runtime `string` variables of a module.
+#[derive(Default)]
+pub struct StringLayout {
+    /// Storage width of each runtime `string` variable.
+    pub widths: HashMap<VarId, usize>,
+    /// The variables holding a `string_pool` handle: those no
+    /// `always_comb`/`always_ff`/`assign`/`let` drives, so their text is only
+    /// set by the testbench (`initial`/`final`), possibly from a value known
+    /// only at run time (a runtime argument). The rest hold the bytes of
+    /// their text, sized below.
+    pub handles: HashSet<VarId>,
+}
+
 /// Storage width of each runtime `string` variable: the widest text any
 /// assignment can store into it.  A `string` type's own width is a nominal
 /// 1 bit -- the text lives in the byte-packed value -- so a slot sized from
@@ -357,18 +373,23 @@ fn report_subject(v: &air::Variable) -> String {
 pub fn collect_string_widths(
     variables: &HashMap<VarId, air::Variable>,
     decls: &[air::Declaration],
-) -> Result<HashMap<VarId, usize>, SimulatorError> {
+) -> Result<StringLayout, SimulatorError> {
     let mut assigns: Vec<(VarId, &air::Expression)> = Vec::new();
+    let mut rtl_driven: HashSet<VarId> = HashSet::default();
     for decl in decls {
-        let stmts = match decl {
-            air::Declaration::Comb(x) => &x.statements,
-            air::Declaration::Ff(x) => &x.statements,
-            air::Declaration::Initial(x) => &x.statements,
-            air::Declaration::Final(x) => &x.statements,
+        let (stmts, rtl) = match decl {
+            air::Declaration::Comb(x) => (&x.statements, true),
+            air::Declaration::Ff(x) => (&x.statements, true),
+            air::Declaration::Initial(x) => (&x.statements, false),
+            air::Declaration::Final(x) => (&x.statements, false),
             _ => continue,
         };
+        let start = assigns.len();
         for stmt in stmts {
             collect_string_assigns(stmt, variables, &mut assigns);
+        }
+        if rtl {
+            rtl_driven.extend(assigns[start..].iter().map(|(id, _)| *id));
         }
     }
 
@@ -406,7 +427,16 @@ pub fn collect_string_widths(
             break;
         }
     }
-    Ok(widths)
+
+    let handles: HashSet<VarId> = widths
+        .keys()
+        .filter(|id| !rtl_driven.contains(id))
+        .copied()
+        .collect();
+    for id in &handles {
+        widths.insert(*id, crate::string_pool::HANDLE_WIDTH);
+    }
+    Ok(StringLayout { widths, handles })
 }
 
 fn collect_string_assigns<'a>(
@@ -480,7 +510,7 @@ fn comptime_string_width(comptime: &air::Comptime) -> usize {
 #[allow(clippy::too_many_arguments)]
 pub fn create_variable_meta(
     src: &HashMap<VarId, air::Variable>,
-    string_widths: &HashMap<VarId, usize>,
+    string_widths: &StringLayout,
     ff_table: &air::FfTable,
     multi_rmw_set: &HashSet<(VarId, usize)>,
     dyn_indexed: &HashSet<VarId>,
@@ -516,7 +546,8 @@ pub fn create_variable_meta(
         // In practice a `$sv::` constant, whose value lives in external
         // SystemVerilog. Reported here because only this loop knows which
         // variable carries the width.
-        let width = if let Some(x) = string_widths.get(k) {
+        let string_handle = string_widths.handles.contains(k);
+        let width = if let Some(x) = string_widths.widths.get(k) {
             (*x).max(1)
         } else {
             v.r#type
@@ -618,7 +649,18 @@ pub fn create_variable_meta(
             } else {
                 Value::new_x(width, v.r#type.signed)
             };
-            let mut val = raw;
+            let mut val = if string_handle {
+                // The text of a string initial value; X (no value) is the
+                // empty text.
+                let text = if raw.is_xz() {
+                    String::new()
+                } else {
+                    veryl_analyzer::value::byte_value_to_string_lossy(&raw)
+                };
+                Value::new(crate::string_pool::intern(&text), width, false)
+            } else {
+                raw
+            };
             if !use_4state {
                 val.clear_xz();
             }
@@ -633,6 +675,7 @@ pub fn create_variable_meta(
             elements,
             initial_values,
             uniform_buffer,
+            string_handle,
         };
         variables.insert(*k, meta);
     }

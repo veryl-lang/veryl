@@ -3178,6 +3178,9 @@ pub enum TbComponentKind {
     /// Queue declared as `var q: $tb::queue::<T, N>;`. `T` is the element
     /// type and `N` the capacity (`0` for unbounded).
     Queue,
+    /// Runtime arguments (`veryl test --runtime-arg`), declared as
+    /// `var a: $tb::runtime_args;`.
+    RuntimeArgs,
     /// User-defined verification component declared in `[[components]]` of
     /// Veryl.toml; the payload is the component name.
     External(StrId),
@@ -3191,6 +3194,7 @@ impl TbComponentKind {
             TbComponentKind::File
                 | TbComponentKind::Random
                 | TbComponentKind::Queue
+                | TbComponentKind::RuntimeArgs
                 | TbComponentKind::External(_)
         )
     }
@@ -3209,6 +3213,7 @@ impl std::fmt::Display for TbComponentKind {
             TbComponentKind::File => write!(f, "file"),
             TbComponentKind::Random => write!(f, "random"),
             TbComponentKind::Queue => write!(f, "queue"),
+            TbComponentKind::RuntimeArgs => write!(f, "runtime_args"),
             TbComponentKind::External(name) => write!(f, "{name}"),
         }
     }

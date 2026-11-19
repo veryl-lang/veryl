@@ -218,6 +218,11 @@ impl Component for Golden {
                 Ok(veryl_component::Value::unit())
             }
             "get" => Ok(veryl_component::Value::from_u64(self.stored, 64)),
+            // The runtime argument named by the string argument.
+            "runtime_arg" => {
+                let value: u64 = ctx.runtime_arg_value(args[0].as_str()?)?.unwrap_or(0);
+                Ok(veryl_component::Value::from_u64(value, 64))
+            }
             "bump" => {
                 self.stored += 1;
                 Ok(veryl_component::Value::from_u64(self.stored, 64))
@@ -1713,19 +1718,38 @@ fn string_argument_and_host_file_service() {
     #[test(comp_test)]
     module comp_test {{
         var g: $comp::golden;
+        var args: $tb::runtime_args;
+        var path: string;
+        var rounds: u64;
 
         initial {{
             g.set(42);
             g.save("{path_str}");
             g.set(0);
-            g.load("{path_str}");
+            // A string variable set by the testbench reaches the component
+            // as text.
+            path = args.get_string("GOLDEN", "");
+            g.load(path);
             g.check(42);
+            // The component reads runtime arguments itself.
+            rounds = g.runtime_arg("ROUNDS");
+            $assert(rounds == 7);
             $finish();
         }}
     }}
     "#
     );
-    assert_all_pass(&run_component_test(&code, "comp_test"));
+    let runtime_args = std::sync::Arc::new(vec![
+        crate::runtime_arg::RuntimeArg::parse(&format!("GOLDEN:{path_str}")),
+        crate::runtime_arg::RuntimeArg::parse("ROUNDS:7"),
+    ]);
+    assert_all_pass(&run_component_test_configured(
+        &code,
+        "comp_test",
+        |config| {
+            config.runtime_args = runtime_args.clone();
+        },
+    ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "42");
     let _ = std::fs::remove_dir_all(&dir);
 }

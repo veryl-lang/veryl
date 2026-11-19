@@ -407,7 +407,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                 }
                 K::Component { args, .. } => {
                     for a in args {
-                        if let ProtoComponentArg::Expr(e) = a {
+                        if let ProtoComponentArg::Expr(e) | ProtoComponentArg::StrHandle(e) = a {
                             census_expr(e, c, poison);
                         }
                     }
@@ -422,11 +422,18 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     census_expr(min, c, poison);
                     census_expr(max, c, poison);
                 }
-                K::FileOpen { .. }
-                | K::FileClose
-                | K::FileFlush
-                | K::RandomGet { .. }
-                | K::RandomGetSeed { .. } => {}
+                K::FileOpen { path, .. } => {
+                    if let crate::ir::statement::ProtoFilePath::Handle(e) = path {
+                        census_expr(e, c, poison);
+                    }
+                }
+                K::RuntimeArg { name, op, .. } => {
+                    census_expr(name, c, poison);
+                    if let Some(e) = op.default_expr() {
+                        census_expr(e, c, poison);
+                    }
+                }
+                K::FileClose | K::FileFlush | K::RandomGet { .. } | K::RandomGetSeed { .. } => {}
             }
             if !poison {
                 c.bail = true;

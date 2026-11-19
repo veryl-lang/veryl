@@ -24581,7 +24581,12 @@ fn tb_queue_arity() {
 #[test]
 fn tb_var_component_as_inst() {
     // `var`-form `$tb` components are rejected when declared with `inst`.
-    for ty in ["$tb::file", "$tb::random::<u32>", "$tb::queue::<u32>"] {
+    for ty in [
+        "$tb::file",
+        "$tb::random::<u32>",
+        "$tb::queue::<u32>",
+        "$tb::runtime_args",
+    ] {
         let code = format!(
             r#"
     #[test(t)]
@@ -24601,6 +24606,87 @@ fn tb_var_component_as_inst() {
             "`inst x: {ty}` should be rejected, got: {errors:?}"
         );
     }
+}
+
+#[test]
+fn tb_runtime_args_analyze() {
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        var args: $tb::runtime_args;
+        var name: string;
+        var rounds: u32;
+        var verbose: bbool;
+        initial {
+            verbose = args.exists("VERBOSE");
+            rounds = args.get_int("ROUNDS", 2) + 1;
+            name = args.get_string("TESTNAME", "basic_test");
+            $display("%s %d %d", name, rounds, verbose);
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Each method takes its fixed number of arguments.
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        var args: $tb::runtime_args;
+        var name: string;
+        var rounds: u32;
+        initial {
+            rounds = args.exists();
+            rounds = args.get_int("ROUNDS");
+            name = args.get_string("A", "b", "c");
+            $display("%s %d", name, rounds);
+            $finish();
+        }
+    }
+    "#;
+    let count = analyze(code)
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::MismatchFunctionArity { .. }))
+        .count();
+    assert_eq!(count, 3);
+
+    // Read only by the testbench, never by RTL processes.
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        inst clk: $tb::clock_gen;
+        var args: $tb::runtime_args;
+        var rounds: u32;
+        always_ff (clk) {
+            rounds = args.get_int("ROUNDS", 2);
+        }
+        initial {
+            clk.next();
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var _args: $tb::runtime_args;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]

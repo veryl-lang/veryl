@@ -3248,6 +3248,7 @@ pub(crate) fn snapshot_selectors(
                 }],
                 initial_values: vec![],
                 uniform_buffer: true,
+                string_handle: false,
             },
         );
         *index = air::Expression::Term(Box::new(air::Factor::Variable(
@@ -3620,6 +3621,14 @@ impl Conv<&air::Expression> for ProtoExpression {
                     })))
                 }
                 air::Factor::Variable(id, index, select, comptime) => {
+                    if (!index.indices.is_empty() || index.range.is_some() || !select.is_empty())
+                        && super::string_handle::is_handle_var(context, id)
+                    {
+                        return Err(SimulatorError::unsupported_string_operation(
+                            "a select",
+                            &comptime.token,
+                        ));
+                    }
                     if let Some(row_type) = packed_range_row_type(context, *id, select) {
                         let meta = context.scope().variable_meta.get(id).unwrap().clone();
                         let dynamic_select = build_packed_range_select(
@@ -3952,6 +3961,12 @@ impl Conv<&air::Expression> for ProtoExpression {
                 }
             },
             air::Expression::Unary(op, x, comptime) => {
+                if super::string_handle::is_handle_expr(context, x) {
+                    return Err(SimulatorError::unsupported_string_operation(
+                        &format!("the operator `{op}`"),
+                        &comptime.token,
+                    ));
+                }
                 let x_kind = x.comptime().r#type.kind.clone();
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let width = comptime.expr_context.width;
@@ -3994,6 +4009,30 @@ impl Conv<&air::Expression> for ProtoExpression {
                 })
             }
             air::Expression::Binary(x, op, y, comptime) => {
+                // A handle `string` compares by handle, converted below as an
+                // ordinary comparison of handles; no other operator has a
+                // meaning on one.
+                let handle_operands;
+                let (x, y, comptime) = if super::string_handle::is_handle_expr(context, x)
+                    || super::string_handle::is_handle_expr(context, y)
+                {
+                    if !matches!(op, Op::Eq | Op::Ne) {
+                        return Err(SimulatorError::unsupported_string_operation(
+                            &format!("the operator `{op}`"),
+                            &comptime.token,
+                        ));
+                    }
+                    let mut comptime = comptime.clone();
+                    comptime.expr_context.width = crate::string_pool::HANDLE_WIDTH;
+                    handle_operands = (
+                        Box::new(super::string_handle::to_handle_expr(context, x)?),
+                        Box::new(super::string_handle::to_handle_expr(context, y)?),
+                        comptime,
+                    );
+                    (&handle_operands.0, &handle_operands.1, &handle_operands.2)
+                } else {
+                    (x, y, comptime)
+                };
                 if matches!(op, Op::As) {
                     let src_kind = &x.comptime().r#type.kind;
                     let dst_kind = &comptime.r#type.kind;
@@ -4173,6 +4212,15 @@ impl Conv<&air::Expression> for ProtoExpression {
                 })
             }
             air::Expression::Concatenation(items, comptime) => {
+                if items
+                    .iter()
+                    .any(|(x, _)| super::string_handle::is_handle_expr(context, x))
+                {
+                    return Err(SimulatorError::unsupported_string_operation(
+                        "a concatenation",
+                        &comptime.token,
+                    ));
+                }
                 let mut elements = Vec::new();
                 for (expr, rep) in items {
                     let mut converted: ProtoExpression = Conv::conv(context, expr)?;

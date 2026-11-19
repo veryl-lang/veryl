@@ -99,6 +99,23 @@ pub enum SimulatorError {
 
     #[diagnostic(
         severity(Error),
+        code(unsupported_string_operation),
+        help(
+            "a `string` variable that only `initial`/`final` write supports assignment, `?:`, `==`, `!=`, printing with `%s`, and passing to a testbench method; its text cannot reach a `string` that `always_comb`/`always_ff`/`assign`/`let` drive"
+        )
+    )]
+    #[error("{operation} is not supported on a `string` the testbench writes")]
+    UnsupportedStringOperation {
+        operation: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("unsupported here")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unordered_combinational_logic),
         help(
             "the simulator orders combinational logic statement by statement and found no order in which each of these reads only values already computed; splitting the `always_comb` blocks involved usually resolves it, and `veryl test --allow-multi-pass` (or `VERYL_ALLOW_MULTI_PASS=1`) evaluates them repeatedly until they settle instead"
@@ -223,6 +240,19 @@ impl SimulatorError {
             input,
             error_location: (*token).into(),
             token_source: token.beg.source,
+        }
+    }
+
+    pub fn unsupported_string_operation(operation: &str, token: &TokenRange) -> Self {
+        let source = token.beg.source;
+        let input = MultiSources {
+            sources: vec![Source::new(source.to_string(), source.get_text())],
+        };
+        SimulatorError::UnsupportedStringOperation {
+            operation: operation.to_string(),
+            input,
+            error_location: (*token).into(),
+            token_source: source,
         }
     }
 
