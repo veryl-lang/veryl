@@ -1563,7 +1563,11 @@ impl SymbolTable {
                 }
             }
 
-            maps.push(GenericMap { id: None, map });
+            maps.push(GenericMap {
+                id: None,
+                parameter_owner: None,
+                map,
+            });
         }
 
         Some(maps)

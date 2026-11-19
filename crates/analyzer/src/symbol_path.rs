@@ -349,20 +349,15 @@ impl GenericSymbol {
         if self.arguments.is_empty() {
             self.base()
         } else {
-            // If arguments have unresolved generic parameter, return base path
-            for arg in &self.arguments {
-                if !arg.is_resolvable() {
-                    continue;
-                }
-                let head = &arg.paths[0];
-                if let Ok(symbol) = symbol_table::resolve(&head.base)
-                    && matches!(
-                        symbol.found.kind,
-                        SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
-                    )
-                {
-                    return self.base();
-                }
+            // A nested argument can still depend on a template parameter,
+            // e.g. Bound::<Geometry::<N>::ROWS>. It has no concrete instance
+            // name until all of those arguments have been substituted.
+            if self
+                .arguments
+                .iter()
+                .any(GenericSymbolPath::is_generic_reference)
+            {
+                return self.base();
             }
 
             let mut text = format!("__{}", self.base);
@@ -592,7 +587,10 @@ impl GenericSymbolPath {
         for path in &self.paths {
             full_path.push(path.base);
             if let Ok(symbol) = symbol_table::resolve(&full_path) {
-                let mut map = GenericMap::default();
+                let mut map = GenericMap {
+                    parameter_owner: Some(symbol.found.id),
+                    ..Default::default()
+                };
 
                 if let SymbolKind::GenericInstance(inst) = &symbol.found.kind {
                     let params = inst.base_symbol().generic_parameters();
@@ -673,7 +671,7 @@ impl GenericSymbolPath {
     pub fn apply_map(&mut self, maps: &[GenericMap]) {
         for map in maps.iter().rev() {
             let head = &self.paths[0];
-            if let Some(x) = map.map.get(&head.base()) {
+            if let Some(x) = map.argument(&head.base) {
                 let mut paths: Vec<_> = self.paths.drain(1..).collect();
                 self.paths.clone_from(&x.paths);
                 self.paths.append(&mut paths);
@@ -682,7 +680,6 @@ impl GenericSymbolPath {
                 break;
             }
         }
-
         for path in &mut self.paths {
             for arg in &mut path.arguments {
                 arg.apply_map(maps);
