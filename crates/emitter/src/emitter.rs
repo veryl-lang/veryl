@@ -22,6 +22,7 @@ use veryl_analyzer::reset_value_table;
 use veryl_analyzer::resolved_type_table;
 use veryl_analyzer::scope;
 use veryl_analyzer::symbol::Direction as SymDirection;
+use veryl_analyzer::symbol::Type as SymType;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TestType, TypeKind,
@@ -812,7 +813,7 @@ impl Emitter {
         {
             self.global_function_identifier_token(&arg.identifier_token, symbol)
         } else {
-            emitting_identifier_token(&arg.identifier_token, symbol)
+            emitting_identifier_token(&arg.identifier_token, symbol, &self.build_opt)
         };
         self.veryl_token(&text);
         self.push_resolved_identifier(&text.to_string());
@@ -1147,9 +1148,10 @@ impl Emitter {
 
     fn always_ff_implicit_clock_event(&mut self) {
         let symbol = symbol_table::get(self.default_clock.unwrap()).unwrap();
-        let (clock_kind, prefix, suffix) = match symbol.kind {
-            SymbolKind::Port(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
-            SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
+        let (prefix, suffix) = get_variable_prefix_suffix(&symbol, &self.build_opt);
+        let clock_kind = match &symbol.kind {
+            SymbolKind::Port(x) => x.r#type.kind.clone(),
+            SymbolKind::Variable(x) => x.r#type.kind.clone(),
             _ => unreachable!(),
         };
         let clock_type = match clock_kind {
@@ -1204,7 +1206,11 @@ impl Emitter {
             })
             .unwrap();
 
-        let token = emitting_identifier_token(&VerylToken::new(symbol.token), Some(&symbol));
+        let token = emitting_identifier_token(
+            &VerylToken::new(symbol.token),
+            Some(&symbol),
+            &self.build_opt,
+        );
 
         match reset_type {
             ResetType::AsyncHigh => {
@@ -1228,21 +1234,68 @@ impl Emitter {
         self.reset_active_low = matches!(reset_type, ResetType::AsyncLow | ResetType::SyncLow);
     }
 
+    /// Symbols of the identifiers in a hierarchical identifier.
+    /// They are taken from the resolved path, since resolving one of them
+    /// alone may find another symbol of the same name.
+    fn hierarchical_identifier_symbols(arg: &HierarchicalIdentifier) -> Vec<Option<Rc<Symbol>>> {
+        let len = arg.hierarchical_identifier_list0.len() + 1;
+        let Ok(resolved) = symbol_table::resolve(arg) else {
+            return vec![None; len];
+        };
+
+        // `full_path` may be shorter than the identifiers if it reaches
+        // a SystemVerilog member.
+        let mut ret: Vec<_> = (0..len - 1)
+            .map(|i| {
+                resolved
+                    .full_path
+                    .get(i)
+                    .and_then(|x| symbol_table::get_rc(*x))
+            })
+            .collect();
+        ret.push(Some(Rc::clone(&resolved.found)));
+        ret
+    }
+
+    /// Text of a hierarchical identifier as emitted by `hierarchical_identifier`.
+    fn hierarchical_identifier_text(&self, arg: &HierarchicalIdentifier) -> String {
+        let symbols = Self::hierarchical_identifier_symbols(arg);
+        let mut ret = String::new();
+
+        let token = emitting_identifier_token(
+            &arg.identifier.identifier_token,
+            symbols[0].as_deref(),
+            &self.build_opt,
+        );
+        ret.push_str(&token.to_string());
+
+        for x in &arg.hierarchical_identifier_list {
+            let mut stringifier = Stringifier::new();
+            stringifier.select(&x.select);
+            ret.push_str(stringifier.as_str());
+        }
+
+        for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
+            ret.push('.');
+            let token = emitting_identifier_token(
+                &x.identifier.identifier_token,
+                symbols[i + 1].as_deref(),
+                &self.build_opt,
+            );
+            ret.push_str(&token.to_string());
+            for x in &x.hierarchical_identifier_list0_list {
+                let mut stringifier = Stringifier::new();
+                stringifier.select(&x.select);
+                ret.push_str(stringifier.as_str());
+            }
+        }
+
+        ret
+    }
+
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
         if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-            let reset_kind = match &found.found.kind {
-                SymbolKind::Port(x) => x.r#type.kind.clone(),
-                SymbolKind::Variable(x) => x.r#type.kind.clone(),
-                SymbolKind::ModportVariableMember(x) => {
-                    let symbol = symbol_table::get(x.variable).unwrap();
-                    if let SymbolKind::Variable(x) = symbol.kind {
-                        x.r#type.kind
-                    } else {
-                        unreachable!();
-                    }
-                }
-                _ => unreachable!(),
-            };
+            let reset_kind = get_variable_type_kind(&found.found).unwrap();
 
             match reset_kind {
                 TypeKind::ResetAsyncHigh | TypeKind::ResetAsyncLow => true,
@@ -1539,6 +1592,7 @@ impl Emitter {
         self.default_block = Some(emitting_identifier_token(
             &arg.identifier.identifier_token,
             None,
+            &self.build_opt,
         ));
         // The brace carries the comments written at the top of the block, and
         // emitting them with it would put them between `begin` and the label.
@@ -3846,7 +3900,6 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) {
-        let list_len = &arg.hierarchical_identifier_list0.len();
         let array_size = if self.build_opt.flatten_array_interface
             && !arg.hierarchical_identifier_list.is_empty()
         {
@@ -3855,12 +3908,8 @@ impl VerylWalker for Emitter {
             vec![]
         };
 
-        if *list_len == 0 {
-            let symbol = symbol_table::resolve(arg).ok().map(|x| Rc::clone(&x.found));
-            self.emit_identifier(&arg.identifier, symbol.as_deref());
-        } else {
-            self.identifier(&arg.identifier);
-        }
+        let symbols = Self::hierarchical_identifier_symbols(arg);
+        self.emit_identifier(&arg.identifier, symbols[0].as_deref());
 
         if array_size.len() > 1 {
             let select: Vec<_> = arg
@@ -3877,12 +3926,7 @@ impl VerylWalker for Emitter {
 
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
-            if (i + 1) == *list_len {
-                let symbol = symbol_table::resolve(arg).ok().map(|x| Rc::clone(&x.found));
-                self.emit_identifier(&x.identifier, symbol.as_deref());
-            } else {
-                self.identifier(&x.identifier);
-            }
+            self.emit_identifier(&x.identifier, symbols[i + 1].as_deref());
             for x in &x.hierarchical_identifier_list0_list {
                 self.select(&x.select);
             }
@@ -5548,15 +5592,14 @@ impl VerylWalker for Emitter {
                 _ => {}
             };
 
-            let mut stringifier = Stringifier::new();
-            stringifier.hierarchical_identifier(&arg.hierarchical_identifier);
+            let text = self.hierarchical_identifier_text(&arg.hierarchical_identifier);
             let token = arg
                 .hierarchical_identifier
                 .identifier
                 .identifier_token
-                .replace(stringifier.as_str());
+                .replace(&text);
 
-            self.reset_signal = Some(emitting_identifier_token(&token, Some(&found.found)));
+            self.reset_signal = Some(token);
             self.reset_active_low = matches!(reset_type, ResetType::AsyncLow | ResetType::SyncLow);
         } else {
             unreachable!()
@@ -7588,21 +7631,13 @@ pub fn symbol_string(
             }
         }
         SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_) => (),
-        SymbolKind::Port(x) => {
-            if let Some(ref x) = x.prefix {
+        SymbolKind::Port(_) | SymbolKind::Variable(_) => {
+            let (prefix, suffix) = get_variable_prefix_suffix(symbol, &context.build_opt);
+            if let Some(ref x) = prefix {
                 ret.push_str(x);
             }
             ret.push_str(&token_text);
-            if let Some(ref x) = x.suffix {
-                ret.push_str(x);
-            }
-        }
-        SymbolKind::Variable(x) => {
-            if let Some(ref x) = x.prefix {
-                ret.push_str(x);
-            }
-            ret.push_str(&token_text);
-            if let Some(ref x) = x.suffix {
+            if let Some(ref x) = suffix {
                 ret.push_str(x);
             }
         }
@@ -7666,6 +7701,7 @@ fn get_variable_type_kind(symbol: &Symbol) -> Option<TypeKind> {
     match &symbol.kind {
         SymbolKind::Port(x) => Some(x.r#type.kind.clone()),
         SymbolKind::Variable(x) => Some(x.r#type.kind.clone()),
+        SymbolKind::StructMember(x) => Some(x.r#type.kind.clone()),
         SymbolKind::ModportVariableMember(x) => {
             let symbol = symbol_table::get(x.variable).unwrap();
             get_variable_type_kind(&symbol)
@@ -7674,13 +7710,66 @@ fn get_variable_type_kind(symbol: &Symbol) -> Option<TypeKind> {
     }
 }
 
-fn get_variable_prefix_suffix(symbol: &Symbol) -> (Option<String>, Option<String>) {
+/// The clock/reset kind shared by all members of a struct type.
+fn struct_clock_reset_kind(r#type: &SymType) -> Option<TypeKind> {
+    let TypeKind::UserDefined(x) = &r#type.kind else {
+        return None;
+    };
+    let symbol = symbol_table::get(x.symbol?)?;
     match &symbol.kind {
-        SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
-        SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+        SymbolKind::Struct(x) => x.clock_reset_kind(),
+        SymbolKind::TypeDef(x) => struct_clock_reset_kind(x.r#type.as_ref()?),
+        _ => None,
+    }
+}
+
+/// Prefix and suffix added to the name of a clock/reset signal,
+/// which follow the polarity given by the build option.
+fn signal_prefix_suffix(kind: &TypeKind, build_opt: &Build) -> (Option<String>, Option<String>) {
+    match kind {
+        TypeKind::Clock => match build_opt.clock_type {
+            ClockType::PosEdge => (
+                build_opt.clock_posedge_prefix.clone(),
+                build_opt.clock_posedge_suffix.clone(),
+            ),
+            ClockType::NegEdge => (
+                build_opt.clock_negedge_prefix.clone(),
+                build_opt.clock_negedge_suffix.clone(),
+            ),
+        },
+        TypeKind::Reset => match build_opt.reset_type {
+            ResetType::AsyncHigh | ResetType::SyncHigh => (
+                build_opt.reset_high_prefix.clone(),
+                build_opt.reset_high_suffix.clone(),
+            ),
+            ResetType::AsyncLow | ResetType::SyncLow => (
+                build_opt.reset_low_prefix.clone(),
+                build_opt.reset_low_suffix.clone(),
+            ),
+        },
+        _ => (None, None),
+    }
+}
+
+fn variable_prefix_suffix(r#type: &SymType, build_opt: &Build) -> (Option<String>, Option<String>) {
+    // A struct made of clock/reset only is named as the clock/reset.
+    if let Some(kind) = struct_clock_reset_kind(r#type) {
+        signal_prefix_suffix(&kind, build_opt)
+    } else {
+        signal_prefix_suffix(&r#type.kind, build_opt)
+    }
+}
+
+fn get_variable_prefix_suffix(
+    symbol: &Symbol,
+    build_opt: &Build,
+) -> (Option<String>, Option<String>) {
+    match &symbol.kind {
+        SymbolKind::Port(x) => variable_prefix_suffix(&x.r#type, build_opt),
+        SymbolKind::Variable(x) => variable_prefix_suffix(&x.r#type, build_opt),
         SymbolKind::ModportVariableMember(x) => {
             let symbol = symbol_table::get(x.variable).unwrap();
-            get_variable_prefix_suffix(&symbol)
+            get_variable_prefix_suffix(&symbol, build_opt)
         }
         _ => (None, None),
     }
@@ -7699,9 +7788,13 @@ fn identifier_token_with_prefix_suffix(
     }
 }
 
-fn emitting_identifier_token(token: &VerylToken, symbol: Option<&Symbol>) -> VerylToken {
+fn emitting_identifier_token(
+    token: &VerylToken,
+    symbol: Option<&Symbol>,
+    build_opt: &Build,
+) -> VerylToken {
     let (prefix, suffix) = if let Some(symbol) = symbol {
-        get_variable_prefix_suffix(symbol)
+        get_variable_prefix_suffix(symbol, build_opt)
     } else {
         (None, None)
     };

@@ -32,14 +32,9 @@ pub struct AnalyzerPass1 {
 }
 
 impl AnalyzerPass1 {
-    pub fn new(
-        build_opt: &Build,
-        lint_opt: &Lint,
-        is_dependency: bool,
-        project_name: StrId,
-    ) -> Self {
+    pub fn new(lint_opt: &Lint, is_dependency: bool, project_name: StrId) -> Self {
         AnalyzerPass1 {
-            handlers: Pass1Handlers::new(build_opt, lint_opt, is_dependency, project_name),
+            handlers: Pass1Handlers::new(lint_opt, is_dependency, project_name),
             is_dependency,
         }
     }
@@ -175,12 +170,7 @@ impl Analyzer {
         let is_dependency = project_name != self.project_name;
         let project_name_id: StrId = project_name.into();
         scope::set_project(project_name_id, !is_dependency);
-        let mut pass1 = AnalyzerPass1::new(
-            &self.build_opt,
-            &self.lint_opt,
-            is_dependency,
-            project_name_id,
-        );
+        let mut pass1 = AnalyzerPass1::new(&self.lint_opt, is_dependency, project_name_id);
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 

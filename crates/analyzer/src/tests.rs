@@ -441,6 +441,26 @@ fn clock_check() {
     assert!(matches!(errors[0], AnalyzerError::InvalidClock { .. }));
 
     let code = r#"
+    package PackageA {
+        struct Clocks {
+            clk_a: clock,
+            clk_b: clock,
+        }
+    }
+    module ModuleA (
+        clk: input PackageA::Clocks,
+    ) {
+        var a: logic;
+        always_ff (clk) {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidClock { .. }));
+
+    let code = r#"
     module ModuleA (
         i_clk_a: input 'a default clock,
         i_clk_b: input 'b default clock,
@@ -636,6 +656,29 @@ fn reset_check() {
         always_ff (clk_b, rst_b[POS]) {
             if_reset {
                 b = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidReset { .. }));
+
+    let code = r#"
+    package PackageA {
+        struct Resets {
+            rst_a: reset,
+            rst_b: reset,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        rst: input PackageA::Resets,
+    ) {
+        var a: logic;
+        always_ff (clk, rst) {
+            if_reset {
+                a = 0;
             }
         }
     }

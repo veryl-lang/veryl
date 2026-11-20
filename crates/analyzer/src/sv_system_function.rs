@@ -47,8 +47,6 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
                 token,
                 r#type,
                 direction: *direction,
-                prefix: None,
-                suffix: None,
                 clock_domain: ClockDomain::None,
                 default_value: None,
                 is_proto: false,
