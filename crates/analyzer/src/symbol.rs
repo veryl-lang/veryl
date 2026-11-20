@@ -405,7 +405,10 @@ impl Symbol {
 
         // empty map for non-generic
         if ret.is_empty() && !self.kind.is_generic() {
-            ret.push(GenericMap::default());
+            ret.push(GenericMap {
+                parameter_owner: Some(self.id),
+                ..Default::default()
+            });
         }
         ret
     }

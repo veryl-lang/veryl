@@ -325,16 +325,7 @@ pub fn function_call_generic_maps(
             }
             None => Vec::new(),
         };
-        let host = parent_maps.iter().rev().find_map(|x| {
-            let mut symbol = symbol_table::get(x.parameter_owner?)?;
-            if let SymbolKind::GenericInstance(x) = &symbol.kind {
-                symbol = symbol_table::get(x.base)?;
-            }
-            symbol.kind.has_mixin_sources().then_some(symbol)
-        });
-        if let Some(host) = host
-            && let Some(map) = mixin_generic_map(signature.symbol, &host, &parent_maps)
-        {
+        if let Some(map) = mixin_member_map(signature.symbol, &parent_maps) {
             parent_maps.push(map);
         }
         parent_maps.append(&mut maps);
@@ -365,21 +356,35 @@ fn enclosing_interface(
     None
 }
 
-/// A function mixed into `host` reads the parameters of the interface it was
+/// `maps` bind the parameters of an interface. A member it mixed in from
+/// another interface reads that interface's parameters instead; returns the
+/// map the arguments of the `mixin` bind them by.
+pub fn mixin_member_map(member: SymbolId, maps: &[GenericMap]) -> Option<GenericMap> {
+    let host = maps.iter().rev().find_map(|x| {
+        let mut symbol = symbol_table::get(x.parameter_owner?)?;
+        if let SymbolKind::GenericInstance(x) = &symbol.kind {
+            symbol = symbol_table::get(x.base)?;
+        }
+        symbol.kind.has_mixin_sources().then_some(symbol)
+    })?;
+    mixin_generic_map(member, &host, maps)
+}
+
+/// A member mixed into `host` reads the parameters of the interface it was
 /// declared in, bound by the arguments of the `mixin`.
 fn mixin_generic_map(
-    function: SymbolId,
+    member: SymbolId,
     host: &Symbol,
     parent_maps: &[GenericMap],
 ) -> Option<GenericMap> {
-    let function = symbol_table::get(function)?;
+    let member = symbol_table::get(member)?;
     for source in host.kind.get_mixin_sources() {
         let mut source = source.clone();
         source.unalias(None);
         let Ok(mixin) = symbol_table::resolve(&source) else {
             continue;
         };
-        if !function.namespace.included(&mixin.found.inner_namespace()) {
+        if !member.namespace.included(&mixin.found.inner_namespace()) {
             continue;
         }
         let Some(last) = source.paths.last() else {
@@ -389,7 +394,13 @@ fn mixin_generic_map(
         for x in &mut arguments {
             x.apply_map(parent_maps);
         }
-        return Some(mixin.found.generic_map(None, &arguments));
+        // Omitted arguments take their defaults, which `generic_map` leaves
+        // out when none is given.
+        return Some(GenericMap {
+            id: None,
+            parameter_owner: Some(mixin.found.id),
+            map: mixin.found.generic_table(&arguments),
+        });
     }
     None
 }
