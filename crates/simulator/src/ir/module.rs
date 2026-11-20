@@ -1507,7 +1507,7 @@ fn run_comb_pipeline(
             let stats = version_split::run(&mut unified, &mut alloc);
             let _ = before;
             version_split::accumulate(&stats);
-            log::info!(
+            log::debug!(
                 "version_split totals ({module_name}): {}",
                 version_split::totals_line()
             );
@@ -1749,6 +1749,9 @@ fn run_comb_pipeline(
     } else {
         required_comb_passes
     };
+    if required_comb_passes > 1 {
+        log::info!("{module_name}: combinational logic settles in {required_comb_passes} passes");
+    }
     let pass_witness = (required_comb_passes > 1).then(|| comb_pipeline_cache::MultiPass {
         linearized,
         participants: backward_edge_tokens(&unified_sorted),
@@ -5144,7 +5147,7 @@ fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
     // the escape hatch on the per-chunk settle path.
     let passes = if max_delay == 0 { 1 } else { max_delay + 2 };
     if passes > 1 {
-        log::info!(
+        log::debug!(
             "compute_required_passes ({scope}): {} passes needed ({} stmts, {} backward edge chain depth)",
             passes,
             n,
@@ -6302,7 +6305,7 @@ impl Conv<&air::Module> for ProtoModule {
                         use_4state,
                     );
                     unfuse_field_offsets = field_offsets;
-                    log::info!("field_unfuse ({}): {stats:?}", src.name);
+                    log::debug!("field_unfuse ({}): {stats:?}", src.name);
                 }
                 let unfuse_comb_bytes = context.comb_total_bytes - comb_total_pre_unfuse;
                 let unfuse_comb_reloc: Vec<(isize, isize, usize)> =
