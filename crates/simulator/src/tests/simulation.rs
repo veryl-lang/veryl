@@ -39463,3 +39463,57 @@ fn wide_shift_left_of_signed_narrow_operand_is_aot_native() {
         }
     }
 }
+
+#[test]
+fn imported_alias_package_with_gen_const_argument() {
+    let pkg = r#"
+    proto package ProtoP {
+        const IS_CSR: bit;
+        const W     : u32;
+    }
+
+    package ImplPkg::<ID: u32> for ProtoP {
+        const IS_CSR: bit = 1;
+        const W     : u32 = ID;
+    }
+
+    package UtilsPkg::<PKG: ProtoP> {
+        function is_bc (x: input logic<PKG::W>) -> logic {
+            return PKG::IS_CSR && x == 3;
+        }
+    }
+
+    interface BusIf::<PKG: ProtoP> {
+        var cmd: logic<PKG::W>;
+
+        function is_bc () -> logic {
+            return UtilsPkg::<PKG>::is_bc(cmd);
+        }
+    }
+
+    package CPkg {
+        gen ID: u32 = 4;
+        alias package BUS = ImplPkg::<ID>;
+    }
+    "#;
+    let top = r#"
+    import CPkg::BUS;
+
+    module Top (
+        o: output logic,
+    ) {
+        inst b: BusIf::<BUS>;
+        always_comb {
+            b.cmd = 3;
+            o     = b.is_bc();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_multi_file_prj(&[pkg, top], &config, "Top", &["prj"]).unwrap();
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
+    }
+}

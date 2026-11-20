@@ -522,6 +522,18 @@ impl GenericSymbolPath {
                 }
                 visited.push(symbol.found.id);
 
+                // A `gen` const of the declaring package is substituted by the
+                // package's map, which a qualified path pushes at its package
+                // segment. An imported alias has no such segment, and the const
+                // is not visible from the referring scope.
+                if i == 0
+                    && let Some(package) = symbol.found.get_parent_package()
+                    && package.has_generic_consts()
+                    && !package.has_generic_paramters()
+                {
+                    generic_maps.push(package.generic_map(Some(package.id), &[]));
+                }
+
                 // Imports used by the target are declared around the alias
                 // declaration, not around the referring site.
                 let (alias_scope, alias_define_context) =
