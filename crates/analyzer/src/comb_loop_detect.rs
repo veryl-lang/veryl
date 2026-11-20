@@ -2199,6 +2199,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
                 }
                 Factor::SystemFunctionCall(call) => match &call.kind {
                     SystemFunctionKind::Onehot(input)
+                    | SystemFunctionKind::IsUnknown(input)
                     | SystemFunctionKind::Signed(input)
                     | SystemFunctionKind::Unsigned(input)
                     | SystemFunctionKind::Readmemh(input, _) => self.eval(&input.0),

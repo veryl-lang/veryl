@@ -93,6 +93,7 @@ pub enum SystemFunctionKind {
     Size(Input, Option<Input>),
     Clog2(Input),
     Onehot(Input),
+    IsUnknown(Input),
     Readmemh(Input, Output),
     Display(Vec<Input>),
     Write(Vec<Input>),
@@ -115,9 +116,11 @@ impl SystemFunctionKind {
             Self::Size(_, dimension) => dimension
                 .as_mut()
                 .is_none_or(|x| x.0.eval_elaboration_const(context)),
-            Self::Clog2(x) | Self::Onehot(x) | Self::Signed(x) | Self::Unsigned(x) => {
-                x.0.eval_elaboration_const(context)
-            }
+            Self::Clog2(x)
+            | Self::Onehot(x)
+            | Self::IsUnknown(x)
+            | Self::Signed(x)
+            | Self::Unsigned(x) => x.0.eval_elaboration_const(context),
             Self::Readmemh(..)
             | Self::Display(_)
             | Self::Write(_)
@@ -137,7 +140,7 @@ impl SystemFunctionKind {
                 ret.signed = true;
                 ret
             }
-            Self::Onehot(_) => Type::new(TypeKind::Bit),
+            Self::Onehot(_) | Self::IsUnknown(_) => Type::new(TypeKind::Bit),
             Self::Signed(x) | Self::Unsigned(x) => {
                 // Sign casts preserve the operand's width and state type.
                 let mut ret = x.0.comptime().r#type.clone();
@@ -309,6 +312,21 @@ impl SystemFunctionCall {
                 comptime.is_const = true;
                 SystemFunctionKind::Onehot(arg0)
             }
+            "$isunknown" => {
+                if args.len() != 1 {
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$isunknown",
+                        1,
+                        args.len(),
+                        &token,
+                    ));
+                    return Err(ir_error!(token));
+                }
+                // Not folded here: whether an x/z literal survives depends on
+                // the 2-state or 4-state simulation that evaluates it.
+                let arg0 = create_input(context, name, None, args.remove(0));
+                SystemFunctionKind::IsUnknown(arg0)
+            }
             "$readmemh" => {
                 if args.len() != 2 {
                     context.insert_error(AnalyzerError::mismatch_function_arity(
@@ -456,6 +474,10 @@ impl SystemFunctionCall {
                 let ret = value.payload().count_ones() == 1;
                 Some(Value::new(ret.into(), 1, false))
             }
+            SystemFunctionKind::IsUnknown(x) => {
+                let value = x.0.eval_value(context)?;
+                Some(Value::new(value.is_xz().into(), 1, false))
+            }
             SystemFunctionKind::Readmemh(_, _) => None,
             SystemFunctionKind::Display(_) => None,
             SystemFunctionKind::Write(_) => None,
@@ -475,7 +497,8 @@ impl SystemFunctionCall {
             SystemFunctionKind::Bits(_)
             | SystemFunctionKind::Size(..)
             | SystemFunctionKind::Clog2(_)
-            | SystemFunctionKind::Onehot(_) => {
+            | SystemFunctionKind::Onehot(_)
+            | SystemFunctionKind::IsUnknown(_) => {
                 let mut ret = self.comptime.clone();
                 if let Some(x) = value {
                     ret.value = ValueVariant::Numeric(x);
@@ -519,6 +542,7 @@ impl fmt::Display for SystemFunctionCall {
             SystemFunctionKind::Size(x, Some(y)) => format!("$size({x}, {y})").fmt(f),
             SystemFunctionKind::Clog2(x) => format!("$clog2({x})").fmt(f),
             SystemFunctionKind::Onehot(x) => format!("$onehot({x})").fmt(f),
+            SystemFunctionKind::IsUnknown(x) => format!("$isunknown({x})").fmt(f),
             SystemFunctionKind::Readmemh(x, y) => format!("$readmemh({x}, {y})").fmt(f),
             SystemFunctionKind::Display(args) => {
                 let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
@@ -550,6 +574,7 @@ impl SystemFunctionCall {
             SystemFunctionKind::Bits(x)
             | SystemFunctionKind::Clog2(x)
             | SystemFunctionKind::Onehot(x)
+            | SystemFunctionKind::IsUnknown(x)
             | SystemFunctionKind::Signed(x)
             | SystemFunctionKind::Unsigned(x) => x.0.set_instance(instance),
             SystemFunctionKind::Size(x, dimension) => {
@@ -596,6 +621,7 @@ impl SystemFunctionCall {
             | SystemFunctionKind::Size(x, _)
             | SystemFunctionKind::Clog2(x)
             | SystemFunctionKind::Onehot(x)
+            | SystemFunctionKind::IsUnknown(x)
             | SystemFunctionKind::Signed(x)
             | SystemFunctionKind::Unsigned(x) => {
                 process_input(x, context, table);

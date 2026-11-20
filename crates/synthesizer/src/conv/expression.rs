@@ -964,6 +964,8 @@ fn synth_system_function_call(
             let result = onehot_reduce(ctx, &bits);
             Ok(resize(vec![result], ret_width.max(1), false))
         }
+        // Synthesized logic has no x/z bits.
+        SystemFunctionKind::IsUnknown(_) => Ok(resize(vec![NET_CONST0], ret_width.max(1), false)),
         _ => Err(SynthesizerError::unsupported(
             UnsupportedKind::SystemFunctionCall,
             &call.comptime.token,

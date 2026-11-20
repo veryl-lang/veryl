@@ -113,7 +113,7 @@ module Module49 {
         a = $increment();
         a = $info();
         a = $isunbounded();
-        a = $isunknown();
+        a = $isunknown(a);
         a = $itor();
         a = $left();
         a = $ln();

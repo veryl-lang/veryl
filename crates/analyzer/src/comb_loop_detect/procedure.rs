@@ -846,6 +846,7 @@ fn collect_summary_system_call_variables(
         | SystemFunctionKind::Size(input, _)
         | SystemFunctionKind::Clog2(input)
         | SystemFunctionKind::Onehot(input)
+        | SystemFunctionKind::IsUnknown(input)
         | SystemFunctionKind::Signed(input)
         | SystemFunctionKind::Unsigned(input) => {
             collect_summary_expression_variables(module, &input.0, ids);
@@ -1947,6 +1948,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             | SystemFunctionKind::Size(input, _)
             | SystemFunctionKind::Clog2(input)
             | SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::IsUnknown(input)
             | SystemFunctionKind::Signed(input)
             | SystemFunctionKind::Unsigned(input) => {
                 self.collect_expression_write_footprint(&input.0, keys, visited);
@@ -5245,6 +5247,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 | SystemFunctionKind::Size(..)
                 | SystemFunctionKind::Clog2(_)
                 | SystemFunctionKind::Onehot(_)
+                | SystemFunctionKind::IsUnknown(_)
                 | SystemFunctionKind::Signed(_)
                 | SystemFunctionKind::Unsigned(_)
         ) {
@@ -5256,6 +5259,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             | SystemFunctionKind::Clog2(_)
             | SystemFunctionKind::Finish => Vec::new(),
             SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::IsUnknown(input)
             | SystemFunctionKind::Signed(input)
             | SystemFunctionKind::Unsigned(input) => self.eval_expr(&input.0),
             SystemFunctionKind::Readmemh(input, output) => {
