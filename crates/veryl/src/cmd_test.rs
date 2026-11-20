@@ -572,7 +572,7 @@ impl CmdTest {
                                     let output = output_buffer::take();
                                     let test_name = &pending.test_name;
                                     let _print = print_lock.lock().unwrap();
-                                    let mut rep_status: &'static str = "error";
+                                    let rep_status: &'static str;
                                     let mut rep_message: Option<String> = None;
                                     match outcome {
                                         NativeOutcome::ElaborateFailed(e) => {
