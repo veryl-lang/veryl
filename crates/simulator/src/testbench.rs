@@ -175,7 +175,7 @@ fn collect_tb_insts(
 ) {
     for stmt in stmts {
         match stmt {
-            Statement::TbMethodCall { inst, method } => match method {
+            Statement::TbMethodCall { inst, method, .. } => match method {
                 TbMethodKind::ClockNext { .. } => {
                     if !clock_insts.contains(inst) {
                         clock_insts.push(*inst);
@@ -252,7 +252,7 @@ fn compute_half_periods(period: u64) -> (u64, u64) {
 fn collect_clock_periods(stmts: &[Statement], periods: &mut HashMap<StrId, u64>) {
     for stmt in stmts {
         match stmt {
-            Statement::TbMethodCall { inst, method } => {
+            Statement::TbMethodCall { inst, method, .. } => {
                 if let TbMethodKind::ClockNext { period, .. } = method
                     && let Some(expr) = period
                 {
@@ -318,7 +318,7 @@ fn convert_stmt(
     default_reset_duration: u64,
 ) -> TestbenchStatement {
     match stmt {
-        Statement::TbMethodCall { inst, method } => match method {
+        Statement::TbMethodCall { inst, method, .. } => match method {
             TbMethodKind::ClockNext { count, period } => {
                 let clock = event_map.get(inst).cloned().unwrap_or(Event::Initial);
                 let p = if let Some(expr) = period {

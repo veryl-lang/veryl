@@ -455,6 +455,53 @@ impl TbMethod {
     }
 }
 
+impl TbMethodCall {
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        let gather_expr = |expr: &Expression, context: &mut Context, table: &mut FfTable| {
+            expr.gather_ff(context, table, decl, None, true);
+        };
+        match &self.method {
+            TbMethod::ClockNext { count, period } => {
+                if let Some(count) = count {
+                    gather_expr(count, context, table);
+                }
+                if let Some(period) = period {
+                    gather_expr(period, context, table);
+                }
+            }
+            TbMethod::ResetAssert { duration, .. } => {
+                if let Some(duration) = duration {
+                    gather_expr(duration, context, table);
+                }
+            }
+            TbMethod::FileOpen { name, .. } => gather_expr(&name.0, context, table),
+            TbMethod::FileWrite { args } | TbMethod::Component { args, .. } => {
+                for arg in args {
+                    gather_expr(&arg.0, context, table);
+                }
+            }
+            TbMethod::RandomSeed { value } => gather_expr(value, context, table),
+            TbMethod::RandomGetRange { min, max, .. } => {
+                gather_expr(min, context, table);
+                gather_expr(max, context, table);
+            }
+            TbMethod::Queue {
+                value: Some(value), ..
+            } => gather_expr(value, context, table),
+            TbMethod::FileClose
+            | TbMethod::FileFlush
+            | TbMethod::RandomGet { .. }
+            | TbMethod::RandomGetSeed
+            | TbMethod::Queue { value: None, .. } => {}
+        }
+
+        if let Some(ret) = &self.ret {
+            ret.gather_ff_selectors(context, table, decl, None, true);
+            ret.gather_ff(context, table, decl);
+        }
+    }
+}
+
 impl Statement {
     pub fn is_null(&self) -> bool {
         matches!(self, Statement::Null)
@@ -588,10 +635,8 @@ impl Statement {
                     }
                 }
             }
-            Statement::TbMethodCall(_)
-            | Statement::Break
-            | Statement::Unsupported(_)
-            | Statement::Null => (),
+            Statement::TbMethodCall(x) => x.gather_ff(context, table, decl),
+            Statement::Break | Statement::Unsupported(_) | Statement::Null => (),
         }
     }
 

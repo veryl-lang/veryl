@@ -341,7 +341,7 @@ impl ProtoModule {
 
         let mut event_gates: HashMap<Event, crate::ir::opt::event_gate::RtEventGates> =
             HashMap::default();
-        let event_statements = self
+        let mut event_statements: HashMap<_, Vec<Statement>> = self
             .event_statements
             .iter()
             .map(|(event, stmts)| {
@@ -381,6 +381,12 @@ impl ProtoModule {
                 (event.clone(), s)
             })
             .collect();
+
+        for statements in event_statements.values_mut() {
+            for statement in statements {
+                statement.bind_tb_return(&module_variables, ff_ptr, ff_len, self.use_4state);
+            }
+        }
 
         // Temporary diagnostic: histogram the statements that stay
         // interpreted in the settle loop (VERYL_INTERP_DIAG=1).
