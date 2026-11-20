@@ -212,10 +212,9 @@ pub struct Context {
     pub tb_hoist: Option<Vec<crate::ir::Statement>>,
     /// Names hoist temporaries uniquely within a module.
     pub tb_hoist_count: usize,
-    /// Resolved numeric parameters of the external component instances
-    /// declared so far, for evaluating declared method width expressions.
-    pub tb_component_params:
-        crate::HashMap<veryl_parser::resource_table::StrId, Vec<(String, u64)>>,
+    /// Testbench handles declared so far; component parameters also serve
+    /// declared method width expressions.
+    pub tb_handles: crate::ir::TbHandles,
     /// Elaborated components of module instances declared so far in the
     /// current module, for hierarchical references from testbench code.
     /// Child module bodies convert in fresh contexts (`inherit` does not

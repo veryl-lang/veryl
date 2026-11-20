@@ -55,6 +55,18 @@ pub struct Module {
     /// that need to mutate (e.g. simulator's `force_all_ff` or post-hoist
     /// rebuild) should clone first.
     pub ff_table: FfTable,
+    pub tb_handles: TbHandles,
+}
+
+/// The `$tb` and `$comp` instances that testbench statements address by
+/// name, so that consumers need not recover them from the statements.
+#[derive(Clone, Debug, Default)]
+pub struct TbHandles {
+    /// `$tb::clock_gen`/`reset_gen` instances and the variable each drives.
+    pub generators: HashMap<StrId, VarId>,
+    /// Numeric parameters of the `$comp` instances here and in nested test
+    /// modules, by instance path, for a parent calling their methods.
+    pub component_params: HashMap<StrId, Vec<(String, u64)>>,
 }
 
 impl Module {

@@ -6,9 +6,9 @@
 use crate::HashMap;
 use crate::component::host::{ExternalInstance, HostContext, HostValue, PortDir, PortRole};
 use crate::component::loader::{ComponentError, lookup_component_backend};
-use crate::ir::ModuleVariables;
-use crate::ir::variable::{read_payload, write_payload};
-use crate::ir::{Event, Expression, Ir, VarId};
+use crate::ir::external::OutputTarget;
+use crate::ir::variable::{VarOffset, read_payload, write_payload};
+use crate::ir::{Event, Expression, Ir};
 use num_bigint::BigUint;
 use veryl_analyzer::value::{MaskCache, Value, ValueBigUint, ValueU64};
 use veryl_component_sys as sys;
@@ -71,15 +71,15 @@ enum InputSource {
 }
 
 /// A component output written back into DUT storage after hooks. The
-/// destination pointer and layout are resolved from `var_id` on first use and
-/// cached, mirroring the precomputed input pointer so the write-back needs no
-/// per-cycle variable lookup. The pointer addresses the run-stable flat
-/// buffers, so it stays valid once resolved.
+/// destination pointer addresses the run-stable flat buffers, mirroring the
+/// precomputed input pointer so the write-back needs no per-cycle variable
+/// lookup.
 struct OutputBinding {
     // Host output port index, for the dirty check and the untouched-port filter.
     idx: u32,
-    // DUT signal driven by the port; resolves the destination once.
-    var_id: VarId,
+    // Destination storage and variable name, for the sole-driver check.
+    offset: VarOffset,
+    name: StrId,
     dest: *mut u8,
     native_bytes: usize,
     width: usize,
@@ -92,13 +92,14 @@ struct OutputBinding {
 }
 
 impl OutputBinding {
-    fn new(idx: u32, var_id: VarId) -> Self {
+    fn new(idx: u32, target: &OutputTarget) -> Self {
         Self {
             idx,
-            var_id,
-            dest: std::ptr::null_mut(),
-            native_bytes: 0,
-            width: 0,
+            offset: target.offset,
+            name: target.name,
+            dest: target.ptr,
+            native_bytes: target.native_bytes,
+            width: target.width,
             src_words: std::ptr::null(),
             src_mask: std::ptr::null(),
         }
@@ -413,7 +414,7 @@ pub fn build_components(
     test_name: &str,
 ) -> Result<Vec<RuntimeComponent>, ComponentError> {
     // Sole-driver check: destination variable -> driving instance name.
-    let mut driven: HashMap<VarId, String> = HashMap::default();
+    let mut driven: HashMap<VarOffset, String> = HashMap::default();
     let mut result = vec![];
     for ext in &ir.external_components {
         let inst_name = str_of(ext.name);
@@ -525,9 +526,9 @@ pub fn build_components(
                 ));
                 in_idx
             });
-            let out_idx = connect.output.map(|var_id| {
+            let out_idx = connect.output.as_ref().map(|target| {
                 let out_idx = host.add_port(&port_name, PortDir::Output, connect.width);
-                outputs.push(OutputBinding::new(out_idx, var_id));
+                outputs.push(OutputBinding::new(out_idx, target));
                 out_idx
             });
             // A clock/reset input without an event source would never
@@ -706,20 +707,14 @@ pub fn build_components(
 
         // A component output must be the destination's only driver.
         for out in &outputs {
-            let var_id = &out.var_id;
-            let var_name = ir
-                .module_variables
-                .variables
-                .get(var_id)
-                .map(|v| v.path.to_string())
-                .unwrap_or_default();
-            if ir.rtl_driven.contains(var_id) {
+            let var_name = resource_table::get_str_value(out.name).unwrap_or_default();
+            if ir.rtl_driven.contains(&out.offset) {
                 return Err(ComponentError::OutputRtlConflict {
                     inst: inst_name.clone(),
                     var: var_name,
                 });
             }
-            if let Some(other) = driven.insert(*var_id, inst_name.clone()) {
+            if let Some(other) = driven.insert(out.offset, inst_name.clone()) {
                 return Err(ComponentError::OutputComponentConflict {
                     inst: inst_name.clone(),
                     var: var_name,
@@ -883,21 +878,11 @@ impl RuntimeComponent {
     /// Writes dirty outputs into variable storage. Runs after FF commit so
     /// the same edge's RTL saw pre-edge values (NBA semantics). Returns
     /// true when anything was written (the caller marks comb dirty).
-    pub fn apply_outputs(&mut self, variables: &mut ModuleVariables, use_4state: bool) -> bool {
+    pub fn apply_outputs(&mut self, use_4state: bool) -> bool {
         let mut wrote = false;
         for out in &mut self.outputs {
             if !self.host.output_dirty_idx(out.idx) {
                 continue;
-            }
-            // Resolve the run-stable destination pointer and layout once, then
-            // reuse them so the write-back skips the per-cycle variable lookup.
-            if out.dest.is_null() {
-                let Some(var) = variables.variables.get(&out.var_id) else {
-                    continue;
-                };
-                out.dest = var.current_values[0];
-                out.native_bytes = var.native_bytes;
-                out.width = var.width;
             }
             let ptr = out.dest;
             if out.width <= 64 && matches!(out.native_bytes, 1 | 2 | 4 | 8) {

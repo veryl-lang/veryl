@@ -12,6 +12,7 @@ pub(crate) mod external;
 pub(crate) mod hier_ref;
 pub(crate) mod inst_layout;
 pub(crate) mod module;
+pub(crate) mod nested_tb;
 pub(crate) mod opt;
 pub(crate) mod partial_index;
 pub(crate) mod site_table;
@@ -80,6 +81,10 @@ pub struct Ir {
     /// See `Config::abstract_reset_active_high`.
     pub abstract_reset_active_high: bool,
     pub module_variables: ModuleVariables,
+    /// See `Module::tb_variables`.
+    pub tb_variables: HashMap<VarId, Variable>,
+    /// See `Module::tb_events`.
+    pub tb_events: HashMap<StrId, Event>,
     pub event_statements: HashMap<Event, Vec<Statement>>,
     /// See `Module::event_gates`.
     pub event_gates: HashMap<Event, opt::event_gate::RtEventGates>,
@@ -179,7 +184,7 @@ pub struct Ir {
     /// directory beneath it. `None` leaves paths process-CWD relative.
     pub component_file_base: Option<PathBuf>,
     /// See `Module::rtl_driven`.
-    pub rtl_driven: HashSet<VarId>,
+    pub rtl_driven: HashSet<VarOffset>,
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
     /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
     pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
@@ -247,6 +252,8 @@ impl Ir {
             use_4state: config.use_4state,
             abstract_reset_active_high: config.abstract_reset_active_high,
             module_variables: module.module_variables,
+            tb_variables: module.tb_variables,
+            tb_events: module.tb_events,
             event_statements: module.event_statements,
             event_gates: module.event_gates,
             event_jit_marked: module.event_jit_marked,
@@ -327,12 +334,21 @@ impl Ir {
         ir
     }
 
+    /// A top-level variable, or a testbench-facing variable of a nested test
+    /// module.
+    pub fn variable(&self, id: &VarId) -> Option<&Variable> {
+        self.module_variables
+            .variables
+            .get(id)
+            .or_else(|| self.tb_variables.get(id))
+    }
+
     /// True when the reset net `id` asserts LOW.  The polarity-agnostic
     /// `reset` type carries none of its own, so a declaration on the ports the
     /// net reaches decides — their `if_reset` blocks were lowered against it —
     /// and `[build] reset_type` is the fallback when none does.
     pub fn reset_active_low(&self, id: &VarId) -> bool {
-        let var = self.module_variables.variables.get(id);
+        let var = self.variable(id);
         match var.map(|x| &x.r#type.kind) {
             Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetSyncHigh) => false,
             Some(air::TypeKind::ResetAsyncLow) | Some(air::TypeKind::ResetSyncLow) => true,

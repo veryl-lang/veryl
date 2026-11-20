@@ -897,7 +897,7 @@ fn run_component_test_configured(
             continue;
         }
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
         let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
@@ -2904,7 +2904,7 @@ fn trace_var_appears_in_vcd() {
         sim.init_components(0, "comp_test").unwrap();
         sim.attach_dump(dumper);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
         let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
@@ -4303,6 +4303,279 @@ mod wasm_transport {
             assert!(
                 msg.contains("[p]") && msg.contains("kaboom"),
                 "unexpected message for {config:?}: {msg}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_test_module_components() {
+    // A nested test module's components are driven like top-level ones,
+    // and the parent calls their methods through the instance path.
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+
+        var d: logic<8>;
+        var q: logic<8>;
+        var y: logic<64>;
+        var g: $comp::golden;
+
+        inst m: $comp::mirror ( clk, d, q );
+
+        initial {
+            g.set(7);
+            y = g.get();
+            $assert(y == 7, "nested method");
+            d = 8'h5a;
+            clk.next();
+            $assert(q == 8'h5a, "nested component output");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+
+        var x: logic<64>;
+
+        initial {
+            u.g.set(42);
+            x = u.g.get();
+            $assert(x == 42, "hierarchical method");
+        }
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        let ir = analyze_component_top(code, &config, "top")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn nested_component_resolves_hierarchical_connection_locally() {
+    // `dut` names the harness's own instance, not the parent's `dut`.
+    let code = r#"
+    module Sub (
+        clk: input clock,
+        rst: input reset,
+        din: input logic<4>,
+    ) {
+        #[allow(unused_variable)]
+        var internal_reg: logic<4>;
+        always_ff {
+            if_reset { internal_reg = 0; }
+            else { internal_reg = din + 1; }
+        }
+    }
+
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var din: logic<4>;
+
+        inst dut: Sub (clk, rst, din);
+
+        inst chk: $comp::hier_checker #( EXPECT: 4, LIMIT: 10 ) (
+            clk,
+            val: dut.internal_reg,
+        );
+
+        initial {
+            rst.assert();
+            din = 3;
+            clk.next(20);
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var din: logic<4>;
+
+        inst dut: Sub (clk, rst, din);
+        inst u: harness;
+
+        initial {
+            rst.assert();
+            din = 8;
+            clk.next(20);
+        }
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        let ir = analyze_component_top(code, &config, "top")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hierarchical_method_through_instance_array_is_rejected() {
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        var g: $comp::golden;
+        initial {
+            g.set(1);
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness [2];
+        initial {
+            u.g.set(2);
+        }
+    }
+    "#;
+    let errors = analyze_component_errors(code);
+    assert!(
+        errors.iter().any(|x| matches!(
+            x,
+            AnalyzerError::ComponentInterfaceMismatch {
+                kind:
+                    veryl_analyzer::analyzer_error::ComponentInterfaceMismatchKind::MethodCallForm,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn parent_component_on_nested_testbench_clock() {
+    // The parent's component fires on the clock its child's testbench runs.
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        var d: logic<8>;
+        initial {
+            d = 8'h5a;
+            clk.next(2);
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+        var q: logic<8>;
+        inst m: $comp::mirror ( clk: u.clk, d: u.d, q );
+        final {
+            $assert(q == 8'h5a, "mirrored on the child's clock");
+        }
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        let ir = analyze_component_top(code, &config, "top")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hierarchical_method_resolves_child_return_width() {
+    // `#[ret_width(bus.WIDTH)]` resolves against the child's connection.
+    // The returned width is checked at run time against the declared one.
+    let code = r#"
+    interface WideIf {
+        const WIDTH: u32 = 96;
+        var clk : clock       ;
+        var data: logic<WIDTH>;
+        modport mon {
+            clk : input,
+            data: input,
+        }
+    }
+
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst bus: WideIf;
+        inst c: $comp::wide_bus ( clk, bus: bus.mon );
+        assign bus.clk = clk;
+        initial {
+            bus.data = 96'h1_0000_0000_0000_0022;
+            clk.next(2);
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+        var x: logic<96>;
+        initial {
+            x = u.c.snoop();
+        }
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        let ir = analyze_component_top(code, &config, "top")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn nested_reset_on_component_starts_deasserted() {
+    // A component reading the reset does not make the net RTL-driven: it
+    // still starts deasserted, alone or nested.
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+        inst w: $comp::role ( clk, rst );
+
+        var state: logic<8>;
+
+        always_ff (clk, rst) {
+            if_reset { state = 1; }
+            else { state = 2; }
+        }
+
+        initial {
+            clk.next();
+            $assert(state == 2, "not in reset");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for mut config in Config::all() {
+        config.abstract_reset_active_high = false;
+        for top in ["harness", "top"] {
+            let ir = analyze_component_top(code, &config, top)
+                .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+            let module_name = ir.name.to_string();
+            let result = run_native_testbench(ir, None, module_name);
+            assert_eq!(
+                result.unwrap(),
+                TestResult::Pass,
+                "{top}, config: {config:?}"
             );
         }
     }
