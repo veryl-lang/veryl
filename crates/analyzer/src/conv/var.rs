@@ -305,9 +305,18 @@ fn conv_expression_identifier(
             continue;
         }
 
-        // Plain-instance hop: descend into the instantiated module so a
-        // following generate hop resolves there; any other node ends the chain.
-        current_scope = hop.as_ref().and_then(instance_module_scope);
+        // An unindexed generate-block hop (`if` generate) descends into the
+        // block; a plain-instance hop into the instantiated module, so a
+        // following generate hop resolves there. Any other node ends the chain.
+        current_scope = hop.as_ref().and_then(|symbol| {
+            if matches!(symbol.kind, SymbolKind::Block)
+                && x.expression_identifier_list0_list.is_empty()
+            {
+                Some(symbol.inner_namespace())
+            } else {
+                instance_module_scope(symbol)
+            }
+        });
 
         // Same scalar rule for a selected member (`s.x[0]` on a scalar `x`).
         if !x.expression_identifier_list0_list.is_empty()
