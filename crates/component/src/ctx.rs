@@ -12,6 +12,9 @@ pub struct InputPort {
     /// Host staging buffer, or null when the host cannot share memory (wasm)
     /// and the read path must fall back to a host call.
     pub(crate) words_ptr: *const u64,
+    /// Shape of a port bound for a reference argument; `None` for a
+    /// connected port.
+    pub(crate) shape: Option<&'static crate::reference::PortShape>,
 }
 
 /// Handle to a component output port, resolved once in [`BuildCtx::output`].
@@ -26,6 +29,9 @@ pub struct OutputPort {
     pub(crate) words_ptr: *mut u64,
     pub(crate) mask_ptr: *mut u64,
     pub(crate) dirty_ptr: *mut u8,
+    /// Shape of a port bound for a reference argument; `None` for a
+    /// connected port.
+    pub(crate) shape: Option<&'static crate::reference::PortShape>,
 }
 
 // The cached pointers address host buffers that outlive the instance and are
@@ -112,6 +118,7 @@ impl From<ClockPort> for InputPort {
             idx: port.idx,
             width: 1,
             words_ptr: std::ptr::null(),
+            shape: None,
         }
     }
 }
@@ -122,6 +129,7 @@ impl From<ResetPort> for InputPort {
             idx: port.idx,
             width: 1,
             words_ptr: std::ptr::null(),
+            shape: None,
         }
     }
 }
@@ -140,7 +148,7 @@ impl TraceVar {
     }
 }
 
-struct RawCtx {
+pub(crate) struct RawCtx {
     ctx: *mut sys::VrlCtx,
     api: *const sys::VrlHostApi,
 }
@@ -171,6 +179,49 @@ impl RawCtx {
         Some((idx as u32, width))
     }
 
+    /// Whether the host provides the reference entries (`port_desc`,
+    /// `write_output_bits`).
+    fn has_ref_api(&self) -> bool {
+        self.api().size >= sys::VRL_HOST_API_REF_SIZE
+    }
+
+    /// Description of a port bound for a reference, or `None` for another
+    /// port or a host without the entry.
+    pub(crate) fn port_desc(&mut self, idx: u32) -> Option<String> {
+        if !self.has_ref_api() {
+            return None;
+        }
+        let mut buf = vec![0u8; 256];
+        loop {
+            let len = unsafe { (self.api().port_desc)(self.ctx, idx, buf.as_mut_ptr(), buf.len()) };
+            let len = usize::try_from(len).ok()?;
+            if len <= buf.len() {
+                buf.truncate(len);
+                return String::from_utf8(buf).ok();
+            }
+            buf.resize(len, 0);
+        }
+    }
+
+    /// Writes `width` bits from `lsb` of an output port; false if the host
+    /// rejects the range or lacks the entry.
+    pub(crate) fn write_output_bits(
+        &mut self,
+        idx: u32,
+        lsb: u32,
+        width: u32,
+        words: &[u64],
+        mask_xz: Option<&[u64]>,
+    ) -> bool {
+        if !self.has_ref_api() {
+            return false;
+        }
+        let mask_xz = mask_xz.map_or(std::ptr::null(), |m| m.as_ptr());
+        unsafe {
+            (self.api().write_output_bits)(self.ctx, idx, lsb, width, words.as_ptr(), mask_xz) == 0
+        }
+    }
+
     /// Whether the host provides the trace entries (`VrlHostApi` is
     /// append-only, so a host that omits later entries reports a smaller
     /// `size`). Compared against the trace entries' extent, not the current
@@ -183,7 +234,7 @@ impl RawCtx {
     /// transport cannot share memory (wasm) or the host omits the entry.
     /// Queried once per port at `create`, so the null check is off the hot
     /// path.
-    fn port_direct(&self, idx: u32) -> sys::VrlPortDirect {
+    pub(crate) fn port_direct(&self, idx: u32) -> sys::VrlPortDirect {
         #[cfg(target_family = "wasm")]
         {
             let _ = idx;
@@ -238,6 +289,7 @@ impl BuildCtx {
                     idx,
                     width,
                     words_ptr: direct.words.cast_const(),
+                    shape: None,
                 })
             }
             None => bail!("no input port named `{name}`"),
@@ -254,6 +306,7 @@ impl BuildCtx {
                     words_ptr: direct.words,
                     mask_ptr: direct.mask_xz,
                     dirty_ptr: direct.dirty,
+                    shape: None,
                 })
             }
             None => bail!("no output port named `{name}`"),
@@ -306,7 +359,7 @@ impl BuildCtx {
 
 /// Context passed to every hook after construction.
 pub struct SimCtx {
-    raw: RawCtx,
+    pub(crate) raw: RawCtx,
     four_state: bool,
 }
 
@@ -542,6 +595,7 @@ impl SimCtx {
             idx,
             width,
             words_ptr: self.raw.port_direct(idx).words.cast_const(),
+            shape: None,
         }
     }
 

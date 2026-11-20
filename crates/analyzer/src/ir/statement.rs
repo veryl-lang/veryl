@@ -332,6 +332,9 @@ pub enum TbMethod {
     Component {
         method: StrId,
         args: Vec<SystemFunctionInput>,
+        /// Arguments the manifest declares as references; their entries in
+        /// `args` are not evaluated as values.
+        refs: Vec<super::ComponentRef>,
     },
     /// `$tb::random::<T>` methods. `width`/`signed` describe the element type
     /// `T`, resolved through the generic pipeline at the call site.
@@ -556,6 +559,15 @@ impl Statement {
                 if let Some(ret) = &x.ret {
                     ret.eval_assign(context, assign_table, assign_context);
                 }
+                // A referenced variable the component drives is assigned
+                // like a component output connection.
+                if let TbMethod::Component { refs, .. } = &x.method {
+                    for member in refs.iter().flat_map(|r| &r.members) {
+                        if let Some(dst) = &member.output {
+                            dst.eval_assign(context, assign_table, AssignContext::SystemVerilog);
+                        }
+                    }
+                }
             }
             Statement::Break => (),
             Statement::Unsupported(_) => (),
@@ -686,7 +698,7 @@ impl fmt::Display for Statement {
                 }
                 TbMethod::FileClose => write!(f, "{}.close();", x.inst),
                 TbMethod::FileFlush => write!(f, "{}.flush();", x.inst),
-                TbMethod::Component { method, args } => {
+                TbMethod::Component { method, args, .. } => {
                     let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
                     write!(f, "{}.{method}({});", x.inst, args_str.join(", "))
                 }

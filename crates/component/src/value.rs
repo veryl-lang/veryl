@@ -18,6 +18,14 @@ pub enum Value {
     },
     Str(String),
     Unit,
+    /// A reference argument as the host passes it: the ports bound for it
+    /// and its `VRL_REF_*` kind. Converted into a port handle or a
+    /// [`crate::ModportRef`] by the generated method dispatch.
+    #[doc(hidden)]
+    Ref {
+        kind: u32,
+        ports: Vec<u32>,
+    },
 }
 
 pub(crate) fn words_for(width: u32) -> usize {
@@ -136,6 +144,7 @@ impl Value {
             }
             Value::Str(_) => bail!("value is a string, not bits"),
             Value::Unit => bail!("value is unit, not bits"),
+            Value::Ref { .. } => bail!("value is a reference, not bits"),
         }
     }
 
@@ -153,6 +162,7 @@ impl Value {
             }
             Value::Str(_) => bail!("value is a string, not bits"),
             Value::Unit => bail!("value is unit, not bits"),
+            Value::Ref { .. } => bail!("value is a reference, not bits"),
         }
     }
 
@@ -177,6 +187,7 @@ impl Value {
             Value::Bits { words, .. } => Ok(words.iter().any(|w| *w != 0)),
             Value::Str(_) => bail!("value is a string, not bits"),
             Value::Unit => bail!("value is unit, not bits"),
+            Value::Ref { .. } => bail!("value is a reference, not bits"),
         }
     }
 
@@ -211,6 +222,20 @@ impl Value {
                 Value::from_bits(read(v.words), read(v.mask_xz), v.width)
             }
             sys::VRL_VALUE_STRING => Value::Str(unsafe { v.str_.as_str() }.to_string()),
+            sys::VRL_VALUE_REF => {
+                let ports = if v.nwords == 0 || v.words.is_null() {
+                    vec![]
+                } else {
+                    unsafe { std::slice::from_raw_parts(v.words, v.nwords) }
+                        .iter()
+                        .map(|&p| p as u32)
+                        .collect()
+                };
+                Value::Ref {
+                    kind: v.width,
+                    ports,
+                }
+            }
             _ => Value::Unit,
         }
     }

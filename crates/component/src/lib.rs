@@ -14,6 +14,7 @@ pub use veryl_component_sys as sys;
 extern crate self as veryl_component;
 
 mod ctx;
+mod reference;
 pub mod testing;
 mod value;
 
@@ -21,6 +22,7 @@ mod value;
 pub mod export;
 
 pub use ctx::{BuildCtx, ClockPort, CtxFile, InputPort, OutputPort, ResetPort, SimCtx, TraceVar};
+pub use reference::{MemberPort, ModportMember, ModportRef};
 pub use value::Value;
 pub use veryl_component_macros::{Component, VerylInterface, component_impl};
 
