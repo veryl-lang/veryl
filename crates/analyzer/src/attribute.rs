@@ -26,6 +26,7 @@ pub enum Attribute {
     Expand(Vec<ExpandItem>),
     Ignore,
     Inline,
+    LegacyAlwaysBlock,
 }
 
 impl Attribute {
@@ -100,6 +101,7 @@ impl fmt::Display for Attribute {
             }
             Attribute::Ignore => String::from("ignore"),
             Attribute::Inline => String::from("inline"),
+            Attribute::LegacyAlwaysBlock => String::from("legacy_always_block"),
         };
         text.fmt(f)
     }
@@ -264,6 +266,7 @@ struct Pattern {
     pub modport: StrId,
     pub ignore: StrId,
     pub inline: StrId,
+    pub legacy_always_block: StrId,
 }
 
 impl Pattern {
@@ -302,6 +305,7 @@ impl Pattern {
             modport: resource_table::insert_str("modport"),
             ignore: resource_table::insert_str("ignore"),
             inline: resource_table::insert_str("inline"),
+            legacy_always_block: resource_table::insert_str("legacy_always_block"),
         }
     }
 }
@@ -587,6 +591,13 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Err(AttributeError::MismatchArgs("no argument".to_string()))
                 } else {
                     Ok(Attribute::Inline)
+                }
+            }
+            x if x == pat.legacy_always_block => {
+                if value.attribute_opt.is_some() {
+                    Err(AttributeError::MismatchArgs("no argument".to_string()))
+                } else {
+                    Ok(Attribute::LegacyAlwaysBlock)
                 }
             }
             _ => Err(AttributeError::UnknownAttribute),
