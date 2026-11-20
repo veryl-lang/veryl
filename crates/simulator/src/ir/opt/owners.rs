@@ -541,7 +541,9 @@ pub(crate) fn has_side_effects(s: &ProtoStatement) -> bool {
         ProtoStatement::SequentialBlock(b) => b.iter().any(has_side_effects),
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::CompiledBlock(_)
-        | ProtoStatement::TbMethodCall { .. } => true,
+        | ProtoStatement::TbMethodCall { .. }
+        | ProtoStatement::Fork(_)
+        | ProtoStatement::DisableFork => true,
         ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }

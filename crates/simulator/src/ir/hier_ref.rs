@@ -209,9 +209,14 @@ fn resolve_stmt(
         ProtoStatement::SequentialBlock(stmts) => {
             resolve_stmts(stmts, context, children)?;
         }
+        ProtoStatement::Fork(x) => {
+            for branch in &mut x.branches {
+                resolve_stmts(branch, context, children)?;
+            }
+        }
         // Compiled blocks come from child-module internals, which cannot
         // contain hierarchical references.
-        ProtoStatement::CompiledBlock(_) | ProtoStatement::Break => {}
+        ProtoStatement::CompiledBlock(_) | ProtoStatement::DisableFork | ProtoStatement::Break => {}
         // Expanded by `resolve_stmts`, which owns the enclosing list.
         ProtoStatement::HierAssign(_) => unreachable!("handled by resolve_stmts"),
     }

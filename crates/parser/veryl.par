@@ -121,6 +121,7 @@ ConnectTerm           : <INITIAL, Generic                                       
 ConstTerm             : <INITIAL, Generic                                             >'const'                                                                               : Token; // Keyword: Statement
 ConverseTerm          : <INITIAL, Generic                                             >'converse'                                                                            : Token; // Keyword: Direction
 DefaultTerm           : <INITIAL, Generic                                             >'default'                                                                             : Token; // Keyword: Conditional
+DisableTerm           : <INITIAL, Generic                                             >'disable'                                                                             : Token; // Keyword: Statement
 ElseTerm              : <INITIAL, Generic                                             >'else'                                                                                : Token; // Keyword: Conditional
 EmbedTerm             : <INITIAL, Generic                                             >'embed'                                                                               : Token; // Keyword: Structure
 EnumTerm              : <INITIAL, Generic                                             >'enum'                                                                                : Token; // Keyword: Structure
@@ -129,6 +130,7 @@ F64Term               : <INITIAL, Generic                                       
 FalseTerm             : <INITIAL, Generic                                             >'false'                                                                               : Token; // Keyword: Literal
 FinalTerm             : <INITIAL, Generic                                             >'final'                                                                               : Token; // Keyword: Statement
 ForTerm               : <INITIAL, Generic                                             >'for'                                                                                 : Token; // Keyword: Repeat
+ForkTerm              : <INITIAL, Generic                                             >'fork'                                                                                : Token; // Keyword: Statement
 FunctionTerm          : <INITIAL, Generic                                             >'function'                                                                            : Token; // Keyword: Structure
 GenTerm               : <INITIAL, Generic                                             >'gen'                                                                                 : Token; // Keyword: Statement
 I8Term                : <INITIAL, Generic                                             >'i8'                                                                                  : Token; // Keyword: Type
@@ -274,6 +276,7 @@ ConnectToken       : ConnectTerm       : Token Comments;
 ConstToken         : ConstTerm         : Token Comments;
 ConverseToken      : ConverseTerm      : Token Comments;
 DefaultToken       : DefaultTerm       : Token Comments;
+DisableToken       : DisableTerm       : Token Comments;
 ElseToken          : ElseTerm          : Token Comments;
 EmbedToken         : EmbedTerm         : Token Comments;
 EnumToken          : EnumTerm          : Token Comments;
@@ -282,6 +285,7 @@ F64Token           : F64Term           : Token Comments;
 FalseToken         : FalseTerm         : Token Comments;
 FinalToken         : FinalTerm         : Token Comments;
 ForToken           : ForTerm           : Token Comments;
+ForkToken          : ForkTerm          : Token Comments;
 FunctionToken      : FunctionTerm      : Token Comments;
 GenToken           : GenTerm           : Token Comments;
 I8Token            : I8Term            : Token Comments;
@@ -434,6 +438,7 @@ Connect       : ConnectToken       : VerylToken;
 Const         : ConstToken         : VerylToken;
 Converse      : ConverseToken      : VerylToken;
 Defaul        : DefaultToken       : VerylToken; // avoid to conflict with Rust's Default trait
+Disable       : DisableToken       : VerylToken;
 Else          : ElseToken          : VerylToken;
 Embed         : EmbedToken         : VerylToken;
 Enum          : EnumToken          : VerylToken;
@@ -442,6 +447,7 @@ F64           : F64Token           : VerylToken;
 False         : FalseToken         : VerylToken;
 Final         : FinalToken         : VerylToken;
 For           : ForToken           : VerylToken;
+Fork          : ForkToken          : VerylToken;
 Function      : FunctionToken      : VerylToken;
 Gen           : GenToken           : VerylToken;
 I8            : I8Token            : VerylToken;
@@ -715,6 +721,8 @@ Statement: IdentifierStatement
          | ReturnStatement
          | BreakStatement
          | ForStatement
+         | ForkStatement
+         | DisableForkStatement
          | CaseStatement
          | SwitchStatement
          ;
@@ -734,6 +742,12 @@ IfResetStatement: IfReset StatementBlock { Else If Expression StatementBlock } [
 ReturnStatement: Return Expression Semicolon;
 
 BreakStatement: Break Semicolon;
+
+ForkStatement: Fork LParen Identifier RParen LBrace { ForkItem } RBrace;
+
+ForkItem: Statement | StatementBlock;
+
+DisableForkStatement: Disable Fork Semicolon;
 
 ForStatement: For Identifier In [ Rev ] Range [ Step AssignmentOperator Expression ] StatementBlock;
 

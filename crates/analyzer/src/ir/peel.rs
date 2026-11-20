@@ -1098,7 +1098,9 @@ impl<'a> Subst<'a> {
                 Statement::SystemFunctionCall(call) if self.analysis => self.system_call(call)?,
                 Statement::SystemFunctionCall(_)
                 | Statement::FunctionCall(_)
-                | Statement::TbMethodCall(_) => return None,
+                | Statement::TbMethodCall(_)
+                | Statement::Fork(_)
+                | Statement::DisableFork => return None,
             }
         }
         Some(())
@@ -1715,6 +1717,8 @@ fn apply(context: &mut Context, env: &mut KnownValues, stmts: &[Statement]) -> b
             | Statement::SystemFunctionCall(_)
             | Statement::FunctionCall(_)
             | Statement::TbMethodCall(_)
+            | Statement::Fork(_)
+            | Statement::DisableFork
             | Statement::Unsupported(_) => env.forget_all(),
         }
     }
@@ -1820,6 +1824,8 @@ fn stmts_have_call(stmts: &[Statement]) -> bool {
         | Statement::FunctionCall(_)
         | Statement::SystemFunctionCall(_)
         | Statement::TbMethodCall(_)
+        | Statement::Fork(_)
+        | Statement::DisableFork
         | Statement::Unsupported(_) => true,
         Statement::Break | Statement::Null => false,
     })
@@ -1907,7 +1913,7 @@ fn visit_reads(stmts: &[Statement], f: &mut impl FnMut(VarId)) -> bool {
                 system_reads(x, f);
                 true
             }
-            Statement::TbMethodCall(_) => false,
+            Statement::TbMethodCall(_) | Statement::Fork(_) | Statement::DisableFork => false,
             Statement::Break | Statement::Null | Statement::Unsupported(_) => true,
         };
         if !seen {

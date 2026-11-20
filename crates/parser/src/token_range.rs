@@ -360,6 +360,8 @@ impl_token_range_singular!(F64);
 impl_token_range_singular!(False);
 impl_token_range_singular!(Final);
 impl_token_range_singular!(For);
+impl_token_range_singular!(Fork);
+impl_token_range_singular!(Disable);
 impl_token_range_singular!(Function);
 impl_token_range_singular!(Gen);
 impl_token_range_singular!(I8);
@@ -882,6 +884,8 @@ impl_token_range_enum!(
     return_statement,
     break_statement,
     for_statement,
+    fork_statement,
+    disable_fork_statement,
     case_statement,
     switch_statement
 );
@@ -953,6 +957,8 @@ impl_token_ext!(IfResetStatementList);
 impl_token_range!(ReturnStatement, r#return, semicolon);
 impl_token_range!(BreakStatement, r#break, semicolon);
 impl_token_range!(ForStatement, r#for, statement_block);
+impl_token_range!(ForkStatement, fork, r_brace);
+impl_token_range!(DisableForkStatement, disable, semicolon);
 impl_token_range!(CaseStatement, r#case, r_brace);
 
 impl From<&CaseItem> for TokenRange {

@@ -37,13 +37,13 @@ pub use opt::comb_fusion::force_disable as force_disable_comb_fusion;
 pub use opt::dead_var_dce::force_disable as force_disable_dead_var_dce;
 pub use opt::field_unfuse::force_disable as force_disable_field_unfuse;
 pub use statement::{
-    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
+    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg, ForkStatement,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
-    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
-    ProtoStatement, ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck,
-    RuntimeForBound, RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind,
-    format_assert_message, format_output, parse_hex_content, patch_stmt_log_buf,
-    veryl_aot_sysfn_print,
+    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoForkStatement,
+    ProtoIfStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements,
+    ProtoSystemFunctionCall, RetWidthCheck, RuntimeForBound, RuntimeForRange, Statement,
+    SystemFunctionCall, TbMethodKind, format_assert_message, format_output, parse_hex_content,
+    patch_stmt_log_buf, veryl_aot_sysfn_print,
 };
 pub(crate) use statement::{extend_to_i64, for_bound_reached};
 pub use variable::{
@@ -511,6 +511,8 @@ impl Ir {
                     format!("Seq{{ {} }}", kids.join("; "))
                 }
                 Statement::TbMethodCall { .. } => "TbMethodCall".to_string(),
+                Statement::Fork(_) => "Fork".to_string(),
+                Statement::DisableFork => "DisableFork".to_string(),
                 Statement::Break => "Break".to_string(),
                 Statement::Compiled(_) | Statement::CompiledBatch(_) => "Compiled".to_string(),
             }

@@ -466,6 +466,16 @@ pub enum Statement {
         inst: StrId,
         method: TbMethodKind,
     },
+    /// `fork(mode) { .. }`: only the testbench scheduler runs it.
+    Fork(ForkStatement),
+    /// `disable fork;`
+    DisableFork,
+}
+
+#[derive(Clone)]
+pub struct ForkStatement {
+    pub mode: air::ForkMode,
+    pub branches: Vec<Vec<Statement>>,
 }
 
 #[derive(Clone)]
@@ -534,10 +544,16 @@ pub fn patch_stmt_log_buf(s: &mut Statement, log_buf: *mut u8) {
                 patch_stmt_log_buf(s, log_buf);
             }
         }
+        Statement::Fork(fork) => {
+            for s in fork.branches.iter_mut().flatten() {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
         Statement::Assign(_)
         | Statement::AssignDynamic(_)
         | Statement::Break
         | Statement::SystemFunctionCall(_)
+        | Statement::DisableFork
         | Statement::TbMethodCall { .. } => {}
     }
 }
@@ -662,7 +678,9 @@ impl Statement {
                 x.eval_step(mask_cache);
                 ControlFlow::Continue
             }
-            Statement::TbMethodCall { .. } => ControlFlow::Continue,
+            Statement::TbMethodCall { .. } | Statement::Fork(_) | Statement::DisableFork => {
+                ControlFlow::Continue
+            }
         }
     }
 
@@ -684,7 +702,12 @@ impl Statement {
                 }
             }
             Statement::SystemFunctionCall(x) => x.gather_variable(inputs),
-            Statement::TbMethodCall { .. } => (),
+            Statement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.gather_variable(inputs, outputs);
+                }
+            }
+            Statement::TbMethodCall { .. } | Statement::DisableFork => (),
         }
     }
 }
@@ -721,6 +744,11 @@ pub(crate) fn make_ff_stores_direct(stmts: &mut [Statement]) {
             }
             Statement::For(x) => make_ff_stores_direct(&mut x.body),
             Statement::SequentialBlock(body) => make_ff_stores_direct(body),
+            Statement::Fork(x) => {
+                for branch in &mut x.branches {
+                    make_ff_stores_direct(branch);
+                }
+            }
             // Compiled chunks carry the log convention in their emitted code;
             // `writes_ff` keeps a testbench event that stores into an FF off
             // the JIT path, so none reach here.
@@ -728,6 +756,7 @@ pub(crate) fn make_ff_stores_direct(stmts: &mut [Statement]) {
             | Statement::CompiledBatch(_)
             | Statement::SystemFunctionCall(_)
             | Statement::Break
+            | Statement::DisableFork
             | Statement::TbMethodCall { .. } => {}
         }
     }
@@ -1364,6 +1393,12 @@ impl std::hash::Hash for ProtoForStatement {
 }
 
 #[derive(Clone, Debug, Hash)]
+pub struct ProtoForkStatement {
+    pub mode: air::ForkMode,
+    pub branches: Vec<Vec<ProtoStatement>>,
+}
+
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoStatement {
     Assign(ProtoAssignStatement),
     AssignDynamic(ProtoAssignDynamicStatement),
@@ -1380,6 +1415,8 @@ pub enum ProtoStatement {
         inst: StrId,
         method: ProtoTbMethodKind,
     },
+    Fork(ProtoForkStatement),
+    DisableFork,
     /// Testbench write into a child instance (`dut.u_core.mem[0] = x`), still
     /// naming its target by path. `resolve_hier_refs` rewrites it into a plain
     /// `Assign` once the instance tree gives the path an offset, so no later
@@ -1438,6 +1475,12 @@ impl ProtoStatement {
                 .map(ProtoStatement::statement_mass)
                 .sum(),
             ProtoStatement::For(f) => f.body.iter().map(ProtoStatement::statement_mass).sum(),
+            ProtoStatement::Fork(f) => f
+                .branches
+                .iter()
+                .flatten()
+                .map(ProtoStatement::statement_mass)
+                .sum(),
             ProtoStatement::SequentialBlock(b) => {
                 b.iter().map(ProtoStatement::statement_mass).sum()
             }
@@ -1472,10 +1515,12 @@ impl ProtoStatement {
                 .chain(x.default.iter())
                 .any(Self::writes_ff),
             ProtoStatement::For(x) => x.body.iter().any(Self::writes_ff),
+            ProtoStatement::Fork(x) => x.branches.iter().flatten().any(Self::writes_ff),
             ProtoStatement::SequentialBlock(body) => body.iter().any(Self::writes_ff),
             ProtoStatement::CompiledBlock(x) => x.output_offsets.iter().any(|o| o.is_ff()),
             // `$readmemh` stores into the FF slots directly already.
             ProtoStatement::SystemFunctionCall(_)
+            | ProtoStatement::DisableFork
             | ProtoStatement::Break
             | ProtoStatement::TbMethodCall { .. } => false,
             ProtoStatement::HierAssign(_) => {
@@ -1583,6 +1628,11 @@ impl ProtoStatement {
                     s.adjust_offsets(ff_delta, comb_delta);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter_mut().flatten() {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
                     s.adjust_offsets(ff_delta, comb_delta);
@@ -1632,7 +1682,7 @@ impl ProtoStatement {
                 | ProtoTbMethodKind::RandomGet { .. }
                 | ProtoTbMethodKind::RandomGetSeed { .. } => {}
             },
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &mut ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -1679,13 +1729,18 @@ impl ProtoStatement {
                     s.collect_written_offsets(out);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.collect_written_offsets(out);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
                     s.collect_written_offsets(out);
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -1783,6 +1838,11 @@ impl ProtoStatement {
                     s.remap_offsets_with(f);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter_mut().flatten() {
+                    s.remap_offsets_with(f);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
                     s.remap_offsets_with(f);
@@ -1832,7 +1892,7 @@ impl ProtoStatement {
                 | ProtoTbMethodKind::RandomGet { .. }
                 | ProtoTbMethodKind::RandomGetSeed { .. } => {}
             },
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &mut ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -1972,6 +2032,11 @@ impl ProtoStatement {
                     s.gather_variable_offsets(inputs, outputs);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.gather_variable_offsets(inputs, outputs);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 let mut all_ins = vec![];
                 let mut all_outs = vec![];
@@ -2008,7 +2073,7 @@ impl ProtoStatement {
                 outputs.extend(all_outs);
             }
             ProtoStatement::TbMethodCall { .. } => {}
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -2100,6 +2165,11 @@ impl ProtoStatement {
                     s.gather_reads_with_ranges(out);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.gather_reads_with_ranges(out);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 let mut all_reads = vec![];
                 for s in body {
@@ -2113,7 +2183,7 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -2141,6 +2211,7 @@ impl ProtoStatement {
             | ProtoStatement::Assign(_)
             | ProtoStatement::SystemFunctionCall(_)
             | ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::DisableFork
             | ProtoStatement::Break => {}
             ProtoStatement::If(x) => {
                 for s in x.true_side.iter().chain(&x.false_side) {
@@ -2154,6 +2225,11 @@ impl ProtoStatement {
             }
             ProtoStatement::For(x) => {
                 for s in &x.body {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
                     s.gather_dynamic_write_spans(out);
                 }
             }
@@ -2289,6 +2365,11 @@ impl ProtoStatement {
                     s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 // No "internal" filter here: a `SequentialBlock` that writes
                 // to an array it also reads would silently drop its outside
@@ -2301,7 +2382,7 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -2379,12 +2460,19 @@ impl ProtoStatement {
                     s.collect_big_arrays(fold);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.collect_big_arrays(fold);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
                     s.collect_big_arrays(fold);
                 }
             }
-            ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
+            ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::DisableFork
+            | ProtoStatement::Break => {}
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -2469,13 +2557,18 @@ impl ProtoStatement {
                     s.gather_dynamic_read_ranges(ranges);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    s.gather_dynamic_read_ranges(ranges);
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
                     s.gather_dynamic_read_ranges(ranges);
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -2533,13 +2626,18 @@ impl ProtoStatement {
                     result.insert(*off);
                 }
             }
+            ProtoStatement::Fork(x) => {
+                for s in x.branches.iter().flatten() {
+                    result.extend(s.gather_ff_canonical_offsets());
+                }
+            }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
                     result.extend(s.gather_ff_canonical_offsets());
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
-            ProtoStatement::Break => {}
+            ProtoStatement::DisableFork | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
@@ -2884,6 +2982,28 @@ impl ProtoStatement {
                         .collect();
                     Statement::SequentialBlock(stmts)
                 }
+                ProtoStatement::Fork(x) => Statement::Fork(ForkStatement {
+                    mode: x.mode,
+                    branches: x
+                        .branches
+                        .iter()
+                        .map(|branch| {
+                            branch
+                                .iter()
+                                .map(|s| {
+                                    s.apply_values_ptr(
+                                        ff_values_ptr,
+                                        ff_len,
+                                        comb_values_ptr,
+                                        comb_len,
+                                        use_4state,
+                                    )
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                }),
+                ProtoStatement::DisableFork => Statement::DisableFork,
                 ProtoStatement::Break => Statement::Break,
                 ProtoStatement::TbMethodCall { inst, method } => {
                     let method = match method {
@@ -4239,6 +4359,22 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
             air::Statement::Unsupported(token) => {
                 return Err(SimulatorError::unsupported_description(token));
             }
+            air::Statement::Fork(x) => {
+                let mut branches = vec![];
+                for branch in &x.branches {
+                    let mut stmts = vec![];
+                    for stmt in branch {
+                        let converted: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
+                        stmts.extend(converted);
+                    }
+                    branches.push(stmts);
+                }
+                vec![ProtoStatement::Fork(ProtoForkStatement {
+                    mode: x.mode,
+                    branches,
+                })]
+            }
+            air::Statement::DisableFork => vec![ProtoStatement::DisableFork],
             air::Statement::Break => vec![ProtoStatement::Break],
             air::Statement::Null => vec![],
         };

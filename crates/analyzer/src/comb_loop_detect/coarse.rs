@@ -729,6 +729,8 @@ impl<'a> Builder<'a> {
                 Statement::Unsupported(_) => self.status.incomplete = true,
                 Statement::IfReset(_)
                 | Statement::TbMethodCall(_)
+                | Statement::Fork(_)
+                | Statement::DisableFork
                 | Statement::Break
                 | Statement::Null => {}
             }

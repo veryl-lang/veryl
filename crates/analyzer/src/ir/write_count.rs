@@ -275,6 +275,8 @@ impl Walk<'_> {
             }
             Statement::SystemFunctionCall(_)
             | Statement::TbMethodCall(_)
+            | Statement::Fork(_)
+            | Statement::DisableFork
             | Statement::Break
             | Statement::Unsupported(_)
             | Statement::Null => {}
@@ -368,8 +370,14 @@ impl Walk<'_> {
                         }
                     }
                 }
+                Statement::Fork(x) => {
+                    for branch in &x.branches {
+                        self.collect_writes(branch, out);
+                    }
+                }
                 Statement::SystemFunctionCall(_)
                 | Statement::TbMethodCall(_)
+                | Statement::DisableFork
                 | Statement::Break
                 | Statement::Unsupported(_)
                 | Statement::Null => {}

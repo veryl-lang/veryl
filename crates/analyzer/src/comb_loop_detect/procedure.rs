@@ -744,7 +744,15 @@ fn collect_summary_statement_variables(
                     | TbMethod::RandomGetSeed => {}
                 }
             }
-            Statement::Break | Statement::Unsupported(_) | Statement::Null => {}
+            Statement::Fork(statement) => {
+                for branch in &statement.branches {
+                    collect_summary_statement_variables(module, branch, ids);
+                }
+            }
+            Statement::DisableFork
+            | Statement::Break
+            | Statement::Unsupported(_)
+            | Statement::Null => {}
         }
     }
 }
@@ -1784,6 +1792,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     self.collect_system_call_write_footprint(call, keys, visited);
                 }
                 Statement::TbMethodCall(_)
+                | Statement::Fork(_)
+                | Statement::DisableFork
                 | Statement::Break
                 | Statement::Unsupported(_)
                 | Statement::Null => {}
@@ -2716,7 +2726,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 self.record_break();
                 FlowResult::new(ProcedureFlow::Break)
             }
-            Statement::IfReset(_) | Statement::TbMethodCall(_) => {
+            Statement::IfReset(_)
+            | Statement::TbMethodCall(_)
+            | Statement::Fork(_)
+            | Statement::DisableFork => {
                 self.repeatable = false;
                 FlowResult::new(ProcedureFlow::Continue)
             }

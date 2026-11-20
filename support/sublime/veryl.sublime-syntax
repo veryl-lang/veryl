@@ -30,7 +30,7 @@ contexts:
       scope: keyword.other.veryl
     - match: '{{keyword_start}}(?:false|lsb|msb|reset_active|reset_inactive|true){{keyword_end}}'
       scope: constant.language.veryl
-    - match: '{{keyword_start}}(?:case|default|else|if_reset|if|inside|outside|switch|for|in|repeat|rev|step){{keyword_end}}'
+    - match: '{{keyword_start}}(?:case|default|else|if_reset|if|inside|outside|switch|for|fork|disable|in|repeat|rev|step){{keyword_end}}'
       scope: keyword.control.veryl
     - match: '{{keyword_start}}(?:bit|bbool|lbool|clock|clock_posedge|clock_negedge|f32|f64|i8|i16|i32|i64|logic|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|signed|string|tri|p8|p16|p32|p64|u8|u16|u32|u64){{keyword_end}}'
       scope: storage.type.veryl
