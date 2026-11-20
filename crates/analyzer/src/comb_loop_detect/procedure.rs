@@ -13,8 +13,8 @@ use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
     Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain,
-    Module, Op, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex,
-    VarPath, VarSelect, VarSelectOp,
+    Module, Op, RuntimeArgOp, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod,
+    Type, VarIndex, VarPath, VarSelect, VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -736,6 +736,14 @@ fn collect_summary_statement_variables(
                     TbMethod::Queue { value, .. } => {
                         if let Some(value) = value {
                             collect_summary_expression_variables(module, value, ids);
+                        }
+                    }
+                    TbMethod::RuntimeArg { name, op } => {
+                        collect_summary_expression_variables(module, name, ids);
+                        if let RuntimeArgOp::GetInt { default }
+                        | RuntimeArgOp::GetString { default } = op
+                        {
+                            collect_summary_expression_variables(module, default, ids);
                         }
                     }
                     TbMethod::FileClose

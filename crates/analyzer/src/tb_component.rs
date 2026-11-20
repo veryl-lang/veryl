@@ -421,6 +421,36 @@ fn insert_queue(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
     }
 }
 
+fn insert_runtime_args(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
+    let ns = insert_component(
+        symbol_table,
+        tb_ns,
+        "runtime_args",
+        TbComponentKind::RuntimeArgs,
+    );
+    insert_method(
+        symbol_table,
+        &ns,
+        "exists",
+        &[("name", Direction::Input)],
+        Some(builtin_type(TypeKind::BBool)),
+    );
+    insert_method(
+        symbol_table,
+        &ns,
+        "get_int",
+        &[("name", Direction::Input), ("default", Direction::Input)],
+        Some(builtin_type(TypeKind::I64)),
+    );
+    insert_method(
+        symbol_table,
+        &ns,
+        "get_string",
+        &[("name", Direction::Input), ("default", Direction::Input)],
+        Some(builtin_type(TypeKind::String)),
+    );
+}
+
 pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
     let mut tb_ns = namespace.clone();
 
@@ -433,4 +463,5 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
     insert_file(symbol_table, &tb_ns);
     insert_random(symbol_table, &tb_ns);
     insert_queue(symbol_table, &tb_ns);
+    insert_runtime_args(symbol_table, &tb_ns);
 }

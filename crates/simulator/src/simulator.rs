@@ -2339,6 +2339,15 @@ impl Simulator {
 
     /// Set a variable value by VarId. Used to write clock/reset signal values
     /// into the variable storage so they appear in wave dumps.
+    /// Width and signedness of a top-level variable.
+    pub fn var_shape_by_id(&self, var_id: &VarId) -> Option<(usize, bool)> {
+        self.ir
+            .module_variables
+            .variables
+            .get(var_id)
+            .map(|x| (x.width, x.r#type.signed))
+    }
+
     pub fn set_var_by_id(&mut self, var_id: &VarId, val: Value) {
         let Some(x) = self.ir.module_variables.variables.get_mut(var_id) else {
             return;

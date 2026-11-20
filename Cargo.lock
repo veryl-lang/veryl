@@ -6332,6 +6332,7 @@ name = "veryl-component"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "num-bigint",
  "smallvec",
  "veryl-component-macros",
  "veryl-component-sys",

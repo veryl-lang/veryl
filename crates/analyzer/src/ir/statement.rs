@@ -305,6 +305,9 @@ pub struct TbMethodCall {
     /// Whether the returned value is 4-state (`$tb::queue` of a 4-state
     /// element); sizes the hoist temporary as `logic` instead of `bit`.
     pub ret_4state: bool,
+    /// Whether the returned value is a `string` (`$tb::runtime_args`
+    /// `get_string`); sizes the hoist temporary as `string`.
+    pub ret_string: bool,
 }
 
 #[derive(Clone)]
@@ -360,6 +363,32 @@ pub enum TbMethod {
         four_state: bool,
         capacity: u32,
     },
+    /// `$tb::runtime_args` methods. `name` is a string expression; `op`
+    /// carries the default value of `get_int`/`get_string`.
+    RuntimeArg {
+        name: Expression,
+        op: RuntimeArgOp,
+    },
+}
+
+#[derive(Clone)]
+pub enum RuntimeArgOp {
+    /// `exists(name)`
+    Exists,
+    /// `get_int(name, default)`
+    GetInt { default: Expression },
+    /// `get_string(name, default)`
+    GetString { default: Expression },
+}
+
+impl RuntimeArgOp {
+    pub fn method_name(&self) -> &'static str {
+        match self {
+            RuntimeArgOp::Exists => "exists",
+            RuntimeArgOp::GetInt { .. } => "get_int",
+            RuntimeArgOp::GetString { .. } => "get_string",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -448,7 +477,8 @@ impl TbMethod {
             TbMethod::Component { .. }
             | TbMethod::RandomGet { .. }
             | TbMethod::RandomGetRange { .. }
-            | TbMethod::RandomGetSeed => true,
+            | TbMethod::RandomGetSeed
+            | TbMethod::RuntimeArg { .. } => true,
             TbMethod::Queue { op, .. } => op.has_return_value(),
             _ => false,
         }
@@ -701,6 +731,15 @@ impl fmt::Display for Statement {
                         write!(f, "{}.{op}({v});", x.inst)
                     } else {
                         write!(f, "{}.{op}();", x.inst)
+                    }
+                }
+                TbMethod::RuntimeArg { name, op } => {
+                    let method = op.method_name();
+                    match op {
+                        RuntimeArgOp::Exists => write!(f, "{}.{method}({name});", x.inst),
+                        RuntimeArgOp::GetInt { default } | RuntimeArgOp::GetString { default } => {
+                            write!(f, "{}.{method}({name}, {default});", x.inst)
+                        }
                     }
                 }
             },

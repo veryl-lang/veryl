@@ -1,4 +1,5 @@
 use super::*;
+use crate::output_buffer;
 
 #[test]
 fn testbench_counter_clock_next() {
@@ -2480,8 +2481,10 @@ fn tb_file_native() {
     #[test(test_file)]
     module test_file {{
         var f: $tb::file;
+        var path: string;
         initial {{
-            f.open("{0}");
+            path = "{0}";
+            f.open(path);
             f.write("hex=%h dec=%d\n", 8'hAB, 8'd42);
             f.write("plain\n");
             f.close();
@@ -2751,6 +2754,140 @@ fn tb_queue_native() {
             config.use_jit,
             config.use_4state
         );
+    }
+}
+
+fn runtime_args_config(config: &Config, args: &[&str]) -> Config {
+    let mut config = config.clone();
+    config.runtime_args = std::sync::Arc::new(
+        args.iter()
+            .map(|x| crate::runtime_arg::RuntimeArg::parse(x))
+            .collect(),
+    );
+    config
+}
+
+#[test]
+fn tb_runtime_args_native() {
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        var args: $tb::runtime_args;
+        var name: string;
+        var mode: string;
+        var empty: string;
+        var rounds: u32;
+        var mask: logic<100>;
+        var sval: i8;
+        var neg: u8;
+        initial {
+            $assert(args.exists("VERBOSE") == 1);
+            $assert(args.exists("QUIET") == 0);
+
+            rounds = args.get_int("ROUNDS", 2);
+            $assert(rounds == 16);
+            rounds = args.get_int("MISSING", 2);
+            $assert(rounds == 2);
+            mask = args.get_int("MASK", 0);
+            $assert(mask == 100'hf_0000_0000_0000_0000_0000_0001);
+            sval = args.get_int("SMALL", 0);
+            $assert(sval == -3);
+            neg = args.get_int("SMALL", 0);
+            $assert(neg == 8'hfd);
+            $assert(args.get_int("ROUNDS", 0) + 1 == 17);
+
+            name = args.get_string("TESTNAME", "basic_test");
+            $assert(name == "random:test");
+            $assert(name != "basic_test");
+            mode = args.get_string("MODE", "basic_test");
+            $assert(mode == "basic_test");
+            $assert(args.get_string("TESTNAME", "") == "random:test");
+            mode = if name == "random:test" ? "matched" : "other";
+            $assert(mode == "matched");
+            mode = name;
+            $assert(mode == "random:test");
+            empty = args.get_string("EMPTY", "x");
+            $display("[%s][%12s][%-4s]", name, mode, empty);
+            $finish();
+        }
+    }
+    "#;
+    let args = [
+        "VERBOSE",
+        "ROUNDS:1",
+        "ROUNDS:0x10",
+        "MASK:0xf_0000_0000_0000_0000_0000_0001",
+        "SMALL:-3",
+        "TESTNAME:random:test",
+        "EMPTY:",
+    ];
+
+    for config in Config::all() {
+        let config = runtime_args_config(&config, &args);
+        output_buffer::enable();
+        let result = run_queue_tb(code, "test_args", &config);
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(
+            output, "[random:test][ random:test][    ]\n",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn tb_runtime_args_errors() {
+    let cases = [
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A"][..],
+            "was given as a flag",
+        ),
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A:abc"][..],
+            "is not an integer",
+        ),
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A:256"][..],
+            "does not fit 8 bits",
+        ),
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A:-129"][..],
+            "does not fit 8 bits",
+        ),
+        (
+            "s = args.get_string(\"A\", \"\");",
+            &["A"][..],
+            "was given as a flag",
+        ),
+    ];
+    for (stmt, args, expected) in cases {
+        let code = format!(
+            r#"
+            #[test(test_args)]
+            module test_args {{
+                var args: $tb::runtime_args;
+                var x: u8;
+                var s: string;
+                initial {{
+                    x = 0;
+                    s = "";
+                    {stmt}
+                    $display("%d %s", x, s);
+                    $finish();
+                }}
+            }}
+            "#
+        );
+        let config = runtime_args_config(&Config::default(), args);
+        let result = run_queue_tb(&code, "test_args", &config);
+        match result {
+            TestResult::Fail(msg) => assert!(msg.contains(expected), "{stmt}: {msg}"),
+            x => panic!("{stmt}: expected a failure, got {x:?}"),
+        }
     }
 }
 

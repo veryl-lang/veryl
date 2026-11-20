@@ -183,7 +183,9 @@ fn resolve_stmt(
             }
             crate::ir::statement::ProtoTbMethodKind::Component { args, .. } => {
                 for arg in args {
-                    if let crate::ir::statement::ProtoComponentArg::Expr(e) = arg {
+                    if let crate::ir::statement::ProtoComponentArg::Expr(e)
+                    | crate::ir::statement::ProtoComponentArg::StrHandle(e) = arg
+                    {
                         resolve_expr(e, context, children)?;
                     }
                 }
@@ -200,8 +202,18 @@ fn resolve_stmt(
                 resolve_expr(min, context, children)?;
                 resolve_expr(max, context, children)?;
             }
-            crate::ir::statement::ProtoTbMethodKind::FileOpen { .. }
-            | crate::ir::statement::ProtoTbMethodKind::FileClose
+            crate::ir::statement::ProtoTbMethodKind::FileOpen { path, .. } => {
+                if let crate::ir::statement::ProtoFilePath::Handle(e) = path {
+                    resolve_expr(e, context, children)?;
+                }
+            }
+            crate::ir::statement::ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                resolve_expr(name, context, children)?;
+                if let Some(e) = op.default_expr_mut() {
+                    resolve_expr(e, context, children)?;
+                }
+            }
+            crate::ir::statement::ProtoTbMethodKind::FileClose
             | crate::ir::statement::ProtoTbMethodKind::FileFlush
             | crate::ir::statement::ProtoTbMethodKind::RandomGet { .. }
             | crate::ir::statement::ProtoTbMethodKind::RandomGetSeed { .. } => {}

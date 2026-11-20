@@ -624,6 +624,24 @@ fn guest_str(
 
 type WResult<T> = Result<T, wasmtime::Error>;
 
+/// Writes a runtime argument's text into the guest buffer when it fits,
+/// returning its length (or -1 for `None`).
+fn write_runtime_arg_text(
+    memory: Memory,
+    caller: &mut Caller<'_, StoreCtx>,
+    text: Option<String>,
+    buf: u32,
+    cap: u32,
+) -> WResult<i64> {
+    let Some(text) = text else {
+        return Ok(-1);
+    };
+    if text.len() <= cap as usize {
+        memory.write(caller, buf as usize, text.as_bytes())?;
+    }
+    Ok(text.len() as i64)
+}
+
 fn add_host_imports(linker: &mut Linker<StoreCtx>) -> WResult<()> {
     let m = sys::VRL_WASM_IMPORT_MODULE;
 
@@ -784,6 +802,32 @@ fn add_host_imports(linker: &mut Linker<StoreCtx>) -> WResult<()> {
     linker.func_wrap(m, "seed", |caller: Caller<'_, StoreCtx>| -> u64 {
         host_of(&caller).map_or(0, |h| h.seed)
     })?;
+    linker.func_wrap(
+        m,
+        "runtime_arg_count",
+        |caller: Caller<'_, StoreCtx>| -> u32 {
+            host_of(&caller).map_or(0, |h| h.svc_runtime_arg_count())
+        },
+    )?;
+    linker.func_wrap(
+        m,
+        "runtime_arg_name",
+        |mut caller: Caller<'_, StoreCtx>, idx: u32, buf: u32, cap: u32| -> WResult<i64> {
+            let memory = memory_of(&mut caller)?;
+            let text = host_of(&caller).and_then(|h| h.svc_runtime_arg_name(idx).map(String::from));
+            write_runtime_arg_text(memory, &mut caller, text, buf, cap)
+        },
+    )?;
+    linker.func_wrap(
+        m,
+        "runtime_arg_value",
+        |mut caller: Caller<'_, StoreCtx>, idx: u32, buf: u32, cap: u32| -> WResult<i64> {
+            let memory = memory_of(&mut caller)?;
+            let text =
+                host_of(&caller).and_then(|h| h.svc_runtime_arg_value(idx).map(String::from));
+            write_runtime_arg_text(memory, &mut caller, text, buf, cap)
+        },
+    )?;
     linker.func_wrap(m, "is_4state", |caller: Caller<'_, StoreCtx>| -> u32 {
         host_of(&caller).map_or(0, |h| u32::from(h.use_4state))
     })?;

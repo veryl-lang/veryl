@@ -1,9 +1,9 @@
 use crate::HashMap;
 use crate::assert_buffer;
 use crate::ir::{
-    ComponentArg, Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement,
-    SystemFunctionCall, TbMethodKind, Value, VarId, VarPath, extend_to_i64, for_bound_reached,
-    format_assert_message, format_output, write_native_value,
+    ComponentArg, Event, Expression, FilePath, Ir, ModuleVariables, RuntimeArgOp, RuntimeForRange,
+    Statement, SystemFunctionCall, TbMethodKind, Value, VarId, VarPath, extend_to_i64,
+    for_bound_reached, format_assert_message, format_output, write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
@@ -42,7 +42,7 @@ pub enum TestbenchStatement {
     /// variable's name, used as the file-table key.
     FileOpen {
         handle: StrId,
-        path: String,
+        path: FilePath,
         append: bool,
     },
     /// `f.write(format, ...)`.
@@ -94,6 +94,13 @@ pub enum TestbenchStatement {
         value: Option<Expression>,
         elem: crate::queue_table::Element,
         capacity: u32,
+        ret: Option<(VarId, crate::ir::RetWidthCheck)>,
+    },
+    /// `$tb::runtime_args` method; `name` evaluates to a `string_pool`
+    /// handle.
+    RuntimeArg {
+        name: Expression,
+        op: RuntimeArgOp,
         ret: Option<(VarId, crate::ir::RetWidthCheck)>,
     },
     /// if-else (may contain next inside)
@@ -197,7 +204,8 @@ fn collect_tb_insts(
                 | TbMethodKind::RandomGet { .. }
                 | TbMethodKind::RandomGetRange { .. }
                 | TbMethodKind::RandomGetSeed { .. }
-                | TbMethodKind::Queue { .. } => {}
+                | TbMethodKind::Queue { .. }
+                | TbMethodKind::RuntimeArg { .. } => {}
             },
             Statement::For(for_stmt) => {
                 collect_tb_insts(&for_stmt.body, clock_insts, reset_insts);
@@ -418,6 +426,11 @@ fn convert_stmt(
                     four_state: *four_state,
                 },
                 capacity: *capacity,
+                ret: *ret,
+            },
+            TbMethodKind::RuntimeArg { name, op, ret } => TestbenchStatement::RuntimeArg {
+                name: name.clone(),
+                op: op.clone(),
                 ret: *ret,
             },
         },
@@ -1463,6 +1476,82 @@ fn take_edges<'a>(
 
 /// A statement that neither branches nor waits: runs to completion in zero
 /// simulated time.
+/// Result of a `$tb::runtime_args` method before it lands in its
+/// destination: a ready value, or an integer sized by the destination.
+enum RuntimeArgValue {
+    Bits(Value),
+    Int(veryl_component_sys::RuntimeArgInt, String),
+}
+
+fn exec_runtime_arg(
+    sim: &mut Simulator,
+    name: &Expression,
+    op: &RuntimeArgOp,
+) -> Result<RuntimeArgValue, String> {
+    let name = crate::string_pool::text(name.eval(&mut sim.mask_cache).payload_u64());
+    let arg = crate::runtime_arg::find(&sim.ir.runtime_args, &name).cloned();
+    let value = match op {
+        RuntimeArgOp::Exists => RuntimeArgValue::Bits(Value::new(arg.is_some() as u64, 1, false)),
+        RuntimeArgOp::GetInt(default) => match arg {
+            None => RuntimeArgValue::Bits(default.eval(&mut sim.mask_cache)),
+            Some(arg) => {
+                let Some(text) = arg.value else {
+                    return Err(format!(
+                        "runtime argument `{name}` was given as a flag, without a value"
+                    ));
+                };
+                let Some(x) = veryl_component_sys::parse_runtime_arg_int(&text) else {
+                    return Err(format!(
+                        "runtime argument `{name}`: value `{text}` is not an integer"
+                    ));
+                };
+                RuntimeArgValue::Int(x, name)
+            }
+        },
+        RuntimeArgOp::GetString(default) => match arg {
+            None => RuntimeArgValue::Bits(default.eval(&mut sim.mask_cache)),
+            Some(arg) => {
+                let Some(text) = arg.value else {
+                    return Err(format!(
+                        "runtime argument `{name}` was given as a flag, without a value"
+                    ));
+                };
+                RuntimeArgValue::Bits(Value::new(
+                    crate::string_pool::intern(&text),
+                    crate::string_pool::HANDLE_WIDTH,
+                    false,
+                ))
+            }
+        },
+    };
+    Ok(value)
+}
+
+/// An integer runtime argument as a `width`-bit value: it fits when it is
+/// representable unsigned or in two's complement, a negative value stored
+/// in two's complement.
+fn runtime_int_value(
+    x: &veryl_component_sys::RuntimeArgInt,
+    width: usize,
+    signed: bool,
+) -> Option<Value> {
+    if !x.fits(width, false) && !x.fits(width, true) {
+        return None;
+    }
+    let words = x.to_words(width);
+    let value = if width <= 64 {
+        Value::new(words[0], width, signed)
+    } else {
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        Value::BigUint(veryl_analyzer::value::ValueBigUint::new_biguint(
+            num_bigint::BigUint::from_bytes_le(&bytes),
+            width,
+            signed,
+        ))
+    };
+    Some(value)
+}
+
 fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
     match stmt {
         TestbenchStatement::Assert {
@@ -1503,7 +1592,9 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             path,
             append,
         } => {
-            crate::file_table::open_handle(*handle, path, *append);
+            sim.ensure_comb_updated();
+            let path = path.eval(&mut sim.mask_cache);
+            crate::file_table::open_handle(*handle, &path, *append);
             ExecResult::Continue
         }
         TestbenchStatement::FileWrite {
@@ -1542,6 +1633,12 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                         let value = e.eval(&mut sim.mask_cache);
                         host_args.push(crate::component::runtime::host_value_from(&value));
                     }
+                    ComponentArg::StrHandle(e) => {
+                        let handle = e.eval(&mut sim.mask_cache).payload_u64();
+                        host_args.push(crate::component::host::HostValue::Str(
+                            crate::string_pool::text(handle),
+                        ));
+                    }
                 }
             }
             match sim.call_component_method(*inst, *method, &host_args) {
@@ -1570,6 +1667,33 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                                 ));
                             }
                         }
+                    }
+                    ExecResult::Continue
+                }
+                Err(msg) => ExecResult::Fail(msg),
+            }
+        }
+        TestbenchStatement::RuntimeArg { name, op, ret } => {
+            sim.ensure_comb_updated();
+            match exec_runtime_arg(sim, name, op) {
+                Ok(value) => {
+                    if let Some((ret, _)) = ret {
+                        let value = match value {
+                            RuntimeArgValue::Bits(x) => x,
+                            RuntimeArgValue::Int(x, name) => {
+                                let (width, signed) =
+                                    sim.var_shape_by_id(ret).unwrap_or((64, true));
+                                match runtime_int_value(&x, width, signed) {
+                                    Some(x) => x,
+                                    None => {
+                                        return ExecResult::Fail(format!(
+                                            "runtime argument `{name}`: value does not fit {width} bits"
+                                        ));
+                                    }
+                                }
+                            }
+                        };
+                        sim.set_var_by_id(ret, value);
                     }
                     ExecResult::Continue
                 }

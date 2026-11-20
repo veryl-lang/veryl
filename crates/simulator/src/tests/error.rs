@@ -649,6 +649,66 @@ fn comb_logic_without_a_one_pass_order_is_rejected() {
 }
 
 #[test]
+fn string_operation_on_a_testbench_written_string() {
+    // A `string` only `initial` writes holds a handle of its text, so only
+    // the operations that keep it a whole string are allowed.
+    let cases = [
+        ("a select", "x = s[0];"),
+        ("an ordering comparison", "x = s <: \"b\";"),
+        ("a concatenation", "x = {s, 8'h00};"),
+        ("a copy into a non-string", "x = s;"),
+    ];
+    for (name, stmt) in cases {
+        let code = format!(
+            r#"
+            #[test(Top)]
+            module Top {{
+                var s: string;
+                var x: logic<64>;
+                initial {{
+                    s = "a";
+                    {stmt}
+                    $display("%s %h", s, x);
+                }}
+            }}
+            "#
+        );
+        let result = analyze_top(&code, &Config::default(), "Top");
+        assert!(
+            matches!(
+                result,
+                Err(SimulatorError::UnsupportedStringOperation { .. })
+            ),
+            "{name}: expected UnsupportedStringOperation, got {:?}",
+            result.err()
+        );
+    }
+
+    // Its text cannot reach a `string` an RTL process drives.
+    let code = r#"
+    #[test(Top)]
+    module Top {
+        var s: string;
+        var t: string;
+        assign t = s;
+        initial {
+            s = "a";
+            $display("%s", t);
+        }
+    }
+    "#;
+    let result = analyze_top(code, &Config::default(), "Top");
+    assert!(
+        matches!(
+            result,
+            Err(SimulatorError::UnsupportedStringOperation { .. })
+        ),
+        "got {:?}",
+        result.err()
+    );
+}
+
+#[test]
 fn string_storage_the_simulator_cannot_size() {
     // A `string` variable is sized from the assignments in its own module.
     // Text that reaches it any other way would be cut to the nominal 1-bit

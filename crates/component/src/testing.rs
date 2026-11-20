@@ -72,6 +72,7 @@ pub struct MockSim {
     pub time: u64,
     pub seed: u64,
     pub fired_clock: u32,
+    runtime_args: Vec<(String, Option<String>)>,
 }
 
 impl MockSim {
@@ -82,6 +83,19 @@ impl MockSim {
     /// Declares an elaboration parameter (`#()` equivalent).
     pub fn param(mut self, name: &str, value: impl Into<Value>) -> Self {
         self.params.push((name.to_string(), value.into()));
+        self
+    }
+
+    /// Gives a runtime argument as a flag (`--runtime-arg=NAME`).
+    pub fn runtime_flag(mut self, name: &str) -> Self {
+        self.runtime_args.push((name.to_string(), None));
+        self
+    }
+
+    /// Gives a runtime argument with a value (`--runtime-arg=NAME:VALUE`).
+    pub fn runtime_arg(mut self, name: &str, value: &str) -> Self {
+        self.runtime_args
+            .push((name.to_string(), Some(value.to_string())));
         self
     }
 
@@ -535,6 +549,41 @@ extern "C" fn mock_trace_write(ctx: *mut sys::VrlCtx, handle: i32, words: *const
     }
 }
 
+fn copy_to_buf(text: &str, buf: *mut u8, cap: usize) -> i64 {
+    if text.len() <= cap && !text.is_empty() {
+        unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), buf, text.len()) };
+    }
+    text.len() as i64
+}
+
+extern "C" fn mock_runtime_arg_count(ctx: *mut sys::VrlCtx) -> u32 {
+    unsafe { mock(ctx) }.runtime_args.len() as u32
+}
+
+extern "C" fn mock_runtime_arg_name(
+    ctx: *mut sys::VrlCtx,
+    idx: u32,
+    buf: *mut u8,
+    cap: usize,
+) -> i64 {
+    match unsafe { mock(ctx) }.runtime_args.get(idx as usize) {
+        Some((name, _)) => copy_to_buf(name, buf, cap),
+        None => -1,
+    }
+}
+
+extern "C" fn mock_runtime_arg_value(
+    ctx: *mut sys::VrlCtx,
+    idx: u32,
+    buf: *mut u8,
+    cap: usize,
+) -> i64 {
+    match unsafe { mock(ctx) }.runtime_args.get(idx as usize) {
+        Some((_, Some(value))) => copy_to_buf(value, buf, cap),
+        _ => -1,
+    }
+}
+
 static MOCK_API: sys::VrlHostApi = sys::VrlHostApi {
     size: size_of::<sys::VrlHostApi>(),
     port_index: mock_port_index,
@@ -558,6 +607,9 @@ static MOCK_API: sys::VrlHostApi = sys::VrlHostApi {
     trace_write: mock_trace_write,
     is_4state: mock_is_4state,
     port_direct: mock_port_direct,
+    runtime_arg_count: mock_runtime_arg_count,
+    runtime_arg_name: mock_runtime_arg_name,
+    runtime_arg_value: mock_runtime_arg_value,
 };
 
 #[cfg(test)]
@@ -630,6 +682,79 @@ mod tests {
 
         let cycle = sim.call(&mut c, "cycle", &[]).unwrap();
         assert_eq!(cycle.as_u64().unwrap(), 2);
+    }
+
+    /// Reads runtime arguments while built and from a method.
+    struct ArgReader {
+        rounds: u32,
+    }
+
+    impl Component for ArgReader {
+        const KIND: ComponentKind = ComponentKind::MethodOnly;
+
+        fn new(ctx: &mut BuildCtx) -> Result<Self> {
+            Ok(Self {
+                rounds: ctx.runtime_arg_value("ROUNDS")?.unwrap_or(2),
+            })
+        }
+
+        fn method(&mut self, name: &str, _args: &[Value], ctx: &mut SimCtx) -> Result<Value> {
+            match name {
+                "rounds" => Ok(Value::from_u64(self.rounds as u64, 32)),
+                "verbose" => Ok(Value::from_u64(ctx.runtime_arg_exists("VERBOSE") as u64, 1)),
+                "test" => {
+                    let test: String = ctx
+                        .runtime_arg_value("TESTNAME")?
+                        .unwrap_or("basic_test".into());
+                    Ok(Value::from_u64(test.len() as u64, 32))
+                }
+                "count" => Ok(Value::from_u64(ctx.runtime_args().len() as u64, 32)),
+                _ => bail!("unknown method: {name}"),
+            }
+        }
+    }
+
+    #[test]
+    fn mock_sim_gives_runtime_args() {
+        let mut sim = MockSim::new()
+            .runtime_arg("ROUNDS", "1")
+            .runtime_flag("VERBOSE")
+            .runtime_arg("ROUNDS", "0x10")
+            .runtime_arg("TESTNAME", "random:test");
+        let mut c = sim.build::<ArgReader>().unwrap();
+        let call = |sim: &mut MockSim, c: &mut ArgReader, name| {
+            sim.call(c, name, &[]).unwrap().as_u64().unwrap()
+        };
+        assert_eq!(call(&mut sim, &mut c, "rounds"), 16);
+        assert_eq!(call(&mut sim, &mut c, "verbose"), 1);
+        assert_eq!(call(&mut sim, &mut c, "test"), "random:test".len() as u64);
+        assert_eq!(call(&mut sim, &mut c, "count"), 4);
+
+        let mut sim = MockSim::new();
+        let mut c = sim.build::<ArgReader>().unwrap();
+        assert_eq!(call(&mut sim, &mut c, "rounds"), 2);
+        assert_eq!(call(&mut sim, &mut c, "verbose"), 0);
+        assert_eq!(call(&mut sim, &mut c, "test"), "basic_test".len() as u64);
+
+        let mut sim = MockSim::new().runtime_flag("ROUNDS");
+        let err = match sim.build::<ArgReader>() {
+            Err(e) => e,
+            Ok(_) => unreachable_panic(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "runtime argument `ROUNDS`: given as a flag, without a value"
+        );
+
+        let mut sim = MockSim::new().runtime_arg("ROUNDS", "-1");
+        let err = match sim.build::<ArgReader>() {
+            Err(e) => e,
+            Ok(_) => unreachable_panic(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "runtime argument `ROUNDS`: value `-1` does not fit `u32`"
+        );
     }
 
     #[test]

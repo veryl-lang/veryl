@@ -480,6 +480,7 @@ pub fn build_components(
         host.label = inst_name.clone();
         host.use_4state = ir.use_4state;
         host.seed = instance_seed(seed_base, test_name, &inst_name);
+        host.runtime_args = ir.runtime_args.clone();
         if let Some(base) = &ir.component_file_base {
             host.read_base = Some(base.clone());
             host.write_base = Some(

@@ -15,6 +15,7 @@ use veryl_simulator::ir::{
     BuildSession, ComponentLibrary, Config, Ir, ProtoModuleCache, build_ir_cached,
 };
 use veryl_simulator::output_buffer;
+use veryl_simulator::runtime_arg::{self, RuntimeArg};
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
 use veryl_simulator::testbench::{TestResult, run_native_testbench_timed};
@@ -24,6 +25,35 @@ use veryl_simulator::wavedrom::{self, SignalKind, classify_signals, parse_wavedr
 /// A fresh random base seed for a test run, used when neither `--seed` nor
 /// `[test].seed` pins one. A new `RandomState` draws OS entropy at process
 /// start, so this avoids pulling in an RNG dependency.
+fn parse_runtime_args(args: &[String]) -> Result<Vec<RuntimeArg>> {
+    args.iter()
+        .map(|x| {
+            let arg = RuntimeArg::parse(x);
+            if arg.name.is_empty() {
+                miette::bail!("--runtime-arg `{x}`: the name is empty");
+            }
+            Ok(arg)
+        })
+        .collect()
+}
+
+/// Appends the winning runtime arguments to every SystemVerilog simulator's
+/// simulate args: `+NAME` / `+NAME=VALUE` (`-testplusarg` for xsim).
+fn add_runtime_plusargs(metadata: &mut Metadata, args: &[RuntimeArg]) {
+    for arg in runtime_arg::winners(args) {
+        let plusarg = match &arg.value {
+            Some(value) => format!("{}={}", arg.name, value),
+            None => arg.name.clone(),
+        };
+        let test = &mut metadata.test;
+        test.vcs.simulate_args.push(format!("+{plusarg}"));
+        test.verilator.simulate_args.push(format!("+{plusarg}"));
+        test.dsim.simulate_args.push(format!("+{plusarg}"));
+        test.vivado.simulate_args.push("-testplusarg".to_string());
+        test.vivado.simulate_args.push(plusarg);
+    }
+}
+
 fn random_seed() -> u64 {
     use std::collections::hash_map::RandomState;
     use std::hash::BuildHasher;
@@ -241,6 +271,11 @@ impl CmdTest {
         }
         let combined_defines = metadata.test.defines.clone();
 
+        let runtime_args = parse_runtime_args(&self.opt.runtime_arg)?;
+        // External simulator runners read their simulate args from
+        // metadata, so the winning runtime arguments ride along as plusargs.
+        add_runtime_plusargs(metadata, &runtime_args);
+
         // `[[components]]` cargo packages build before analysis: the analyzer
         // reads their interface manifests, so building afterwards would
         // leave the checks one edit behind — and a stale-manifest error
@@ -368,6 +403,7 @@ impl CmdTest {
                 metadata.build.reset_type,
                 veryl_metadata::ResetType::SyncHigh | veryl_metadata::ResetType::SyncLow
             ),
+            runtime_args: std::sync::Arc::new(runtime_args),
             ..Config::default()
         };
         config.apply_env();
@@ -420,6 +456,10 @@ impl CmdTest {
 
         if !pending_native.is_empty() {
             info!("Test seed: {} (reproduce with --seed)", config.seed);
+            if !config.runtime_args.is_empty() {
+                let args: Vec<_> = self.opt.runtime_arg.iter().map(String::as_str).collect();
+                info!("Runtime args: {}", args.join(" "));
+            }
             if let Some(libraries) = component_libraries {
                 config.component_libraries = libraries;
                 config.component_file_base = Some(metadata.project_path());
