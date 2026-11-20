@@ -887,49 +887,50 @@ impl RuntimeComponent {
             // A component may write an output every edge whether or not it
             // changed; only a changed value has to re-settle the design.
             let ptr = out.dest;
-            let mut changed = false;
-            if out.width <= 64 && matches!(out.native_bytes, 1 | 2 | 4 | 8) {
+            let changed = if out.width <= 64 && matches!(out.native_bytes, 1 | 2 | 4 | 8) {
                 let mask = width_mask(out.width);
                 let payload = unsafe { *out.src_words } & mask;
-                if read_payload(ptr, out.native_bytes) != payload {
-                    write_payload(ptr, out.native_bytes, payload);
-                    changed = true;
-                }
+                let mut diff = read_payload(ptr, out.native_bytes) ^ payload;
+                write_payload(ptr, out.native_bytes, payload);
                 if use_4state {
                     let mask_xz = unsafe { *out.src_mask } & mask;
                     let mask_ptr = unsafe { ptr.add(out.native_bytes) };
-                    if read_payload(mask_ptr, out.native_bytes) != mask_xz {
-                        write_payload(mask_ptr, out.native_bytes, mask_xz);
-                        changed = true;
-                    }
+                    diff |= read_payload(mask_ptr, out.native_bytes) ^ mask_xz;
+                    write_payload(mask_ptr, out.native_bytes, mask_xz);
                 }
+                diff != 0
             } else {
                 // Wide destination: the port buffer and DUT storage share the
                 // LSB-first word layout and the payload is already masked to the
                 // width (by `write_words` or `to_port_words`), so copy it across
                 // directly. Two-state storage has no mask slot.
-                let len = out.native_bytes;
-                let slots = [(out.src_words, ptr)]
-                    .into_iter()
-                    .chain(use_4state.then(|| (out.src_mask, unsafe { ptr.add(len) })));
-                for (src, dst) in slots {
-                    let src = src as *const u8;
-                    let same = unsafe {
-                        std::slice::from_raw_parts(src, len)
-                            == std::slice::from_raw_parts(dst.cast_const(), len)
-                    };
-                    if !same {
-                        unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
-                        changed = true;
-                    }
+                let words = out.native_bytes / 8;
+                let mut changed = unsafe { copy_words(out.src_words, ptr, words) };
+                if use_4state {
+                    changed |=
+                        unsafe { copy_words(out.src_mask, ptr.add(out.native_bytes), words) };
                 }
-            }
-            if !changed {
-                continue;
-            }
-            wrote = true;
+                changed
+            };
+            wrote |= changed;
         }
         self.host.clear_output_dirty();
         wrote
     }
+}
+
+/// Copies `words` words into the unaligned slot at `dst`, returning whether
+/// any of them differed from what it held. The store is unconditional, so
+/// an output that changes every edge pays only the comparison.
+unsafe fn copy_words(src: *const u64, dst: *mut u8, words: usize) -> bool {
+    let dst = dst.cast::<u64>();
+    let mut diff = 0;
+    for i in 0..words {
+        unsafe {
+            let word = *src.add(i);
+            diff |= dst.add(i).read_unaligned() ^ word;
+            dst.add(i).write_unaligned(word);
+        }
+    }
+    diff != 0
 }
