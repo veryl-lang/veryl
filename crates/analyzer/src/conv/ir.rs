@@ -362,6 +362,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         context.pop_namespace();
+        let tb_handles = std::mem::take(&mut context.tb_handles);
         // A test module's names are its own, not those of the modules after it.
         let body_names = upper_context.body_names.take();
         upper_context.inherit(&mut context);
@@ -382,6 +383,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
             per_decl_refs: HashMap::default(),
             assign_tokens: HashMap::default(),
             ff_table: ir::FfTable::default(),
+            tb_handles,
         })
     }
 }
@@ -610,6 +612,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             per_decl_refs: HashMap::default(),
             assign_tokens: HashMap::default(),
             ff_table: ir::FfTable::default(),
+            tb_handles: ir::TbHandles::default(),
         })
     }
 }

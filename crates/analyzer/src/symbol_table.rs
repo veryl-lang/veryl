@@ -23,6 +23,7 @@ use crate::tb_component;
 use crate::wavedrom::{self, DocTestTarget};
 use crate::{AnalyzerError, HashMap, HashSet, SVec};
 use connect::check_connect;
+pub use function::mixin_member_map;
 pub(crate) use function::{
     find_external_write, function_call_generic_maps, specialized_direct_effect,
 };
@@ -1563,7 +1564,11 @@ impl SymbolTable {
                 }
             }
 
-            maps.push(GenericMap { id: None, map });
+            maps.push(GenericMap {
+                id: None,
+                parameter_owner: None,
+                map,
+            });
         }
 
         Some(maps)

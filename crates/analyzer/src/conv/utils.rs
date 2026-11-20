@@ -209,10 +209,9 @@ pub fn eval_expr(
             expr.eval_comptime(context, None).clone()
         };
 
-        // `eval_comptime` doesn't evaluate an array literal, so evaluate it here
-        // to carry the element values.
-        if matches!(expr, ir::Expression::ArrayLiteral(..))
-            && !comptime.r#type.array.is_empty()
+        // Scalar evaluation cannot carry an unpacked aggregate. Resolve array
+        // literals and constant conditional arms with their destination shape.
+        if !comptime.r#type.array.is_empty()
             && let Some(values) = eval_array_literal_values(context, &comptime.r#type, &mut expr)?
         {
             comptime.value = ValueVariant::NumericArray(values);
@@ -990,6 +989,41 @@ fn eval_array_literal_values(
     r#type: &ir::Type,
     expr: &mut ir::Expression,
 ) -> IrResult<Option<Vec<Value>>> {
+    if let ir::Expression::Ternary(condition, yes, no, _) = expr {
+        if !condition.comptime().is_const {
+            return Ok(None);
+        }
+        let Some(condition) = condition.eval_value(context) else {
+            return Ok(None);
+        };
+        if let Some(taken) = condition.truth() {
+            let arm = if taken { yes } else { no };
+            return eval_array_literal_values(context, r#type, arm);
+        }
+        if r#type.is_string() || r#type.kind.is_float() {
+            return eval_array_literal_values(context, r#type, no);
+        }
+        // An unknown condition merges corresponding integral elements, not
+        // the array as one packed scalar and not an arbitrarily selected arm.
+        let Some(yes) = eval_array_literal_values(context, r#type, yes)? else {
+            return Ok(None);
+        };
+        let Some(no) = eval_array_literal_values(context, r#type, no)? else {
+            return Ok(None);
+        };
+        if yes.len() != no.len() {
+            return Ok(None);
+        }
+        let Some(width) = r#type.total_width() else {
+            return Ok(None);
+        };
+        return Ok(Some(
+            yes.iter()
+                .zip(&no)
+                .map(|(yes, no)| condition.conditional(yes, no, width, r#type.signed))
+                .collect(),
+        ));
+    }
     let Some(exprs) = eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?
     else {
         return Ok(None);
@@ -1093,6 +1127,17 @@ pub fn eval_const_assign(
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
 
+    // As with scalar overrides above, an unresolved conditional array still
+    // refers to the caller's variables, not this component's variable table.
+    if !overridden
+        && comptime.value.is_unknown()
+        && !r#type.array.is_empty()
+        && matches!(expr, ir::Expression::Ternary(..))
+        && let Some(values) = eval_array_literal_values(context, r#type, expr)?
+    {
+        comptime.value = ValueVariant::NumericArray(values);
+    }
+
     match expr {
         // The guard skips an override literal, which already carries its values
         // as a NumericArray (below), so the literal isn't folded twice.
@@ -1192,7 +1237,7 @@ pub fn eval_variable(
     r#type: &ir::Type,
     clock_domain: ClockDomain,
     token: TokenRange,
-) {
+) -> ir::VarId {
     let comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
     let signed = comptime.r#type.signed;
     let id = context.insert_var_path(path.clone(), comptime);
@@ -1227,6 +1272,7 @@ pub fn eval_variable(
         array_limit,
     );
     context.insert_variable(id, variable);
+    id
 }
 
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
@@ -1549,6 +1595,7 @@ pub fn eval_type(
                         }
 
                         check_struct_union_members(c, &members, &symbol.found);
+                        check_clock_reset_struct_members(c, &members, &symbol.found);
                         Ok(members)
                     });
 
@@ -1906,6 +1953,29 @@ fn check_clock_reset_union_member(
         &member.token.to_string(),
         token,
     ));
+}
+
+/// A struct having a clock/reset member, nested ones included, has to be made
+/// of that kind only, so that any bit of it is of that kind.
+fn check_clock_reset_struct_members(
+    context: &mut Context,
+    members: &[ir::TypeKindMember],
+    symbol: &Symbol,
+) {
+    if context.in_generic {
+        return;
+    }
+
+    let kinds: Vec<_> = members.iter().flat_map(|x| x.r#type.leaf_kinds()).collect();
+    if kinds.contains(&&ir::TypeKind::Unknown) {
+        return;
+    }
+
+    let has_clock_reset = members.iter().any(|x| x.r#type.include_clock_reset());
+    if has_clock_reset && kinds.iter().any(|x| *x != kinds[0]) {
+        let token: TokenRange = symbol.token.into();
+        context.insert_error(AnalyzerError::mixed_clock_reset_struct_member(&token));
+    }
 }
 
 fn check_struct_union_members(
@@ -3041,13 +3111,14 @@ fn reduce_unevaluable_select(
 
     comptime.r#type.array.drain(0..array_select.dimension());
     if !width_select.is_empty() {
+        let clock_reset = comptime.select_clock_reset();
         comptime.r#type.flatten_struct_union_enum();
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
         comptime
             .r#type
-            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
+            .restore_member(comptime.member_signed, clock_reset.as_ref());
     }
     comptime.token = token;
 }
@@ -3081,6 +3152,7 @@ fn fold_symbol_select(
     // replaces its width dimensions by the selected width.
     let mut element = comptime.r#type.clone();
     if !select.is_empty() {
+        let clock_reset = comptime.select_clock_reset();
         element.flatten_struct_union_enum();
         comptime.r#type = element.clone();
         if let Some(width) = select.eval_comptime(context, &element, false) {
@@ -3088,7 +3160,7 @@ fn fold_symbol_select(
         }
         comptime
             .r#type
-            .restore_member(comptime.member_signed, comptime.member_clock_reset.as_ref());
+            .restore_member(comptime.member_signed, clock_reset.as_ref());
     }
 
     let flat = array.calc_index(&indices)?;
@@ -5456,7 +5528,7 @@ fn conv_external_method_call(
     let args: Vec<SystemFunctionInput> = match args {
         Some(ir::Arguments::Positional(ref positional)) => positional
             .iter()
-            .map(|arg| SystemFunctionInput(arg.0.clone()))
+            .map(|arg| SystemFunctionInput(self_determined_arg(context, &arg.0)))
             .collect(),
         None | Some(ir::Arguments::Null) => Vec::new(),
         // The ABI carries values only, no argument names.
@@ -5513,7 +5585,8 @@ fn conv_external_method_call(
                 }
 
                 let inst_params = context
-                    .tb_component_params
+                    .tb_handles
+                    .component_params
                     .get(&inst_name)
                     .cloned()
                     .unwrap_or_default();
@@ -5621,6 +5694,25 @@ pub fn tb_method_call(
 
     let tb_kind = match &type_symbol.found.kind {
         SymbolKind::TbComponent(x) => &x.kind,
+        SymbolKind::Module(_) => {
+            // An instance array element or generate block would need an
+            // index the instance path does not carry.
+            let has_index = is_array(&inst_symbol.found.kind)
+                || !expr_id.expression_identifier_list.is_empty()
+                || expr_id
+                    .expression_identifier_list0
+                    .iter()
+                    .any(|x| !x.expression_identifier_list0_list.is_empty());
+            return hierarchical_component_method_call(
+                context,
+                &path,
+                &type_symbol.found,
+                has_index,
+                func_call,
+                position,
+                token,
+            );
+        }
         _ => {
             return Ok(None);
         }
@@ -5644,12 +5736,7 @@ pub fn tb_method_call(
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && !positional.is_empty()
             {
-                // Self-determine the width (as for $display args): otherwise a
-                // binary count like `clk.next(DW / 2)` keeps a width-0 comptime
-                // type and folds to 0 in the simulator.
-                let mut count = positional[0].0.clone();
-                count.eval_comptime(context, None);
-                Some(count)
+                Some(self_determined_arg(context, &positional[0].0))
             } else {
                 None
             };
@@ -5669,11 +5756,7 @@ pub fn tb_method_call(
             let duration = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && let Some(arg) = positional.first()
             {
-                // Self-determine the width like the count above — else a binary
-                // `rst.assert(DW / 2)` folds to 0 (then clamps to 1 cycle).
-                let mut duration = arg.0.clone();
-                duration.eval_comptime(context, None);
-                Some(duration)
+                Some(self_determined_arg(context, &arg.0))
             } else {
                 context.tb_reset_cycles.get(&inst_name).cloned()
             };
@@ -5707,7 +5790,7 @@ pub fn tb_method_call(
             let args = if let Some(ir::Arguments::Positional(ref positional)) = args {
                 positional
                     .iter()
-                    .map(|arg| SystemFunctionInput(arg.0.clone()))
+                    .map(|arg| SystemFunctionInput(self_determined_arg(context, &arg.0)))
                     .collect()
             } else {
                 Vec::new()
@@ -5793,6 +5876,107 @@ pub fn tb_method_call(
     })))
 }
 
+/// A testbench method argument has no context to size it, so like a
+/// `$display` argument it takes its own width. Without that, a binary
+/// expression keeps a width-0 comptime type and folds to 0 in the simulator.
+fn self_determined_arg(context: &mut Context, arg: &ir::Expression) -> ir::Expression {
+    arg.check_self_determined_unsized(context);
+    let mut expr = arg.clone();
+    expr.eval_comptime(context, None);
+    expr
+}
+
+fn is_array(kind: &SymbolKind) -> bool {
+    match kind {
+        SymbolKind::Instance(x) => !x.array.is_empty(),
+        SymbolKind::Variable(x) => !x.r#type.array.is_empty(),
+        _ => false,
+    }
+}
+
+/// `u.csr.method(...)`: a method of a `$comp` instance inside a child
+/// instance. The call names the component by its instance path, as the
+/// simulator names a nested test module's components.
+fn hierarchical_component_method_call(
+    context: &mut Context,
+    path: &GenericSymbolPath,
+    module: &Symbol,
+    mut has_index: bool,
+    func_call: &FunctionCall,
+    position: TbMethodCallPosition,
+    token: TokenRange,
+) -> IrResult<Option<ir::Statement>> {
+    let method = path.paths.len() - 1;
+    let mut namespace = module.inner_namespace();
+    let mut names = vec![path.paths[0].base.text];
+    for (i, segment) in path.paths.iter().enumerate().take(method).skip(1) {
+        let Ok(inst) = symbol_table::resolve((&SymbolPath::new(&[segment.base.text]), &namespace))
+        else {
+            return Ok(None);
+        };
+        let type_path = match &inst.found.kind {
+            SymbolKind::Instance(x) => &x.type_name,
+            SymbolKind::Variable(x) => match &x.r#type.kind {
+                TypeKind::UserDefined(x) => &x.path,
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        let Ok(type_symbol) =
+            symbol_table::resolve_generic_structural(type_path, &inst.found.namespace)
+        else {
+            return Ok(None);
+        };
+        has_index |= is_array(&inst.found.kind);
+        names.push(segment.base.text);
+        match &type_symbol.found.kind {
+            SymbolKind::Module(_) => namespace = type_symbol.found.inner_namespace(),
+            SymbolKind::TbComponent(x) if i + 1 == method => {
+                let TbComponentKind::External(component) = x.kind else {
+                    return Ok(None);
+                };
+                if has_index || path.paths[..i].iter().any(|x| !x.arguments.is_empty()) {
+                    context.insert_error(AnalyzerError::component_interface_mismatch(
+                        ComponentInterfaceMismatchKind::MethodCallForm,
+                        Some(component),
+                        &token,
+                    ));
+                    return Err(ir_error!(token));
+                }
+                let inst_name = names
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let inst_name = resource_table::insert_str(&inst_name);
+                let args = if let Some(ref arg_list) = func_call.function_call_opt {
+                    Some(argument_list(context, arg_list.argument_list.as_ref())?)
+                } else {
+                    None
+                };
+                let call_path = GenericSymbolPath {
+                    paths: path.paths[i..].to_vec(),
+                    ..path.clone()
+                };
+                let (method, ret_width) = conv_external_method_call(
+                    context, component, &call_path, args, inst_name, position, token,
+                )?;
+                return Ok(Some(ir::Statement::TbMethodCall(TbMethodCall {
+                    inst: inst_name,
+                    method,
+                    ret: None,
+                    ret_strict: false,
+                    ret_width,
+                    ret_signed: false,
+                    ret_4state: false,
+                })));
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(None)
+}
+
 /// Captures the `i`-th positional argument of a `$tb::random` method as a
 /// self-determined expression (its width folds from the argument, as for
 /// `$display`). Emits an arity error and fails when the argument is missing.
@@ -5807,9 +5991,7 @@ fn random_arg(
     if let Some(ir::Arguments::Positional(positional)) = args
         && let Some(arg) = positional.get(i)
     {
-        let mut expr = arg.0.clone();
-        expr.eval_comptime(context, None);
-        Ok(expr)
+        Ok(self_determined_arg(context, &arg.0))
     } else {
         let actual = if let Some(ir::Arguments::Positional(positional)) = args {
             positional.len()

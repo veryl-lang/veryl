@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
@@ -106,7 +107,7 @@ impl LockSource {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockSourceRepository {
     uuid: Uuid,
@@ -119,8 +120,37 @@ pub struct LockSourceRepository {
 }
 
 impl LockSourceRepository {
+    // A root-only override chooses where to load this source. It does not make
+    // a transitive reference to the same published source a different project.
+    // Keep all existing identity fields, but exclude the loading hint from both
+    // equality and hashing so analyzer lookup and metadata edge lookup agree.
+    fn identity(&self) -> (&Uuid, &UrlPath, &Path, &str, &Version, &str) {
+        (
+            &self.uuid,
+            &self.url,
+            &self.path,
+            &self.project,
+            &self.version,
+            &self.revision,
+        )
+    }
+
     pub fn local_path(&self) -> Result<PathBuf, MetadataError> {
         Ok(Lockfile::dependency_path(&self.url, &self.path, &self.revision)?.join(&self.path))
+    }
+}
+
+impl PartialEq for LockSourceRepository {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity() == other.identity()
+    }
+}
+
+impl Eq for LockSourceRepository {}
+
+impl Hash for LockSourceRepository {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.identity().hash(state);
     }
 }
 

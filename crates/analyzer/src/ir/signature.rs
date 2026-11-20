@@ -193,8 +193,10 @@ impl Signature {
 
                 for arg in path.paths[i].arguments.iter_mut() {
                     // A forwarded generic parameter is qualified by its value,
-                    // as the generic instance was registered.
+                    // and an alias by its target, as the generic instance was
+                    // registered.
                     context.apply_generic_maps(arg);
+                    arg.unalias(None);
                     if !path_symbol.is_global_function() {
                         arg.append_namespace_path(&namespace, &path_symbol.namespace);
                     }
@@ -222,9 +224,20 @@ impl Signature {
 
                         let base = symbol_table::get(inst.base).unwrap();
                         let params = base.generic_parameters();
-                        if inst.arguments.len() == params.len() {
+                        // A global function instance is shared by every caller
+                        // passing the same argument text, so its arguments name
+                        // the first caller's symbols.
+                        let arguments = match path.paths.last() {
+                            Some(x) if base.is_global_function() => x
+                                .arguments
+                                .iter()
+                                .map(|x| context.canonical_generic_argument(x))
+                                .collect(),
+                            _ => inst.arguments.clone(),
+                        };
+                        if arguments.len() == params.len() {
                             for (i, (name, _)) in params.iter().enumerate() {
-                                let mut arg = inst.arguments[i].clone();
+                                let mut arg = arguments[i].clone();
                                 if let Some(current_namespace) = &current_namespace {
                                     arg.append_namespace_path(current_namespace, &base.namespace);
                                 }
@@ -279,7 +292,10 @@ impl Signature {
     }
 
     pub fn to_generic_map(&self) -> Vec<GenericMap> {
-        let mut ret = GenericMap::default();
+        let mut ret = GenericMap {
+            parameter_owner: Some(self.symbol),
+            ..Default::default()
+        };
 
         for (key, val) in &self.generic_parameters {
             ret.map.insert(*key, val.clone());

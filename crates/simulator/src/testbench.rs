@@ -1,9 +1,9 @@
 use crate::HashMap;
 use crate::assert_buffer;
 use crate::ir::{
-    ComponentArg, Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement,
-    SystemFunctionCall, TbMethodKind, Value, VarId, VarPath, extend_to_i64, for_bound_reached,
-    format_assert_message, format_output, write_native_value,
+    ComponentArg, Event, Expression, Ir, RuntimeForRange, Statement, SystemFunctionCall,
+    TbMethodKind, Value, VarId, extend_to_i64, for_bound_reached, format_assert_message,
+    format_output, write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
@@ -151,96 +151,9 @@ impl From<ExecResult> for TestResult {
     }
 }
 
-fn find_var_id_by_name(module_variables: &ModuleVariables, name: StrId) -> Option<VarId> {
-    let target_path = VarPath::new(name);
-    for (var_id, variable) in &module_variables.variables {
-        if variable.path == target_path {
-            return Some(*var_id);
-        }
-    }
-    for child in &module_variables.children {
-        if let Some(id) = find_var_id_by_name(child, name) {
-            return Some(id);
-        }
-    }
-    None
-}
-
-/// Recursively collect $tb method call instances from statements,
-/// including those nested inside For loops and If blocks.
-fn collect_tb_insts(
-    stmts: &[Statement],
-    clock_insts: &mut Vec<StrId>,
-    reset_insts: &mut Vec<StrId>,
-) {
-    for stmt in stmts {
-        match stmt {
-            Statement::TbMethodCall { inst, method } => match method {
-                TbMethodKind::ClockNext { .. } => {
-                    if !clock_insts.contains(inst) {
-                        clock_insts.push(*inst);
-                    }
-                }
-                TbMethodKind::ResetAssert { .. } => {
-                    if !reset_insts.contains(inst) {
-                        reset_insts.push(*inst);
-                    }
-                }
-                // File handles, component methods and random generators
-                // drive no clock/reset event.
-                TbMethodKind::FileOpen { .. }
-                | TbMethodKind::FileWrite { .. }
-                | TbMethodKind::FileClose
-                | TbMethodKind::FileFlush
-                | TbMethodKind::Component { .. }
-                | TbMethodKind::RandomSeed { .. }
-                | TbMethodKind::RandomGet { .. }
-                | TbMethodKind::RandomGetRange { .. }
-                | TbMethodKind::RandomGetSeed { .. }
-                | TbMethodKind::Queue { .. } => {}
-            },
-            Statement::For(for_stmt) => {
-                collect_tb_insts(&for_stmt.body, clock_insts, reset_insts);
-            }
-            Statement::If(if_stmt) => {
-                collect_tb_insts(&if_stmt.true_side, clock_insts, reset_insts);
-                collect_tb_insts(&if_stmt.false_side, clock_insts, reset_insts);
-            }
-            Statement::Case(case_stmt) => {
-                for arm in &case_stmt.arms {
-                    collect_tb_insts(&arm.body, clock_insts, reset_insts);
-                }
-                collect_tb_insts(&case_stmt.default, clock_insts, reset_insts);
-            }
-            _ => {}
-        }
-    }
-}
-
 /// Build a mapping from $tb instance names (StrId) to their corresponding Events.
-pub fn build_event_map(
-    event_statements: &HashMap<Event, Vec<Statement>>,
-    module_variables: &ModuleVariables,
-) -> HashMap<StrId, Event> {
-    let mut clock_insts: Vec<StrId> = Vec::new();
-    let mut reset_insts: Vec<StrId> = Vec::new();
-    for stmts in event_statements.values() {
-        collect_tb_insts(stmts, &mut clock_insts, &mut reset_insts);
-    }
-
-    let mut event_map = HashMap::default();
-
-    for inst in clock_insts {
-        let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
-        event_map.entry(inst).or_insert(Event::clock(var_id));
-    }
-
-    for inst in reset_insts {
-        let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
-        event_map.entry(inst).or_insert(Event::reset(var_id));
-    }
-
-    event_map
+pub fn build_event_map(ir: &Ir) -> HashMap<StrId, Event> {
+    ir.tb_events.clone()
 }
 
 /// period < 2 is clamped to 2. Remainder goes to high (posedge) phase.
@@ -562,7 +475,7 @@ fn derive_testbench(
     sim: &mut Simulator,
     module_name: &str,
 ) -> Result<Vec<Vec<TestbenchStatement>>, SimulatorError> {
-    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+    let event_map = build_event_map(&sim.ir);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
     let token = sim.ir.token;

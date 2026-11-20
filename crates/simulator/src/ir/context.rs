@@ -92,6 +92,8 @@ pub struct Context {
     /// `peeled_declarations` of each instantiated component, keyed as
     /// `chunk_cache` is, so identical instances peel once.
     pub peel_cache: HashMap<*const air::Component, Option<Vec<air::Declaration>>>,
+    /// `nested_tb::has_testbench` of each instantiated component.
+    pub testbench_cache: HashMap<*const air::Component, bool>,
     pub expanding_functions: HashSet<VarId>,
     pub in_initial: bool,
     /// True while converting an `always_comb` / `assign` body.
@@ -146,6 +148,11 @@ impl Context {
             "internal event id allocator exhausted its half of the u32 range"
         );
         VarId::from_raw(u32::MAX - self.internal_event_ids_allocated)
+    }
+
+    /// Whether `id` came from `alloc_internal_event_id`.
+    pub fn is_internal_event_id(id: VarId) -> bool {
+        id > VarId::from_raw(u32::MAX / 2)
     }
 }
 

@@ -34,6 +34,7 @@ mod instantiation_note_tests;
 mod interface_array_tests;
 mod interface_instance_select_tests;
 mod modport_connection_tests;
+mod nested_generic_argument_tests;
 mod package_alias_type_tests;
 mod statement_after_if_reset_tests;
 mod unit_cache_tests;
@@ -815,43 +816,6 @@ fn implicit_clock_conversion() {
         AnalyzerError::ImplicitClockConversion { .. }
     ));
 
-    // logic members of a struct mixing clock/reset and logic members wired
-    // into clock/reset ports
-    let code = r#"
-    package PackageA {
-        struct Mixed {
-            clk: clock,
-            rst: reset,
-            d  : logic<2>,
-        }
-    }
-    module ModuleA (
-        i_s: input PackageA::Mixed,
-        o_q: output logic,
-    ) {
-        inst u: ModuleB ( clk: i_s.d[0], rst: i_s.d[1], o_q: o_q );
-    }
-    module ModuleB (
-        clk: input clock,
-        rst: input reset,
-        o_q: output logic,
-    ) {
-        always_ff (clk, rst) {
-            if_reset { o_q = 0; } else { o_q = ~o_q; }
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::ImplicitClockConversion { .. }
-    ));
-    assert!(matches!(
-        errors[1],
-        AnalyzerError::ImplicitClockConversion { .. }
-    ));
-
     // a logic vector wired into an input port of a struct with clock
     // members
     let code = r#"
@@ -971,7 +935,7 @@ fn implicit_clock_conversion() {
         }
         struct Outer {
             inner: ClockBundle,
-            d    : logic      ,
+            c    : clock      ,
         }
     }
     module ModuleA (
@@ -987,7 +951,7 @@ fn implicit_clock_conversion() {
         o_q: output logic,
     ) {
         always_ff (clk.inner.a, rst) {
-            if_reset { o_q = 0; } else { o_q = clk.d; }
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
         }
     }
     "#;
@@ -1172,21 +1136,41 @@ fn implicit_clock_conversion() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
-    // clock/reset members of a struct mixing clock/reset and logic members
-    // connect to clock/reset ports without explicit binding
+    // a bit or a range selected from a struct with clock/reset members
+    // (nested ones and arrays of it included) keeps the kind of the members
     let code = r#"
     package PackageA {
-        struct Mixed {
-            clk: clock,
-            rst: reset,
-            d  : logic<2>,
+        struct ClockBundle {
+            a: clock   ,
+            b: clock<2>,
+        }
+        struct ResetBundle {
+            a: reset,
+            b: reset,
+        }
+        struct NestedBundle {
+            a: ClockBundle,
+            b: clock      ,
+        }
+        struct PosedgeBundle {
+            a: clock_posedge,
+            b: clock_posedge,
         }
     }
     module ModuleA (
-        i_s: input PackageA::Mixed,
-        o_q: output logic,
+        i_clk : input PackageA::ClockBundle     ,
+        i_rst : input PackageA::ResetBundle     ,
+        i_nest: input PackageA::NestedBundle    ,
+        i_arr : input PackageA::ClockBundle  [2],
+        i_pos : input PackageA::PosedgeBundle   ,
+        o_q   : output logic<7>,
     ) {
-        inst u: ModuleB ( clk: i_s.clk, rst: i_s.rst, o_q: o_q );
+        inst u0: ModuleB ( clk: i_clk[0], rst: i_rst[1], o_q: o_q[0] );
+        inst u1: ModuleB ( clk: i_nest[3], rst: i_rst[0], o_q: o_q[1] );
+        inst u2: ModuleB ( clk: i_arr[1][2], rst: i_rst[0], o_q: o_q[2] );
+        inst u3: ModuleC ( clk: i_clk[2:1], rst: i_rst[1:0], o_q: o_q[4:3] );
+        inst u4: ModuleC ( clk: i_nest.a[1+:2], rst: i_rst[1:0], o_q: o_q[6:5] );
+        inst u5: ModuleD ( clk: i_pos[1] );
     }
     module ModuleB (
         clk: input clock,
@@ -1195,6 +1179,26 @@ fn implicit_clock_conversion() {
     ) {
         always_ff (clk, rst) {
             if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    module ModuleC (
+        clk: input clock<2>,
+        rst: input reset<2>,
+        o_q: output logic<2>,
+    ) {
+        always_ff (clk[0], rst[0]) {
+            if_reset { o_q[0] = 0; } else { o_q[0] = ~o_q[0]; }
+        }
+        always_ff (clk[1], rst[1]) {
+            if_reset { o_q[1] = 0; } else { o_q[1] = ~o_q[1]; }
+        }
+    }
+    module ModuleD (
+        clk: input clock_posedge,
+    ) {
+        var q: logic;
+        always_ff (clk) {
+            q = ~q;
         }
     }
     "#;
@@ -19767,7 +19771,7 @@ fn clock_reset_union_member() {
     package Pkg {
         struct StructA {
             a: clock,
-            b: logic,
+            b: clock,
         }
         union UnionA {
             a: StructA ,
@@ -19832,6 +19836,176 @@ fn clock_reset_union_member() {
         errors[0],
         AnalyzerError::ClockResetUnionMember { .. }
     ));
+}
+
+#[test]
+fn mixed_clock_reset_struct_member() {
+    let is_error = |errors: &[AnalyzerError]| {
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MixedClockResetStructMember { .. }))
+    };
+
+    // a clock and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+            b: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a reset and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: reset   ,
+            b: logic<2>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // clocks of different edges
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock        ,
+            b: clock_posedge,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock and a reset
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+            b: reset,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // resets of different kinds
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: reset_async_high,
+            b: reset_async_low ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock in a nested struct and a logic
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+        }
+        struct StructB {
+            a: StructA,
+            b: logic  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock in a nested struct and a reset
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: clock,
+        }
+        struct StructB {
+            a: StructA,
+            b: reset  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock through a typedef and a logic
+    let code = r#"
+    package Pkg {
+        type ClockAlias = clock;
+        struct StructA {
+            a: ClockAlias,
+            b: logic     ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // a clock given by a generic type argument and a logic
+    let code = r#"
+    module ModuleA {
+        type ClockAlias = clock;
+        struct StructA::<T: type> {
+            a: T    ,
+            b: logic,
+        }
+        var _a: StructA::<ClockAlias>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(is_error(&errors));
+
+    // the same kind of clocks/resets of any width, nested or through a
+    // typedef, and a struct without clock/reset are clean
+    let code = r#"
+    package Pkg {
+        type ClockAlias = clock;
+        struct StructA {
+            a: clock     ,
+            b: clock<2>  ,
+            c: ClockAlias,
+        }
+        struct StructB {
+            a: StructA,
+            b: clock  ,
+        }
+        struct StructC {
+            a: reset_sync_low   ,
+            b: reset_sync_low<2>,
+        }
+        struct StructD {
+            a: logic   ,
+            b: logic<2>,
+        }
+    }
+    module ModuleA {
+        struct StructE::<T: type> {
+            a: T    ,
+            b: clock,
+        }
+        let _a: StructE::<Pkg::ClockAlias> = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -20102,6 +20276,251 @@ fn generic_arg_forwarded_to_other_project() {
         .map(|x| as_module(&inst_components(&as_module(x))[0]).signature)
         .collect();
     assert_ne!(leaves[0], leaves[1]);
+}
+
+#[test]
+fn other_project_global_function_generic_arg() {
+    let inputs = [
+        (
+            "prj",
+            r#"
+    module ModuleA #(
+        param W: u32 = 2,
+    ) (
+        o: output logic<32>,
+    ) {
+        assign o = libx::width::<W>() + libx::width::<W>();
+    }
+
+    module ModuleB #(
+        param W: u32 = 2,
+    ) (
+        o: output logic<32>,
+    ) {
+        assign o = libx::width::<W>();
+    }
+
+    module ModuleC (
+        o1: output logic<32>,
+        o2: output logic<32>,
+    ) {
+        inst a: ModuleA #(W: 5) (o: o1);
+        inst b: ModuleB #(W: 9) (o: o2);
+    }
+    "#,
+        ),
+        (
+            "libx",
+            r#"
+    pub function width::<N: u32> () -> u32 {
+        return N;
+    }
+    "#,
+        ),
+    ];
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let mut parsed = vec![];
+    for (i, (prj, code)) in inputs.iter().enumerate() {
+        let metadata = Metadata::create_default(prj).unwrap();
+        let parser = Parser::parse(code, &format!("test_{i}.veryl")).unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        analyzer.analyze_pass1(prj, &parser.veryl);
+        parsed.push((parser, analyzer));
+    }
+    Analyzer::analyze_post_pass1();
+
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    for (parser, analyzer) in &parsed {
+        let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    let top = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Component::Module(x) if x.name.to_string() == "ModuleC" => Some(x),
+            _ => None,
+        })
+        .unwrap();
+    let outputs: Vec<_> = top
+        .declarations
+        .iter()
+        .filter_map(|x| match x {
+            crate::ir::Declaration::Inst(x) => Some(x.component.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        outputs[0].contains("var1 = 32'h0000000a;"),
+        "{}",
+        outputs[0]
+    );
+    assert_eq!(outputs[0].matches("func ").count(), 1, "{}", outputs[0]);
+    assert!(
+        outputs[1].contains("var1 = 32'h00000009;"),
+        "{}",
+        outputs[1]
+    );
+}
+
+/// `Top`'s IR. The tests below call a function whose local is sized by a
+/// generic package parameter `W` = 16, so a bound parameter shows as
+/// `logic<16>`.
+fn generic_function_top_ir(code: &str) -> String {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    assert!(errors.is_empty(), "{errors:?}");
+
+    ir.components
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Component::Module(x) if x.name.to_string() == "Top" => Some(x),
+            _ => None,
+        })
+        .unwrap()
+        .to_string()
+}
+
+const GENERIC_FUNCTION_PACKAGES: &str = r#"
+    pub proto package PP {
+        const W: u32;
+    }
+    pub package P16 for PP {
+        const W: u32 = 16;
+    }
+    pub package PG::<N: u32> for PP {
+        const W: u32 = N;
+    }
+    pub interface Base::<PKG: PP> {
+        var a: logic<32>;
+        function f() -> logic<32> {
+            var o: logic<PKG::W>;
+            o = a[PKG::W - 1:0];
+            return o as 32;
+        }
+    }
+"#;
+
+#[track_caller]
+fn assert_generic_function_bound(decls: &str, inst_type: &str, call: &str) {
+    let code = format!(
+        r#"{GENERIC_FUNCTION_PACKAGES}
+    {decls}
+    module Top (
+        i: input  logic<32>,
+        o: output logic<32>,
+    ) {{
+        inst x: {inst_type};
+        assign x.a = i;
+        assign o = x.{call}();
+    }}
+    "#
+    );
+    let top = generic_function_top_ir(&code);
+    assert!(top.contains(".o): logic<16>"), "{top}");
+}
+
+#[test]
+fn alias_package_forwarded_as_generic_arg() {
+    assert_generic_function_bound(
+        r#"
+    pub package Cfg {
+        alias package P = PG::<16>;
+    }
+    pub package Utils::<Q: PP> {
+        function f(a: input logic<32>) -> logic<32> {
+            var o: logic<Q::W>;
+            o = a[Q::W - 1:0];
+            return o as 32;
+        }
+    }
+    pub interface IF::<PKG: PP> {
+        var a: logic<32>;
+        function g() -> logic<32> {
+            return Utils::<PKG>::f(a);
+        }
+    }
+    import Cfg::P;
+    "#,
+        "IF::<P>",
+        "g",
+    );
+}
+
+#[test]
+fn mixin_function_called_through_instance() {
+    assert_generic_function_bound(
+        r#"
+    pub interface IF::<Q: PP> {
+        mixin Base::<Q>;
+    }
+    "#,
+        "IF::<P16>",
+        "f",
+    );
+}
+
+#[test]
+fn mixin_function_called_from_host_interface() {
+    assert_generic_function_bound(
+        r#"
+    pub interface IF::<Q: PP> {
+        mixin Base::<Q>;
+        function g() -> logic<32> {
+            return f();
+        }
+    }
+    "#,
+        "IF::<P16>",
+        "g",
+    );
+}
+
+#[test]
+fn mixin_through_alias_interface() {
+    assert_generic_function_bound(
+        r#"
+    alias interface B16 = Base::<P16>;
+    pub interface IF {
+        mixin B16;
+    }
+    "#,
+        "IF",
+        "f",
+    );
+}
+
+#[test]
+fn instance_of_alias_interface_binds_target_args() {
+    let decls = r#"
+    pub interface IF::<Q: PP> {
+        mixin Base::<Q>;
+        function g() -> logic<32> {
+            var o: logic<Q::W>;
+            o = a[Q::W - 1:0];
+            return o as 32;
+        }
+    }
+    alias interface IF16 = IF::<P16>;
+    "#;
+    assert_generic_function_bound(decls, "IF16", "f");
+    assert_generic_function_bound(decls, "IF16", "g");
 }
 
 #[test]

@@ -42,7 +42,7 @@ pub use ff_table::FfTable;
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
 pub use ir::{Component, Ir, IrError, IrResult, SystemVerilog};
-pub use module::Module;
+pub use module::{Module, TbHandles};
 pub use op::Op;
 pub use shape::{Shape, ShapeRef};
 pub use signature::{Signature, stable_type};

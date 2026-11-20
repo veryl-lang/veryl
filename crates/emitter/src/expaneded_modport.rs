@@ -266,6 +266,8 @@ pub struct ExpandedModportPort {
     pub direction: SymDirection,
     pub direction_token: VerylToken,
     pub defines: Vec<IfdefCondition>,
+    /// Binds the parameters of the interface the member was mixed in from.
+    pub mixin_map: Option<GenericMap>,
 }
 
 #[derive(Clone, Debug)]
@@ -274,12 +276,18 @@ pub struct ExpandedModportPorts {
 }
 
 impl ExpandedModportPorts {
-    fn new(port: &Port, modport: &Symbol, array_index: &[isize]) -> Self {
+    fn new(
+        port: &Port,
+        modport: &Symbol,
+        array_index: &[isize],
+        generic_maps: &[GenericMap],
+    ) -> Self {
         let ports: Vec<_> = collect_modport_member_variables(modport)
             .into_iter()
             .map(|member| {
                 let ExpandedMember {
                     token: variable_token,
+                    id,
                     variable,
                     direction,
                     defines,
@@ -311,6 +319,7 @@ impl ExpandedModportPorts {
                     direction,
                     direction_token,
                     defines,
+                    mixin_map: symbol_table::mixin_member_map(id, generic_maps),
                 }
             })
             .collect();
@@ -396,12 +405,18 @@ impl ExpandedModportPortTable {
                 port.token.replace(&text)
             };
 
+            let generic_maps = interface_symbol.generic_maps();
             let ports = if array_index.is_empty() {
-                vec![ExpandedModportPorts::new(&port, &modport, &[])]
+                vec![ExpandedModportPorts::new(
+                    &port,
+                    &modport,
+                    &[],
+                    &generic_maps,
+                )]
             } else {
                 array_index
                     .iter()
-                    .map(|index| ExpandedModportPorts::new(&port, &modport, index))
+                    .map(|index| ExpandedModportPorts::new(&port, &modport, index, &generic_maps))
                     .collect()
             };
 
@@ -409,7 +424,7 @@ impl ExpandedModportPortTable {
                 id: port.name(),
                 identifier: port.token.clone(),
                 interface_name,
-                generic_maps: interface_symbol.generic_maps(),
+                generic_maps,
                 array_size,
                 ports,
             };
@@ -531,6 +546,7 @@ fn collect_modport_member_variables(symbol: &Symbol) -> Vec<ExpandedMember> {
             };
             Some(ExpandedMember {
                 token: variable_symbol.token,
+                id: variable_symbol.id,
                 variable,
                 direction: member.direction,
                 defines: symbol_table::modport_member_conditions(&member_symbol),
@@ -541,6 +557,7 @@ fn collect_modport_member_variables(symbol: &Symbol) -> Vec<ExpandedMember> {
 
 struct ExpandedMember {
     token: Token,
+    id: SymbolId,
     variable: VariableProperty,
     direction: SymDirection,
     defines: Vec<IfdefCondition>,

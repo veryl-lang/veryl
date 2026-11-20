@@ -98,9 +98,15 @@ pub struct Module {
     /// User-defined component instances (`$comp::<name>`), driven by
     /// the simulator around event evaluation.
     pub external_components: Vec<ExternalComponentInst>,
+    /// Testbench-facing variables of nested test modules, named by their
+    /// instance path; see `nested_tb::TbVariable`.
+    pub tb_variables: HashMap<VarId, Variable>,
+    /// The event of every `$tb` clock and reset, by the name testbench
+    /// statements address it by: an instance path in a nested test module.
+    pub tb_events: HashMap<StrId, Event>,
     /// Top-level variables written by RTL statements; component outputs
     /// must not overlap them (sole-driver check at load time).
-    pub rtl_driven: crate::HashSet<air::VarId>,
+    pub rtl_driven: crate::HashSet<VarOffset>,
     /// Comb offsets whose defs the fusion pass consumed
     /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
     /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
@@ -161,8 +167,12 @@ pub struct ProtoModule {
     pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
     /// See `Module::external_components` (pre-pointer-binding form).
     pub external_components: Vec<ProtoExternalComponent>,
+    /// See `Module::tb_variables`, keyed the same way.
+    pub tb_variables: HashMap<VarId, VariableMeta>,
+    /// See `Module::tb_events`.
+    pub tb_events: HashMap<StrId, Event>,
     /// See `Module::rtl_driven`.
-    pub rtl_driven: crate::HashSet<air::VarId>,
+    pub rtl_driven: crate::HashSet<VarOffset>,
     /// See `Module::fused_comb_offsets`.
     pub fused_comb_offsets: Vec<isize>,
     /// See `Module::comb_touched_offsets`.
@@ -497,6 +507,18 @@ impl ProtoModule {
                     x.instantiate(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state)
                 })
                 .collect(),
+            tb_variables: create_variables_recursive(
+                &ModuleVariableMeta {
+                    name: self.name,
+                    hierarchy: vec![],
+                    variable_meta: self.tb_variables.clone(),
+                    children: vec![],
+                },
+                ff_base,
+                comb_base,
+            )
+            .variables,
+            tb_events: self.tb_events.clone(),
             rtl_driven: self.rtl_driven.clone(),
             fused_comb_offsets: self.fused_comb_offsets.clone(),
             comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
@@ -1485,7 +1507,7 @@ fn run_comb_pipeline(
             let stats = version_split::run(&mut unified, &mut alloc);
             let _ = before;
             version_split::accumulate(&stats);
-            log::info!(
+            log::debug!(
                 "version_split totals ({module_name}): {}",
                 version_split::totals_line()
             );
@@ -1727,6 +1749,9 @@ fn run_comb_pipeline(
     } else {
         required_comb_passes
     };
+    if required_comb_passes > 1 {
+        log::info!("{module_name}: combinational logic settles in {required_comb_passes} passes");
+    }
     let pass_witness = (required_comb_passes > 1).then(|| comb_pipeline_cache::MultiPass {
         linearized,
         participants: backward_edge_tokens(&unified_sorted),
@@ -5122,7 +5147,7 @@ fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
     // the escape hatch on the per-chunk settle path.
     let passes = if max_delay == 0 { 1 } else { max_delay + 2 };
     if passes > 1 {
-        log::info!(
+        log::debug!(
             "compute_required_passes ({scope}): {} passes needed ({} stmts, {} backward edge chain depth)",
             passes,
             n,
@@ -5927,6 +5952,16 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut nested_derived_clock_candidates: Vec<crate::ir::EdgeCandidate> = vec![];
         let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
+        let mut tb_variables: HashMap<VarId, VariableMeta> = HashMap::default();
+        let mut tb_events: HashMap<StrId, Event> = src
+            .tb_handles
+            .generators
+            .iter()
+            .filter_map(|(name, id)| {
+                let r#type = &src.variables.get(id)?.r#type;
+                Some((*name, crate::ir::nested_tb::handle_event(*id, r#type)))
+            })
+            .collect();
 
         for decl in declarations {
             let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -5942,6 +5977,15 @@ impl Conv<&air::Module> for ProtoModule {
             all_child_modules.extend(proto_decl.child_modules);
             nested_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
             all_external_components.extend(proto_decl.external_components);
+            for x in proto_decl.tb_variables {
+                if let Some(handle) = x.handle {
+                    tb_events.insert(
+                        handle,
+                        crate::ir::nested_tb::handle_event(x.id, &x.meta.r#type),
+                    );
+                }
+                tb_variables.insert(x.id, x.meta);
+            }
         }
 
         // Hierarchical testbench references need the complete child meta
@@ -5958,41 +6002,13 @@ impl Conv<&air::Module> for ProtoModule {
             &mut all_event_statements,
         )?;
 
-        // Component input connections may also reference DUT internals.
-        for external in &mut all_external_components {
-            for connect in &mut external.connects {
-                crate::ir::hier_ref::resolve_expr(&mut connect.expr, context, &all_child_modules)?;
-                // A hierarchical clock/reset connection carries no VarId at
-                // conv time; recover the event key from the resolved offset.
-                // A nested derived clock matches its re-keyed candidate id;
-                // a child port aliased onto a testbench variable matches the
-                // top-scope variable that fires the event.
-                if (connect.is_clock || connect.is_reset)
-                    && connect.event_var.is_none()
-                    && let crate::ir::expression::ProtoExpression::Variable {
-                        var_offset,
-                        select: None,
-                        ..
-                    } = &connect.expr
-                {
-                    connect.event_var = nested_derived_clock_candidates
-                        .iter()
-                        .find(|(_, offset, _, _, _)| offset == var_offset)
-                        .map(|(vid, _, _, _, _)| *vid)
-                        .or_else(|| {
-                            context
-                                .scope()
-                                .variable_meta
-                                .iter()
-                                .find_map(|(vid, meta)| {
-                                    (meta.elements.len() == 1
-                                        && meta.elements[0].current == *var_offset)
-                                        .then_some(*vid)
-                                })
-                        });
-                }
-            }
-        }
+        crate::ir::hier_ref::resolve_component_connects(
+            context,
+            &mut all_external_components,
+            &all_child_modules,
+            &nested_derived_clock_candidates,
+            &crate::ir::nested_tb::signal_offsets(&tb_variables),
+        )?;
 
         context.scope_contexts.pop();
 
@@ -6289,7 +6305,7 @@ impl Conv<&air::Module> for ProtoModule {
                         use_4state,
                     );
                     unfuse_field_offsets = field_offsets;
-                    log::info!("field_unfuse ({}): {stats:?}", src.name);
+                    log::debug!("field_unfuse ({}): {stats:?}", src.name);
                 }
                 let unfuse_comb_bytes = context.comb_total_bytes - comb_total_pre_unfuse;
                 let unfuse_comb_reloc: Vec<(isize, isize, usize)> =
@@ -6362,9 +6378,13 @@ impl Conv<&air::Module> for ProtoModule {
             for (_, off, _, _, _) in &mut nested_derived_clock_candidates {
                 *off = sched.translate_off(*off);
             }
+            comb_layout::translate_meta_map(&mut tb_variables, &sched);
             for external in &mut all_external_components {
                 for connect in &mut external.connects {
                     connect.expr.remap_offsets_with(&|o| sched.translate_off(o));
+                    if let Some(output) = &mut connect.output {
+                        output.offset = sched.translate_off(output.offset);
+                    }
                 }
             }
             if sched.buffer_end > context.comb_total_bytes {
@@ -6466,7 +6486,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Top-level variables written by RTL (post-DCE), for the sole-driver
         // check on component outputs at load time.
-        let rtl_driven: crate::HashSet<air::VarId> = if all_external_components.is_empty() {
+        let rtl_driven: crate::HashSet<VarOffset> = if all_external_components.is_empty() {
             crate::HashSet::default()
         } else {
             let mut write_offsets: crate::HashSet<VarOffset> = crate::HashSet::default();
@@ -6492,15 +6512,26 @@ impl Conv<&air::Module> for ProtoModule {
                 stmt.gather_variable_offsets(&mut ins, &mut outs);
                 write_offsets.extend(outs.drain(..));
             }
-            variable_meta
-                .iter()
-                .filter(|(_, meta)| {
-                    meta.elements
-                        .iter()
-                        .any(|e| write_offsets.contains(&e.current))
-                })
-                .map(|(vid, _)| *vid)
-                .collect()
+            // Keyed by storage: a nested test module's component drives
+            // a variable of a child scope.
+            let mut driven = crate::HashSet::default();
+            let mut metas: Vec<&HashMap<VarId, VariableMeta>> = vec![&variable_meta];
+            let mut stack: Vec<&ModuleVariableMeta> = all_child_modules.iter().collect();
+            while let Some(child) = stack.pop() {
+                metas.push(&child.variable_meta);
+                stack.extend(child.children.iter());
+            }
+            for meta in metas.into_iter().flat_map(|x| x.values()) {
+                if meta
+                    .elements
+                    .iter()
+                    .any(|e| write_offsets.contains(&e.current))
+                    && let Some(first) = meta.elements.first()
+                {
+                    driven.insert(first.current);
+                }
+            }
+            driven
         };
 
         // Cond-hoist transform (disable with VERYL_COND_HOIST_DISABLE=1):
@@ -6880,6 +6911,17 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             }
+            // A nested test module's clock is driven the same way.
+            for (id, meta) in &tb_variables {
+                if meta.r#type.is_clock()
+                    && let Some(elem) = meta.elements.first()
+                {
+                    pc_offsets.insert(elem.current, *id);
+                    if matches!(meta.r#type.kind, air::TypeKind::ClockNegedge) {
+                        negedge_inputs.insert(*id);
+                    }
+                }
+            }
             (dc_vars, pc_offsets, negedge_inputs)
         };
 
@@ -7190,7 +7232,11 @@ impl Conv<&air::Module> for ProtoModule {
                 } else {
                     stmts
                 };
-                if tb_ff_store {
+                // precompile_tb_bodies is the only safe initial-block chunker:
+                // it preserves a settle boundary after a DUT-visible write.
+                // The general event chunker below can recombine that write
+                // with a following guard, which then polls stale comb state.
+                if event.is_initial() || tb_ff_store {
                     let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
                     return (event, stmts);
                 }
@@ -7368,6 +7414,8 @@ impl Conv<&air::Module> for ProtoModule {
             dataflow,
             whole_events,
             external_components: all_external_components,
+            tb_variables,
+            tb_events,
             rtl_driven,
             fused_comb_offsets: cached.fused_offsets.clone(),
             comb_touched_offsets,

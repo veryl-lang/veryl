@@ -540,3 +540,55 @@ pub(crate) fn resolve_expr(
     }
     Ok(())
 }
+
+/// Resolves the hierarchical references in component connections against the
+/// instance tree of the scope that declared them, which must be current.
+pub(crate) fn resolve_component_connects(
+    context: &mut Context,
+    components: &mut [crate::ir::external::ProtoExternalComponent],
+    children: &[ModuleVariableMeta],
+    derived_clock_candidates: &[crate::ir::derived_clock::EdgeCandidate],
+    tb_signals: &[(air::VarId, VarOffset)],
+) -> Result<(), SimulatorError> {
+    for external in components {
+        for connect in &mut external.connects {
+            resolve_expr(&mut connect.expr, context, children)?;
+            // A hierarchical clock/reset connection carries no VarId at
+            // conv time; recover the event key from the resolved offset.
+            // A nested derived clock or testbench clock/reset matches its
+            // re-keyed id; a child port aliased onto a testbench variable
+            // matches the scope's variable that fires the event.
+            if (connect.is_clock || connect.is_reset)
+                && connect.event_var.is_none()
+                && let ProtoExpression::Variable {
+                    var_offset,
+                    select: None,
+                    ..
+                } = &connect.expr
+            {
+                connect.event_var = derived_clock_candidates
+                    .iter()
+                    .find(|(_, offset, _, _, _)| offset == var_offset)
+                    .map(|(vid, _, _, _, _)| *vid)
+                    .or_else(|| {
+                        tb_signals
+                            .iter()
+                            .find(|(_, offset)| offset == var_offset)
+                            .map(|(vid, _)| *vid)
+                    })
+                    .or_else(|| {
+                        context
+                            .scope()
+                            .variable_meta
+                            .iter()
+                            .find_map(|(vid, meta)| {
+                                (meta.elements.len() == 1
+                                    && meta.elements[0].current == *var_offset)
+                                    .then_some(*vid)
+                            })
+                    });
+            }
+        }
+    }
+    Ok(())
+}

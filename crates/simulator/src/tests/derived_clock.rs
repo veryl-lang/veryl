@@ -420,7 +420,7 @@ fn gated_clock_via_submodule_in_testbench() {
         };
         let mut sim = Simulator::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let event_map = build_event_map(&sim.ir);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim
             .ir

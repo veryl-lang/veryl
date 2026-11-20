@@ -11,8 +11,11 @@ use crate::ir::{
 };
 use crate::namespace::Namespace;
 use crate::scope;
-use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, Symbol, SymbolId};
-use crate::symbol_path::GenericSymbolPath;
+use crate::symbol::{
+    Affiliation, ClockDomain, Direction, GenericMap, Symbol, SymbolId, SymbolKind,
+};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind};
+use crate::symbol_table;
 use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
 use miette::Result;
@@ -59,6 +62,49 @@ pub(crate) struct FunctionOutputBinding {
     pub scheduler_external: bool,
 }
 
+/// Identifies what a generic argument refers to, independent of its tokens.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GenericArgumentKey {
+    kind: GenericSymbolPathKind,
+    symbol: Option<SymbolId>,
+    paths: Vec<(StrId, Vec<GenericArgumentKey>)>,
+}
+
+impl GenericArgumentKey {
+    /// `None` when the meaning cannot be pinned down: a type with width
+    /// expressions, or an unresolved generic parameter whose value depends on
+    /// the enclosing generic map.
+    fn new(arg: &GenericSymbolPath) -> Option<Self> {
+        let symbol = match arg.kind {
+            GenericSymbolPathKind::VariableType(_) => return None,
+            GenericSymbolPathKind::Identifier => {
+                let symbol = symbol_table::resolve(arg).ok()?.found.clone();
+                if matches!(
+                    symbol.kind,
+                    SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
+                ) {
+                    return None;
+                }
+                Some(symbol.id)
+            }
+            GenericSymbolPathKind::TypeLiteral | GenericSymbolPathKind::ValueLiteral => None,
+        };
+        let paths = arg
+            .paths
+            .iter()
+            .map(|x| {
+                let arguments = x.arguments.iter().map(Self::new).collect::<Option<_>>()?;
+                Some((x.base.text, arguments))
+            })
+            .collect::<Option<_>>()?;
+        Some(Self {
+            kind: arg.kind.clone(),
+            symbol,
+            paths,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 struct FunctionEffectFrame {
     path: FuncPath,
@@ -90,6 +136,10 @@ pub struct Context {
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
     pub func_paths: HashMap<FuncPath, VarId>,
+    /// The first path seen for each generic argument meaning. A global
+    /// function signature takes its arguments from the call site, whose
+    /// tokens differ per call, so equal arguments are replaced by this one.
+    generic_arguments: HashMap<GenericArgumentKey, GenericSymbolPath>,
     /// Symbols whose function bodies are mid-conversion. Carried (via `inherit`)
     /// across the fresh per-call contexts that mutual recursion creates, so
     /// re-entry is detected and the IR conversion doesn't overflow.
@@ -162,10 +212,9 @@ pub struct Context {
     pub tb_hoist: Option<Vec<crate::ir::Statement>>,
     /// Names hoist temporaries uniquely within a module.
     pub tb_hoist_count: usize,
-    /// Resolved numeric parameters of the external component instances
-    /// declared so far, for evaluating declared method width expressions.
-    pub tb_component_params:
-        crate::HashMap<veryl_parser::resource_table::StrId, Vec<(String, u64)>>,
+    /// Testbench handles declared so far; component parameters also serve
+    /// declared method width expressions.
+    pub tb_handles: crate::ir::TbHandles,
     /// Elaborated components of module instances declared so far in the
     /// current module, for hierarchical references from testbench code.
     /// Child module bodies convert in fresh contexts (`inherit` does not
@@ -712,8 +761,9 @@ impl Context {
     pub fn apply_generic_maps(&self, path: &mut GenericSymbolPath) -> bool {
         let mut mapped = false;
         for map in self.generic_maps.iter().rev() {
-            let head = path.paths[0].base();
-            mapped |= map.iter().any(|x| x.map.contains_key(&head));
+            mapped |= map
+                .iter()
+                .any(|x| x.argument(&path.paths[0].base).is_some());
             path.apply_map(map);
         }
         mapped
@@ -1312,6 +1362,17 @@ impl Context {
 
     pub fn current_namespace(&self) -> Option<Namespace> {
         self.namespaces.last().cloned()
+    }
+
+    pub fn canonical_generic_argument(&mut self, arg: &GenericSymbolPath) -> GenericSymbolPath {
+        match GenericArgumentKey::new(arg) {
+            Some(key) => self
+                .generic_arguments
+                .entry(key)
+                .or_insert_with(|| arg.clone())
+                .clone(),
+            None => arg.clone(),
+        }
     }
 
     pub fn find_path(&self, path: &VarPath) -> Option<(VarId, Comptime)> {

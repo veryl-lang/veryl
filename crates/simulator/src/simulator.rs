@@ -563,6 +563,7 @@ impl Simulator {
             .module_variables
             .variables
             .iter()
+            .chain(&ret.ir.tb_variables)
             .filter(|(_, x)| x.r#type.is_reset())
             .map(|(id, _)| *id)
             .collect();
@@ -869,7 +870,7 @@ impl Simulator {
     }
 
     fn set_input_clock_bit(&mut self, var_id: VarId, value: u8) {
-        let Some(var) = self.ir.module_variables.variables.get(&var_id) else {
+        let Some(var) = self.ir.variable(&var_id) else {
             return;
         };
         let ptr = var.current_values[0];
@@ -1330,9 +1331,7 @@ impl Simulator {
         for c in &mut components {
             c.on_init();
             c.drain_logs();
-            if c.apply_outputs(&mut self.ir.module_variables, self.ir.use_4state)
-                && self.dump.is_some()
-            {
+            if c.apply_outputs(self.ir.use_4state) && self.dump.is_some() {
                 crate::wave_dumper::note_direct_write();
             }
         }
@@ -1381,7 +1380,7 @@ impl Simulator {
             if c.listens_to(event) {
                 c.fire(event, self.time);
                 c.drain_logs();
-                wrote |= c.apply_outputs(&mut self.ir.module_variables, self.ir.use_4state);
+                wrote |= c.apply_outputs(self.ir.use_4state);
             }
         }
         self.components = components;
@@ -2340,7 +2339,7 @@ impl Simulator {
     /// Set a variable value by VarId. Used to write clock/reset signal values
     /// into the variable storage so they appear in wave dumps.
     pub fn set_var_by_id(&mut self, var_id: &VarId, val: Value) {
-        let Some(x) = self.ir.module_variables.variables.get_mut(var_id) else {
+        let Some(x) = self.ir.variable(var_id) else {
             return;
         };
         let (ptr, nb) = (x.current_values[0], x.native_bytes);
