@@ -20369,6 +20369,160 @@ fn other_project_global_function_generic_arg() {
     );
 }
 
+/// `Top`'s IR. The tests below call a function whose local is sized by a
+/// generic package parameter `W` = 16, so a bound parameter shows as
+/// `logic<16>`.
+fn generic_function_top_ir(code: &str) -> String {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    assert!(errors.is_empty(), "{errors:?}");
+
+    ir.components
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Component::Module(x) if x.name.to_string() == "Top" => Some(x),
+            _ => None,
+        })
+        .unwrap()
+        .to_string()
+}
+
+const GENERIC_FUNCTION_PACKAGES: &str = r#"
+    pub proto package PP {
+        const W: u32;
+    }
+    pub package P16 for PP {
+        const W: u32 = 16;
+    }
+    pub package PG::<N: u32> for PP {
+        const W: u32 = N;
+    }
+    pub interface Base::<PKG: PP> {
+        var a: logic<32>;
+        function f() -> logic<32> {
+            var o: logic<PKG::W>;
+            o = a[PKG::W - 1:0];
+            return o as 32;
+        }
+    }
+"#;
+
+#[track_caller]
+fn assert_generic_function_bound(decls: &str, inst_type: &str, call: &str) {
+    let code = format!(
+        r#"{GENERIC_FUNCTION_PACKAGES}
+    {decls}
+    module Top (
+        i: input  logic<32>,
+        o: output logic<32>,
+    ) {{
+        inst x: {inst_type};
+        assign x.a = i;
+        assign o = x.{call}();
+    }}
+    "#
+    );
+    let top = generic_function_top_ir(&code);
+    assert!(top.contains(".o): logic<16>"), "{top}");
+}
+
+#[test]
+fn alias_package_forwarded_as_generic_arg() {
+    assert_generic_function_bound(
+        r#"
+    pub package Cfg {
+        alias package P = PG::<16>;
+    }
+    pub package Utils::<Q: PP> {
+        function f(a: input logic<32>) -> logic<32> {
+            var o: logic<Q::W>;
+            o = a[Q::W - 1:0];
+            return o as 32;
+        }
+    }
+    pub interface IF::<PKG: PP> {
+        var a: logic<32>;
+        function g() -> logic<32> {
+            return Utils::<PKG>::f(a);
+        }
+    }
+    import Cfg::P;
+    "#,
+        "IF::<P>",
+        "g",
+    );
+}
+
+#[test]
+fn mixin_function_called_through_instance() {
+    assert_generic_function_bound(
+        r#"
+    pub interface IF::<Q: PP> {
+        mixin Base::<Q>;
+    }
+    "#,
+        "IF::<P16>",
+        "f",
+    );
+}
+
+#[test]
+fn mixin_function_called_from_host_interface() {
+    assert_generic_function_bound(
+        r#"
+    pub interface IF::<Q: PP> {
+        mixin Base::<Q>;
+        function g() -> logic<32> {
+            return f();
+        }
+    }
+    "#,
+        "IF::<P16>",
+        "g",
+    );
+}
+
+#[test]
+fn mixin_through_alias_interface() {
+    assert_generic_function_bound(
+        r#"
+    alias interface B16 = Base::<P16>;
+    pub interface IF {
+        mixin B16;
+    }
+    "#,
+        "IF",
+        "f",
+    );
+}
+
+#[test]
+fn instance_of_alias_interface_binds_target_args() {
+    let decls = r#"
+    pub interface IF::<Q: PP> {
+        mixin Base::<Q>;
+        function g() -> logic<32> {
+            var o: logic<Q::W>;
+            o = a[Q::W - 1:0];
+            return o as 32;
+        }
+    }
+    alias interface IF16 = IF::<P16>;
+    "#;
+    assert_generic_function_bound(decls, "IF16", "f");
+    assert_generic_function_bound(decls, "IF16", "g");
+}
+
 #[test]
 fn type_inference_not_supported() {
     // Binary arithmetic is not an inferable expression shape.
