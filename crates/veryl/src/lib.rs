@@ -127,6 +127,10 @@ pub struct OptNew {
     /// usable as `$comp::<name>`) instead of a Veryl project
     #[arg(long)]
     pub component: bool,
+
+    /// Generate an AGENTS.md guide for AI agents working in the project
+    #[arg(long)]
+    pub agent: bool,
 }
 
 /// Create a new project in an existing directory
@@ -134,6 +138,10 @@ pub struct OptNew {
 pub struct OptInit {
     #[arg(default_value = ".")]
     pub path: PathBuf,
+
+    /// Generate an AGENTS.md guide for AI agents working in the project
+    #[arg(long)]
+    pub agent: bool,
 }
 
 /// Format the current project

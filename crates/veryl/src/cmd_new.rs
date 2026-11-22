@@ -49,6 +49,14 @@ impl CmdNew {
                 Git::init(&self.opt.path)?;
             }
 
+            if self.opt.agent {
+                let agents_md = Metadata::create_default_agents_md(&name);
+                let agents_path = self.opt.path.join("AGENTS.md");
+                let mut file = File::create(&agents_path).into_diagnostic()?;
+                write!(file, "{agents_md}").into_diagnostic()?;
+                file.flush().into_diagnostic()?;
+            }
+
             info!("Created \"{name}\" project");
         } else {
             bail!("path \"{}\" is not valid", self.opt.path.to_string_lossy());
@@ -306,6 +314,7 @@ mod tests {
         CmdNew::new(OptNew {
             path: std::env::temp_dir().join(name),
             component: true,
+            agent: false,
         })
     }
 
@@ -373,6 +382,7 @@ mod tests {
         let cmd = CmdNew::new(OptNew {
             path: root.clone(),
             component: true,
+            agent: false,
         });
         cmd.create_component_project("my_checker", "cargo", "lib")
             .unwrap();
@@ -385,5 +395,27 @@ mod tests {
         let tb = fs::read_to_string(root.join("examples/my_checker.veryl")).unwrap();
         assert!(tb.contains("$comp::my_checker"), "{tb}");
         let _ = fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn new_with_agent_creates_agents_md() {
+        let root = std::env::temp_dir().join("veryl_new_agent_test");
+        let _ = fs::remove_dir_all(&root);
+        let cmd = CmdNew::new(OptNew {
+            path: root.clone(),
+            component: false,
+            agent: true,
+        });
+        cmd.exec().unwrap();
+
+        let agents_md_path = root.join("AGENTS.md");
+        assert!(agents_md_path.is_file());
+        let content = fs::read_to_string(&agents_md_path).unwrap();
+        assert!(content.contains("# AGENTS.md"));
+        assert!(content.contains("veryl check"));
+        assert!(content.contains("veryl fmt"));
+        assert!(content.contains("Initial Setup"));
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -52,6 +52,16 @@ impl CmdInit {
                 Git::init(&self.opt.path)?;
             }
 
+            if self.opt.agent {
+                let agents_path = self.opt.path.join("AGENTS.md");
+                if !agents_path.exists() {
+                    let agents_md = Metadata::create_default_agents_md(&name);
+                    let mut file = File::create(&agents_path).into_diagnostic()?;
+                    write!(file, "{agents_md}").into_diagnostic()?;
+                    file.flush().into_diagnostic()?;
+                }
+            }
+
             info!("Created \"{name}\" project");
         } else {
             bail!("path \"{}\" is not valid", self.opt.path.to_string_lossy());

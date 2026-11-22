@@ -593,6 +593,39 @@ obj_dir/
 "#
     }
 
+    pub fn create_default_agents_md(name: &str) -> String {
+        format!(
+            r#"# AGENTS.md - Instructions for {name}
+
+This project is written in [Veryl](https://doc.veryl-lang.org), a modern hardware description language.
+
+## Project Layout
+
+- `Veryl.toml`: Main project manifest and dependency configuration.
+- `src/`: Veryl source files (`*.veryl`).
+- `.gitignore`: Ignored build and simulation artifacts.
+
+## Development Commands
+
+Always run these standard Veryl commands during the development loop:
+
+- **Check diagnostics**: `veryl check` (or `veryl check --json` for machine-readable output)
+- **Formatting**: `veryl fmt` (or `veryl fmt --check` to verify)
+- **Run tests**: `veryl test`
+- **Build SystemVerilog**: `veryl build`
+
+## Initial Setup & Toolchain Configuration
+
+This project is service-agnostic and does not mandate a specific CI or synthesis vendor by default.
+
+When beginning work on this project, please converse with the user in an interactive dialogue to determine:
+1. Target EDA toolchain (e.g. Verilator, Vivado, Quartus, Yosys) if hardware simulation or synthesis is needed.
+2. Desired CI platform (e.g. GitHub Actions, GitLab CI, local scripts) if automated testing is desired.
+3. Coding standards or naming conventions specific to their team or organization.
+"#
+        )
+    }
+
     pub fn project_path(&self) -> PathBuf {
         self.metadata_path.parent().unwrap().to_path_buf()
     }
