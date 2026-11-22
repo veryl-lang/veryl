@@ -721,7 +721,10 @@ incremental = true
     fn run_check(metadata: &mut Metadata) -> Result<bool> {
         Analyzer::new(metadata).clear();
 
-        let check = crate::cmd_check::CmdCheck::new(crate::OptCheck { files: Vec::new() });
+        let check = crate::cmd_check::CmdCheck::new(crate::OptCheck {
+            files: Vec::new(),
+            ..Default::default()
+        });
         let ret = check.exec(metadata);
 
         Analyzer::new(metadata).clear();
