@@ -27737,3 +27737,27 @@ fn op_assign_on_multidimensional_struct_array_element() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn enum_encoding_one_hot_alias() {
+    let code = r#"
+    package PkgA {
+        #[enum_encoding(one_hot)]
+        enum EnumA: logic<3> {
+            A,
+            B,
+            C,
+        }
+
+        #[enum_encoding(onehot)]
+        enum EnumB: logic<3> {
+            A,
+            B,
+            C,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}

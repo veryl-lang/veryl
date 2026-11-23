@@ -246,6 +246,7 @@ struct Pattern {
     pub enum_encoding: StrId,
     pub sequential: StrId,
     pub onehot: StrId,
+    pub one_hot: StrId,
     pub gray: StrId,
     pub enum_member_prefix: StrId,
     pub test: StrId,
@@ -284,6 +285,7 @@ impl Pattern {
             enum_encoding: resource_table::insert_str("enum_encoding"),
             sequential: resource_table::insert_str("sequential"),
             onehot: resource_table::insert_str("onehot"),
+            one_hot: resource_table::insert_str("one_hot"),
             gray: resource_table::insert_str("gray"),
             enum_member_prefix: resource_table::insert_str("enum_member_prefix"),
             test: resource_table::insert_str("test"),
@@ -425,7 +427,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         x if x == pat.sequential => {
                             Ok(Attribute::EnumEncoding(EnumEncodingItem::Sequential))
                         }
-                        x if x == pat.onehot => {
+                        x if x == pat.onehot || x == pat.one_hot => {
                             Ok(Attribute::EnumEncoding(EnumEncodingItem::OneHot))
                         }
                         x if x == pat.gray => Ok(Attribute::EnumEncoding(EnumEncodingItem::Gray)),
