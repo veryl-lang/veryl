@@ -3593,6 +3593,61 @@ fn lower_runtime_system_function(
     })
 }
 
+/// `$isunknown(x)` of an argument known only at run time. A 2-state
+/// simulation has no x/z bits. In 4-state, the reduction XOR of the argument
+/// is x exactly when some bit is x/z, and an x bit is the only value that
+/// wildcard-matches both 0 and 1.
+fn lower_runtime_isunknown(
+    context: &mut Context,
+    call: &air::SystemFunctionCall,
+    input: &air::Expression,
+) -> Result<ProtoExpression, SimulatorError> {
+    let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+    if !context.config.use_4state {
+        return Ok(ProtoExpression::Value {
+            value: Value::new(0, 1, false),
+            width: 1,
+            expr_context,
+        });
+    }
+    let bit = ExpressionContext {
+        width: 1,
+        signed: false,
+    };
+    let arg: ProtoExpression = Conv::conv(context, input)?;
+    let parity = ProtoExpression::Unary {
+        op: Op::BitXor,
+        x: Box::new(arg),
+        width: 1,
+        expr_context: bit,
+    };
+    let parity = snapshot_expression(context, parity);
+    let matches = |value: u64| ProtoExpression::Binary {
+        x: Box::new(ProtoExpression::Value {
+            value: Value::new(value, 1, false),
+            width: 1,
+            expr_context: bit,
+        }),
+        op: Op::EqWildcard,
+        y: Box::new(parity.clone()),
+        width: 1,
+        expr_context: bit,
+    };
+    let unknown = ProtoExpression::Binary {
+        x: Box::new(matches(0)),
+        op: Op::BitAnd,
+        y: Box::new(matches(1)),
+        width: 1,
+        expr_context: bit,
+    };
+    Ok(ProtoExpression::Resize {
+        x: Box::new(unknown),
+        width: 1,
+        sign_extend: false,
+        expr_context,
+    })
+}
+
 impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut Context, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
@@ -3926,6 +3981,11 @@ impl Conv<&air::Expression> for ProtoExpression {
                     // A function body is shared by every caller, so an
                     // argument constant at only some call sites is a runtime
                     // value here; evaluating it would read a stale binding.
+                    air::SystemFunctionKind::IsUnknown(input)
+                        if !context.config.use_4state || !input.0.comptime().is_const =>
+                    {
+                        lower_runtime_isunknown(context, call, &input.0)
+                    }
                     air::SystemFunctionKind::Clog2(input)
                     | air::SystemFunctionKind::Onehot(input)
                         if !input.0.comptime().is_const =>

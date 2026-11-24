@@ -989,6 +989,7 @@ impl<'a> Subst<'a> {
             SystemFunctionKind::Bits(x)
             | SystemFunctionKind::Clog2(x)
             | SystemFunctionKind::Onehot(x)
+            | SystemFunctionKind::IsUnknown(x)
             | SystemFunctionKind::Signed(x)
             | SystemFunctionKind::Unsigned(x) => self.expr(&mut x.0)?,
             SystemFunctionKind::Size(x, y) => {
@@ -1991,6 +1992,7 @@ fn system_reads(call: &SystemFunctionCall, f: &mut impl FnMut(VarId)) {
         SystemFunctionKind::Bits(x)
         | SystemFunctionKind::Clog2(x)
         | SystemFunctionKind::Onehot(x)
+        | SystemFunctionKind::IsUnknown(x)
         | SystemFunctionKind::Signed(x)
         | SystemFunctionKind::Unsigned(x) => expr_reads(&x.0, f),
         SystemFunctionKind::Size(x, y) => {

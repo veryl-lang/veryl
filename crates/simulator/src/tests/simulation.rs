@@ -39517,3 +39517,48 @@ fn imported_alias_package_with_gen_const_argument() {
         assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
     }
 }
+
+#[test]
+fn isunknown() {
+    let code = r#"
+    module Top (
+        i_a   : input  logic<4>,
+        i_b   : input  logic<3>,
+        o_var : output logic,
+        o_part: output logic,
+        o_bit : output logic,
+        o_lit : output logic,
+    ) {
+        assign o_var  = $isunknown(i_a);
+        assign o_part = $isunknown({i_b, 1'bx});
+        assign o_bit  = $isunknown(i_a[2]);
+        assign o_lit  = $isunknown(4'b01x0);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_a", Value::new_x(4, false));
+        sim.set("i_b", Value::new(0b101, 3, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        let expected = config.use_4state as u64;
+        for name in ["o_var", "o_part", "o_bit", "o_lit"] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(expected, 1, false),
+                "{name} {config:?}"
+            );
+        }
+
+        sim.set("i_a", Value::new(0b1001, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        for name in ["o_var", "o_bit"] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(0, 1, false),
+                "{name} {config:?}"
+            );
+        }
+    }
+}
