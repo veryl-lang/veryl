@@ -1,0 +1,45 @@
+/// Arbiter package
+///
+/// Provides types and helper functions used by arbiter modules.
+pub package arbiter_pkg {
+    /// Arbitration scheme
+    enum arbiter_kind {
+        ROUND_ROBIN,
+        FIXED_PRIORITY,
+    }
+
+    /// Implementation of the grant selection logic
+    ///
+    /// * `FIND_MAX`  : Comparator tree
+    /// * `LOWEST_BIT`: Lowest set bit detection by `x & (~x + 1)`
+    /// * `LZC`       : Leading zero counter
+    enum selector_kind {
+        FIND_MAX,
+        LOWEST_BIT,
+        LZC,
+    }
+
+    function calc_grant_width (
+        requests    : input u32  ,
+        onehot_grant: input bbool,
+    ) -> u32 {
+        if requests == 1 {
+            return 1;
+        } else if onehot_grant {
+            return requests;
+        } else {
+            return $clog2(requests);
+        }
+    }
+
+    function calc_n_slots (
+        priority_enable: input bbool,
+        priority_width : input u32  ,
+    ) -> u32 {
+        if priority_enable {
+            return 2 ** priority_width;
+        } else {
+            return 1;
+        }
+    }
+}
