@@ -1,10 +1,11 @@
-use crate::backend::inst::{ReuseOutcome, try_compile_inst_chunks};
+use crate::backend::inst::{HierOutcome, ReuseOutcome, try_compile_inst_chunks};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{
     ExpressionContext, build_dynamic_write_select, dynamic_ranges_contain,
 };
 use crate::ir::external::{ExternalOutput, ProtoExternalComponent, ProtoExternalConnect};
+use crate::ir::hier::HierInstance;
 use crate::ir::module::{
     BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
 };
@@ -1442,6 +1443,8 @@ pub struct ProtoDeclaration {
     pub external_components: Vec<ProtoExternalComponent>,
     /// Testbench-facing variables of nested test modules.
     pub tb_variables: Vec<TbVariable>,
+    /// Template instances whose comb logic the top schedules (see `ir::hier`).
+    pub(crate) hier_instances: Vec<HierInstance>,
 }
 
 impl Conv<&air::Declaration> for ProtoDeclaration {
@@ -1512,6 +1515,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    hier_instances: vec![],
                 })
             }
             air::Declaration::Ff(x) => {
@@ -1588,6 +1592,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    hier_instances: vec![],
                 })
             }
             air::Declaration::Inst(x) => Conv::conv(context, x.as_ref()),
@@ -1621,6 +1626,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    hier_instances: vec![],
                 })
             }
             air::Declaration::Final(x) => {
@@ -1639,6 +1645,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    hier_instances: vec![],
                 })
             }
             air::Declaration::Unsupported(token) => {
@@ -1719,6 +1726,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                         token: x.token,
                     }],
                     tb_variables: vec![],
+                    hier_instances: vec![],
                 })
             }
             air::Declaration::Null => Ok(ProtoDeclaration {
@@ -1729,6 +1737,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 derived_clock_candidates: vec![],
                 external_components: vec![],
                 tb_variables: vec![],
+                hier_instances: vec![],
             }),
         }
     }
@@ -2489,6 +2498,65 @@ fn input_port_array_variable(
     Ok(Some(expressions))
 }
 
+/// At a hierarchy template's boundary, point the instance's event reads of a
+/// clock or reset port at the parent net it is wired to, as aliasing would.  The port
+/// copy settles with the comb logic, after the derived edge that fires the
+/// event has already been taken from the parent net.
+fn read_clock_reset_from_parent(
+    context: &mut Context,
+    src: &air::InstDeclaration,
+    child: &air::Module,
+    child_meta: &HashMap<air::VarId, VariableMeta>,
+    events: &mut HashMap<Event, Vec<ProtoStatement>>,
+) {
+    let mut map: HashMap<VarOffset, VarOffset> = HashMap::default();
+    let scope = context.scope();
+    for input in &src.inputs {
+        let Some(port) = child.variables.get(&input.id) else {
+            continue;
+        };
+        if !(port.r#type.is_clock() || port.r#type.is_reset()) {
+            continue;
+        }
+        let air::Expression::Term(factor) = &input.expr else {
+            continue;
+        };
+        let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref() else {
+            continue;
+        };
+        if !index.indices.is_empty() || !select.is_empty() {
+            continue;
+        }
+        // An event reading parent storage would race the parent's own NBA.
+        if scope.ff_table.has_ff_writer(*parent_id) {
+            continue;
+        }
+        let (Some(parent_meta), Some(child_port)) = (
+            scope.variable_meta.get(parent_id),
+            child_meta.get(&input.id),
+        ) else {
+            continue;
+        };
+        if parent_meta.elements.len() != child_port.elements.len()
+            || parent_meta.width != child_port.width
+            || parent_meta.native_bytes != child_port.native_bytes
+        {
+            continue;
+        }
+        for (c, p) in child_port.elements.iter().zip(&parent_meta.elements) {
+            map.insert(c.current, p.current);
+        }
+    }
+    if map.is_empty() {
+        return;
+    }
+    for stmts in events.values_mut() {
+        for s in stmts {
+            s.remap_offsets(&map);
+        }
+    }
+}
+
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
     fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
         let air::Component::Module(child_module) = src.component.as_ref() else {
@@ -2578,13 +2646,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let reusable = context.config.dut_reuse
             && !has_reference_aliases
             && !nested_tb::has_testbench(context, &src.component);
-        let alias_enabled = context.dut_reuse.port_alias_enabled(
-            component_key,
-            child_ff_count,
-            child_comb_count,
-            context.in_reuse_dut,
-            reusable,
-        );
+        let hier_template = context.dut_reuse.is_hier_template(component_key)
+            && !context.in_hier_template
+            && !has_reference_aliases
+            && !nested_tb::has_testbench(context, &src.component);
+        let alias_enabled = !hier_template
+            && context.dut_reuse.port_alias_enabled(
+                component_key,
+                child_ff_count,
+                child_comb_count,
+                context.in_reuse_dut,
+                reusable,
+            );
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
@@ -2701,21 +2774,40 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_derived_clock_candidates: Vec<EdgeCandidate> = vec![];
         let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
         let mut all_tb_variables: Vec<TbVariable> = vec![];
+        let mut all_hier_instances: Vec<HierInstance> = vec![];
+        let mut hier_instance: Option<HierInstance> = None;
 
         // Cross-test DUT reuse: if this component was already converted (earlier
         // test/instance), restore its subtree relocated to this instance's
         // offsets, skipping IR assembly AND codegen.  `child_variable_meta` and
         // the port copies / event remap below are still rebuilt fresh.
-        let (reuse_hit, claim_guard) = match context.dut_reuse.try_reuse_or_claim(
-            component_key,
-            alias_enabled,
-            ff_start,
-            comb_start,
-            reusable,
-        ) {
-            ReuseOutcome::Hit(r) => (Some(r), None),
-            ReuseOutcome::Compute(g) => (None, Some(g)),
-            ReuseOutcome::Disabled => (None, None),
+        let mut _hier_claim = None;
+        let (reuse_hit, claim_guard) = if hier_template {
+            match context
+                .dut_reuse
+                .hier_lookup(component_key, ff_start, comb_start)
+            {
+                HierOutcome::Hit(r, inst) => {
+                    hier_instance = inst;
+                    (Some(r), None)
+                }
+                HierOutcome::Compute(claim) => {
+                    _hier_claim = claim;
+                    (None, None)
+                }
+            }
+        } else {
+            match context.dut_reuse.try_reuse_or_claim(
+                component_key,
+                alias_enabled,
+                ff_start,
+                comb_start,
+                reusable,
+            ) {
+                ReuseOutcome::Hit(r) => (Some(r), None),
+                ReuseOutcome::Compute(g) => (None, Some(g)),
+                ReuseOutcome::Disabled => (None, None),
+            }
         };
         if let Some(reuse) = reuse_hit {
             // Re-key the cached subtree's grandchild derived-clock event ids
@@ -2752,6 +2844,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             all_comb_statements = reuse.comb_statements;
             all_post_comb_fns = reuse.post_comb_fns;
             all_child_modules = reuse.child_modules;
+            all_hier_instances = reuse.hier_instances;
             all_derived_clock_candidates = reuse
                 .derived_clock_candidates
                 .into_iter()
@@ -2784,6 +2877,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // de-aliased; internals relocate uniformly with the DUT).
             let prev_in_reuse_dut = context.in_reuse_dut;
             context.in_reuse_dut = prev_in_reuse_dut || !alias_enabled;
+            let prev_in_hier_template = context.in_hier_template;
+            context.in_hier_template = prev_in_hier_template || hier_template;
 
             for decl in child_decls {
                 let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -2798,6 +2893,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
                 all_external_components.extend(proto_decl.external_components);
                 all_tb_variables.extend(proto_decl.tb_variables);
+                all_hier_instances.extend(proto_decl.hier_instances);
             }
 
             // A nested test module's initial/final statements merge into the
@@ -2818,9 +2914,58 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             )?;
 
             context.in_reuse_dut = prev_in_reuse_dut;
+            context.in_hier_template = prev_in_hier_template;
             context.scope_contexts.pop();
 
-            if !has_reference_aliases {
+            if hier_template {
+                let mut stmts = std::mem::take(&mut all_comb_statements).into_vec();
+                stmts.append(&mut all_post_comb_fns);
+                let template = match crate::ir::hier::HierTemplate::build(
+                    context,
+                    child_module.name,
+                    stmts,
+                    ff_start,
+                    comb_start,
+                ) {
+                    Ok(t) => Some(t),
+                    Err(flat) => {
+                        all_comb_statements = CombList::from(flat);
+                        None
+                    }
+                };
+                if let Some(t) = &template
+                    && context.config.use_jit
+                {
+                    t.plan_cells(
+                        &child_module.name.to_string(),
+                        &child_variable_meta,
+                        &all_child_modules,
+                        &all_event_statements,
+                        &context.comb_reloc[comb_reloc_start..],
+                        context.config.use_4state,
+                    );
+                }
+                hier_instance = template.as_ref().map(|t| HierInstance {
+                    template: Arc::clone(t),
+                    ff_delta: 0,
+                    comb_delta: 0,
+                });
+                let comb = Arc::new(std::mem::take(&mut all_comb_statements).into_vec());
+                all_comb_statements = CombList::shared(Arc::clone(&comb));
+                context.dut_reuse.hier_store(
+                    component_key,
+                    ff_start,
+                    comb_start,
+                    context.ff_total_bytes - ff_start as usize,
+                    context.comb_total_bytes - comb_start as usize,
+                    &all_event_statements,
+                    comb,
+                    &all_child_modules,
+                    &all_derived_clock_candidates,
+                    &context.comb_reloc[comb_reloc_start..],
+                    template,
+                );
+            } else if !has_reference_aliases {
                 let mut comb = std::mem::take(&mut all_comb_statements).into_vec();
                 try_compile_inst_chunks(
                     context,
@@ -2857,9 +3002,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     &all_child_modules,
                     &all_derived_clock_candidates,
                     &context.comb_reloc[comb_reloc_start..],
+                    &all_hier_instances,
                 );
             }
         }
+        all_hier_instances.extend(hier_instance);
 
         // Direction-free interface references exchange only the bits written
         // on each side. Whole-member copies would overwrite disjoint drivers.
@@ -3233,6 +3380,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
         }
 
+        // A template's events compile after this point, so all of them see
+        // the remap; a reused DUT's are already compiled chunks.
+        if hier_template {
+            read_clock_reset_from_parent(
+                context,
+                src,
+                child_module,
+                &child_variable_meta,
+                &mut all_event_statements,
+            );
+        }
+
         let mut remapped_events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         for (event, stmts) in all_event_statements {
             let new_event = match &event {
@@ -3435,6 +3594,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             derived_clock_candidates: all_derived_clock_candidates,
             external_components: all_external_components,
             tb_variables: all_tb_variables,
+            hier_instances: all_hier_instances,
         })
     }
 }

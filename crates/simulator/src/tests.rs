@@ -21,7 +21,12 @@ use veryl_parser::Parser;
 /// Whether the comb runs as AOT-C code, i.e. the dataflow settle's `.so`.
 /// With dataflow off the comb has no AOT-C path, so this holds vacuously.
 pub(crate) fn comb_is_aot_native(ir: &Ir) -> bool {
-    !dataflow_on() || ir.dataflow.as_ref().is_some_and(|d| d.cell.get().is_some())
+    !dataflow_on()
+        || ir
+            .dataflow
+            .as_ref()
+            .and_then(|d| d.root_set())
+            .is_some_and(|r| r.cell.get().is_some())
 }
 
 pub(crate) fn dataflow_on() -> bool {
@@ -610,6 +615,7 @@ mod derived_clock;
 mod dut_reuse;
 mod error;
 mod guarded_cover;
+mod hier;
 mod hier_ref;
 mod simulation;
 mod testbench;

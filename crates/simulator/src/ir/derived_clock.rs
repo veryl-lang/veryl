@@ -266,24 +266,34 @@ fn reads_master(
     .any(|m| masters.contains(m))
 }
 
+/// A hierarchy cell `(partition, cell)` the cone writes into.
+pub(crate) type ConeMark = (u32, u32);
+
 /// The comb statements the master input clocks reach: running just these, in
 /// order, with the masters raised brings a settled comb to the full settle's
 /// state.  `None` when the cone depends on statement order beyond that (an
 /// offset with several writers) or is not much smaller than the comb.
-pub fn master_cone(
+pub(crate) fn master_cone(
     schedule: &DerivedClockSchedule,
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
-) -> Option<Vec<ProtoStatement>> {
-    fn leaves<'a>(s: &'a ProtoStatement, out: &mut Vec<&'a ProtoStatement>) {
+    partitions: &crate::ir::hier_cells::PartitionIndex,
+) -> Option<(Vec<ProtoStatement>, Vec<ConeMark>)> {
+    fn leaves<'a>(s: &'a ProtoStatement, out: &mut Vec<Leaf<'a>>) {
         match s {
-            ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+            ProtoStatement::CompiledBlock(cb) if cb.hier.is_none() && cb.has_originals() => {
                 for x in cb.original_stmts.iter() {
                     leaves(x, out);
                 }
             }
-            _ => out.push(s),
+            _ => out.push(Leaf::Plain(s)),
         }
+    }
+    // A hierarchy class block's statements are made one block at a time, so
+    // the whole comb is never copied out at once.
+    enum Leaf<'a> {
+        Plain(&'a ProtoStatement),
+        Class(&'a crate::ir::statement::CompiledBlockStatement, usize),
     }
     let diag = std::env::var("VERYL_MASTER_CONE_DIAG").is_ok();
     let decline = |why: &str| {
@@ -295,28 +305,55 @@ pub fn master_cone(
     if schedule.master_input_clocks.is_empty() {
         return decline("no master clock");
     }
-    let mut flat: Vec<&ProtoStatement> = Vec::new();
-    for s in pre_jit_stmts {
-        if let ProtoStatement::CompiledBlock(cb) = s
-            && cb.original_stmts.is_empty()
-        {
-            return decline("a compiled block without its statements");
-        }
-        leaves(s, &mut flat);
-    }
+    let mut flat: Vec<Leaf> = Vec::new();
+    // Where a leaf sits inside a hierarchy class block: the cell to mark
+    // dirty once the cone has rewritten it outside the cell.
+    let mut origin: Vec<Option<ConeMark>> = Vec::new();
     let fold = crate::ir::big_array::BigArrayFold::default();
-    let mut io: Vec<(Vec<VarOffset>, Vec<VarOffset>)> = Vec::with_capacity(flat.len());
-    let mut writers: HashMap<VarOffset, SmallVec<[u32; 1]>> = HashMap::default();
-    for (i, s) in flat.iter().enumerate() {
+    let mut io: Vec<(Vec<VarOffset>, Vec<VarOffset>)> = Vec::new();
+    let gather = |s: &ProtoStatement, io: &mut Vec<(Vec<VarOffset>, Vec<VarOffset>)>| {
         let mut ins = Vec::new();
         let mut outs = Vec::new();
         s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
         ins.retain(|o| !o.is_ff());
         outs.retain(|o| !o.is_ff());
-        for o in &outs {
+        io.push((ins, outs));
+    };
+    for s in pre_jit_stmts {
+        if let ProtoStatement::CompiledBlock(cb) = s {
+            if !cb.has_originals() {
+                return decline("a compiled block without its statements");
+            }
+            if let Some(h) = &cb.hier {
+                let key = (
+                    std::sync::Arc::as_ptr(&h.cells) as usize,
+                    cb.comb_delta_bytes,
+                );
+                let Some(&partition) = partitions.get(&key) else {
+                    return decline("a hierarchy class block outside the comb list");
+                };
+                for (i, x) in cb.originals().iter().enumerate() {
+                    gather(x, &mut io);
+                    flat.push(Leaf::Class(cb, i));
+                    origin.push(Some((partition, h.cells.cell_of(h.class, i))));
+                }
+                continue;
+            }
+        }
+        let first = flat.len();
+        leaves(s, &mut flat);
+        for leaf in &flat[first..] {
+            if let Leaf::Plain(x) = leaf {
+                gather(x, &mut io);
+            }
+        }
+        origin.resize(flat.len(), None);
+    }
+    let mut writers: HashMap<VarOffset, SmallVec<[u32; 1]>> = HashMap::default();
+    for (i, (_, outs)) in io.iter().enumerate() {
+        for o in outs {
             writers.entry(*o).or_default().push(i as u32);
         }
-        io.push((ins, outs));
     }
     let mut tainted: HashSet<VarOffset> = input_clock_offsets
         .iter()
@@ -365,7 +402,17 @@ pub fn master_cone(
     if cone.is_empty() || cone.len() * 8 > flat.len() {
         return decline("the cone is not much smaller than the comb");
     }
-    Some(cone.into_iter().map(|i| flat[i].clone()).collect())
+    let mut marks: Vec<ConeMark> = cone.iter().filter_map(|&i| origin[i]).collect();
+    marks.sort_unstable();
+    marks.dedup();
+    let stmts = cone
+        .into_iter()
+        .map(|i| match flat[i] {
+            Leaf::Plain(s) => s.clone(),
+            Leaf::Class(cb, j) => cb.original_at(j),
+        })
+        .collect();
+    Some((stmts, marks))
 }
 
 /// The master input clock the copy chain from `offset` reaches, else the
@@ -692,11 +739,13 @@ mod tests {
         let filler: Vec<ProtoStatement> = (0..16).map(|k| assign(100 + 8 * k, bit(400))).collect();
         let mut alone = vec![gate.clone()];
         alone.extend(filler.iter().cloned());
-        let cone = master_cone(&schedule, &alone, &input_clock_offsets).expect("a cone");
+        let partitions = HashMap::default();
+        let (cone, _) =
+            master_cone(&schedule, &alone, &input_clock_offsets, &partitions).expect("a cone");
         assert_eq!(cone.len(), 1);
         let mut late = vec![assign(16, bit(24)), gate];
         late.extend(filler);
-        assert!(master_cone(&schedule, &late, &input_clock_offsets).is_none());
+        assert!(master_cone(&schedule, &late, &input_clock_offsets, &partitions).is_none());
     }
 
     #[test]

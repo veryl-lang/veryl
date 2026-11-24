@@ -55,6 +55,16 @@ impl BigArrayFold {
             .push((base.is_ff(), start, start.saturating_add(span as isize)));
     }
 
+    /// The ranges recorded so far, before `finish`.
+    pub(crate) fn recorded(&self) -> &[(bool, isize, isize)] {
+        &self.spans
+    }
+
+    /// Record a range `recorded` returned, shifted by `delta`.
+    pub(crate) fn record_span(&mut self, (is_ff, start, end): (bool, isize, isize), delta: isize) {
+        self.spans.push((is_ff, start + delta, end + delta));
+    }
+
     /// Sort and merge the recorded ranges.  Must be called once recording is
     /// done; the lookups below assume sorted, non-overlapping spans.
     pub fn finish(&mut self) {

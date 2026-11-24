@@ -16,6 +16,7 @@
 use crate::backend::CompileCtx;
 use crate::ir::context::{CachedChunk, ChunkCacheEntry, Context};
 use crate::ir::declaration::stable_topo_sort_with_blocks;
+use crate::ir::hier::{HierInstance, HierTemplate};
 use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableElement, VariableMeta};
 use crate::ir::{CompiledBlockStatement, Event, ProtoStatement};
 use crate::{HashMap, HashSet};
@@ -46,6 +47,19 @@ pub(crate) struct DutReuseCache {
     disable_port_alias: bool,
     statements: Mutex<HashMap<usize, Slot>>,
     ready: Condvar,
+    /// Hierarchy templates (see `ir::hier`) and their first conversion.
+    hier_templates: HashSet<usize>,
+    hier_entries: Mutex<HashMap<usize, HierSlot>>,
+    hier_ready: Condvar,
+    #[cfg(test)]
+    pub(crate) hier_conversions: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How long a claiming conversion stalls, so a parallel test overlaps it.
+    pub(crate) static HIER_CLAIM_STALL: std::cell::Cell<std::time::Duration> =
+        const { std::cell::Cell::new(std::time::Duration::ZERO) };
 }
 
 impl Default for DutReuseCache {
@@ -55,16 +69,118 @@ impl Default for DutReuseCache {
             disable_port_alias: std::env::var("VERYL_DISABLE_PORT_ALIAS").as_deref() == Ok("1"),
             statements: Mutex::default(),
             ready: Condvar::new(),
+            hier_templates: HashSet::default(),
+            hier_entries: Mutex::default(),
+            hier_ready: Condvar::new(),
+            #[cfg(test)]
+            hier_conversions: Default::default(),
         }
     }
 }
 
 impl DutReuseCache {
-    pub(crate) fn new(ir: &air::Ir, tops: &[veryl_parser::resource_table::StrId]) -> Self {
+    pub(crate) fn new(
+        ir: &air::Ir,
+        tops: &[veryl_parser::resource_table::StrId],
+        config: &crate::ir::Config,
+    ) -> Self {
         Self {
-            recurring: compute_recurring_set(ir, tops),
+            recurring: if config.dut_reuse {
+                compute_recurring_set(ir, tops)
+            } else {
+                HashSet::default()
+            },
+            hier_templates: match config.hier_templates {
+                Some(min_decls) => crate::ir::hier::template_set(ir, tops, min_decls),
+                None => HashSet::default(),
+            },
             ..Self::default()
         }
+    }
+
+    pub(crate) fn is_hier_template(&self, component_key: *const air::Component) -> bool {
+        self.hier_templates.contains(&(component_key as usize))
+    }
+
+    /// A template's earlier conversion relocated to this instance, with the
+    /// instance's handle on the shared schedule when the template holds.  On a
+    /// miss the caller converts it, holding the claim until `hier_store`, while
+    /// parallel tests wait for that conversion instead of repeating it.
+    pub(crate) fn hier_lookup(
+        self: &Arc<Self>,
+        component_key: *const air::Component,
+        ff_start: isize,
+        comb_start: isize,
+    ) -> HierOutcome {
+        let key = component_key as usize;
+        let mut entries = self.hier_entries.lock().unwrap();
+        let entry = loop {
+            match entries.get(&key) {
+                Some(HierSlot::Done(entry)) => break Arc::clone(entry),
+                Some(HierSlot::Computing) => entries = self.hier_ready.wait(entries).unwrap(),
+                Some(HierSlot::Abandoned) => return HierOutcome::Compute(None),
+                None => {
+                    entries.insert(key, HierSlot::Computing);
+                    #[cfg(test)]
+                    {
+                        drop(entries);
+                        std::thread::sleep(HIER_CLAIM_STALL.with(|d| d.get()));
+                    }
+                    return HierOutcome::Compute(Some(HierClaim {
+                        cache: Arc::clone(self),
+                        key,
+                    }));
+                }
+            }
+        };
+        drop(entries);
+        let inst = entry.template.as_ref().map(|t| HierInstance {
+            template: Arc::clone(t),
+            ff_delta: ff_start - entry.conv.ref_ff_start,
+            comb_delta: comb_start - entry.conv.ref_comb_start,
+        });
+        HierOutcome::Hit(relocate_entry(&entry.conv, ff_start, comb_start), inst)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn hier_store(
+        &self,
+        component_key: *const air::Component,
+        ff_start: isize,
+        comb_start: isize,
+        ff_size: usize,
+        comb_size: usize,
+        event_statements: &HashMap<Event, Vec<ProtoStatement>>,
+        comb_statements: Arc<Vec<ProtoStatement>>,
+        child_modules: &[ModuleVariableMeta],
+        derived_clock_candidates: &[crate::ir::EdgeCandidate],
+        comb_reloc: &[(isize, isize, usize)],
+        template: Option<Arc<HierTemplate>>,
+    ) {
+        let conv = CachedStatements {
+            ref_ff_start: ff_start,
+            ref_comb_start: comb_start,
+            ff_size,
+            comb_size,
+            event_statements: event_statements.clone(),
+            comb_statements,
+            post_comb_fns: Vec::new(),
+            child_modules: child_modules.to_vec(),
+            derived_clock_candidates: derived_clock_candidates.to_vec(),
+            comb_reloc: comb_reloc.to_vec(),
+            hier_instances: Vec::new(),
+        };
+        #[cfg(test)]
+        self.hier_conversions
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut entries = self.hier_entries.lock().unwrap();
+        let slot = entries
+            .entry(component_key as usize)
+            .or_insert(HierSlot::Computing);
+        if !matches!(slot, HierSlot::Done(_)) {
+            *slot = HierSlot::Done(Arc::new(HierEntry { conv, template }));
+        }
+        self.hier_ready.notify_all();
     }
 
     /// De-alias only the topmost recurring DUT boundary. Its internals remain
@@ -181,6 +297,41 @@ struct CachedStatements {
     /// `Context::comb_reloc` entries the reference conv recorded inside its
     /// region; a copy needs them relocated too or its temps stay unowned.
     comb_reloc: Vec<(isize, isize, usize)>,
+    hier_instances: Vec<HierInstance>,
+}
+
+struct HierEntry {
+    conv: CachedStatements,
+    template: Option<Arc<HierTemplate>>,
+}
+
+enum HierSlot {
+    Computing,
+    Done(Arc<HierEntry>),
+    /// The claiming conversion failed; later tests convert on their own.
+    Abandoned,
+}
+
+pub(crate) enum HierOutcome {
+    Hit(ReusedStatements, Option<HierInstance>),
+    Compute(Option<HierClaim>),
+}
+
+/// Held across a template's conversion; dropping it before `hier_store`
+/// releases the tests waiting on it.
+pub(crate) struct HierClaim {
+    cache: Arc<DutReuseCache>,
+    key: usize,
+}
+
+impl Drop for HierClaim {
+    fn drop(&mut self) {
+        let mut entries = self.cache.hier_entries.lock().unwrap();
+        if let Some(slot @ HierSlot::Computing) = entries.get_mut(&self.key) {
+            *slot = HierSlot::Abandoned;
+        }
+        self.cache.hier_ready.notify_all();
+    }
 }
 
 /// Single-flight cache slot: one thread `Computing` a component blocks others
@@ -203,6 +354,7 @@ pub struct ReusedStatements {
     pub ff_size: usize,
     pub comb_size: usize,
     pub comb_reloc: Vec<(isize, isize, usize)>,
+    pub(crate) hier_instances: Vec<HierInstance>,
 }
 
 fn adjust_offsets_vec(offs: &[VarOffset], ff_delta: isize, comb_delta: isize) -> Vec<VarOffset> {
@@ -240,6 +392,8 @@ fn reloc_stmt(s: &ProtoStatement, ff_delta: isize, comb_delta: isize) -> ProtoSt
                         .collect(),
                 ),
                 original_stmts: Arc::new(reloc_stmts(&cb.original_stmts, ff_delta, comb_delta)),
+                shared: cb.shared,
+                hier: cb.hier.clone(),
             })
         }
         other => {
@@ -356,6 +510,11 @@ fn relocate_entry(
         ff_size: entry.ff_size,
         comb_size: entry.comb_size,
         comb_reloc,
+        hier_instances: entry
+            .hier_instances
+            .iter()
+            .map(|h| h.adjusted(ff_delta, comb_delta))
+            .collect(),
     }
 }
 
@@ -382,7 +541,7 @@ pub struct ClaimGuard {
 
 impl ClaimGuard {
     #[allow(clippy::too_many_arguments)]
-    pub fn store(
+    pub(crate) fn store(
         mut self,
         ff_start: isize,
         comb_start: isize,
@@ -394,6 +553,7 @@ impl ClaimGuard {
         child_modules: &[ModuleVariableMeta],
         derived_clock_candidates: &[crate::ir::EdgeCandidate],
         comb_reloc: &[(isize, isize, usize)],
+        hier_instances: &[HierInstance],
     ) {
         let entry = Arc::new(CachedStatements {
             ref_ff_start: ff_start,
@@ -406,6 +566,7 @@ impl ClaimGuard {
             child_modules: child_modules.to_vec(),
             derived_clock_candidates: derived_clock_candidates.to_vec(),
             comb_reloc: comb_reloc.to_vec(),
+            hier_instances: hier_instances.to_vec(),
         });
         let mut cache = self.cache.statements.lock().unwrap();
         cache.insert(self.key, Slot::Done(entry));
@@ -568,6 +729,8 @@ pub fn try_compile_inst_chunks(
                     ff_canonical_offsets: adjusted_canonical,
                     stmt_deps: Arc::new(vec![]),
                     original_stmts: Arc::new(adjust_stmts(&cached.original_stmts)),
+                    shared: false,
+                    hier: None,
                 })];
             }
         }
@@ -587,6 +750,8 @@ pub fn try_compile_inst_chunks(
                 ff_canonical_offsets: vec![],
                 stmt_deps: Arc::new(adjusted_deps),
                 original_stmts: Arc::new(adjust_stmts(&cached.original_stmts)),
+                shared: false,
+                hier: None,
             })];
         }
     } else {
@@ -640,6 +805,8 @@ pub fn try_compile_inst_chunks(
                     ff_canonical_offsets: ff_canonical,
                     stmt_deps: Arc::new(vec![]),
                     original_stmts: event_original,
+                    shared: false,
+                    hier: None,
                 })];
             }
         }
@@ -696,6 +863,8 @@ pub fn try_compile_inst_chunks(
                         ff_canonical_offsets: vec![],
                         stmt_deps: Arc::clone(&stmt_deps),
                         original_stmts,
+                        shared: false,
+                        hier: None,
                     })];
 
                 Some(CachedChunk {

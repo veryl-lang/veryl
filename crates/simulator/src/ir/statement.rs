@@ -538,6 +538,8 @@ pub enum Statement {
     Compiled(CompiledStmt),
     /// Consecutive `Compiled` chunks sharing the same `artifact`.
     CompiledBatch(CompiledBatchStmt),
+    /// One class of a hierarchy template instance, run through its cells.
+    HierClass(Box<crate::ir::hier_cells::HierClassRun>),
     SequentialBlock(Vec<Statement>),
     SystemFunctionCall(SystemFunctionCall),
     TbMethodCall {
@@ -582,6 +584,9 @@ pub fn patch_stmt_log_buf(s: &mut Statement, log_buf: *mut u8) {
             c.log_buf = log_buf;
         }
         Statement::CompiledBatch(c) => {
+            c.log_buf = log_buf;
+        }
+        Statement::HierClass(c) => {
             c.log_buf = log_buf;
         }
         Statement::If(if_stmt) => {
@@ -728,6 +733,10 @@ impl Statement {
                 }
                 ControlFlow::Continue
             },
+            Statement::HierClass(c) => unsafe {
+                c.run();
+                ControlFlow::Continue
+            },
             Statement::SequentialBlock(body) => {
                 for s in body {
                     if s.eval_step(mask_cache, status) == ControlFlow::Break {
@@ -755,7 +764,10 @@ impl Statement {
                     s.gather_variable(inputs, outputs);
                 }
             }
-            Statement::Compiled(_) | Statement::CompiledBatch(_) | Statement::Break => {}
+            Statement::Compiled(_)
+            | Statement::CompiledBatch(_)
+            | Statement::HierClass(_)
+            | Statement::Break => {}
             Statement::SequentialBlock(body) => {
                 for s in body {
                     s.gather_variable(inputs, outputs);
@@ -804,6 +816,7 @@ pub(crate) fn make_ff_stores_direct(stmts: &mut [Statement]) {
             // the JIT path, so none reach here.
             Statement::Compiled(_)
             | Statement::CompiledBatch(_)
+            | Statement::HierClass(_)
             | Statement::SystemFunctionCall(_)
             | Statement::Break
             | Statement::TbMethodCall { .. } => {}
@@ -1286,6 +1299,62 @@ pub struct CompiledBlockStatement {
     /// relocates by a zero delta hands the same list to every test rather than
     /// deep-cloning the whole tree per test (`backend::inst::relocate_entry`).
     pub original_stmts: Arc<Vec<ProtoStatement>>,
+    /// Code shared by every instance of a hierarchy template: the block is
+    /// never expanded back into its originals.
+    pub shared: bool,
+    /// Runs as the dirty-tracked cells of one template class instead of
+    /// `artifact` (see `ir::hier_cells`).
+    pub hier: Option<HierRef>,
+}
+
+#[derive(Clone)]
+pub struct HierRef {
+    pub(crate) cells: Arc<crate::ir::hier_cells::HierCells>,
+    pub(crate) class: u32,
+    /// The instance's partition in the dataflow cell layout; numbered once
+    /// the comb list is final.
+    pub(crate) partition: u32,
+    /// The class's reads and writes, standing in for walking `original_stmts`.
+    pub(crate) summary: Arc<crate::ir::hier::HierSummary>,
+    /// The class's template statements at the template's own offsets, shared
+    /// by every instance; `original_stmts` stays empty, since one shifted copy
+    /// per instance would hold the template many times over.
+    pub(crate) class_stmts: Arc<Vec<ProtoStatement>>,
+}
+
+impl CompiledBlockStatement {
+    /// The statements this block executes, at this instance's offsets.
+    pub fn originals(&self) -> std::borrow::Cow<'_, [ProtoStatement]> {
+        match &self.hier {
+            Some(h) => std::borrow::Cow::Owned(
+                h.class_stmts
+                    .iter()
+                    .map(|s| {
+                        let mut s = s.clone();
+                        s.adjust_offsets(self.ff_delta_bytes, self.comb_delta_bytes);
+                        s
+                    })
+                    .collect(),
+            ),
+            None => std::borrow::Cow::Borrowed(&self.original_stmts),
+        }
+    }
+
+    /// The `i`th of `originals()`, made alone.
+    pub fn original_at(&self, i: usize) -> ProtoStatement {
+        match &self.hier {
+            Some(h) => {
+                let mut s = h.class_stmts[i].clone();
+                s.adjust_offsets(self.ff_delta_bytes, self.comb_delta_bytes);
+                s
+            }
+            None => self.original_stmts[i].clone(),
+        }
+    }
+
+    pub fn has_originals(&self) -> bool {
+        self.hier.is_some() || !self.original_stmts.is_empty()
+    }
 }
 
 // `stmt_deps` and `original_stmts` are excluded from `Debug` and `Hash`: both are
@@ -1308,9 +1377,18 @@ impl std::fmt::Debug for CompiledBlockStatement {
             ff_canonical_offsets,
             stmt_deps: _,
             original_stmts: _,
+            shared,
+            hier,
         } = self;
         f.debug_struct("CompiledBlockStatement")
-            .field("artifact", artifact)
+            .field("shared", shared)
+            .field(
+                "hier",
+                &hier
+                    .as_ref()
+                    .map(|h| (h.cells.fingerprint, h.class, h.partition)),
+            )
+            .field("artifact", &hier.is_none().then_some(artifact))
             .field("ff_delta_bytes", ff_delta_bytes)
             .field("comb_delta_bytes", comb_delta_bytes)
             .field("input_offsets", input_offsets)
@@ -1331,8 +1409,18 @@ impl std::hash::Hash for CompiledBlockStatement {
             ff_canonical_offsets,
             stmt_deps: _,
             original_stmts: _,
+            shared,
+            hier,
         } = self;
-        artifact.hash(state);
+        shared.hash(state);
+        hier.as_ref()
+            .map(|h| (h.cells.fingerprint, h.class, h.partition))
+            .hash(state);
+        // A template class runs through its cells; its artifact's address
+        // would only make the hash differ between runs.
+        if hier.is_none() {
+            artifact.hash(state);
+        }
         ff_delta_bytes.hash(state);
         comb_delta_bytes.hash(state);
         input_offsets.hash(state);
@@ -1573,11 +1661,14 @@ impl ProtoStatement {
             ProtoStatement::SequentialBlock(b) => {
                 b.iter().map(ProtoStatement::statement_mass).sum()
             }
-            ProtoStatement::CompiledBlock(cb) => cb
-                .original_stmts
-                .iter()
-                .map(ProtoStatement::statement_mass)
-                .sum(),
+            ProtoStatement::CompiledBlock(cb) => match &cb.hier {
+                Some(h) => h.summary.mass,
+                None => cb
+                    .original_stmts
+                    .iter()
+                    .map(ProtoStatement::statement_mass)
+                    .sum(),
+            },
             _ => 0,
         };
         1 + kids
@@ -2328,11 +2419,14 @@ impl ProtoStatement {
                     s.gather_dynamic_write_spans(out);
                 }
             }
-            ProtoStatement::CompiledBlock(x) => {
-                for s in x.original_stmts.iter() {
-                    s.gather_dynamic_write_spans(out);
+            ProtoStatement::CompiledBlock(x) => match &x.hier {
+                Some(h) => h.summary.dynamic_writes(x, out),
+                None => {
+                    for s in x.original_stmts.iter() {
+                        s.gather_dynamic_write_spans(out);
+                    }
                 }
-            }
+            },
         }
     }
 
@@ -2427,7 +2521,9 @@ impl ProtoStatement {
                 // DynamicVariable expansions are applied; fall back to the
                 // cached base+last input_offsets / output_offsets if the
                 // originals weren't retained.
-                if !x.original_stmts.is_empty() {
+                if let Some(h) = &x.hier {
+                    h.summary.gather_expanded(x, fold, inputs, outputs);
+                } else if !x.original_stmts.is_empty() {
                     for s in x.original_stmts.iter() {
                         s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
@@ -2538,8 +2634,12 @@ impl ProtoStatement {
                 // retained originals can name a foldable array.  A block
                 // reduced to its cache keeps its arrays expanded — safe,
                 // since the gather reads the same lists.
-                for s in x.original_stmts.iter() {
-                    s.collect_big_arrays(fold);
+                if let Some(h) = &x.hier {
+                    h.summary.collect_big_arrays(x, fold);
+                } else {
+                    for s in x.original_stmts.iter() {
+                        s.collect_big_arrays(fold);
+                    }
                 }
             }
             ProtoStatement::For(x) => {
@@ -2628,7 +2728,9 @@ impl ProtoStatement {
                 // as ranges; without them only cached base+last point offsets
                 // exist (covered by the non-expanded read set), so nothing to
                 // add here.
-                if !x.original_stmts.is_empty() {
+                if let Some(h) = &x.hier {
+                    h.summary.dynamic_reads(x, ranges);
+                } else if !x.original_stmts.is_empty() {
                     for s in x.original_stmts.iter() {
                         s.gather_dynamic_read_ranges(ranges);
                     }
@@ -2938,6 +3040,21 @@ impl ProtoStatement {
                         Statement::SystemFunctionCall(SystemFunctionCall::Finish)
                     }
                 },
+                ProtoStatement::CompiledBlock(x) if x.hier.is_some() => {
+                    let h = x.hier.as_ref().unwrap();
+                    Statement::HierClass(Box::new(crate::ir::hier_cells::HierClassRun {
+                        cells: Arc::clone(&h.cells),
+                        class: h.class,
+                        partition: h.partition,
+                        ff: (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes),
+                        comb: (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes),
+                        bits: std::ptr::null_mut(),
+                        log_buf: std::ptr::null_mut(),
+                        ff_delta: x.ff_delta_bytes,
+                        compare_inputs: true,
+                        primed: std::cell::Cell::new(false),
+                    }))
+                }
                 ProtoStatement::CompiledBlock(x) => {
                     // Use wrapping_offset because the adjusted pointer may temporarily
                     // go before the buffer start when ff_delta_bytes is negative.

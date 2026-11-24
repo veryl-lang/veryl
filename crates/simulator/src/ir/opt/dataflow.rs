@@ -111,9 +111,9 @@ pub struct DataflowPlan {
     pub comb_readers: Readers,
     /// `comb_readers` plus the cells writing each range: an outside write
     /// also has to rerun a co-writer, or the outside value stands.
-    pub comb_marked: Readers,
+    pub comb_marked: std::sync::Arc<Readers>,
     /// The FF counterpart.
-    pub ff_marked: Readers,
+    pub ff_marked: std::sync::Arc<Readers>,
     /// Every comb range a cell writes, sorted, with its writing cell.
     pub written: Vec<(u32, u32)>,
     /// Every FF range a cell writes, sorted (checked by `VERYL_DATAFLOW_CHECK`).
@@ -139,6 +139,124 @@ impl DataflowPlan {
             .sum();
         self.words() + shadow.div_ceil(8)
     }
+}
+
+/// One instance of a cell set: where its storage starts and which words of
+/// the dirty buffer it owns.  The set's code addresses storage and dirty
+/// words relative to these bases.
+#[derive(Clone, Debug)]
+pub struct Partition {
+    /// Index of the compiled set in `CellSpace::sets`; `None` for a
+    /// hierarchy template instance, which runs from its class blocks.
+    pub set: Option<u32>,
+    pub ff_base: isize,
+    pub comb_base: isize,
+    /// First dirty word: the cell bits, then the set's own state (a
+    /// dataflow set's boundary shadow, a template's input copies).
+    pub word_base: u32,
+    pub cells: u32,
+}
+
+impl Partition {
+    pub fn cell_words(&self) -> std::ops::Range<usize> {
+        let w = self.word_base as usize;
+        w..w + (self.cells as usize).div_ceil(64)
+    }
+}
+
+/// What `CellLayout::new` places: a set's tables in its own coordinates.
+pub struct PartitionSpec<'a> {
+    pub set: Option<u32>,
+    pub comb_marked: &'a std::sync::Arc<Readers>,
+    pub ff_marked: &'a std::sync::Arc<Readers>,
+    pub always_run: &'a [u32],
+    pub cells: u32,
+    pub words: usize,
+    pub ff_base: isize,
+    pub comb_base: isize,
+}
+
+impl<'a> PartitionSpec<'a> {
+    /// A dataflow plan run once at the storage origin.
+    pub fn root(plan: &'a DataflowPlan, set: u32) -> Self {
+        PartitionSpec {
+            set: Some(set),
+            comb_marked: &plan.comb_marked,
+            ff_marked: &plan.ff_marked,
+            always_run: &plan.always_run,
+            cells: plan.cells.len() as u32,
+            words: plan.buffer_words(),
+            ff_base: 0,
+            comb_base: 0,
+        }
+    }
+}
+
+/// The dirty buffer of a dataflow settle: the partitions it holds and, over
+/// all of them, which dirty bits each storage byte's readers and co-writers
+/// own.  Bit numbers here are absolute in the buffer.
+#[derive(Clone, Debug)]
+pub struct CellLayout {
+    pub partitions: Vec<Partition>,
+    pub words: usize,
+    pub comb_marked: std::sync::Arc<Readers>,
+    pub ff_marked: std::sync::Arc<Readers>,
+    pub always_run: Vec<u32>,
+}
+
+impl CellLayout {
+    /// Place the partitions one after another in the dirty buffer, in run
+    /// order.  A range more than one partition reads (a port the parent
+    /// writes and a child instance reads) marks the readers of both.
+    pub fn new(specs: &[PartitionSpec]) -> Self {
+        let mut partitions = Vec::with_capacity(specs.len());
+        let mut words = 0usize;
+        for spec in specs {
+            partitions.push(Partition {
+                set: spec.set,
+                ff_base: spec.ff_base,
+                comb_base: spec.comb_base,
+                word_base: words as u32,
+                cells: spec.cells,
+            });
+            words += spec.words;
+        }
+        let expand = |ff: bool| {
+            fn table<'a>(s: &PartitionSpec<'a>, ff: bool) -> &'a std::sync::Arc<Readers> {
+                if ff { s.ff_marked } else { s.comb_marked }
+            }
+            if let [s] = specs
+                && s.ff_base == 0
+                && s.comb_base == 0
+            {
+                return std::sync::Arc::clone(table(s, ff));
+            }
+            let mut out: Readers = Vec::new();
+            for (p, s) in partitions.iter().zip(specs) {
+                let base = if ff { p.ff_base } else { p.comb_base };
+                let at = |o: u32| (o as isize + base) as u32;
+                let bit = p.word_base * 64;
+                out.extend(table(s, ff).iter().map(|(a, b, cells)| {
+                    (at(*a), at(*b), cells.iter().map(|c| c + bit).collect())
+                }));
+            }
+            std::sync::Arc::new(merge_overlaps(out))
+        };
+        let comb_marked = expand(false);
+        let ff_marked = expand(true);
+        let always_run = partitions
+            .iter()
+            .zip(specs)
+            .flat_map(|(p, s)| s.always_run.iter().map(|k| k + p.word_base * 64))
+            .collect();
+        CellLayout {
+            partitions,
+            words,
+            comb_marked,
+            ff_marked,
+            always_run,
+        }
+    }
 
     /// `comb_marked` with each cell list folded to `(word, mask)` pairs, for
     /// code that marks them at a store.
@@ -149,6 +267,64 @@ impl DataflowPlan {
     /// `store_marks` for FF storage, marked at the log push.
     pub fn ff_store_marks(&self) -> MarkTable {
         fold_marks(&self.ff_marked)
+    }
+
+    /// The `h`-th hierarchy template instance's partition.
+    pub fn hier_partition(&self, h: usize) -> Option<&Partition> {
+        self.partitions.iter().filter(|p| p.set.is_none()).nth(h)
+    }
+
+    /// The partitions a dataflow set runs, with that set.
+    pub fn set_partitions(&self) -> impl Iterator<Item = (usize, &Partition, u32)> + '_ {
+        self.partitions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.set.map(|s| (i, p, s)))
+    }
+}
+
+/// A module's dataflow settle: its compiled cell sets, indexed like the
+/// partitions' `set`, and the layout of their instances.  With no set, only
+/// hierarchy template instances use the marks.
+pub struct CellSpace {
+    pub sets: Vec<std::sync::Arc<DataflowRt>>,
+    pub layout: CellLayout,
+}
+
+impl CellSpace {
+    /// The set at the storage origin, which owns the settle's mode.
+    pub fn root_set(&self) -> Option<&DataflowRt> {
+        self.sets.first().map(|s| &**s)
+    }
+}
+
+/// Have each root cell mark the template instance cells reading its
+/// boundary outputs, as the instances' class runs no longer compare the
+/// inputs their parent writes.  The root partition is the layout's first.
+pub fn mark_instance_readers(plan: &mut DataflowPlan, layout: &CellLayout) {
+    let Some(root) = layout.partitions.first().filter(|p| p.set.is_some()) else {
+        return;
+    };
+    let first_other = layout
+        .partitions
+        .get(1)
+        .map_or(u32::MAX, |p| p.word_base * 64);
+    debug_assert_eq!(root.word_base, 0);
+    let table = &layout.comb_marked;
+    for (k, watch) in plan.boundary.iter().enumerate() {
+        let list = &mut plan.consumers[k];
+        let per_range = &mut plan.range_consumers[k];
+        for (r, &(a, b)) in watch.iter().enumerate() {
+            let first = table.partition_point(|t| t.1 <= a);
+            for (_, _, cells) in table[first..].iter().take_while(|t| t.0 < b) {
+                for &c in cells.iter().filter(|&&c| c >= first_other) {
+                    add_mark(list, c);
+                    add_mark(&mut per_range[r], c);
+                }
+            }
+            per_range[r].sort_unstable();
+        }
+        list.sort_unstable();
     }
 }
 
@@ -161,6 +337,53 @@ fn add_word_mask(list: &mut Vec<(u32, u64)>, w: u32, m: u64) {
 
 fn add_mark(list: &mut Vec<(u32, u64)>, cell: u32) {
     add_word_mask(list, cell / 64, 1u64 << (cell % 64));
+}
+
+/// `v` sorted and cut into disjoint ranges, each with every reader of the
+/// input ranges covering it.
+pub(crate) fn merge_overlaps(mut v: Readers) -> Readers {
+    v.sort_unstable_by_key(|r| (r.0, r.1));
+    if v.windows(2).all(|w| w[0].1 <= w[1].0) {
+        return v;
+    }
+    let mut out: Readers = Vec::with_capacity(v.len());
+    let mut i = 0;
+    while i < v.len() {
+        let mut end = v[i].1;
+        let mut j = i + 1;
+        while j < v.len() && v[j].0 < end {
+            end = end.max(v[j].1);
+            j += 1;
+        }
+        if j == i + 1 {
+            out.push(std::mem::take(&mut v[i]));
+            i = j;
+            continue;
+        }
+        let cluster = &v[i..j];
+        let mut cuts: Vec<u32> = cluster.iter().flat_map(|r| [r.0, r.1]).collect();
+        cuts.sort_unstable();
+        cuts.dedup();
+        for w in cuts.windows(2) {
+            let (lo, hi) = (w[0], w[1]);
+            let mut cells: Vec<u32> = cluster
+                .iter()
+                .filter(|r| r.0 <= lo && hi <= r.1)
+                .flat_map(|r| r.2.iter().copied())
+                .collect();
+            if cells.is_empty() {
+                continue;
+            }
+            cells.sort_unstable();
+            cells.dedup();
+            match out.last_mut() {
+                Some(last) if last.1 == lo && last.2 == cells => last.1 = hi,
+                _ => out.push((lo, hi, cells)),
+            }
+        }
+        i = j;
+    }
+    out
 }
 
 fn fold_marks(table: &Readers) -> MarkTable {
@@ -624,7 +847,23 @@ fn output_effects_only(s: &ProtoStatement) -> bool {
         ProtoStatement::SystemFunctionCall(f) => {
             !matches!(f, ProtoSystemFunctionCall::Readmemh { .. })
         }
+        // A template class runs its own cells, which skip what nothing
+        // marked, so the cell holding it runs at every settle.
+        ProtoStatement::CompiledBlock(cb) => cb.hier.is_some(),
         _ => false,
+    }
+}
+
+/// A hierarchy class block's instance: its template's cells and comb base.
+fn hier_instance(s: &ProtoStatement) -> Option<(usize, isize)> {
+    match s {
+        ProtoStatement::CompiledBlock(cb) => cb.hier.as_ref().map(|h| {
+            (
+                std::sync::Arc::as_ptr(&h.cells) as usize,
+                cb.comb_delta_bytes,
+            )
+        }),
+        _ => None,
     }
 }
 
@@ -677,6 +916,17 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
         (x < e).then_some((s, e))
     };
     let fold = BigArrayFold::from_statements(stmts.iter());
+    // What each template instance's classes write: a class reading it is
+    // marked by the instance's own cells, not the root's.
+    let mut instance_writes: HashMap<(usize, isize), HashSet<VarOffset>> = HashMap::default();
+    for s in stmts {
+        if let (Some(key), ProtoStatement::CompiledBlock(cb)) = (hier_instance(s), s) {
+            instance_writes
+                .entry(key)
+                .or_default()
+                .extend(cb.output_offsets.iter().copied());
+        }
+    }
     let mut ins: Vec<VarOffset> = Vec::new();
     let mut outs: Vec<VarOffset> = Vec::new();
     let mut io = Vec::with_capacity(stmts.len());
@@ -689,8 +939,20 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
         }
         ins.clear();
         outs.clear();
-        s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
-        loop_vars(s, &mut outs);
+        // A class's storage no owner covers is its template's own: no root
+        // statement reads it, or that read declines below.
+        let class = hier_instance(s).is_some();
+        match (hier_instance(s), s) {
+            (Some(key), ProtoStatement::CompiledBlock(cb)) => {
+                let own = &instance_writes[&key];
+                ins.extend(cb.input_offsets.iter().filter(|o| !own.contains(o)));
+                outs.extend(cb.output_offsets.iter().copied());
+            }
+            _ => {
+                s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
+                loop_vars(s, &mut outs);
+            }
+        }
         let mut x = StmtIo {
             in_comb: Vec::new(),
             in_ff: Vec::new(),
@@ -703,6 +965,7 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             match o {
                 VarOffset::Comb(off) if *off >= 0 => match span_in(*off as usize) {
                     Some(sp) => x.out_comb.push(sp),
+                    None if class => {}
                     None => untracked.push((*off as usize, i, true)),
                 },
                 VarOffset::Ff(off) if *off >= 0 => {
@@ -734,6 +997,7 @@ fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>
             match o {
                 VarOffset::Comb(off) if *off >= 0 => match span_in(*off as usize) {
                     Some(sp) => x.in_comb.push(sp),
+                    None if class => {}
                     None => untracked.push((*off as usize, i, false)),
                 },
                 VarOffset::Ff(off) if *off >= 0 => match inputs.ff_owner.span(*off as usize) {
@@ -1230,8 +1494,8 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<DataflowPl
     }
     let comb_readers = finish(comb_map);
     let ff_readers = finish(ff_map);
-    let comb_marked = finish(comb_out);
-    let ff_marked = finish(ff_out);
+    let comb_marked = std::sync::Arc::new(finish(comb_out));
+    let ff_marked = std::sync::Arc::new(finish(ff_out));
 
     let mut spans_of: Vec<Vec<MarkedSpan>> = vec![Vec::new(); ncells];
     let mut consumers: Vec<Vec<(u32, u64)>> = vec![Vec::new(); ncells];
@@ -1534,6 +1798,14 @@ pub fn cache_get(key: u128) -> Result<std::sync::Arc<DataflowRt>, Option<CacheCl
     }
 }
 
+/// Forget every settle `cache_put` kept, so the next build compiles again.
+#[cfg(all(test, not(target_family = "wasm")))]
+pub(crate) fn cache_clear() {
+    if let Ok(mut c) = CACHE.lock() {
+        *c = None;
+    }
+}
+
 #[cfg(not(target_family = "wasm"))]
 pub fn cache_put(key: u128, rt: std::sync::Arc<DataflowRt>) {
     if let Ok(mut c) = CACHE.lock() {
@@ -1647,7 +1919,7 @@ fn contains(s: &ProtoStatement, leaf: &dyn Fn(&ProtoStatement) -> bool) -> bool 
                 .any(|s| contains(s, leaf)),
             ProtoStatement::For(x) => x.body.iter().any(|s| contains(s, leaf)),
             ProtoStatement::SequentialBlock(v) => v.iter().any(|s| contains(s, leaf)),
-            ProtoStatement::CompiledBlock(x) => x.original_stmts.iter().any(|s| contains(s, leaf)),
+            ProtoStatement::CompiledBlock(x) => x.originals().iter().any(|s| contains(s, leaf)),
             _ => false,
         }
 }
@@ -2229,5 +2501,70 @@ mod tests {
         let row = p.comb_marked.iter().find(|r| r.0 == a as u32);
         let row = row.unwrap_or_else(|| panic!("{:?}", p.comb_marked));
         assert!(row.2.contains(&wc), "{:?}", p.comb_marked);
+    }
+
+    fn plan_with(cells: usize, comb: Readers, ff: Readers, always: Vec<u32>) -> DataflowPlan {
+        DataflowPlan {
+            cells: vec![vec![0]; cells],
+            boundary: vec![vec![(0, 9)]; cells],
+            comb_marked: std::sync::Arc::new(comb),
+            ff_marked: std::sync::Arc::new(ff),
+            always_run: always,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_lone_instance_at_the_origin_shares_its_plan_tables() {
+        let p = plan_with(3, vec![(4, 8, vec![1])], vec![(0, 2, vec![2])], vec![0]);
+        let l = CellLayout::new(&[PartitionSpec::root(&p, 0)]);
+        assert!(std::sync::Arc::ptr_eq(&l.comb_marked, &p.comb_marked));
+        assert!(std::sync::Arc::ptr_eq(&l.ff_marked, &p.ff_marked));
+        assert_eq!(l.words, p.buffer_words());
+        assert_eq!(l.always_run, vec![0]);
+        assert_eq!(l.store_marks(), vec![(4, 8, vec![(0, 0b10)])]);
+    }
+
+    #[test]
+    fn overlapping_reader_ranges_mark_every_reader() {
+        let merged = merge_overlaps(vec![(4, 12, vec![1]), (0, 2, vec![0]), (8, 16, vec![70])]);
+        assert_eq!(
+            merged,
+            vec![
+                (0, 2, vec![0]),
+                (4, 8, vec![1]),
+                (8, 12, vec![1, 70]),
+                (12, 16, vec![70]),
+            ]
+        );
+    }
+
+    #[test]
+    fn instances_mark_their_own_words_at_their_own_bytes() {
+        let a = plan_with(70, vec![(4, 8, vec![65])], vec![(0, 2, vec![3])], vec![]);
+        let b = plan_with(2, vec![(0, 4, vec![0, 1])], vec![(0, 1, vec![1])], vec![1]);
+        let l = CellLayout::new(&[
+            PartitionSpec::root(&a, 0),
+            PartitionSpec {
+                ff_base: 0x100,
+                comb_base: 0x200,
+                ..PartitionSpec::root(&b, 1)
+            },
+        ]);
+        // `a`: two cell words and a 70 * 9 byte shadow.
+        let b_word = 2 + (70 * 9usize).div_ceil(8);
+        assert_eq!(l.partitions[1].word_base as usize, b_word);
+        assert_eq!(l.partitions[1].cell_words(), b_word..b_word + 1);
+        assert_eq!(l.words, b_word + b.buffer_words());
+        let bit = b_word as u32 * 64;
+        assert_eq!(
+            *l.comb_marked,
+            vec![(4, 8, vec![65]), (0x200, 0x204, vec![bit, bit + 1])]
+        );
+        assert_eq!(
+            *l.ff_marked,
+            vec![(0, 2, vec![3]), (0x100, 0x101, vec![bit + 1])]
+        );
+        assert_eq!(l.always_run, vec![bit + 1]);
     }
 }

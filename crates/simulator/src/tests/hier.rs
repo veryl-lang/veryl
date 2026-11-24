@@ -1,0 +1,636 @@
+//! Hierarchy templates: a cell instantiated several times is scheduled once
+//! and its instances run shared code.  Random cells are wired so that the
+//! instance graph has cycles the statement graph does not; the result must
+//! match the build without templates.
+
+use super::*;
+
+const IN: usize = 4;
+const OUT: usize = 3;
+const CELLS: usize = 4;
+const TOP_IN: usize = 3;
+
+/// `(op, lhs, rhs)`; operands index the inputs, then earlier temps.
+type Term = (usize, usize, usize);
+
+struct Cell {
+    /// A second term writes the upper half from its own statement.
+    temps: Vec<(Term, Option<Term>)>,
+    /// Temp each output reads.
+    outs: Vec<usize>,
+}
+
+impl Cell {
+    fn operand(&self, k: usize) -> String {
+        if k < IN {
+            format!("a{k}")
+        } else {
+            format!("t{}", k - IN)
+        }
+    }
+
+    /// Inputs each output depends on, as bit masks.
+    fn deps(&self) -> Vec<u32> {
+        let mut of: Vec<u32> = (0..IN).map(|k| 1 << k).collect();
+        for &((_, l, r), hi) in &self.temps {
+            let mut d = of[l] | of[r];
+            if let Some((_, l2, r2)) = hi {
+                d |= of[l2] | of[r2];
+            }
+            of.push(d);
+        }
+        self.outs.iter().map(|&t| of[IN + t]).collect()
+    }
+}
+
+enum Source {
+    Top(usize),
+    Cell(usize, usize),
+}
+
+struct Design {
+    cell: Cell,
+    /// Per cell, per input.
+    wiring: Vec<Vec<Source>>,
+}
+
+fn generate(seed: u64) -> Design {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+    let mut temps = Vec::new();
+    for k in 0..6 + rng.below(6) {
+        let term = (rng.below(4), rng.below(IN + k), rng.below(IN + k));
+        let hi = rng
+            .chance(30)
+            .then(|| (rng.below(4), rng.below(IN + k), rng.below(IN + k)));
+        temps.push((term, hi));
+    }
+    let outs = (0..OUT).map(|_| rng.below(temps.len())).collect();
+    let cell = Cell { temps, outs };
+    let deps = cell.deps();
+    // Port graph: node `c * (IN + OUT) + p`, inputs first.
+    let node = |c: usize, p: usize| c * (IN + OUT) + p;
+    let mut succ: Vec<Vec<usize>> = vec![Vec::new(); CELLS * (IN + OUT)];
+    for c in 0..CELLS {
+        for (j, &d) in deps.iter().enumerate() {
+            for i in 0..IN {
+                if d & (1 << i) != 0 {
+                    succ[node(c, i)].push(node(c, IN + j));
+                }
+            }
+        }
+    }
+    let reaches = |succ: &Vec<Vec<usize>>, from: usize, to: usize| {
+        let mut stack = vec![from];
+        let mut seen = vec![false; succ.len()];
+        while let Some(n) = stack.pop() {
+            if n == to {
+                return true;
+            }
+            if !std::mem::replace(&mut seen[n], true) {
+                stack.extend(succ[n].iter().copied());
+            }
+        }
+        false
+    };
+    let mut wiring: Vec<Vec<Source>> = (0..CELLS).map(|_| Vec::new()).collect();
+    let mut slots: Vec<(usize, usize)> = (0..CELLS)
+        .flat_map(|c| (0..IN).map(move |i| (c, i)))
+        .collect();
+    rng.shuffle(&mut slots);
+    let mut chosen: Vec<Vec<Option<Source>>> = (0..CELLS)
+        .map(|_| (0..IN).map(|_| None).collect())
+        .collect();
+    for (c, i) in slots {
+        let mut src = Source::Top(rng.below(TOP_IN));
+        if rng.chance(75) {
+            for _ in 0..8 {
+                let (k, j) = (rng.below(CELLS), rng.below(OUT));
+                if !reaches(&succ, node(c, i), node(k, IN + j)) {
+                    succ[node(k, IN + j)].push(node(c, i));
+                    src = Source::Cell(k, j);
+                    break;
+                }
+            }
+        }
+        chosen[c][i] = Some(src);
+    }
+    for (c, ins) in chosen.into_iter().enumerate() {
+        wiring[c] = ins.into_iter().map(|s| s.unwrap()).collect();
+    }
+    Design { cell, wiring }
+}
+
+fn emit(d: &Design) -> String {
+    let ops = ["+", "^", "&", "|"];
+    let mut s = String::from("module Cell (\n    clk: input clock,\n    rst: input reset,\n");
+    for i in 0..IN {
+        s += &format!("    a{i}: input logic<8>,\n");
+    }
+    for j in 0..OUT {
+        s += &format!("    y{j}: output logic<8>,\n");
+    }
+    s += "    r: output logic<8>,\n    z: output logic<8>,\n) {\n";
+    for (k, &((op, l, r), hi)) in d.cell.temps.iter().enumerate() {
+        s += &format!("    var t{k}: logic<8>;\n");
+        match hi {
+            None => {
+                s += &format!(
+                    "    assign t{k} = {} {} {};\n",
+                    d.cell.operand(l),
+                    ops[op],
+                    d.cell.operand(r)
+                );
+            }
+            Some((op2, l2, r2)) => {
+                s += &format!(
+                    "    assign t{k}[3:0] = {}[3:0] {} {}[3:0];\n",
+                    d.cell.operand(l),
+                    ops[op],
+                    d.cell.operand(r)
+                );
+                s += &format!(
+                    "    assign t{k}[7:4] = {}[7:4] {} {}[7:4];\n",
+                    d.cell.operand(l2),
+                    ops[op2],
+                    d.cell.operand(r2)
+                );
+            }
+        }
+    }
+    for (j, &t) in d.cell.outs.iter().enumerate() {
+        s += &format!("    assign y{j} = t{t};\n");
+    }
+    // A version chain: `v` reads the first value of `u`.
+    s += "    var u: logic<8>;\n    var v: logic<8>;\n    always_comb {\n        u = a0 + 8'd1;\n        v = u;\n        u = u ^ a1;\n    }\n    assign z = u + v;\n";
+    s += "    var q: logic<8>;\n    always_ff {\n        if_reset { q = 0; }\n        else { q = q + y0; }\n    }\n    assign r = q;\n}\n";
+    s += "module Top (\n    clk: input clock,\n    rst: input reset,\n";
+    for i in 0..TOP_IN {
+        s += &format!("    i{i}: input logic<8>,\n");
+    }
+    for c in 0..CELLS {
+        for j in 0..OUT {
+            s += &format!("    o{c}_{j}: output logic<8>,\n");
+        }
+        s += &format!("    r{c}: output logic<8>,\n    z{c}: output logic<8>,\n");
+    }
+    s += ") {\n";
+    for c in 0..CELLS {
+        for j in 0..OUT {
+            s += &format!("    var w{c}_{j}: logic<8>;\n    assign o{c}_{j} = w{c}_{j};\n");
+        }
+    }
+    for (c, ins) in d.wiring.iter().enumerate() {
+        s += &format!("    inst c{c}: Cell (\n        clk,\n        rst,\n");
+        for (i, src) in ins.iter().enumerate() {
+            let text = match src {
+                Source::Top(k) => format!("i{k}"),
+                Source::Cell(k, j) => format!("w{k}_{j}"),
+            };
+            s += &format!("        a{i}: {text},\n");
+        }
+        for j in 0..OUT {
+            s += &format!("        y{j}: w{c}_{j},\n");
+        }
+        s += &format!("        r: r{c},\n        z: z{c},\n    );\n");
+    }
+    s += "}\n";
+    s
+}
+
+fn outputs(sim: &mut Simulator) -> Vec<Value> {
+    let mut v = Vec::new();
+    for c in 0..CELLS {
+        for j in 0..OUT {
+            v.push(sim.get(&format!("o{c}_{j}")).unwrap());
+        }
+        v.push(sim.get(&format!("r{c}")).unwrap());
+        v.push(sim.get(&format!("z{c}")).unwrap());
+    }
+    v
+}
+
+fn check_seeds(seeds: std::ops::Range<u64>, use_4state: bool, chunk_mass: Option<usize>) {
+    let flat = Config {
+        use_jit: true,
+        use_4state,
+        ..Default::default()
+    };
+    check_seeds_with(seeds, flat, chunk_mass);
+}
+
+fn check_seeds_with(seeds: std::ops::Range<u64>, flat: Config, chunk_mass: Option<usize>) {
+    crate::ir::hier::CHUNK_MASS.with(|m| m.set(chunk_mass));
+    let mut engaged = 0;
+    let n = seeds.end - seeds.start;
+    for seed in seeds {
+        let code = emit(&generate(seed));
+        let hier = Config {
+            hier_templates: Some(1),
+            ..flat.clone()
+        };
+        let a = analyze_top(&code, &flat, "Top").unwrap();
+        let b = match analyze_top(&code, &hier, "Top") {
+            Ok(ir) => ir,
+            Err(e) => panic!("seed {seed}: {e:?}\n{code}"),
+        };
+        assert_eq!(b.required_comb_passes, 1, "seed {seed}\n{code}");
+        if b.hier_shared_blocks > 0 {
+            engaged += 1;
+            // A root of class calls must still land as compiled cells.
+            if flat.aot_c {
+                let root = b.dataflow.as_ref().and_then(|d| d.root_set());
+                assert!(
+                    root.is_some_and(|r| r.cell.get().is_some()),
+                    "seed {seed}: no AOT-C root cells\n{code}"
+                );
+                assert!(
+                    !b.hier_runs.is_empty() && b.hier_runs.values().all(|r| r.cells.aot_landed()),
+                    "seed {seed}: no AOT-C template cells\n{code}"
+                );
+            }
+        }
+        let mut sa = Simulator::new(a, None);
+        let mut sb = Simulator::new(b, None);
+        let mut rng = Rng(seed + 1);
+        for sim in [&mut sa, &mut sb] {
+            let clk = sim.get_clock("clk").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.step_reset(&clk, &rst);
+        }
+        for step in 0..4 {
+            let inputs: Vec<u64> = (0..TOP_IN).map(|_| rng.next() & 0xff).collect();
+            for sim in [&mut sa, &mut sb] {
+                for (k, &x) in inputs.iter().enumerate() {
+                    sim.set(&format!("i{k}"), Value::new(x, 8, false));
+                }
+                let clk = sim.get_clock("clk").unwrap();
+                sim.step(&clk);
+            }
+            assert_eq!(
+                outputs(&mut sa),
+                outputs(&mut sb),
+                "seed {seed} step {step} inputs {inputs:x?}\n{code}"
+            );
+        }
+    }
+    assert!(
+        engaged * 2 > n,
+        "templates engaged in only {engaged} of {n} seeds"
+    );
+}
+
+#[test]
+fn hier_templates_match_flat_2state() {
+    check_seeds(0..48, false, None);
+}
+
+#[test]
+fn hier_templates_match_flat_4state() {
+    check_seeds(48..80, true, None);
+}
+
+#[test]
+fn hier_templates_match_flat_small_chunks() {
+    check_seeds(80..128, false, Some(2));
+}
+
+/// The root's AOT-C cells run the template classes through a callback.
+#[test]
+fn hier_templates_match_flat_aot_c() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let flat = Config {
+        use_jit: true,
+        aot_c: true,
+        aot_c_async: false,
+        aot_c_min_stmts: 0,
+        ..Default::default()
+    };
+    check_seeds_with(128..136, flat, None);
+}
+
+/// A parent of template classes rebuilt from the same inputs finds its
+/// dataflow cells by those inputs: the class calls do not keep it from the
+/// index.
+/// Tests building in parallel share one conversion of a template instead of
+/// each converting it.
+#[test]
+fn parallel_tests_share_one_template_conversion() {
+    let config = Config {
+        use_jit: true,
+        dut_reuse: true,
+        hier_templates: Some(1),
+        ..Default::default()
+    };
+    let top: veryl_parser::resource_table::StrId = "Top".into();
+    let mut checked = false;
+    for seed in 0..8 {
+        let code = emit(&generate(seed));
+        let air_ir = analyze_air(&code);
+        let session = crate::ir::BuildSession::new(&air_ir, &config, &[top]);
+        let resources = veryl_parser::resource_table::export_tables();
+        let texts = veryl_parser::text_table::export_tables();
+        let engaged: Vec<bool> = std::thread::scope(|s| {
+            let workers: Vec<_> = (0..2)
+                .map(|_| {
+                    let (resources, texts, session) = (&resources, &texts, &session);
+                    std::thread::Builder::new()
+                        .stack_size(crate::IR_WALK_STACK_BYTES)
+                        .spawn_scoped(s, move || {
+                            veryl_parser::resource_table::import_tables(resources);
+                            veryl_parser::text_table::import_tables(texts);
+                            crate::backend::inst::HIER_CLAIM_STALL
+                                .with(|d| d.set(std::time::Duration::from_millis(200)));
+                            session.build_ir(top).unwrap().hier_shared_blocks > 0
+                        })
+                        .unwrap()
+                })
+                .collect();
+            workers.into_iter().map(|w| w.join().unwrap()).collect()
+        });
+        if !engaged.iter().all(|&e| e) {
+            continue;
+        }
+        assert_eq!(session.hier_conversions(), 1, "seed {seed}\n{code}");
+        checked = true;
+        break;
+    }
+    assert!(checked, "no seed built a template");
+}
+
+#[test]
+fn a_rebuilt_template_parent_loads_its_cells_without_emitting() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let config = Config {
+        use_jit: true,
+        aot_c: true,
+        aot_c_async: false,
+        aot_c_min_stmts: 0,
+        hier_templates: Some(1),
+        ..Default::default()
+    };
+    crate::backend::aot_c::emit::set_test_aot_index(true);
+    let mut checked = false;
+    for seed in 128..136 {
+        let code = emit(&generate(seed));
+        crate::backend::aot_c::emit::take_dataflow_emits();
+        let first = analyze_top(&code, &config, "Top").unwrap();
+        let emitted = crate::backend::aot_c::emit::take_dataflow_emits();
+        if first.hier_shared_blocks == 0 || emitted == 0 {
+            continue;
+        }
+        crate::ir::opt::dataflow::cache_clear();
+        let second = analyze_top(&code, &config, "Top").unwrap();
+        assert_eq!(
+            crate::backend::aot_c::emit::take_dataflow_emits(),
+            0,
+            "seed {seed}: the rebuild emitted its dataflow again\n{code}"
+        );
+        let root = second.dataflow.as_ref().and_then(|d| d.root_set());
+        assert!(root.is_some_and(|r| r.cell.get().is_some()), "seed {seed}");
+        checked = true;
+        break;
+    }
+    crate::backend::aot_c::emit::set_test_aot_index(false);
+    assert!(checked, "no seed built a parent of template classes");
+}
+
+/// A template's async reset, derived inside the parent, asserts with the
+/// edge the parent takes, not one settle later through the port copy.
+#[test]
+fn hier_template_async_reset_from_parent_net() {
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset { r = 1'b0; } else { r = 1'b1; }
+        }
+        assign q = r;
+    }
+    module SubH (
+        clk  : input  clock           ,
+        rst_h: input  reset_async_high,
+        q    : output logic           ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_h) {
+            if_reset { r = 1'b0; } else { r = 1'b1; }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q0  : output logic,
+        q1  : output logic,
+        q2  : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) { f = trig; }
+        let n    : logic               = ~f;
+        let rst_a: '_ reset_async_low  = n;
+        let rst_b: '_ reset_async_low  = n;
+        inst u0: Sub (clk, rst_l: rst_a, q: q0);
+        inst u1: Sub (clk, rst_l: rst_b, q: q1);
+        let rst_h: '_ reset_async_high = ~rst_a;
+        inst u2: SubH (clk, rst_h, q: q2);
+    }
+    "#;
+    for hier in [None, Some(1)] {
+        let config = Config {
+            hier_templates: hier,
+            ..Default::default()
+        };
+        let ir = analyze_top(code, &config, "Top").unwrap();
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        for q in ["q0", "q1", "q2"] {
+            assert_eq!(sim.get(q).unwrap(), Value::new(0, 1, false), "{q} {hier:?}");
+        }
+    }
+}
+
+/// A gated clock inside a template: the master's cone raises it outside the
+/// template's cells, which must still bring it back down at the low phase
+/// although the enable, a flop the cells read, no longer changes.
+#[test]
+fn hier_template_gated_clock_with_master_cone() {
+    let mut fill = String::new();
+    for i in 0..40 {
+        let prev = if i == 0 {
+            "q".to_string()
+        } else {
+            format!("t{}", i - 1)
+        };
+        fill += &format!("        var t{i}: logic<8>;\n        assign t{i} = {prev} ^ 8'd{i};\n");
+    }
+    let code = format!(
+        r#"
+    module Cell (
+        clk: input  '_ clock,
+        rst: input  '_ reset,
+        o  : output logic<8>,
+    ) {{
+        var en: logic;
+        always_ff (clk, rst) {{
+            if_reset {{ en = 0; }} else {{ en = 1; }}
+        }}
+        let gclk: '_ clock = clk & en;
+        var q: logic<8>;
+        always_ff (gclk, rst) {{
+            if_reset {{ q = 0; }} else {{ q += 1; }}
+        }}
+{fill}        assign o = t39;
+    }}
+    module Top (
+        clk: input  '_ clock,
+        rst: input  '_ reset,
+        o0 : output logic<8>,
+        o1 : output logic<8>,
+    ) {{
+        inst c0: Cell (clk, rst, o: o0);
+        inst c1: Cell (clk, rst, o: o1);
+    }}
+"#
+    );
+    let run = |hier: Option<usize>| {
+        let config = Config {
+            use_jit: true,
+            hier_templates: hier,
+            ..Default::default()
+        };
+        let ir = analyze_top(&code, &config, "Top").unwrap();
+        let cells = ir.hier_shared_blocks;
+        // The root's dataflow cells take the cone's place: the clock marks
+        // its readers.
+        let root_cells = ir.dataflow.as_ref().is_some_and(|d| d.root_set().is_some());
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        let mut seen = Vec::new();
+        for _ in 0..12 {
+            sim.step(&clk);
+            seen.push((sim.get("o0").unwrap(), sim.get("o1").unwrap()));
+        }
+        (seen, cells, sim.master_cone_settles > 0 || root_cells)
+    };
+    let (flat, _, _) = run(None);
+    let (hier, cells, partial) = run(Some(1));
+    assert!(
+        cells > 0 && partial,
+        "cells {cells} partial settle {partial}"
+    );
+    assert_eq!(flat, hier);
+}
+
+/// A template's comb reads its flops: every commit that changes one must
+/// rerun the cells reading it, though nothing compares the flops.
+#[test]
+fn hier_template_cells_follow_their_flops() {
+    let code = r#"
+    module Acc (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+    ) {
+        var r: logic<8>;
+        var s: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; s = 1; } else { r += a; s = s + r; }
+        }
+        let x: logic<8> = r ^ 8'h5a;
+        let y: logic<8> = x + s;
+        assign o = y ^ {r[3:0], s[7:4]};
+    }
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        o0 : output logic<8>,
+        o1 : output logic<8>,
+    ) {
+        let b: logic<8> = a + 8'd3;
+        inst u0: Acc (clk, rst, a, o: o0);
+        inst u1: Acc (clk, rst, a: b, o: o1);
+    }
+    "#;
+    let run = |hier: Option<usize>| {
+        let config = Config {
+            use_jit: true,
+            hier_templates: hier,
+            ..Default::default()
+        };
+        let ir = analyze_top(code, &config, "Top").unwrap();
+        let cells = ir.hier_shared_blocks;
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        let mut seen = Vec::new();
+        for i in 0..24u64 {
+            // Inputs that hold still for a few cycles leave the flops as the
+            // only thing changing.
+            sim.set("a", Value::new(i / 4, 8, false));
+            sim.step(&clk);
+            seen.push((sim.get("o0").unwrap(), sim.get("o1").unwrap()));
+        }
+        (seen, cells)
+    };
+    let (flat, _) = run(None);
+    let (hier, cells) = run(Some(1));
+    assert!(cells > 0, "no template engaged");
+    assert_eq!(flat, hier);
+}
+
+/// A template whose levels do not settle falls back, and the top then builds
+/// exactly as it would without templates.
+#[test]
+fn a_fallen_back_template_builds_as_flat() {
+    let n = 70;
+    let mut code = String::from(
+        "module Sub (a: input logic<8>, x: output logic<8>) { assign x = a + 8'd1; }\n\
+         module Top (i: input logic<8>, o: output logic<8>) {\n",
+    );
+    for k in 0..=n {
+        code.push_str(&format!("    var w{k}: logic<8>;\n"));
+    }
+    code.push_str("    assign w0 = i;\n");
+    for k in 0..n {
+        code.push_str(&format!("    inst s{k}: Sub (a: w{k}, x: w{});\n", k + 1));
+    }
+    code.push_str(&format!("    assign o = w{n};\n}}\n"));
+    let top: veryl_parser::resource_table::StrId = "Top".into();
+    let air_ir = analyze_air(&code);
+    let build = |hier| {
+        let config = Config {
+            hier_templates: hier,
+            ..Default::default()
+        };
+        crate::ir::BuildSession::new(&air_ir, &config, &[top])
+            .build_ir(top)
+            .unwrap()
+    };
+    let (flat, hier) = (build(None), build(Some(1)));
+    assert_eq!(hier.hier_shared_blocks, 0, "the template did not fall back");
+    assert_eq!(hier.comb_statements.len(), flat.comb_statements.len());
+    assert_eq!(hier.comb_values.len(), flat.comb_values.len());
+    assert_eq!(hier.ff_values.len(), flat.ff_values.len());
+    let mut sim = Simulator::new(hier, None);
+    sim.set("i", Value::new(5, 8, false));
+    assert_eq!(sim.get("o").unwrap(), Value::new(75, 8, false));
+}

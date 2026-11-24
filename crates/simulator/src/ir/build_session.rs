@@ -1,12 +1,12 @@
 use super::comb_pipeline_cache::CombPipelineCache;
 use super::{Config, Context, Conv, Ir, ProtoModule};
-use crate::HashMap;
 use crate::backend::BackendRegistry;
 use crate::backend::inst::DutReuseCache;
 use crate::backend::registry::ChunkArtifactCache;
 use crate::simulator_error::SimulatorError;
+use crate::{HashMap, HashSet};
 use std::collections::hash_map::Entry;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -33,23 +33,34 @@ use veryl_parser::token_range::TokenRange;
 pub struct BuildSession<'ir> {
     ir: &'ir air::Ir,
     config: Config,
+    tops: Vec<StrId>,
     dut_reuse: Arc<DutReuseCache>,
     comb_cache: Arc<CombPipelineCache>,
     chunk_cache: ChunkArtifactCache,
+    /// The configuration and reuse cache without hierarchy templates, for
+    /// the tops whose templates fell back.
+    flat: OnceLock<(Config, Arc<DutReuseCache>)>,
+    fell_back: Mutex<HashSet<StrId>>,
 }
 
 impl<'ir> BuildSession<'ir> {
+    #[cfg(test)]
+    pub(crate) fn hier_conversions(&self) -> usize {
+        self.dut_reuse
+            .hier_conversions
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub fn new(ir: &'ir air::Ir, config: &Config, tops: &[StrId]) -> Self {
         Self {
             ir,
             config: config.clone(),
-            dut_reuse: Arc::new(if config.dut_reuse {
-                DutReuseCache::new(ir, tops)
-            } else {
-                DutReuseCache::default()
-            }),
+            tops: tops.to_vec(),
+            dut_reuse: Arc::new(DutReuseCache::new(ir, tops, config)),
             comb_cache: Arc::default(),
             chunk_cache: Arc::default(),
+            flat: OnceLock::new(),
+            fell_back: Mutex::default(),
         }
     }
 
@@ -68,19 +79,54 @@ impl<'ir> BuildSession<'ir> {
         let module = module.ok_or_else(|| SimulatorError::TopModuleNotFound {
             module_name: top.to_string(),
         })?;
-        let mut backends = BackendRegistry::for_config(&self.config);
+        let templates = self.config.hier_templates.is_some();
+        if templates && !self.fell_back.lock().unwrap().contains(&top) {
+            let (proto, fell_back) = self.convert_with(module, &self.config, &self.dut_reuse)?;
+            if !fell_back {
+                return Ok(CacheEntry {
+                    proto,
+                    token: module.token,
+                });
+            }
+            self.fell_back.lock().unwrap().insert(top);
+        }
+        let (config, dut_reuse) = if templates {
+            let (config, dut_reuse) = self.flat.get_or_init(|| {
+                let mut config = self.config.clone();
+                config.hier_templates = None;
+                let dut_reuse = Arc::new(DutReuseCache::new(self.ir, &self.tops, &config));
+                (config, dut_reuse)
+            });
+            (config, dut_reuse)
+        } else {
+            (&self.config, &self.dut_reuse)
+        };
+        let (proto, _) = self.convert_with(module, config, dut_reuse)?;
+        Ok(CacheEntry {
+            proto,
+            token: module.token,
+        })
+    }
+
+    /// The top converted under `config`, and whether its hierarchy templates
+    /// fell back.
+    fn convert_with(
+        &self,
+        module: &air::Module,
+        config: &Config,
+        dut_reuse: &Arc<DutReuseCache>,
+    ) -> Result<(ProtoModule, bool), SimulatorError> {
+        let mut backends = BackendRegistry::for_config(config);
         backends.chunk_cache = Arc::clone(&self.chunk_cache);
         let mut context = Context {
-            config: self.config.clone(),
+            config: config.clone(),
             backends,
-            dut_reuse: Arc::clone(&self.dut_reuse),
+            dut_reuse: Arc::clone(dut_reuse),
             comb_cache: Arc::clone(&self.comb_cache),
             ..Default::default()
         };
-        Ok(CacheEntry {
-            proto: Conv::conv(&mut context, module)?,
-            token: module.token,
-        })
+        let proto = Conv::conv(&mut context, module)?;
+        Ok((proto, context.hier_fell_back))
     }
 
     fn instantiate(&self, entry: &CacheEntry) -> Ir {

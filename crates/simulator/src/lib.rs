@@ -32,6 +32,8 @@ pub const IR_WALK_STACK_BYTES: usize = 64 * 1024 * 1024;
 // instance's ff base, added to baked FF write-log offsets so a relocated
 // (cache-reused) chunk records absolute `ff_values` offsets. 0 when not reused.
 pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8, *mut u8, isize);
+/// `FuncPtr` returning nonzero when the comb it watches changed.
+pub type ReportFuncPtr = unsafe extern "system" fn(*const u8, *const u8, *mut u8, isize) -> u64;
 
 #[cfg(test)]
 mod tests;

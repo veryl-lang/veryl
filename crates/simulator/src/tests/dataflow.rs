@@ -295,6 +295,8 @@ fn leaving_the_whole_settle_entry_reruns_every_cell() {
         ir.dataflow
             .as_ref()
             .unwrap()
+            .root_set()
+            .unwrap()
             .cell
             .get()
             .unwrap()
@@ -342,6 +344,8 @@ fn whole_settle_entry_runs_after_an_unmarked_commit() {
     assert!(
         ir.dataflow
             .as_ref()
+            .unwrap()
+            .root_set()
             .unwrap()
             .cell
             .get()
@@ -651,7 +655,12 @@ fn without_aot_c_the_cranelift_cells_settle_the_comb() {
     };
     assert!(!config.aot_c);
     let ir = analyze(code, &config);
-    let df = ir.dataflow.as_ref().expect("no dataflow without AOT-C");
+    let df = ir
+        .dataflow
+        .as_ref()
+        .expect("no dataflow without AOT-C")
+        .root_set()
+        .unwrap();
     assert!(df.jit_only && df.jit.is_some());
     let mut sim = Simulator::new(ir, None);
     let clk = sim.get_clock("clk").unwrap();
@@ -699,7 +708,7 @@ fn leaving_the_chunked_settle_reruns_every_cranelift_cell() {
         ..Default::default()
     };
     let ir = analyze(code, &config);
-    assert!(ir.dataflow.as_ref().unwrap().jit_only);
+    assert!(ir.dataflow.as_ref().unwrap().root_set().unwrap().jit_only);
     let mut sim = Simulator::new(ir, None);
     let clk = sim.get_clock("clk").unwrap();
     let v = |x: u64| Value::new(x, 8, false);

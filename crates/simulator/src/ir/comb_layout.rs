@@ -184,7 +184,7 @@ pub fn expand_compiled_blocks(stmts: &mut Vec<ProtoStatement>) {
     let mut out = Vec::with_capacity(stmts.len());
     for s in stmts.drain(..) {
         match s {
-            ProtoStatement::CompiledBlock(cb) => out.extend(
+            ProtoStatement::CompiledBlock(cb) if !cb.shared => out.extend(
                 std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone()),
             ),
             other => out.push(other),
@@ -208,14 +208,21 @@ fn cb_comb_span(cb: &CompiledBlockStatement) -> Option<(isize, isize)> {
     for off in cb.input_offsets.iter().chain(cb.output_offsets.iter()) {
         visit(off);
     }
-    let mut ins = vec![];
-    let mut outs = vec![];
-    for s in cb.original_stmts.iter() {
-        ins.clear();
-        outs.clear();
-        s.gather_variable_offsets(&mut ins, &mut outs);
-        for off in ins.iter().chain(outs.iter()) {
-            visit(off);
+    if let Some(h) = &cb.hier {
+        if let Some((a, b)) = h.summary.comb_span {
+            visit(&VarOffset::Comb(a + cb.comb_delta_bytes));
+            visit(&VarOffset::Comb(b + cb.comb_delta_bytes));
+        }
+    } else {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        for s in cb.original_stmts.iter() {
+            ins.clear();
+            outs.clear();
+            s.gather_variable_offsets(&mut ins, &mut outs);
+            for off in ins.iter().chain(outs.iter()) {
+                visit(off);
+            }
         }
     }
     if lo == isize::MAX {
@@ -242,7 +249,7 @@ fn collect_cb_units(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
 /// Every comb store's footprint: a store covering several units must keep
 /// them adjacent.  Reads stay inside the variable they name, and
 /// runtime-indexed stores are in `collect_dynamic_spans`.
-fn collect_write_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
+pub(crate) fn collect_write_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
     for s in stmts {
         match s {
             ProtoStatement::Assign(a) => {
@@ -263,7 +270,10 @@ fn collect_write_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) 
             }
             ProtoStatement::For(x) => collect_write_spans(&x.body, out),
             ProtoStatement::SequentialBlock(b) => collect_write_spans(b, out),
-            ProtoStatement::CompiledBlock(cb) => collect_write_spans(&cb.original_stmts, out),
+            ProtoStatement::CompiledBlock(cb) => match &cb.hier {
+                Some(h) => h.summary.spans(&h.summary.write_spans, cb, out),
+                None => collect_write_spans(&cb.original_stmts, out),
+            },
             _ => {}
         }
     }
@@ -274,7 +284,7 @@ fn collect_write_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) 
 /// the allocation stays contiguous — its full extent must be ONE unit.  For
 /// loop counters are collected too (no gather form mentions them, but the
 /// loop driver writes them every iteration).
-fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
+pub(crate) fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
     fn expr(e: &ProtoExpression, out: &mut Vec<(isize, isize)>) {
         match e {
             ProtoExpression::DynamicVariable {
@@ -388,7 +398,10 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 collect_dynamic_spans(&x.body, out);
             }
             ProtoStatement::SequentialBlock(b) => collect_dynamic_spans(b, out),
-            ProtoStatement::CompiledBlock(cb) => collect_dynamic_spans(&cb.original_stmts, out),
+            ProtoStatement::CompiledBlock(cb) => match &cb.hier {
+                Some(h) => h.summary.spans(&h.summary.dynamic_spans, cb, out),
+                None => collect_dynamic_spans(&cb.original_stmts, out),
+            },
             _ => {}
         }
     }

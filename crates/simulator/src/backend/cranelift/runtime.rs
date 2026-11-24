@@ -492,7 +492,15 @@ pub fn build_binary_marked(
     no_cache: bool,
     marks: Option<crate::ir::opt::dataflow::StoreMarks>,
 ) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
-    build_binary_inner(config, proto, HashSet::default(), no_cache, None, marks)
+    build_binary_inner(
+        config,
+        proto,
+        HashSet::default(),
+        no_cache,
+        None,
+        false,
+        marks,
+    )
 }
 
 /// What a dataflow cell watches: the comb ranges other cells read, and the
@@ -528,8 +536,44 @@ pub fn build_cell_binary(
         HashSet::default(),
         no_cache,
         Some(watch),
+        false,
         None,
     )
+}
+
+/// A chunk that returns nonzero when any `boundary` range of the comb changed
+/// across its run, so the caller marks the readers.  The fourth argument
+/// stays the FF delta, which lets one compile serve every instance of a
+/// template.  `None` past `MARK_COMPARE_MAX_BYTES`.
+pub fn build_reporting_binary(
+    config: &Config,
+    proto: Vec<ProtoStatement>,
+    boundary: &[(u32, u32)],
+) -> Option<(crate::ReportFuncPtr, Option<memmap2::Mmap>)> {
+    let bytes: u32 = boundary.iter().map(|&(a, b)| b - a).sum();
+    if bytes > MARK_COMPARE_MAX_BYTES || !proto.iter().all(|s| s.can_build_binary()) {
+        return None;
+    }
+    let no_cache = proto_contains_compiled_block(&proto);
+    let watch = CellWatch {
+        boundary,
+        consumers: &[],
+        always: false,
+    };
+    let (f, keep) = build_binary_inner(
+        config,
+        proto,
+        HashSet::default(),
+        no_cache,
+        Some(&watch),
+        true,
+        None,
+    )?;
+    // SAFETY: compiled with an I64 return for this signature.
+    Some((
+        unsafe { std::mem::transmute::<FuncPtr, crate::ReportFuncPtr>(f) },
+        keep,
+    ))
 }
 
 /// The load widths covering `[a, b)`, widest first.
@@ -666,6 +710,7 @@ fn build_binary_inner(
     store_elim: HashSet<VarOffset>,
     disable_load_cache: bool,
     watch: Option<&CellWatch>,
+    report: bool,
     df_marks: Option<crate::ir::opt::dataflow::StoreMarks>,
 ) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
     scratch_reset();
@@ -709,6 +754,9 @@ fn build_binary_inner(
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (comb base)
     sig.params.push(AbiParam::new(ptr_type)); // *mut u8 (write_log buffer)
     sig.params.push(AbiParam::new(ptr_type)); // isize ff_delta, or a cell's *mut u64 dirty words
+    if report {
+        sig.returns.push(AbiParam::new(I64));
+    }
 
     let mut func = Function::with_name_signature(UserFuncName::default(), sig);
     let mut func_ctx = FunctionBuilderContext::new();
@@ -725,7 +773,7 @@ fn build_binary_inner(
     // are u32.  A dataflow cell gets its dirty words pointer there instead,
     // and the comb it runs is never relocated.
     let ff_delta_raw = builder.block_params(block)[3];
-    let ff_delta = if watch.is_some() {
+    let ff_delta = if watch.is_some() && !report {
         builder.ins().iconst(I32, 0)
     } else {
         builder.ins().ireduce(I32, ff_delta_raw)
@@ -817,7 +865,20 @@ fn build_binary_inner(
         }
     }
 
-    if let Some(w) = watch
+    if report {
+        let mut acc = builder.ins().iconst(I64, 0);
+        for &(o, ty, old) in &before {
+            let new = builder.ins().load(ty, wflags, comb_values, o as i32);
+            let x = builder.ins().bxor(old, new);
+            let x = if ty == I64 {
+                x
+            } else {
+                builder.ins().uextend(I64, x)
+            };
+            acc = builder.ins().bor(acc, x);
+        }
+        builder.ins().return_(&[acc]);
+    } else if let Some(w) = watch
         && !w.consumers.is_empty()
     {
         let dirty = ff_delta_raw;
@@ -849,7 +910,9 @@ fn build_binary_inner(
         builder.ins().jump(done, &[]);
         builder.switch_to_block(done);
     }
-    builder.ins().return_(&[]);
+    if !report {
+        builder.ins().return_(&[]);
+    }
     builder.seal_all_blocks();
     builder.finalize(isa.frontend_config());
 

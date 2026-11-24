@@ -155,7 +155,7 @@ pub(crate) fn check() -> bool {
 }
 
 /// `(is_ff, start, end)`: a byte range in one value buffer.
-type Range = (bool, usize, usize);
+pub(crate) type Range = (bool, usize, usize);
 /// The emitter's form of a range: `(is_ff, start, end)` in `u32`.
 type Span = (bool, u32, u32);
 /// Sorted, merged `(start, end)` byte ranges of one buffer.
@@ -232,7 +232,7 @@ fn expr_reads(e: &ProtoExpression, out: &mut Vec<Range>) {
 /// Every byte range a statement may read (`reads`) or write (`writes`).
 /// A dual-slot FF write names both slots, so a read of the current one
 /// counts as the writer's own.
-fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &mut Vec<Range>) {
+pub(crate) fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &mut Vec<Range>) {
     match s {
         ProtoStatement::Assign(a) => {
             expr_reads(&a.expr, reads);
@@ -297,11 +297,14 @@ fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &mut Vec<Rang
                 stmt_ranges(t, reads, writes);
             }
         }
-        ProtoStatement::CompiledBlock(cb) => {
-            for t in cb.original_stmts.iter() {
-                stmt_ranges(t, reads, writes);
+        ProtoStatement::CompiledBlock(cb) => match &cb.hier {
+            Some(h) => h.summary.ranges(cb, reads, writes),
+            None => {
+                for t in cb.original_stmts.iter() {
+                    stmt_ranges(t, reads, writes);
+                }
             }
-        }
+        },
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::TbMethodCall { .. }
         | ProtoStatement::Break => {}

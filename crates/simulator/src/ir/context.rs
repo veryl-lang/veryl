@@ -111,6 +111,13 @@ pub struct Context {
     /// boundary is de-aliased — the DUT's internals stay aliased (they relocate
     /// uniformly with it, no per-cycle boundary copies on hot paths).
     pub in_reuse_dut: bool,
+    /// True while converting a hierarchy template's subtree, so templates
+    /// do not nest.
+    pub in_hier_template: bool,
+    /// Set when the hierarchy templates fell back to flat statements: the
+    /// conversion then differs from one without templates, so the caller
+    /// converts again with them off.
+    pub hier_fell_back: bool,
     /// Shared only by builds in the same `BuildSession`.
     pub(crate) dut_reuse: Arc<crate::backend::inst::DutReuseCache>,
     pub(crate) comb_cache: Arc<super::comb_pipeline_cache::CombPipelineCache>,

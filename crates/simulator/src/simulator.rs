@@ -570,7 +570,7 @@ impl Simulator {
             ret.watch_pool = info.watch_pool.clone();
             ret.comb_watch_scratch = vec![0u8; info.max_watch];
             if let Some(df) = ret.ir.dataflow.clone() {
-                let words = df.plan.words();
+                let words = df.layout.words;
                 for (event, writes) in &ret.ir.event_comb_writes {
                     let Some(offs) = writes else { continue };
                     if ret.event_comb_watch.contains_key(event) || !ret.dirty_events.contains(event)
@@ -583,7 +583,7 @@ impl Simulator {
                     let mut bits = vec![0u64; words];
                     for &(lo, hi) in offs {
                         crate::ir::mark_readers(
-                            &df.plan.comb_marked,
+                            &df.layout.comb_marked,
                             &mut bits,
                             lo as usize,
                             hi as usize + 1,
@@ -981,6 +981,7 @@ impl Simulator {
             match stmts.get(idx) {
                 Some(Statement::Compiled(_)) => "cb".into(),
                 Some(Statement::CompiledBatch(b)) => format!("batch(x{})", b.args.len()),
+                Some(Statement::HierClass(_)) => "hier".into(),
                 Some(Statement::Assign(_)) => "assign".into(),
                 Some(Statement::AssignDynamic(_)) => "assign_dyn".into(),
                 Some(Statement::If(_)) => "if".into(),
@@ -1796,7 +1797,7 @@ impl Simulator {
                 &self.ir.write_log_buffer,
                 &mut |off, len| {
                     crate::ir::mark_readers(
-                        &df.plan.ff_marked,
+                        &df.layout.ff_marked,
                         &mut dirty.borrow_mut(),
                         off,
                         off + len,
@@ -1897,11 +1898,13 @@ impl Simulator {
         } else {
             self.master_cone_settles += 1;
             if master_cone_check() {
-                let after_cone = self.ir.comb_values.to_vec();
+                // Past the logic storage is bookkeeping a settle mutates.
+                let logic = self.ir.gate_state_base as usize;
+                let after_cone = self.ir.comb_values[..logic].to_vec();
                 self.do_settle_comb();
                 if let Some(i) = after_cone
                     .iter()
-                    .zip(self.ir.comb_values.iter())
+                    .zip(self.ir.comb_values[..logic].iter())
                     .position(|(a, b)| a != b)
                 {
                     panic!(
@@ -2423,7 +2426,7 @@ impl Simulator {
     #[allow(clippy::too_many_arguments)]
     fn check_event_marks(
         &self,
-        df: &crate::ir::opt::dataflow::DataflowRt,
+        df: &crate::ir::opt::dataflow::CellSpace,
         marks: &[u64],
         comb_before: &[u8],
         comb_after: &[u8],
@@ -2431,7 +2434,7 @@ impl Simulator {
         ff_committed: &HashMap<u32, u8>,
         whole: &dyn CompiledWhole,
     ) {
-        let words = df.plan.words();
+        let words = df.layout.words;
         let mut need = vec![0u64; words];
         let logic = (self.ir.gate_state_base as usize).min(comb_after.len());
         for (off, (b, a)) in comb_before[..logic]
@@ -2440,14 +2443,14 @@ impl Simulator {
             .enumerate()
         {
             if b != a {
-                crate::ir::mark_readers(&df.plan.comb_marked, &mut need, off, off + 1);
+                crate::ir::mark_readers(&df.layout.comb_marked, &mut need, off, off + 1);
             }
         }
         if whole.dataflow_ff_marked() {
             for (&off, &v) in ff_committed {
                 if ff_before.get(off as usize) != Some(&v) {
                     let off = off as usize;
-                    crate::ir::mark_readers(&df.plan.ff_marked, &mut need, off, off + 1);
+                    crate::ir::mark_readers(&df.layout.ff_marked, &mut need, off, off + 1);
                 }
             }
         }

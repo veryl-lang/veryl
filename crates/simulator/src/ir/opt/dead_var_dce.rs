@@ -301,6 +301,23 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             }
             ProtoSystemFunctionCall::Finish => {}
         },
+        // A template class: every read counts, and every write keeps its
+        // variable alive as a partial write would.
+        ProtoStatement::CompiledBlock(x) if x.hier.is_some() => {
+            let summary = &x.hier.as_ref().unwrap().summary;
+            for o in summary.comb_reads(x) {
+                let off = VarOffset::Comb(o);
+                let e = c.live.entry(off).or_default();
+                e.reads = e.reads.saturating_add(1);
+                if c.trace {
+                    c.reads.push(off);
+                }
+            }
+            for o in summary.comb_writes(x) {
+                let e = c.live.entry(VarOffset::Comb(o)).or_default();
+                e.partial_writes = e.partial_writes.saturating_add(1);
+            }
+        }
         ProtoStatement::CompiledBlock(x) => {
             let outer = std::mem::replace(&mut c.in_compiled, true);
             for s in x.original_stmts.iter() {

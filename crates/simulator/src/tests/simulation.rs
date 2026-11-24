@@ -21245,6 +21245,7 @@ fn dataflow_cache_keeps_compile_configs_apart() {
         assert_eq!(sim.get("o").unwrap().payload_u64(), 7 ^ 0x5a);
     }
     if let [Some(sync), Some(async_), Some(again)] = &built[..] {
+        let (sync, async_, again) = (&sync.sets[0], &async_.sets[0], &again.sets[0]);
         assert!(
             !std::sync::Arc::ptr_eq(sync, async_),
             "async build reused the sync settle"
@@ -38054,7 +38055,10 @@ fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
     };
     let ir = analyze(&code, &config);
     let df = ir.dataflow.clone().expect("a dataflow settle");
-    assert!(df.jit.is_some(), "the Cranelift cells must be built");
+    assert!(
+        df.root_set().unwrap().jit.is_some(),
+        "the Cranelift cells must be built"
+    );
     let mut sim = Simulator::new(ir, None);
     let v = |x: u64| Value::new(x, 8, false);
     for z in ["z1", "z2", "z3", "z4"] {
@@ -38065,7 +38069,7 @@ fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
     let on_jit = !sim.ir.dataflow_on_aot.get();
 
     let t = std::time::Instant::now();
-    while df.cell.get().is_none() {
+    while df.root_set().unwrap().cell.get().is_none() {
         assert!(t.elapsed().as_secs() < 120, "the .so never landed");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }

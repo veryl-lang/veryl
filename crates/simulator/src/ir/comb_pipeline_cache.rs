@@ -97,7 +97,7 @@ pub struct CombPipeline {
     /// `derived_clock::master_cone` over `pre_jit_stmts`, keyed by the sorted
     /// master input clock offsets it starts from.
     #[allow(clippy::type_complexity)]
-    pub master_cone: Mutex<Option<(Vec<isize>, Option<Vec<ProtoStatement>>)>>,
+    pub master_cone: Mutex<Option<(Vec<isize>, Option<(Vec<ProtoStatement>, Vec<(u32, u32)>)>)>>,
     /// Child-module meta lists translated through `layout`, shared by the
     /// tests whose reused subtrees hand in the same lists.
     pub layout_meta: Mutex<crate::ir::comb_layout::MetaMemo>,

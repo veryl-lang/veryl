@@ -388,7 +388,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
         // Executes a pre-compiled artifact with baked offsets; the original
         // statements say what it touches, and none of that may move.
         ProtoStatement::CompiledBlock(x) => {
-            for s in x.original_stmts.iter() {
+            for s in x.originals().iter() {
                 census_stmt(s, c, true);
             }
         }
