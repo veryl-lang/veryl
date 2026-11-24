@@ -292,6 +292,171 @@ endmodule
 }
 
 #[test]
+fn struct_clock_reset_prefix_suffix() {
+    let code = r#"package PackageA {
+    struct Clocks {
+        clk_a: clock,
+        clk_b: clock,
+    }
+    struct Resets {
+        rst_a: reset,
+        rst_b: reset,
+    }
+    type ResetsAlias = Resets;
+    struct NestedResets {
+        rsts: Resets,
+    }
+}
+module ModuleA (
+    i_clks: input  PackageA::Clocks     ,
+    i_rsts: input  PackageA::ResetsAlias,
+    o_rsts: output PackageA::NestedResets,
+) {
+    var clks: PackageA::Clocks;
+    var rsts: PackageA::Resets;
+    assign clks = i_clks;
+    assign rsts = i_rsts;
+    assign o_rsts.rsts = rsts;
+
+    var _a: logic;
+    always_ff (clks.clk_a, rsts.rst_a) {
+        if_reset {
+            _a = 0;
+        } else {
+            _a = 1;
+        }
+    }
+
+    var _b: logic;
+    always_ff (i_clks.clk_b, o_rsts.rsts.rst_b) {
+        if_reset {
+            _b = 0;
+        } else {
+            _b = 1;
+        }
+    }
+
+    inst u: ModuleB (
+        i_clks,
+        i_rsts: rsts,
+    );
+}
+module ModuleB (
+    i_clks: input PackageA::Clocks,
+    i_rsts: input PackageA::Resets,
+) {}
+"#;
+
+    let expect = r#"package prj_PackageA;
+    typedef struct packed {
+        logic clk_a;
+        logic clk_b;
+    } Clocks;
+    typedef struct packed {
+        logic rst_a;
+        logic rst_b;
+    } Resets;
+    typedef Resets ResetsAlias;
+    typedef struct packed {
+        Resets rsts;
+    } NestedResets;
+endpackage
+module prj_ModuleA (
+    input  var prj_PackageA::Clocks       i_clks_p,
+    input  var prj_PackageA::ResetsAlias  i_rsts_x,
+    output var prj_PackageA::NestedResets o_rsts_x
+);
+    prj_PackageA::Clocks clks_p       ;
+    prj_PackageA::Resets rsts_x       ;
+    always_comb clks_p        = i_clks_p;
+    always_comb rsts_x        = i_rsts_x;
+    always_comb o_rsts_x.rsts = rsts_x;
+
+    logic _a;
+    always_ff @ (posedge clks_p.clk_a, negedge rsts_x.rst_a) begin
+        if (!rsts_x.rst_a) begin
+            _a <= 0;
+        end else begin
+            _a <= 1;
+        end
+    end
+
+    logic _b;
+    always_ff @ (posedge i_clks_p.clk_b, negedge o_rsts_x.rsts.rst_b) begin
+        if (!o_rsts_x.rsts.rst_b) begin
+            _b <= 0;
+        end else begin
+            _b <= 1;
+        end
+    end
+
+    prj_ModuleB u (
+        .i_clks_p (i_clks_p),
+        .i_rsts_x (rsts_x  )
+    );
+endmodule
+module prj_ModuleB (
+    input var prj_PackageA::Clocks i_clks_p,
+    input var prj_PackageA::Resets i_rsts_x
+);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.build.clock_posedge_suffix = Some("_p".to_string());
+    metadata.build.reset_low_suffix = Some("_x".to_string());
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn reset_array_element_prefix_suffix() {
+    let code = r#"module ModuleA (
+    i_clk: input clock   ,
+    i_rst: input reset[2],
+) {
+    var _a: logic;
+    always_ff (i_clk, i_rst[1]) {
+        if_reset {
+            _a = 0;
+        } else {
+            _a = 1;
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_clk_p    ,
+    input var logic i_rst_x [2]
+);
+    logic _a;
+    always_ff @ (posedge i_clk_p, negedge i_rst_x[1]) begin
+        if (!i_rst_x[1]) begin
+            _a <= 0;
+        end else begin
+            _a <= 1;
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.build.clock_posedge_suffix = Some("_p".to_string());
+    metadata.build.reset_low_suffix = Some("_x".to_string());
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn omit_prject_prefix() {
     let code = r#"module ModuleA {
     inst u: InterfaceB::<10>;

@@ -32,8 +32,6 @@ use crate::symbol_table::Import as SymImport;
 use crate::symbol_table::Msb as SymMsb;
 use crate::type_dag::{self, Context, TypeDagCandidate};
 use std::collections::{HashMap, HashSet};
-use veryl_metadata::ClockType;
-use veryl_metadata::{Build, ResetType};
 use veryl_parser::ParolError;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
@@ -148,7 +146,6 @@ impl GenericContext {
 #[derive(Default)]
 pub struct CreateSymbolTable {
     pub errors: Vec<AnalyzerError>,
-    build_opt: Build,
     project_name: StrId,
     point: HandlerPoint,
     module_namspace_depth: usize,
@@ -204,7 +201,7 @@ enum StructOrUnion {
 }
 
 impl CreateSymbolTable {
-    pub fn new(build_opt: &Build, project_name: StrId) -> Self {
+    pub fn new(project_name: StrId) -> Self {
         // Anchor the scope tree and the initial namespace at the project root
         // before the walk begins, so file-scope references resolve from the same
         // scope as pass1 without consulting a mutable global default.
@@ -212,7 +209,6 @@ impl CreateSymbolTable {
         namespace.push(project_name);
         scope::set_current(scope::intern_namespace(&namespace));
         Self {
-            build_opt: build_opt.clone(),
             project_name,
             ..Default::default()
         }
@@ -411,37 +407,6 @@ impl CreateSymbolTable {
             }
         };
         SymClockDomain::Explicit(id)
-    }
-
-    fn get_signal_prefix_suffix(&self, kind: TypeKind) -> (Option<String>, Option<String>) {
-        match kind {
-            TypeKind::Clock => match self.build_opt.clock_type {
-                ClockType::PosEdge => {
-                    let prefix = self.build_opt.clock_posedge_prefix.clone();
-                    let suffix = self.build_opt.clock_posedge_suffix.clone();
-                    return (prefix, suffix);
-                }
-                ClockType::NegEdge => {
-                    let prefix = self.build_opt.clock_negedge_prefix.clone();
-                    let suffix = self.build_opt.clock_negedge_suffix.clone();
-                    return (prefix, suffix);
-                }
-            },
-            TypeKind::Reset => match self.build_opt.reset_type {
-                ResetType::AsyncHigh | ResetType::SyncHigh => {
-                    let prefix = self.build_opt.reset_high_prefix.clone();
-                    let suffix = self.build_opt.reset_high_suffix.clone();
-                    return (prefix, suffix);
-                }
-                ResetType::AsyncLow | ResetType::SyncLow => {
-                    let prefix = self.build_opt.reset_low_prefix.clone();
-                    let suffix = self.build_opt.reset_low_suffix.clone();
-                    return (prefix, suffix);
-                }
-            },
-            _ => {}
-        }
-        (None, None)
     }
 
     fn push_default_clock_reset(&mut self, identifier: &Token, id: SymbolId, kind: &SymbolKind) {
@@ -963,7 +928,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
             r#type.is_const = true;
             let affiliation = self.affiliation.last().cloned().unwrap();
-            let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let clock_domain = if let Some(ref x) = arg.let_statement_opt
                 && let Some(ref y) = x.let_statement_opt0
             {
@@ -977,8 +941,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let property = VariableProperty {
                 r#type,
                 affiliation,
-                prefix,
-                suffix,
                 clock_domain,
                 loop_variable: false,
             };
@@ -1092,8 +1054,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let property = VariableProperty {
                     r#type,
                     affiliation,
-                    prefix: None,
-                    suffix: None,
                     clock_domain: SymClockDomain::None,
                     loop_variable: true,
                 };
@@ -1120,7 +1080,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
             r#type.is_const = true;
             let affiliation = self.affiliation.last().cloned().unwrap();
-            let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let clock_domain = if let Some(ref x) = arg.let_declaration_opt
                 && let Some(ref y) = x.let_declaration_opt0
             {
@@ -1134,8 +1093,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let property = VariableProperty {
                 r#type,
                 affiliation,
-                prefix,
-                suffix,
                 clock_domain,
                 loop_variable: false,
             };
@@ -1163,7 +1120,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
             }
 
             let affiliation = self.affiliation.last().cloned().unwrap();
-            let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let clock_domain = if let Some(ref x) = arg.var_declaration_opt
                 && let Some(ref y) = x.var_declaration_opt0
             {
@@ -1177,8 +1133,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let property = VariableProperty {
                 r#type,
                 affiliation,
-                prefix,
-                suffix,
                 clock_domain,
                 loop_variable: false,
             };
@@ -1880,7 +1834,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     }
 
                     let direction: SymDirection = x.direction.as_ref().into();
-                    let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
                     let clock_domain = if let Some(ref x) = x.port_type_concrete_opt {
                         self.insert_clock_domain(&x.clock_domain)
                     } else if affiliation == Affiliation::Module {
@@ -1900,8 +1853,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         token,
                         r#type,
                         direction,
-                        prefix,
-                        suffix,
                         clock_domain,
                         default_value,
                         is_proto: self.in_proto,
@@ -1940,8 +1891,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         token,
                         r#type,
                         direction: SymDirection::Interface,
-                        prefix: None,
-                        suffix: None,
                         clock_domain,
                         default_value: None,
                         is_proto: self.in_proto,
@@ -2047,7 +1996,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
-                    SymbolKind::Function(property),
+                    SymbolKind::Function(Box::new(property)),
                     false,
                 ) {
                     self.push_declaration_item(id);
@@ -2733,7 +2682,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
-                    SymbolKind::Function(property),
+                    SymbolKind::Function(Box::new(property)),
                     false,
                 ) {
                     self.push_declaration_item(id);
