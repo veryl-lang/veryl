@@ -3293,6 +3293,43 @@ fn tb_dirty_filter_skips_private_writes() {
     }
 }
 
+#[test]
+fn tb_dirty_filter_bounds_dynamic_write_to_last_element() {
+    // `lm_dump` is laid out right before `w_row`, which the comb writes. A
+    // dynamically indexed write reaches only up to the last element of
+    // `lm_dump`, so the copy must stay clean instead of settling every time.
+    let code = r#"
+    #[test(test_sample)]
+    module test_sample {
+        inst clk: $tb::clock_gen;
+        var r_line : logic<8>;
+        var lm_dump: logic<128> [4, 8];
+        var w_row  : logic<128> [4];
+        assign w_row = '{default: '0};
+        initial {
+            r_line = 0;
+            for k in 0..8 {
+                r_line = k as 8;
+                clk.next(1);
+                for pe in 0..4 {
+                    lm_dump[pe][k] = w_row[pe];
+                }
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let clean = tb_clean_count(code, &config, "test_sample").expect("analyzes");
+        assert_eq!(
+            clean, 3,
+            "the copy into the testbench array must be proved private (jit={}, 4state={})",
+            config.use_jit, config.use_4state,
+        );
+    }
+}
+
 /// How many testbench statements the tb settle filter proves private, or `None`
 /// when the design does not analyze under `config`.
 #[track_caller]
