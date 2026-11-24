@@ -70,6 +70,8 @@ pub(crate) struct HierCells {
     /// FF bytes the cells read.
     pub(crate) ff_marked: Arc<crate::ir::opt::dataflow::Readers>,
     pub(crate) fingerprint: u64,
+    /// A statement prints, asserts or finishes: its runs keep their order.
+    pub(crate) effects: bool,
     /// The cells as AOT-C, once compiled (see `emit_hier_template`).
     #[cfg(not(target_family = "wasm"))]
     aot: Option<crate::backend::aot_c::emit::AotCell>,
@@ -600,6 +602,7 @@ pub(crate) fn build(
         comb_marked,
         ff_marked,
         fingerprint: h.finish(),
+        effects: stmts.iter().any(crate::ir::opt::owners::has_side_effects),
         #[cfg(not(target_family = "wasm"))]
         aot,
         shadow_word,
@@ -667,9 +670,14 @@ fn compile_template(
 
 impl HierCells {
     /// Whether the AOT-C cells have loaded.
-    #[cfg(all(test, not(target_family = "wasm")))]
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn aot_landed(&self) -> bool {
         self.aot.as_ref().is_some_and(|c| c.get().is_some())
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn aot_landed(&self) -> bool {
+        false
     }
 
     /// A compiled cell of the class, standing in for the class block's
@@ -918,11 +926,224 @@ pub(crate) fn set_active(runs: *const HashMap<RunKey, HierClassRun>) {
 /// # Safety
 /// The runs `set_active` installed must be alive and hold the class.
 pub unsafe extern "C" fn veryl_aot_hier_run(class: u32, comb_delta: i64, template: u64) {
+    let key = (class, comb_delta as isize, template);
+    if PRE_RAN.with(|p| {
+        let mut p = p.borrow_mut();
+        !p.is_empty() && p.remove(&key)
+    }) {
+        return;
+    }
     let runs = ACTIVE.with(|a| a.get());
     debug_assert!(!runs.is_null(), "a hierarchy class ran outside a settle");
     let runs = unsafe { &*runs };
-    let run = &runs[&(class, comb_delta as isize, template)];
+    let run = &runs[&key];
     unsafe { run.run() };
+}
+
+thread_local! {
+    /// Class runs a batch already ran this settle, which their own cells skip.
+    static PRE_RAN: std::cell::RefCell<HashSet<RunKey>> =
+        std::cell::RefCell::new(HashSet::default());
+}
+
+/// Forget the batch runs of the previous settle.
+pub(crate) fn begin_settle() {
+    PRE_RAN.with(|p| {
+        let mut p = p.borrow_mut();
+        if !p.is_empty() {
+            p.clear();
+        }
+    });
+}
+
+/// Forgets the batch runs when the settle that made them ends, so no other
+/// path running class calls skips one.
+pub(crate) struct SettleEnd;
+
+impl Drop for SettleEnd {
+    fn drop(&mut self) {
+        begin_settle();
+    }
+}
+
+/// `VERYL_HIER_THREADS=N`: run batches of independent class runs on `N`
+/// threads.
+pub(crate) fn hier_threads() -> usize {
+    static N: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+        std::env::var("VERYL_HIER_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    });
+    *N
+}
+
+struct Batch {
+    runs: Vec<*const HierClassRun>,
+    next: std::sync::atomic::AtomicUsize,
+    done: std::sync::atomic::AtomicUsize,
+    force: bool,
+}
+
+struct Pool {
+    /// The batch being run, published with a new generation.
+    batch: std::sync::atomic::AtomicPtr<Batch>,
+    generation: std::sync::atomic::AtomicU64,
+    /// Workers holding the batch pointer: the publisher waits them out
+    /// before the batch goes away.
+    active: std::sync::atomic::AtomicUsize,
+    /// Workers waiting on `wake`; the publisher notifies only when there are.
+    sleeping: std::sync::atomic::AtomicUsize,
+    sleep: std::sync::Mutex<()>,
+    wake: std::sync::Condvar,
+    busy: std::sync::Mutex<()>,
+}
+
+// SAFETY: a batch's runs address buffers of the settle that waits for it.
+unsafe impl Sync for Pool {}
+
+/// How long an idle worker polls for the next batch before it sleeps: long
+/// enough to bridge the batches of one settle, short enough to leave the
+/// cores to others between settles.
+const SPIN: std::time::Duration = std::time::Duration::from_micros(200);
+
+fn pool() -> &'static Pool {
+    static POOL: std::sync::OnceLock<&'static Pool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        let pool: &'static Pool = Box::leak(Box::new(Pool {
+            batch: std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()),
+            generation: std::sync::atomic::AtomicU64::new(0),
+            active: std::sync::atomic::AtomicUsize::new(0),
+            sleeping: std::sync::atomic::AtomicUsize::new(0),
+            sleep: std::sync::Mutex::new(()),
+            wake: std::sync::Condvar::new(),
+            busy: std::sync::Mutex::new(()),
+        }));
+        for _ in 1..hier_threads() {
+            std::thread::spawn(move || worker(pool));
+        }
+        pool
+    })
+}
+
+fn worker(pool: &Pool) {
+    use std::sync::atomic::Ordering;
+    let mut seen = 0u64;
+    loop {
+        let since = std::time::Instant::now();
+        let mut spins = 0u32;
+        while pool.generation.load(Ordering::SeqCst) == seen {
+            spins += 1;
+            if spins.is_multiple_of(64) && since.elapsed() > SPIN {
+                let guard = pool.sleep.lock().unwrap();
+                pool.sleeping.fetch_add(1, Ordering::SeqCst);
+                let guard = pool
+                    .wake
+                    .wait_while(guard, |_| pool.generation.load(Ordering::SeqCst) == seen)
+                    .unwrap();
+                pool.sleeping.fetch_sub(1, Ordering::SeqCst);
+                drop(guard);
+                break;
+            }
+            std::hint::spin_loop();
+        }
+        seen = pool.generation.load(Ordering::SeqCst);
+        pool.active.fetch_add(1, Ordering::SeqCst);
+        let b = pool.batch.load(Ordering::SeqCst);
+        if !b.is_null() {
+            // SAFETY: the publisher keeps the batch alive while `active`
+            // counts this worker.
+            unsafe { work(&*b) };
+        }
+        pool.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Take runs off `b` until none is left.
+unsafe fn work(b: &Batch) {
+    use std::sync::atomic::Ordering;
+    let prev = FORCE_ALL.with(|f| f.replace(b.force));
+    loop {
+        let i = b.next.fetch_add(1, Ordering::AcqRel);
+        if i >= b.runs.len() {
+            break;
+        }
+        unsafe { (*b.runs[i]).run() };
+        b.done.fetch_add(1, Ordering::AcqRel);
+    }
+    FORCE_ALL.with(|f| f.set(prev));
+}
+
+/// Callback a compiled dataflow cell makes to run `n` independent class runs
+/// at once; each run's own cell then skips it.
+///
+/// # Safety
+/// As `veryl_aot_hier_run`, for each of the runs.
+pub unsafe extern "C" fn veryl_aot_hier_run_batch(
+    n: u32,
+    classes: *const u32,
+    deltas: *const i64,
+    templates: *const u64,
+) {
+    use std::sync::atomic::Ordering;
+    let runs = ACTIVE.with(|a| a.get());
+    let runs = unsafe { &*runs };
+    let keys: Vec<RunKey> = unsafe {
+        let (classes, deltas, templates) = (
+            std::slice::from_raw_parts(classes, n as usize),
+            std::slice::from_raw_parts(deltas, n as usize),
+            std::slice::from_raw_parts(templates, n as usize),
+        );
+        (0..n as usize)
+            .map(|i| (classes[i], deltas[i] as isize, templates[i]))
+            .collect()
+    };
+    // Only AOT-C cells keep off the shared write log; any other run goes
+    // here, on this thread.
+    let (parallel, serial): (Vec<&RunKey>, Vec<&RunKey>) =
+        keys.iter().partition(|k| runs[*k].cells.aot_landed());
+    for k in serial {
+        unsafe { runs[k].run() };
+    }
+    let batch = Batch {
+        runs: parallel
+            .into_iter()
+            .map(|k| &runs[k] as *const HierClassRun)
+            .collect(),
+        next: std::sync::atomic::AtomicUsize::new(0),
+        done: std::sync::atomic::AtomicUsize::new(0),
+        force: FORCE_ALL.with(|f| f.get()),
+    };
+    if hier_threads() < 2 {
+        unsafe { work(&batch) };
+        return pre_ran(keys);
+    }
+    let pool = pool();
+    match pool.busy.try_lock() {
+        Ok(_guard) => {
+            pool.batch
+                .store(&batch as *const Batch as *mut Batch, Ordering::SeqCst);
+            pool.generation.fetch_add(1, Ordering::SeqCst);
+            if pool.sleeping.load(Ordering::SeqCst) > 0 {
+                let _guard = pool.sleep.lock().unwrap();
+                pool.wake.notify_all();
+            }
+            unsafe { work(&batch) };
+            while batch.done.load(Ordering::Acquire) < batch.runs.len() {
+                std::hint::spin_loop();
+            }
+            pool.batch.store(std::ptr::null_mut(), Ordering::SeqCst);
+            while pool.active.load(Ordering::SeqCst) > 0 {
+                std::hint::spin_loop();
+            }
+        }
+        Err(_) => unsafe { work(&batch) },
+    }
+    pre_ran(keys);
+}
+
+fn pre_ran(keys: Vec<RunKey>) {
+    PRE_RAN.with(|p| p.borrow_mut().extend(keys));
 }
 
 /// The partition of each `(cells, instance comb delta)`.

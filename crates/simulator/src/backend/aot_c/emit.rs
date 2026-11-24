@@ -5699,7 +5699,7 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
             // Not weak per unit: PE exports no weak definition.
             if part == 0 || !l.starts_with(ENTRY_ATTR) {
                 out.push((*l).to_string());
-            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF, HIER_DEF]
+            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF, HIER_DEF, HIER_BATCH_DEF]
                 .into_iter()
                 .find(|x| cross_unit_hit(l, x))
             {
@@ -5792,7 +5792,11 @@ const SYSFN_DEF: &str = "veryl_sysfn_t veryl_sysfn_cb;";
 const SYSFN_SET: &str = "void veryl_set_sysfn_cb(";
 const HIER_DEF: &str = "veryl_hier_t veryl_hier_cb;";
 const HIER_SET: &str = "void veryl_set_hier_cb(";
-const CROSS_UNIT: [&str; 6] = [
+const HIER_BATCH_DEF: &str = "veryl_hier_batch_t veryl_hier_batch_cb;";
+const HIER_BATCH_SET: &str = "void veryl_set_hier_batch_cb(";
+const CROSS_UNIT: [&str; 8] = [
+    HIER_BATCH_DEF,
+    HIER_BATCH_SET,
     WIDEOPS_DEF,
     WIDEOPS_SET,
     SYSFN_DEF,
@@ -5804,7 +5808,10 @@ const CROSS_UNIT: [&str; 6] = [
 /// through, for a plan that holds one.
 const HIER_CB_C: &str = "typedef void (*veryl_hier_t)(unsigned, long long, unsigned long long);\n\
      __attribute__((visibility(\"default\"))) veryl_hier_t veryl_hier_cb;\n\
-     __attribute__((visibility(\"default\"))) void veryl_set_hier_cb(void *p) { veryl_hier_cb = (veryl_hier_t)p; }\n";
+     __attribute__((visibility(\"default\"))) void veryl_set_hier_cb(void *p) { veryl_hier_cb = (veryl_hier_t)p; }\n\
+     typedef void (*veryl_hier_batch_t)(unsigned, const unsigned *, const long long *, const unsigned long long *);\n\
+     __attribute__((visibility(\"default\"))) veryl_hier_batch_t veryl_hier_batch_cb;\n\
+     __attribute__((visibility(\"default\"))) void veryl_set_hier_batch_cb(void *p) { veryl_hier_batch_cb = (veryl_hier_batch_t)p; }\n";
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
 
 /// The compiler, its source-independent flags, and whether event sources
@@ -6072,6 +6079,13 @@ fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
         unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_hier_cb\0") }
     {
         let cb: unsafe extern "C" fn(u32, i64, u64) = crate::ir::hier_cells::veryl_aot_hier_run;
+        unsafe { setter(cb as *mut c_void) };
+    }
+    if let Ok(setter) =
+        unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_hier_batch_cb\0") }
+    {
+        let cb: unsafe extern "C" fn(u32, *const u32, *const i64, *const u64) =
+            crate::ir::hier_cells::veryl_aot_hier_run_batch;
         unsafe { setter(cb as *mut c_void) };
     }
     Ok(EmittedModule {
@@ -11268,6 +11282,11 @@ fn emit_dataflow_cells(
     body.push_str(WIDEOPS_C_INLINE);
     body.push_str(selection::INLINE);
     body.push('\n');
+    let batches = if hier_calls {
+        hier_call_batches(&cells, plan)
+    } else {
+        HashMap::default()
+    };
     // Each cell's code, indented for a function body.
     let mut cell_code: Vec<String> = Vec::with_capacity(cells.len());
     let shadow_base = plan.words();
@@ -11286,6 +11305,25 @@ fn emit_dataflow_cells(
             }
         };
         c.push_str("    uint64_t _own = 0;\n");
+        if let Some(members) = batches.get(&k) {
+            // The dispatcher spills the scanned word before a batch's first
+            // cell, so every member's dirty bit is in memory: only the
+            // members that will run join.
+            let n = members.len();
+            let mut b = format!(
+                "    {{ unsigned _bc[{n}]; long long _bd[{n}]; unsigned long long _bt[{n}]; unsigned _bn = 0;\n      _bc[_bn] = {}u; _bd[_bn] = {}LL; _bt[_bn] = {:#x}ULL; _bn++;\n",
+                members[0].1, members[0].2, members[0].3
+            );
+            for &(cell, class, delta, template) in &members[1..] {
+                b.push_str(&format!(
+                    "      if ((dirty[{}] >> {}) & 1) {{ _bc[_bn] = {class}u; _bd[_bn] = {delta}LL; _bt[_bn] = {template:#x}ULL; _bn++; }}\n",
+                    cell / 64,
+                    cell % 64
+                ));
+            }
+            b.push_str("      if (_bn > 1) { __asm__ volatile(\"\" ::: \"memory\"); veryl_hier_batch_cb(_bn, _bc, _bd, _bt); __asm__ volatile(\"\" ::: \"memory\"); } }\n");
+            c.push_str(&b);
+        }
         let watch = &plan.boundary[k];
         let always = plan.mark_always[k];
         let compare = !watch.is_empty() && !always;
@@ -11383,6 +11421,23 @@ fn emit_dataflow_cells(
     body.push_str("};\n");
     // A cell marks only cells after it: its own word through the return
     // value, later words in memory, read when the scan reaches them.
+    let spill = if batches.is_empty() {
+        String::new()
+    } else {
+        let mut leaders = vec![0u64; nw];
+        for &k in batches.keys() {
+            leaders[k / 64] |= 1 << (k % 64);
+        }
+        body.push_str(&format!(
+            "static const uint64_t veryl_batch_leaders[{nw}] = {{{}}};\n",
+            leaders
+                .iter()
+                .map(|m| format!("{m:#x}ULL"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        "\x20           if ((veryl_batch_leaders[w] >> (k & 63u)) & 1) { dirty[w] = b; b = veryl_cells[k](ff_values, comb_values, dirty); b |= dirty[w]; dirty[w] = 0; continue; }\n".to_string()
+    };
     let entry = |name: &str, count: &str| {
         format!(
             "{ENTRY_ATTR}\n\
@@ -11397,6 +11452,7 @@ fn emit_dataflow_cells(
              \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
              {count}\
              \x20           b &= b - 1;\n\
+             {spill}\
              \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
              \x20       }} while (b);\n\
              \x20   }}\n\
@@ -11437,6 +11493,74 @@ fn emit_dataflow_cells(
     body.push_str("}\n");
     Some(body)
 }
+
+/// Cells holding one class call each, batched by their first cell: a later
+/// call of the same class joins when no cell from the first one on marks it
+/// and no other class of its instance runs in between, so it can run before
+/// the first one's cell compares its outputs.
+fn hier_call_batches(
+    cells: &[Vec<&ProtoStatement>],
+    plan: &crate::ir::opt::dataflow::DataflowPlan,
+) -> HashMap<usize, Vec<BatchCall>> {
+    let call = |k: usize| match cells[k][..] {
+        [ProtoStatement::CompiledBlock(cb)] => cb
+            .hier
+            .as_ref()
+            .filter(|h| !h.cells.effects)
+            .map(|h| (k, h.class, cb.comb_delta_bytes, h.cells.fingerprint)),
+        _ => None,
+    };
+    let calls: Vec<BatchCall> = (0..cells.len()).filter_map(call).collect();
+    let is_call: HashSet<usize> = calls.iter().map(|c| c.0).collect();
+    let mut markers: HashMap<usize, Vec<usize>> = HashMap::default();
+    for (c, list) in plan.consumers.iter().enumerate() {
+        for &(w, m) in list {
+            let mut bits = m;
+            while bits != 0 {
+                let to = w as usize * 64 + bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                if is_call.contains(&to) {
+                    markers.entry(to).or_default().push(c);
+                }
+            }
+        }
+    }
+    let mut by_class: HashMap<u32, Vec<BatchCall>> = HashMap::default();
+    for &c in &calls {
+        by_class.entry(c.1).or_default().push(c);
+    }
+    let mut out: HashMap<usize, Vec<BatchCall>> = HashMap::default();
+    for list in by_class.into_values() {
+        let mut members = vec![list[0]];
+        for &member in &list[1..] {
+            let (leader, k) = (members[0].0, member.0);
+            // The instance's other classes pass values inside the template,
+            // which the parent's marks do not show.
+            let marked = markers
+                .get(&k)
+                .is_some_and(|m| m.iter().any(|&c| leader <= c && c < k))
+                || calls
+                    .iter()
+                    .any(|&(c, _, d, t)| leader <= c && c < k && (d, t) == (member.2, member.3));
+            if marked {
+                if members.len() > 1 {
+                    out.insert(leader, std::mem::take(&mut members));
+                }
+                members = vec![member];
+            } else {
+                members.push(member);
+            }
+        }
+        if members.len() > 1 {
+            out.insert(members[0].0, members);
+        }
+    }
+    out
+}
+
+/// A class call batched with others: its cell, class, comb delta and
+/// template fingerprint.
+type BatchCall = (usize, u32, isize, u64);
 
 /// One cell of a hierarchy template, in template coordinates.
 pub struct TemplateCell<'a> {

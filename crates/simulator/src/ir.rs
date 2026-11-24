@@ -847,6 +847,10 @@ impl Ir {
         let Some(space) = self.dataflow.as_ref() else {
             return false;
         };
+        let _end = self.has_hier_templates.then(|| {
+            crate::ir::hier_cells::begin_settle();
+            crate::ir::hier_cells::SettleEnd
+        });
         let layout = &space.layout;
         let Some(df) = space.root_set() else {
             return false;
