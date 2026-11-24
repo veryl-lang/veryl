@@ -374,6 +374,67 @@ fn inside<T: Copy + Ord>(ranges: &[(T, T)], s: T, e: T) -> bool {
     i > 0 && ranges[i - 1].1 >= e
 }
 
+/// Whether the bytes of the union of each sorted list, summed, cost more
+/// than `budget_ns` to compare: a lower bound on a gate's check, as joining
+/// only adds bytes.  Stops at the first range that crosses it.
+fn union_bytes_exceed(lists: [&mut dyn Iterator<Item = &(u32, u32)>; 2], budget_ns: usize) -> bool {
+    let mut bytes = 0usize;
+    for list in lists {
+        let mut end = 0u32;
+        for &(s, e) in list {
+            if e > end {
+                bytes += (e - s.max(end)) as usize;
+                end = e;
+                if bytes / BYTES_PER_NS > budget_ns {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Every comb read of an event's statements, by start, to find the reads
+/// meeting a range without scanning them all.
+struct ReadIndex {
+    /// `(start, end, statement)`.
+    reads: Vec<(usize, usize, usize)>,
+    /// Running maximum of `end`.
+    max_end: Vec<usize>,
+}
+
+impl ReadIndex {
+    fn new(reads: &[Vec<Range>]) -> Self {
+        let mut v: Vec<(usize, usize, usize)> = reads
+            .iter()
+            .enumerate()
+            .flat_map(|(i, r)| r.iter().filter(|x| !x.0).map(move |x| (x.1, x.2, i)))
+            .collect();
+        v.sort_unstable();
+        let mut m = 0usize;
+        let max_end = v
+            .iter()
+            .map(|r| {
+                m = m.max(r.1);
+                m
+            })
+            .collect();
+        Self { reads: v, max_end }
+    }
+
+    /// Whether a statement outside `[lo, hi)` reads comb overlapping `[s, e)`.
+    fn read_outside(&self, s: usize, e: usize, lo: usize, hi: usize) -> bool {
+        let upto = self.reads.partition_point(|r| r.0 < e);
+        (0..upto)
+            .rev()
+            .take_while(|&j| self.max_end[j] > s)
+            .any(|j| {
+                let (_, re, i) = self.reads[j];
+                re > s && (i < lo || i >= hi)
+            })
+    }
+}
+
 fn split(v: &[Range]) -> (Spans, Spans) {
     let ff = v.iter().filter(|r| r.0).map(|r| (r.1, r.2)).collect();
     let comb = v.iter().filter(|r| !r.0).map(|r| (r.1, r.2)).collect();
@@ -552,6 +613,8 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
         mass.push(s.statement_mass());
     }
 
+    let read_index = ReadIndex::new(&reads);
+
     // Candidate subtrees: every node owning event statements, outer nodes
     // first so the emitter nests the inner gates.  A node qualifies exactly
     // when it is an owner or an owner's ancestor.
@@ -637,20 +700,18 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
                 .filter(|&&(s, e)| !overlaps(comb_touched_comb, s, e))
                 .copied()
                 .collect();
-            let scratch_flow = (0..stmts.len()).any(|i| {
-                let outside = i < lo || i >= hi;
-                reads[i].iter().any(|&(is_ff, s, e)| {
-                    !is_ff
-                        && if outside {
-                            overlaps(&scratch_written, s, e)
-                        } else {
-                            !inside(&written_comb, s, e)
-                                && !produces(produced, s, e)
-                                && !overlaps(comb_touched_comb, s, e)
-                                && owner_span(&inputs.comb_var, s).is_none()
-                        }
-                })
-            });
+            let scratch_flow = scratch_written
+                .iter()
+                .any(|&(s, e)| read_index.read_outside(s, e, lo, hi))
+                || (lo..hi).any(|i| {
+                    reads[i].iter().any(|&(is_ff, s, e)| {
+                        !is_ff
+                            && !inside(&written_comb, s, e)
+                            && !produces(produced, s, e)
+                            && !overlaps(comb_touched_comb, s, e)
+                            && owner_span(&inputs.comb_var, s).is_none()
+                    })
+                });
             if scratch_flow {
                 counts[3] += 1;
                 if diag_on {
@@ -678,6 +739,16 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
                 .ff_unless_written
                 .iter()
                 .filter(|&&(s, e)| !inside(&written_ff, s as usize, e as usize));
+            // Most candidates fail the cost test below on these bytes alone.
+            if !diag_on
+                && union_bytes_exceed(
+                    [&mut boundary.clone(), &mut comb_ff.clone()],
+                    total_mass * STMT_NS / 2,
+                )
+            {
+                counts[1] += 1;
+                continue;
+            }
             // The gated statements' own reads that neither they nor the
             // subtree's comb produce.
             let (mut event_ff, mut event_comb) = (Vec::new(), Vec::new());
@@ -1125,6 +1196,49 @@ mod tests {
     use crate::ir::{ExpressionContext, ProtoAssignStatement};
     use veryl_analyzer::value::{Value, ValueU64};
     use veryl_parser::token_range::TokenRange;
+
+    /// Overlapping ranges count once toward the bound, and the bound holds
+    /// exactly when the union's bytes exceed the budget.
+    #[test]
+    fn union_bytes_bound_counts_overlaps_once() {
+        let comb = [(0u32, 40u32), (8, 48), (100, 140)];
+        let ff = [(0u32, 16u32)];
+        let union = 48 + 40 + 16;
+        for budget in [0, 10, union / BYTES_PER_NS - 1, union / BYTES_PER_NS, 100] {
+            assert_eq!(
+                union_bytes_exceed([&mut comb.iter(), &mut ff.iter()], budget),
+                union / BYTES_PER_NS > budget,
+                "budget {budget}"
+            );
+        }
+    }
+
+    /// The index finds a read outside the run exactly when a scan would.
+    #[test]
+    fn read_index_matches_a_scan() {
+        let reads: Vec<Vec<Range>> = vec![
+            vec![(false, 0, 8), (true, 0, 100)],
+            vec![(false, 20, 30)],
+            vec![],
+            vec![(false, 4, 64), (false, 70, 72)],
+            vec![(false, 90, 91)],
+        ];
+        let index = ReadIndex::new(&reads);
+        for (s, e) in [(0, 4), (8, 20), (25, 26), (64, 70), (71, 95), (100, 120)] {
+            for lo in 0..reads.len() {
+                for hi in lo..=reads.len() {
+                    let scan = reads.iter().enumerate().any(|(i, r)| {
+                        (i < lo || i >= hi) && r.iter().any(|x| !x.0 && x.1 < e && x.2 > s)
+                    });
+                    assert_eq!(
+                        index.read_outside(s, e, lo, hi),
+                        scan,
+                        "[{s},{e}) run {lo}..{hi}"
+                    );
+                }
+            }
+        }
+    }
 
     /// Densely packed small ranges join cheapest into one span far past the
     /// cap; the emitter would then drop the gate.

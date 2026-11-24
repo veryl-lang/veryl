@@ -137,6 +137,10 @@ impl CompiledWhole for AotCWhole {
         self.dataflow_ff_marked
     }
 
+    fn ready(&self) -> bool {
+        self.cell.get().is_some()
+    }
+
     fn try_dispatch(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome {
         match self.cell.get() {
             Some(m) => {

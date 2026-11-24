@@ -37638,6 +37638,158 @@ fn dataflow_event_config() -> Config {
 }
 
 #[test]
+fn aot_c_events_compiled_as_one_batch_run_from_their_slots() {
+    // The clock and reset events compile as one module, each from its own
+    // slot, and a rebuild loads them from the index by slot.
+    if !crate::tests::aot_c_loads() {
+        return;
+    }
+    // Constants no earlier run compiled, so the batch is built here.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    let (k, j) = (nanos & 0xffff, (nanos >> 16) & 0xffff);
+    let code = format!(
+        r#"
+    module Top (
+        clk: input clock, rst: input reset,
+        oa: output logic<16>, ob: output logic<16>,
+    ) {{
+        var a: logic<16>;
+        var b: logic<16>;
+        always_ff (clk, rst) {{ if_reset {{ a = 16'd{k}; }} else {{ a = a + 16'd{k}; }} }}
+        always_ff (clk, rst) {{ if_reset {{ b = 16'd{j}; }} else {{ b = b ^ (a + 16'd3); }} }}
+        assign oa = a;
+        assign ob = b;
+    }}
+    "#
+    );
+    let run = |ir: Ir| -> Vec<(Option<Value>, Option<Value>)> {
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        (0..8)
+            .map(|_| {
+                sim.step(&clk);
+                (sim.get("oa"), sim.get("ob"))
+            })
+            .collect()
+    };
+    let reference = run(analyze(&code, &Config::default()));
+    crate::backend::aot_c::emit::set_test_aot_index(true);
+    for build in 0..2 {
+        crate::backend::aot_c::emit::take_event_sources();
+        crate::backend::aot_c::emit::take_event_batches();
+        let ir = analyze(&code, &dataflow_event_config());
+        let emitted = crate::backend::aot_c::emit::take_event_sources().len();
+        let batches = crate::backend::aot_c::emit::take_event_batches();
+        assert!(ir.whole_events.len() >= 2, "build {build}");
+        assert!(
+            ir.whole_events.values().all(|w| w.ready()),
+            "build {build}: every event must run compiled"
+        );
+        if build == 0 {
+            assert!(emitted >= 2, "the first build must emit the events");
+            assert_eq!(batches, 1, "the events must compile as one batch");
+        } else {
+            assert_eq!(emitted, 0, "the rebuild must load every event by its slot");
+        }
+        assert_eq!(run(ir), reference, "build {build}");
+    }
+    crate::backend::aot_c::emit::set_test_aot_index(false);
+}
+
+#[test]
+fn aot_c_event_stores_at_a_runtime_bit_position() {
+    // Event-local arrays written at a runtime index and bit position, which
+    // the shape-specific stores decline, take the generic windowed store and
+    // agree with the interpreter.
+    if !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input clock, rst: input reset,
+        idx: input logic<2>, pos: input logic<5>, wpos: input logic<7>, v: input logic<8>,
+        o: output logic<32>, w: output logic<128>,
+    ) {
+        function patch (
+            x  : input logic<32>,
+            i  : input logic<2> ,
+            p  : input logic<5> ,
+            val: input logic<4> ,
+        ) -> logic<32> {
+            var tt: logic<32> [4];
+            tt[0] = x;
+            tt[1] = ~x;
+            tt[2] = x ^ 32'h5a5a5a5a;
+            tt[3] = 0;
+            tt[i][p +: 4] = val;
+            return tt[i];
+        }
+        function widen (
+            x  : input logic<128>,
+            p  : input logic<7>  ,
+            val: input logic<8>  ,
+        ) -> logic<128> {
+            var uu: logic<128>;
+            uu = x;
+            uu[p +: 32] = {val, val, val, val};
+            return uu;
+        }
+        var r: logic<32>;
+        var s: logic<128>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; s = 0; }
+            else {
+                r = patch(r, idx, pos, v[3:0]);
+                s = widen(s, wpos, v);
+            }
+        }
+        assign o = r;
+        assign w = s;
+    }
+    "#;
+    let aot = analyze(code, &dataflow_event_config());
+    assert!(
+        aot.event_statements
+            .keys()
+            .all(|e| aot.whole_events.contains_key(e)),
+        "every event must compile whole"
+    );
+    let mut sims = [
+        Simulator::new(analyze(code, &Config::default()), None),
+        Simulator::new(aot, None),
+    ];
+    for sim in &mut sims {
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+    }
+    let mut rng = crate::tests::Rng(7);
+    for cycle in 0..64 {
+        let inputs = [
+            ("idx", rng.next() & 3, 2),
+            ("pos", rng.next() & 31, 5),
+            ("wpos", rng.next() & 127, 7),
+            ("v", rng.next() & 255, 8),
+        ];
+        let mut outs = Vec::new();
+        for sim in &mut sims {
+            for &(name, x, width) in &inputs {
+                sim.set(name, Value::new(x, width, false));
+            }
+            let clk = sim.get_clock("clk").unwrap();
+            sim.step(&clk);
+            outs.push((sim.get("o"), sim.get("w")));
+        }
+        assert_eq!(outs[0], outs[1], "cycle {cycle} inputs {inputs:?}");
+    }
+}
+
+#[test]
 fn aot_c_event_reuses_the_compile_of_equal_inputs() {
     // An event whose inputs a previous build compiled loads that `.so` without
     // emitting its source again, and simulates the same.

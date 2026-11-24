@@ -744,17 +744,52 @@ impl LocalAnalysis {
 
 /// Whether the `w` bytes at comb offset `off` meet a localize range: an
 /// element of a strided array, or with stride 1 any byte of a byte range.
-fn localize_range_hit(ranges: &[(isize, usize, isize)], off: isize, w: usize) -> bool {
-    ranges.iter().any(|&(base, num, stride)| {
-        if stride == 0 || num == 0 {
-            return false;
-        }
-        if stride == 1 {
-            return off < base + num as isize && base < off + w.max(1) as isize;
-        }
-        let delta = off - base;
-        delta >= 0 && delta % stride == 0 && (delta / stride) < num as isize
-    })
+fn range_hit((base, num, stride): (isize, usize, isize), off: isize, w: usize) -> bool {
+    if stride == 0 || num == 0 {
+        return false;
+    }
+    if stride == 1 {
+        return off < base + num as isize && base < off + w.max(1) as isize;
+    }
+    let delta = off - base;
+    delta >= 0 && delta % stride == 0 && (delta / stride) < num as isize
+}
+
+/// `range_hit` over many ranges: sorted by base, with the running
+/// maximum end, so a query visits only the ranges whose span can meet it.
+struct RangeIndex {
+    ranges: Vec<(isize, usize, isize)>,
+    max_end: Vec<isize>,
+}
+
+impl RangeIndex {
+    fn new(ranges: &[(isize, usize, isize)]) -> Self {
+        let mut ranges: Vec<_> = ranges
+            .iter()
+            .copied()
+            .filter(|&(_, num, stride)| stride > 0 && num > 0)
+            .collect();
+        ranges.sort_unstable_by_key(|r| r.0);
+        let mut end = isize::MIN;
+        let max_end = ranges
+            .iter()
+            .map(|&(base, num, stride)| {
+                end = end.max(base + num as isize * stride);
+                end
+            })
+            .collect();
+        Self { ranges, max_end }
+    }
+
+    fn hit(&self, off: isize, w: usize) -> bool {
+        let upto = self
+            .ranges
+            .partition_point(|r| r.0 < off + w.max(1) as isize);
+        (0..upto)
+            .rev()
+            .take_while(|&j| self.max_end[j] > off)
+            .any(|j| range_hit(self.ranges[j], off, w))
+    }
 }
 
 /// Pack `nb` (byte count) into the low 16 bits and `width` (bit count) into
@@ -4134,8 +4169,9 @@ pub struct EmittedModule {
     pub coarse_func: Option<FuncPtr>,
     /// `func` counting `[statements, calls]` through its log argument.
     pub counted: Option<FuncPtr>,
-    /// Keep-alive: dropping unloads the library and invalidates `func`.
-    _lib: libloading::Library,
+    /// Keep-alive: dropping unloads the library and invalidates `func`.  The
+    /// events of one batch share it.
+    _lib: Arc<libloading::Library>,
 }
 
 /// A background compile request: build `src` and publish the result through
@@ -4143,6 +4179,8 @@ pub struct EmittedModule {
 struct CompileJob {
     src: String,
     cell: AotCell,
+    /// A batch's events, filled from its table instead of `cell`.
+    fanout: Vec<AotCell>,
 }
 
 // Largest source first: cold, longest-job-first shortens the makespan; warm,
@@ -4259,7 +4297,7 @@ fn compile_pool() -> &'static CompileQueue {
                         // failures, so this only ever fires on a bug).
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             if let Ok(m) = compile_source(&job.src) {
-                                let _ = job.cell.set(m);
+                                publish(m, &job.cell, &job.fanout);
                             }
                         }));
                     }
@@ -4269,19 +4307,40 @@ fn compile_pool() -> &'static CompileQueue {
     })
 }
 
+/// `m` into `cell`, or a batch's slots into `fanout`.
+fn publish(m: EmittedModule, cell: &AotCell, fanout: &[AotCell]) {
+    if fanout.is_empty() {
+        let _ = cell.set(m);
+    } else if let Some(mods) = batch_modules(&m, fanout.len()) {
+        for (c, m) in fanout.iter().zip(mods) {
+            let _ = c.set(m);
+        }
+    }
+}
+
 /// Compile `src` to an `EmittedModule` published through a `OnceLock`.  When
 /// `async_mode` is true the compile is queued on the bounded global pool
 /// (see [`compile_pool`]) and the cell stays empty until the `.so` is ready →
-/// callers stay on Cranelift, then hot-swap to AOT-C the cycle it lands —
+/// callers stay on Cranelift, then hot-swap to AOT-C the cycle it lands,
 /// hiding the cold gcc latency; otherwise it is filled synchronously before
 /// return.  A compile failure (e.g. missing `cc`) leaves the cell empty →
 /// graceful Cranelift fallback either way.
 fn compile_or_spawn(src: String, async_mode: bool) -> AotCell {
+    compile_or_spawn_fanout(src, async_mode, Vec::new())
+}
+
+fn compile_or_spawn_fanout(src: String, async_mode: bool, fanout: Vec<AotCell>) -> AotCell {
     let cell = Arc::new(OnceLock::new());
+    compile_into(src, async_mode, Arc::clone(&cell), fanout);
+    cell
+}
+
+fn compile_into(src: String, async_mode: bool, cell: AotCell, fanout: Vec<AotCell>) {
     if async_mode {
         let job = CompileJob {
             src,
             cell: Arc::clone(&cell),
+            fanout,
         };
         let pool = compile_pool();
         // A poisoned queue just leaves the cell empty → Cranelift handles it.
@@ -4290,9 +4349,8 @@ fn compile_or_spawn(src: String, async_mode: bool) -> AotCell {
             pool.ready.notify_one();
         }
     } else if let Ok(m) = compile_source(&src) {
-        let _ = cell.set(m);
+        publish(m, &cell, &fanout);
     }
-    cell
 }
 
 /// Emit and compile an event's AOT-C eval handle: `None` when the emitter
@@ -4337,8 +4395,201 @@ pub fn prepare_event(
             why[0], why[1]
         );
     }
+    if src.len() <= BATCH_EVENT_MAX_BYTES && !is_compiled(&src) {
+        let cell: AotCell = Arc::new(OnceLock::new());
+        let queued = EVENT_BATCH.with(|b| match b.borrow_mut().as_mut() {
+            Some(pending) => {
+                pending.push(PendingEvent {
+                    input,
+                    src: src.clone(),
+                    cell: Arc::clone(&cell),
+                    comb_marked,
+                    ff_marked,
+                });
+                true
+            }
+            None => false,
+        });
+        if queued {
+            return Some((cell, comb_marked, ff_marked));
+        }
+    }
     index_event(input, &src, comb_marked, ff_marked);
     Some((compile_or_spawn(src, async_mode), comb_marked, ff_marked))
+}
+
+/// An event source above this compiles on its own.
+const BATCH_EVENT_MAX_BYTES: usize = 256 * 1024;
+
+/// An event source `prepare_event` left for `finish_event_batch` to compile.
+struct PendingEvent {
+    input: Option<u128>,
+    src: String,
+    cell: AotCell,
+    comb_marked: bool,
+    ff_marked: bool,
+}
+
+thread_local! {
+    static EVENT_BATCH: RefCell<Option<Vec<PendingEvent>>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static EVENT_BATCHES: Cell<usize> = const { Cell::new(0) };
+}
+
+/// The event batches this thread built since the last call.
+#[cfg(test)]
+pub(crate) fn take_event_batches() -> usize {
+    EVENT_BATCHES.with(|n| n.replace(0))
+}
+
+/// Collect the event sources this thread emits until `finish_event_batch`.
+pub fn begin_event_batch() {
+    EVENT_BATCH.with(|b| *b.borrow_mut() = Some(Vec::new()));
+}
+
+/// Compile the collected event sources as few modules: the events sharing a
+/// header go into one source, the header once and each event's functions
+/// renamed apart, so one compiler pass and one load serve them all.  A
+/// lone event compiles as it would have unbatched.
+pub fn finish_event_batch(async_mode: bool) {
+    let Some(pending) = EVENT_BATCH.with(|b| b.borrow_mut().take()) else {
+        return;
+    };
+    let mut groups: Vec<(String, Vec<(PendingEvent, String)>)> = Vec::new();
+    for p in pending {
+        let Some((header, body)) = split_event_source(&p.src) else {
+            index_event(p.input, &p.src, p.comb_marked, p.ff_marked);
+            compile_into(p.src, async_mode, p.cell, Vec::new());
+            continue;
+        };
+        let (header, body) = (header.to_string(), body.to_string());
+        match groups.iter_mut().find(|g| g.0 == header) {
+            Some(g) => g.1.push((p, body)),
+            None => groups.push((header, vec![(p, body)])),
+        }
+    }
+    for (header, events) in groups {
+        if events.len() == 1 {
+            let (p, _) = events.into_iter().next().unwrap();
+            index_event(p.input, &p.src, p.comb_marked, p.ff_marked);
+            compile_into(p.src, async_mode, p.cell, Vec::new());
+            continue;
+        }
+        #[cfg(test)]
+        EVENT_BATCHES.with(|n| n.set(n.get() + 1));
+        let src = batch_source(&header, events.iter().map(|e| e.1.as_str()));
+        let (_, _, hash) = compile_key(&src);
+        for (k, (p, _)) in events.iter().enumerate() {
+            index_event_slot(p.input, &hash, k, p.comb_marked, p.ff_marked);
+        }
+        let async_mode = async_mode && !is_compiled(&src);
+        let cells = events.into_iter().map(|(p, _)| p.cell).collect();
+        compile_or_spawn_fanout(src, async_mode, cells);
+    }
+}
+
+/// An event source's shared header and its own functions: the header ends
+/// where the first function of the event starts.
+fn split_event_source(src: &str) -> Option<(&str, &str)> {
+    let mut at = 0usize;
+    let mut prev: Option<&str> = None;
+    for line in src.split_inclusive('\n') {
+        if line.starts_with(SPLIT_FN_PREFIX) {
+            return Some(src.split_at(at));
+        }
+        if line.starts_with("void veryl_aot_eval(")
+            && let Some(p) = prev
+            && p.trim_end() == ENTRY_ATTR
+        {
+            return Some(src.split_at(at - p.len()));
+        }
+        at += line.len();
+        prev = Some(line);
+    }
+    None
+}
+
+/// One source for the events of `bodies`, which share `header`: each body's
+/// functions renamed by its slot, its entry made a movable function, and a
+/// table of the entries exported in their place.
+fn batch_source<'a>(header: &str, bodies: impl Iterator<Item = &'a str>) -> String {
+    let mut src = String::from(header);
+    let mut n = 0usize;
+    for body in bodies {
+        let body = body.replacen(
+            &format!("{ENTRY_ATTR}\nvoid veryl_aot_eval("),
+            &format!("{SPLIT_FN_PREFIX}void veryl_aot_eval("),
+            1,
+        );
+        src.push_str(&rename_event_symbols(&body, n));
+        src.push('\n');
+        n += 1;
+    }
+    src.push_str(ENTRY_SECTION_MARKER);
+    src.push_str(
+        "\ntypedef void (*veryl_event_t)(uint8_t *__restrict__, uint8_t *__restrict__, uint64_t *__restrict__, intptr_t);\n",
+    );
+    src.push_str(&format!(
+        "static const veryl_event_t veryl_batch_table[{n}] = {{\n"
+    ));
+    for k in 0..n {
+        src.push_str(&format!("    veryl_aot_b{k}_eval,\n"));
+    }
+    src.push_str("};\n");
+    src.push_str(&format!(
+        "{ENTRY_ATTR}\nconst veryl_event_t *veryl_aot_batch(void) {{ return veryl_batch_table; }}\n\
+         {ENTRY_ATTR}\nvoid veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+         \x20   (void)ff_values; (void)comb_values; (void)write_log; (void)ff_delta;\n\
+         }}\n"
+    ));
+    src
+}
+
+/// `body` with every name it defines prefixed by its slot `k`: the entry and
+/// its parts (`veryl_aot_eval*`), outlined blocks (`veryl_aot_ol*`) and gate
+/// parts (`veryl_evg_*`).  The gate log check is the same in every event and
+/// sits in the shared header, so its calls keep the header's name.
+fn rename_event_symbols(body: &str, k: usize) -> String {
+    let mut out = String::with_capacity(body.len() + 64);
+    let mut rest = body;
+    while let Some(i) = rest.find("veryl_") {
+        let (head, tail) = rest.split_at(i);
+        out.push_str(head);
+        let boundary = head
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'))
+            && !tail.starts_with(EVENT_GATE_UNCHANGED);
+        let renamed = boundary
+            .then(|| {
+                [
+                    ("veryl_aot_eval", "veryl_aot_b", "_eval"),
+                    ("veryl_aot_ol", "veryl_aot_b", "_ol"),
+                    ("veryl_evg_", "veryl_evg_b", "_"),
+                ]
+                .into_iter()
+                .find_map(|(from, head, tail_part)| {
+                    tail.strip_prefix(from)
+                        .map(|t| (format!("{head}{k}{tail_part}"), t))
+                })
+            })
+            .flatten();
+        match renamed {
+            Some((name, t)) => {
+                out.push_str(&name);
+                rest = t;
+            }
+            None => {
+                out.push_str("veryl_");
+                rest = &tail["veryl_".len()..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Fingerprint of everything `emit_event_function` reads: the statements and
@@ -4460,6 +4711,24 @@ fn index_event(input: Option<u128>, src: &str, comb_marked: bool, ff_marked: boo
     );
 }
 
+/// Records that the event of `input` is slot `slot` of the batch whose source
+/// hashes to `hash`.
+fn index_event_slot(
+    input: Option<u128>,
+    hash: &str,
+    slot: usize,
+    comb_marked: bool,
+    ff_marked: bool,
+) {
+    let Some(path) = index_path("event", input) else {
+        return;
+    };
+    let _ = veryl_path::atomic_write(
+        &path,
+        format!("{hash} {} {} {slot}\n", comb_marked as u8, ff_marked as u8).as_bytes(),
+    );
+}
+
 /// Records that the emitter cannot cover the `kind` source of `input`.
 fn index_declined(kind: &str, input: Option<u128>) {
     if let Some(path) = index_path(kind, input) {
@@ -4485,13 +4754,41 @@ fn load_indexed_event(input: Option<u128>) -> Option<IndexedEvent> {
     }
     let comb_marked = fields.next()? == "1";
     let ff_marked = fields.next()? == "1";
+    let slot: Option<usize> = fields.next().and_then(|f| f.parse().ok());
     let so_path = path.with_file_name(format!("veryl_aot_{hash}.so"));
     if !so_path.exists() {
         return None;
     }
-    load_module(&so_path)
-        .ok()
-        .map(|module| IndexedEvent::Compiled(module, comb_marked, ff_marked))
+    let module = match slot {
+        Some(k) => load_batch_slot(&so_path, k)?,
+        None => load_module(&so_path).ok()?,
+    };
+    Some(IndexedEvent::Compiled(module, comb_marked, ff_marked))
+}
+
+/// Slot `k` of the batch module at `so_path`, opening each batch once per
+/// process however many of its events a build loads.
+fn load_batch_slot(so_path: &Path, k: usize) -> Option<EmittedModule> {
+    static OPEN: Mutex<Option<HashMap<PathBuf, EmittedModule>>> = Mutex::new(None);
+    let mut open = OPEN.lock().ok()?;
+    let open = open.get_or_insert_with(HashMap::default);
+    if !open.contains_key(so_path) {
+        open.insert(so_path.to_path_buf(), load_module(so_path).ok()?);
+    }
+    batch_slot(&open[so_path], k)
+}
+
+/// Slot `k` of the batch module `m`.
+fn batch_slot(m: &EmittedModule, k: usize) -> Option<EmittedModule> {
+    type Table = unsafe extern "C" fn() -> *const FuncPtr;
+    // SAFETY: a batch module exports the table, and the index names its slot.
+    let table = unsafe { *m._lib.get::<Table>(b"veryl_aot_batch\0").ok()? };
+    Some(EmittedModule {
+        func: unsafe { *table().add(k) },
+        coarse_func: None,
+        counted: None,
+        _lib: Arc::clone(&m._lib),
+    })
 }
 
 /// Records which `.so` the dataflow source of `input` compiles to, with the
@@ -4594,6 +4891,8 @@ fn dataflow_event_covered(stmts: &[ProtoStatement], marks: &DataflowMarks) -> bo
         _ => true,
     })
 }
+
+const EVENT_GATE_UNCHANGED: &str = "veryl_evg_unchanged(";
 
 /// The idle-subtree gates of `emit_event_function`, applied innermost first:
 /// each replaces its statement range with one unit that checks the gate and
@@ -5201,17 +5500,6 @@ const CHUNK_FN_MARKER: &str = "static __attribute__((noinline)) void veryl_aot_c
 /// A dataflow cell: returns the marks it sets in its own dirty word.
 const CELL_FN_MARKER: &str = "static __attribute__((noinline)) uint64_t veryl_aot_chunk_";
 
-/// The return type of the chunk function `line` starts, if it starts one.
-fn chunk_fn_ret(line: &str) -> Option<&'static str> {
-    if line.starts_with(CHUNK_FN_MARKER) {
-        Some("void")
-    } else if line.starts_with(CELL_FN_MARKER) {
-        Some("uint64_t")
-    } else {
-        None
-    }
-}
-
 /// Bytes of C per translation unit, and the ceiling on how many to make.
 ///
 /// One `cc` on a multi-megabyte source is the whole cold-start latency: the
@@ -5258,11 +5546,11 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     if n < 2 {
         return None;
     }
-    let lines: Vec<&str> = src.split('\n').collect();
+    let (lines, helpers_at) = hoist_static_helpers(src.split('\n').collect())?;
     let chunk_starts: Vec<usize> = lines
         .iter()
         .enumerate()
-        .filter(|(_, l)| chunk_fn_ret(l).is_some())
+        .filter(|(_, l)| split_fn_signature(l).is_some())
         .map(|(i, _)| i)
         .collect();
     // Fewer chunks than units would leave empty ones; the entry functions must
@@ -5288,7 +5576,7 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     // non-entry units.
     if header
         .iter()
-        .any(|l| l.starts_with(ENTRY_ATTR) && !CROSS_UNIT.iter().any(|x| l.contains(x)))
+        .any(|l| l.starts_with(ENTRY_ATTR) && !CROSS_UNIT.iter().any(|x| cross_unit_hit(l, x)))
     {
         return None;
     }
@@ -5298,14 +5586,10 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     let decls: Vec<String> = chunk_starts
         .iter()
         .filter_map(|&i| {
-            let ret = chunk_fn_ret(lines[i])?;
-            let name = lines[i]
-                .strip_prefix(CHUNK_FN_MARKER)
-                .or_else(|| lines[i].strip_prefix(CELL_FN_MARKER))?
-                .split('(')
-                .next()?
-                .trim();
-            Some(format!("{CHUNK_DECL_ATTR} {ret} veryl_aot_chunk_{name}(uint8_t *__restrict__, uint8_t *__restrict__, uint64_t *__restrict__);"))
+            Some(format!(
+                "{CHUNK_DECL_ATTR} {};",
+                split_fn_signature(lines[i])?
+            ))
         })
         .collect();
     if decls.len() != chunk_starts.len() {
@@ -5356,25 +5640,94 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
             chunk_starts[bound[part + 1]]
         };
         let mut out: Vec<String> = Vec::with_capacity(header.len() + decls.len() + (hi - lo) + 16);
-        for l in header {
+        for (i, l) in header.iter().enumerate() {
+            // The hoisted helpers may call any chunk, an outlined block in particular.
+            if i == helpers_at {
+                out.extend(decls.iter().cloned());
+            }
             // Not weak per unit: PE exports no weak definition.
             if part == 0 || !l.starts_with(ENTRY_ATTR) {
                 out.push((*l).to_string());
-            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF].into_iter().find(|x| l.contains(x)) {
+            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF]
+                .into_iter()
+                .find(|x| cross_unit_hit(l, x))
+            {
                 out.push(format!("extern {def}"));
             }
         }
-        out.extend(decls.iter().cloned());
-        out.extend(lines[lo..hi].iter().map(|l| {
-            l.replace(CHUNK_FN_MARKER, CHUNK_DEF_PREFIX)
-                .replace(CELL_FN_MARKER, CELL_DEF_PREFIX)
-        }));
+        if helpers_at >= header.len() {
+            out.extend(decls.iter().cloned());
+        }
+        out.extend(
+            lines[lo..hi]
+                .iter()
+                .map(|l| match l.strip_prefix(SPLIT_FN_PREFIX) {
+                    Some(rest) if split_fn_signature(l).is_some() => {
+                        format!("{CHUNK_DECL_ATTR} {rest}")
+                    }
+                    _ => (*l).to_string(),
+                }),
+        );
         if part == 0 {
             out.extend(entries.iter().map(|l| (*l).to_string()));
         }
         units.push(out.join("\n"));
     }
     Some(units)
+}
+
+/// How every function the split can move between units starts.
+const SPLIT_FN_PREFIX: &str = "static __attribute__((noinline)) ";
+
+/// The signature of the movable function `line` opens, written on that one
+/// line: chunks and cells of a comb, parts, outlined blocks and gated groups of
+/// an event.  Whatever is not movable is repeated in every unit.
+fn split_fn_signature(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix(SPLIT_FN_PREFIX)?;
+    let sig = rest.strip_suffix(" {")?;
+    ((sig.contains(" veryl_aot_") || sig.contains(" veryl_evg_")) && sig.ends_with(')'))
+        .then_some(sig)
+}
+
+/// Whether the header line `line` is the cross-unit definition `def`,
+/// initialized or not.
+fn cross_unit_hit(line: &str, def: &str) -> bool {
+    line.contains(def)
+        || def
+            .strip_suffix(';')
+            .is_some_and(|d| line.contains(&format!("{d} = 0;")))
+}
+
+/// `lines` with every `static` helper defined between the movable functions
+/// moved ahead of the first one, so each unit gets its own copy, and the line
+/// the helpers start at; the entry section after the last one stays.  `None`
+/// when a helper does not end at a closing brace of its own.
+fn hoist_static_helpers(lines: Vec<&str>) -> Option<(Vec<&str>, usize)> {
+    let is_start = |l: &&str| split_fn_signature(l).is_some();
+    let Some(first) = lines.iter().position(is_start) else {
+        let n = lines.len();
+        return Some((lines, n));
+    };
+    let last = lines.iter().rposition(is_start).unwrap_or(first);
+    let mut helpers: Vec<&str> = Vec::new();
+    let mut rest: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = first;
+    while i < lines.len() {
+        let l = lines[i];
+        if i < last && l.starts_with("static ") && split_fn_signature(l).is_none() {
+            let end = i + lines[i..].iter().position(|x| *x == "}")?;
+            helpers.extend(&lines[i..=end]);
+            i = end + 1;
+        } else {
+            rest.push(l);
+            i += 1;
+        }
+    }
+    let mut out = Vec::with_capacity(lines.len());
+    out.extend(&lines[..first]);
+    out.extend(helpers);
+    out.extend(rest);
+    Some((out, first))
 }
 
 const ENTRY_ATTR: &str = "__attribute__((visibility(\"default\")))";
@@ -5388,10 +5741,6 @@ const SYSFN_DEF: &str = "veryl_sysfn_t veryl_sysfn_cb;";
 const SYSFN_SET: &str = "void veryl_set_sysfn_cb(";
 const CROSS_UNIT: [&str; 4] = [WIDEOPS_DEF, WIDEOPS_SET, SYSFN_DEF, SYSFN_SET];
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
-const CHUNK_DEF_PREFIX: &str =
-    "__attribute__((noinline,visibility(\"hidden\"))) void veryl_aot_chunk_";
-const CELL_DEF_PREFIX: &str =
-    "__attribute__((noinline,visibility(\"hidden\"))) uint64_t veryl_aot_chunk_";
 
 /// The compiler, its flags and the cache hash for `src`.
 fn compile_key(src: &str) -> (String, Vec<String>, String) {
@@ -5626,8 +5975,27 @@ fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
         func,
         coarse_func,
         counted,
-        _lib: lib,
+        _lib: Arc::new(lib),
     })
+}
+
+/// The event functions of a batch module, in slot order (see
+/// `finish_event_batch`), each keeping the library alive.
+fn batch_modules(m: &EmittedModule, n: usize) -> Option<Vec<EmittedModule>> {
+    type Table = unsafe extern "C" fn() -> *const FuncPtr;
+    // SAFETY: a batch module exports the table with `n` entries.
+    let table = unsafe { *m._lib.get::<Table>(b"veryl_aot_batch\0").ok()? };
+    let table = unsafe { table() };
+    Some(
+        (0..n)
+            .map(|k| EmittedModule {
+                func: unsafe { *table.add(k) },
+                coarse_func: None,
+                counted: None,
+                _lib: Arc::clone(&m._lib),
+            })
+            .collect(),
+    )
 }
 
 fn temp_infix() -> String {
@@ -6918,6 +7286,22 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     {
         return Some(s);
     }
+    emit_stmt_shape(stmt).or_else(|| match stmt {
+        // A runtime bit position the shape-specific stores above decline
+        // still takes the generic windowed store.
+        ProtoStatement::Assign(a) if a.dynamic_select.is_some() => selection::assign(a),
+        ProtoStatement::AssignDynamic(a)
+            if a.dynamic_select.is_some()
+                && !(a.rhs_select.is_none()
+                    && a.expr.store_sign_extend_from(a.dst_width).is_some()) =>
+        {
+            selection::assign_dynamic(a)
+        }
+        _ => None,
+    })
+}
+
+fn emit_stmt_shape(stmt: &ProtoStatement) -> Option<String> {
     match stmt {
         ProtoStatement::Assign(a) => {
             if a.dynamic_select.as_ref().is_some_and(|d| d.adjusted()) {
@@ -10613,7 +10997,7 @@ fn local_sets_of(units: &[&[&ProtoStatement]]) -> Vec<HashSet<(isize, usize)>> {
         return sets;
     }
     let bl = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
-    let rg = LOCALIZE_RANGES.with(|r| r.borrow().clone());
+    let rg = LOCALIZE_RANGES.with(|r| RangeIndex::new(&r.borrow()));
     let mut a = LocalAnalysis::default();
     for (i, unit) in units.iter().enumerate() {
         for s in unit.iter() {
@@ -10626,7 +11010,7 @@ fn local_sets_of(units: &[&[&ProtoStatement]]) -> Vec<HashSet<(isize, usize)>> {
         if a.bad.contains(off)
             || a.read_before_write.contains(off)
             || bl.contains(off)
-            || localize_range_hit(&rg, *off, w)
+            || rg.hit(*off, w)
         {
             continue;
         }
@@ -10980,6 +11364,88 @@ mod tests {
     use std::time::Instant;
     use veryl_analyzer::value::ValueU64;
     use veryl_parser::token_range::TokenRange;
+
+    #[test]
+    fn event_symbols_are_renamed_by_slot_and_only_at_a_name_start() {
+        let body = "veryl_aot_eval_p0(); veryl_aot_eval(x); veryl_aot_ol3(); veryl_evg_2_1(); \
+                    myveryl_aot_eval(); veryl_wideops.add; veryl_sysfn_cb; veryl_evg_unchanged(f)";
+        assert_eq!(
+            rename_event_symbols(body, 7),
+            "veryl_aot_b7_eval_p0(); veryl_aot_b7_eval(x); veryl_aot_b7_ol3(); veryl_evg_b7_2_1(); \
+             myveryl_aot_eval(); veryl_wideops.add; veryl_sysfn_cb; veryl_evg_unchanged(f)"
+        );
+    }
+
+    #[test]
+    fn a_batch_of_gated_events_defines_every_gate_function_it_calls() {
+        let gated = |dst: isize| {
+            let a = ProtoAssignStatement {
+                dst: VarOffset::Ff(dst),
+                dst_width: 32,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: const_expr(0x1234, 32),
+                dst_ff_current_offset: dst - 4,
+                comb_direct: false,
+                token: dummy_token(),
+            };
+            let gate = EventGate {
+                lo: 0,
+                hi: 1,
+                state_off: 0x90,
+                compare: vec![(false, 0x40, 0x44)],
+                out_comb: Vec::new(),
+                cone: String::new(),
+            };
+            emit_event_function(&[ProtoStatement::Assign(a)], true, &[gate]).expect("must emit")
+        };
+        let (a, b) = (gated(0x44), gated(0x84));
+        let (ha, ba) = split_event_source(&a).expect("splits");
+        let (hb, bb) = split_event_source(&b).expect("splits");
+        assert_eq!(ha, hb, "gated events share a header");
+        let src = batch_source(ha, [ba, bb].into_iter());
+        let mut called = HashSet::default();
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("veryl_evg_") {
+            let name: String = rest[i..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            rest = &rest[i + name.len()..];
+            if rest.starts_with('(') {
+                called.insert(name);
+            }
+        }
+        assert!(called.len() > 2, "{called:?}");
+        for name in called {
+            assert!(
+                src.lines()
+                    .any(|l| l.starts_with("static") && l.contains(&format!(" {name}("))),
+                "{name} is called but not defined"
+            );
+        }
+    }
+
+    #[test]
+    fn range_index_matches_a_linear_scan() {
+        let ranges = [
+            (100, 4, 8),
+            (0, 16, 1),
+            (40, 3, 0),
+            (64, 0, 4),
+            (90, 5, 2),
+            (200, 10, 1),
+            (96, 2, 16),
+        ];
+        let index = RangeIndex::new(&ranges);
+        for off in -8..260 {
+            for w in 0..10 {
+                let linear = ranges.iter().any(|&r| range_hit(r, off, w));
+                assert_eq!(index.hit(off, w), linear, "off {off} w {w}");
+            }
+        }
+    }
 
     fn dummy_token() -> TokenRange {
         TokenRange::default()
@@ -15955,6 +16421,125 @@ mod tests {
         }
     }
 
+    /// An event's shape: an initialized callback global, outlined blocks and
+    /// parts in the four-argument ABI, and a `static` helper between them.
+    fn event_stub_source(parts: usize) -> String {
+        let mut s = String::from(
+            "// AOT-C event; do not edit.\n\
+             #include <stdint.h>\n\
+             typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
+             __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
+             __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+        );
+        for i in 0..parts {
+            s.push_str(&format!(
+                "static __attribute__((noinline)) void veryl_aot_ol{i}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+                 (void)ff_values; (void)write_log; (void)ff_delta;\n\
+                 *(uint32_t*)(comb_values + {}) = {i} + 1;\n\
+                 }}\n",
+                i * 4
+            ));
+            if i == 0 {
+                s.push_str(
+                    "static int veryl_stub_helper(const uint8_t *comb_values, unsigned i) {\n\
+                     return *(const uint32_t*)(comb_values + i * 4) != 0;\n\
+                     }\n",
+                );
+                s.push_str(&format!(
+                    "static void veryl_evg_stub(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+                     if (*(const uint32_t*)comb_values) {{ veryl_aot_ol{}(ff_values, comb_values, write_log, ff_delta); }}\n\
+                     }}\n",
+                    parts - 1
+                ));
+            }
+        }
+        for i in 0..parts {
+            s.push_str(&format!(
+                "static __attribute__((noinline)) void veryl_aot_eval_p{i}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+                 veryl_aot_ol{i}(ff_values, comb_values, write_log, ff_delta);\n\
+                 veryl_evg_stub(ff_values, comb_values, write_log, ff_delta);\n\
+                 *(uint32_t*)(comb_values + {}) = veryl_stub_helper(comb_values, {i});\n\
+                 }}\n",
+                (parts + i) * 4
+            ));
+        }
+        s.push_str(
+            "__attribute__((visibility(\"default\")))\n\
+             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
+        );
+        for i in 0..parts {
+            s.push_str(&format!(
+                "veryl_aot_eval_p{i}(ff_values, comb_values, write_log, ff_delta);\n"
+            ));
+        }
+        s.push_str("}\n");
+        s
+    }
+
+    #[test]
+    fn split_places_each_gated_group_in_one_unit() {
+        let mut src = event_stub_source(6);
+        let gate = "static __attribute__((noinline)) void veryl_evg_7_0(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
+                    (void)ff_values; (void)comb_values; (void)write_log; (void)ff_delta;\n\
+                    }\n";
+        let at = src
+            .find("static __attribute__((noinline)) void veryl_aot_eval_p0")
+            .unwrap();
+        src.insert_str(at, gate);
+        let units = split_translation_units(&src, 3).unwrap();
+        let defined = units
+            .iter()
+            .filter(|u| u.contains("void veryl_evg_7_0(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {"))
+            .count();
+        assert_eq!(defined, 1);
+    }
+
+    #[test]
+    fn split_declares_the_chunks_before_the_hoisted_helpers_call_them() {
+        const PARTS: usize = 6;
+        let units = split_translation_units(&event_stub_source(PARTS), 3).unwrap();
+        let call = format!("veryl_aot_ol{}(", PARTS - 1);
+        for (k, unit) in units.iter().enumerate() {
+            let first = unit.lines().find(|l| l.contains(&call)).unwrap();
+            assert!(first.starts_with(CHUNK_DECL_ATTR), "unit {k}: {first}");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn split_units_of_an_event_compile_to_the_same_behaviour() {
+        if !crate::backend::aot_c::cc_available() {
+            return;
+        }
+        const PARTS: usize = 6;
+        let src = event_stub_source(PARTS);
+        assert!(
+            split_translation_units(&src, 3).is_some(),
+            "the event stub must have the shape the split recognises"
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_split_ev_{}", std::process::id()));
+        TEST_TU_SPLIT.with(|c| c.set(Some(3)));
+        let module = compile_for_test(&tmp, &src, "split_units_of_an_event");
+        TEST_TU_SPLIT.with(|c| c.set(None));
+        let Some(module) = module else { return };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; PARTS * 8];
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        for i in 0..PARTS {
+            let word = |k: usize| u32::from_le_bytes(comb[k * 4..k * 4 + 4].try_into().unwrap());
+            assert_eq!(word(i), i as u32 + 1, "outlined block {i} did not run");
+            assert_eq!(word(PARTS + i), 1, "part {i} did not reach the helper");
+        }
+    }
+
     #[test]
     #[cfg(unix)]
     fn split_units_compile_to_the_same_behaviour() {
@@ -16035,10 +16620,10 @@ mod tests {
         // the unit holding it must not also hold the tail of the chunk list.
         let holder = units
             .iter()
-            .position(|u| u.contains("veryl_aot_chunk_1(void)"))
+            .position(|u| u.contains("veryl_aot_chunk_1(void) {"))
             .expect("the giant chunk must land somewhere");
         assert!(
-            !units[holder].contains("veryl_aot_chunk_11(void)"),
+            !units[holder].contains("veryl_aot_chunk_11(void) {"),
             "the byte split must move later chunks out of the giant chunk's unit"
         );
     }

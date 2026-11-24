@@ -7150,6 +7150,8 @@ impl Conv<&air::Module> for ProtoModule {
         let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !size_ok {
             HashMap::default()
         } else {
+            #[cfg(not(target_family = "wasm"))]
+            crate::backend::aot_c::emit::begin_event_batch();
             let ctx = CompileCtx {
                 config: &context.config,
                 use_4state: context.config.use_4state,
@@ -7167,6 +7169,8 @@ impl Conv<&air::Module> for ProtoModule {
                     map.insert(event.clone(), whole);
                 }
             }
+            #[cfg(not(target_family = "wasm"))]
+            crate::backend::aot_c::emit::finish_event_batch(context.config.aot_c_async);
             map
         };
         #[cfg(not(target_family = "wasm"))]
@@ -7269,6 +7273,15 @@ impl Conv<&air::Module> for ProtoModule {
                 // The general event chunker below can recombine that write
                 // with a following guard, which then polls stale comb state.
                 if event.is_initial() || tb_ff_store {
+                    let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
+                    return (event, stmts);
+                }
+                // A whole-event function that already loaded runs every fire,
+                // so per-statement code for it would never run.
+                if !context.config.aot_c_validate
+                    && whole_events.get(&event).is_some_and(|w| w.ready())
+                {
+                    event_gates.remove(&event);
                     let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
                     return (event, stmts);
                 }
