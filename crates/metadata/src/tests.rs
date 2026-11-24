@@ -457,6 +457,23 @@ four_state = true
 }
 
 #[test]
+fn shared_modules_default_empty_and_parse() {
+    let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
+    assert!(metadata.test.shared_modules.is_empty());
+
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[test]
+shared_modules = ["Core", "Tile"]
+"#;
+    let metadata: Metadata = toml::from_str(toml).unwrap();
+    assert_eq!(metadata.test.shared_modules, ["Core", "Tile"]);
+}
+
+#[test]
 fn lint_portability_defaults_empty_and_parses() {
     let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
     assert!(metadata.lint.portability.allow_in_dependencies.is_empty());

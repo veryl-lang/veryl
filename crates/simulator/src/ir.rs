@@ -1688,6 +1688,8 @@ pub struct Config {
     /// the declaration count (own plus descendants') a component needs to
     /// become one.  Default off; `VERYL_HIER=1` enables it for the CLI.
     pub hier_templates: Option<usize>,
+    /// Modules made hierarchy templates by name (`[test] shared_modules`).
+    pub shared_modules: Vec<String>,
     /// Base seed for user-defined component instances (from `[test] seed`
     /// or `--seed`).
     pub seed: u64,
@@ -1701,6 +1703,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub(crate) fn has_hier_templates(&self) -> bool {
+        self.hier_templates.is_some() || !self.shared_modules.is_empty()
+    }
+
     /// Run on Cranelift alone, for a host where AOT-C modules cannot load.
     pub fn fall_back_to_cranelift(&mut self) {
         self.use_jit = true;

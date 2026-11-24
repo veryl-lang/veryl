@@ -49,6 +49,8 @@ pub(crate) struct DutReuseCache {
     ready: Condvar,
     /// Hierarchy templates (see `ir::hier`) and their first conversion.
     hier_templates: HashSet<usize>,
+    /// `Config::shared_modules` entries no top instantiates twice.
+    pub(crate) unmatched_shared_modules: Vec<String>,
     hier_entries: Mutex<HashMap<usize, HierSlot>>,
     hier_ready: Condvar,
     #[cfg(test)]
@@ -70,6 +72,7 @@ impl Default for DutReuseCache {
             statements: Mutex::default(),
             ready: Condvar::new(),
             hier_templates: HashSet::default(),
+            unmatched_shared_modules: Vec::new(),
             hier_entries: Mutex::default(),
             hier_ready: Condvar::new(),
             #[cfg(test)]
@@ -84,16 +87,19 @@ impl DutReuseCache {
         tops: &[veryl_parser::resource_table::StrId],
         config: &crate::ir::Config,
     ) -> Self {
+        let (hier_templates, unmatched_shared_modules) = if config.has_hier_templates() {
+            crate::ir::hier::template_set(ir, tops, config.hier_templates, &config.shared_modules)
+        } else {
+            Default::default()
+        };
         Self {
             recurring: if config.dut_reuse {
                 compute_recurring_set(ir, tops)
             } else {
                 HashSet::default()
             },
-            hier_templates: match config.hier_templates {
-                Some(min_decls) => crate::ir::hier::template_set(ir, tops, min_decls),
-                None => HashSet::default(),
-            },
+            hier_templates,
+            unmatched_shared_modules,
             ..Self::default()
         }
     }

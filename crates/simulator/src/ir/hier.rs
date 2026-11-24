@@ -313,10 +313,17 @@ pub(crate) fn diag() -> bool {
     std::env::var("VERYL_HIER_DIAG").is_ok()
 }
 
-/// Components instantiated at least twice under one top and large enough to
-/// pay for their boundary copies.  Only the topmost such component on a path
-/// is chosen; its descendants are converted inside it.
-pub(crate) fn template_set(ir: &air::Ir, tops: &[StrId], min_decls: usize) -> HashSet<usize> {
+/// Components instantiated at least twice under one top that are `named`, or
+/// have at least `min_decls` declarations of their own and their
+/// descendants'.  Only the topmost such component on a path is chosen; its
+/// descendants are converted inside it.  Also the `named` modules no top
+/// instantiates twice.
+pub(crate) fn template_set(
+    ir: &air::Ir,
+    tops: &[StrId],
+    min_decls: Option<usize>,
+    named: &[String],
+) -> (HashSet<usize>, Vec<String>) {
     fn children(m: &air::Module) -> impl Iterator<Item = (usize, &air::Module)> {
         m.declarations.iter().filter_map(|d| match d {
             air::Declaration::Inst(inst) => match inst.component.as_ref() {
@@ -339,16 +346,26 @@ pub(crate) fn template_set(ir: &air::Ir, tops: &[StrId], min_decls: usize) -> Ha
         memo.insert(key, w);
         w
     }
-    fn count(m: &air::Module, counts: &mut HashMap<usize, usize>) {
+    fn count(
+        m: &air::Module,
+        counts: &mut HashMap<usize, usize>,
+        names: &mut HashMap<usize, String>,
+    ) {
         for (k, child) in children(m) {
             *counts.entry(k).or_default() += 1;
-            count(child, counts);
+            names.entry(k).or_insert_with(|| child.name.to_string());
+            count(child, counts, names);
         }
+    }
+    struct Rule<'a> {
+        counts: &'a HashMap<usize, usize>,
+        names: &'a HashMap<usize, String>,
+        min_decls: Option<usize>,
+        named: &'a [String],
     }
     fn pick(
         m: &air::Module,
-        counts: &HashMap<usize, usize>,
-        min_decls: usize,
+        rule: &Rule,
         weights: &mut HashMap<usize, usize>,
         visited: &mut HashSet<usize>,
         out: &mut HashSet<usize>,
@@ -357,24 +374,30 @@ pub(crate) fn template_set(ir: &air::Ir, tops: &[StrId], min_decls: usize) -> Ha
             if !visited.insert(k) {
                 continue;
             }
-            if counts.get(&k).copied().unwrap_or(0) >= 2 && weight(k, child, weights) >= min_decls {
+            let chosen = rule.counts.get(&k).copied().unwrap_or(0) >= 2
+                && (rule.named.contains(&rule.names[&k])
+                    || rule
+                        .min_decls
+                        .is_some_and(|min| weight(k, child, weights) >= min));
+            if chosen {
                 if diag() {
                     eprintln!(
                         "[hier] pick {}: {} instances, weight {}",
                         child.name,
-                        counts[&k],
+                        rule.counts[&k],
                         weight(k, child, weights)
                     );
                 }
                 out.insert(k);
             } else {
-                pick(child, counts, min_decls, weights, visited, out);
+                pick(child, rule, weights, visited, out);
             }
         }
     }
 
     let mut out = HashSet::default();
     let mut weights = HashMap::default();
+    let mut repeated: HashSet<String> = HashSet::default();
     for &top in tops {
         let Some(air::Component::Module(m)) = ir
             .components
@@ -383,12 +406,28 @@ pub(crate) fn template_set(ir: &air::Ir, tops: &[StrId], min_decls: usize) -> Ha
         else {
             continue;
         };
-        let mut counts = HashMap::default();
-        count(m, &mut counts);
+        let (mut counts, mut names) = (HashMap::default(), HashMap::default());
+        count(m, &mut counts, &mut names);
+        for (k, &n) in &counts {
+            if n >= 2 {
+                repeated.insert(names[k].clone());
+            }
+        }
+        let rule = Rule {
+            counts: &counts,
+            names: &names,
+            min_decls,
+            named,
+        };
         let mut visited = HashSet::default();
-        pick(m, &counts, min_decls, &mut weights, &mut visited, &mut out);
+        pick(m, &rule, &mut weights, &mut visited, &mut out);
     }
-    out
+    let unmatched = named
+        .iter()
+        .filter(|n| !repeated.contains(*n))
+        .cloned()
+        .collect();
+    (out, unmatched)
 }
 
 /// One compiled run of a class, in the reference instance's coordinates.
@@ -1210,7 +1249,7 @@ pub(crate) fn inject(
             if diag() {
                 eprintln!("[hier] flat fallback: {why}");
             }
-            context.hier_fell_back = true;
+            context.hier_fell_back = Some(why);
             for inst in instances {
                 push_flat(unified, inst);
             }
@@ -1226,7 +1265,7 @@ pub(crate) fn inject(
                 if diag() {
                     eprintln!("[hier] {} flat fallback: {why}", g.template.name);
                 }
-                context.hier_fell_back = true;
+                context.hier_fell_back = Some(format!("{}: {why}", g.template.name));
                 for inst in instances {
                     push_flat(unified, inst);
                 }
@@ -1253,7 +1292,8 @@ pub(crate) fn inject(
                         g.template.name
                     );
                 }
-                context.hier_fell_back = true;
+                context.hier_fell_back =
+                    Some(format!("{}: a chunk did not compile", g.template.name));
                 for inst in instances {
                     push_flat(unified, inst);
                 }

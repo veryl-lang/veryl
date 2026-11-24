@@ -634,3 +634,144 @@ fn a_fallen_back_template_builds_as_flat() {
     sim.set("i", Value::new(5, 8, false));
     assert_eq!(sim.get("o").unwrap(), Value::new(75, 8, false));
 }
+
+/// `[test] shared_modules` makes exactly the named modules templates, however
+/// small they are.
+#[test]
+fn a_named_module_becomes_a_template() {
+    let code = r#"
+    module Inc (a: input logic<8>, x: output logic<8>) { assign x = a + 8'd1; }
+    module Dec (a: input logic<8>, x: output logic<8>) { assign x = a - 8'd1; }
+    module Top (i: input logic<8>, o: output logic<8>, p: output logic<8>) {
+        var w: logic<8>;
+        var v: logic<8>;
+        inst i0: Inc (a: i, x: w);
+        inst i1: Inc (a: w, x: o);
+        inst d0: Dec (a: i, x: v);
+        inst d1: Dec (a: v, x: p);
+    }
+    "#;
+    let top: veryl_parser::resource_table::StrId = "Top".into();
+    let air_ir = analyze_air(code);
+    let build = |named: &[&str]| {
+        let config = Config {
+            use_jit: true,
+            shared_modules: named.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        crate::ir::BuildSession::new(&air_ir, &config, &[top])
+            .build_ir(top)
+            .unwrap()
+    };
+    assert_eq!(build(&[]).hier_shared_blocks, 0);
+    let inc = build(&["Inc"]);
+    let both = build(&["Inc", "Dec"]);
+    assert!(inc.hier_shared_blocks > 0);
+    assert!(both.hier_shared_blocks > inc.hier_shared_blocks);
+    let mut sim = Simulator::new(both, None);
+    sim.set("i", Value::new(5, 8, false));
+    assert_eq!(sim.get("o").unwrap(), Value::new(7, 8, false));
+    assert_eq!(sim.get("p").unwrap(), Value::new(3, 8, false));
+}
+
+/// Two templates each have an instance at the same relative offset: their
+/// class runs and partitions must not be taken for each other.
+#[test]
+fn two_templates_keep_their_own_runs() {
+    let code = r#"
+    module Inc (a: input logic<8>, x: output logic<8>) { assign x = a + 8'd1; }
+    module Mix (a: input logic<8>, b: input logic<8>, x: output logic<8>, y: output logic<8>) {
+        var t: logic<8>;
+        assign t = a ^ b;
+        assign x = t + 8'd3;
+        assign y = t & a;
+    }
+    module Top (i: input logic<8>, j: input logic<8>, o: output logic<8>, p: output logic<8>, q: output logic<8>) {
+        var w: logic<8>;
+        var v: logic<8>;
+        var u: logic<8>;
+        inst i0: Inc (a: i, x: w);
+        inst i1: Inc (a: w, x: o);
+        inst m0: Mix (a: i, b: j, x: v, y: u);
+        inst m1: Mix (a: v, b: u, x: p, y: q);
+    }
+    "#;
+    let top: veryl_parser::resource_table::StrId = "Top".into();
+    let air_ir = analyze_air(code);
+    let mut configs = vec![Config {
+        use_jit: true,
+        ..Default::default()
+    }];
+    if crate::tests::aot_c_loads() {
+        configs.push(Config {
+            use_jit: true,
+            aot_c: true,
+            aot_c_async: false,
+            aot_c_min_stmts: 0,
+            ..Default::default()
+        });
+    }
+    for base in configs {
+        let build = |named: &[&str]| {
+            let config = Config {
+                shared_modules: named.iter().map(|s| s.to_string()).collect(),
+                ..base.clone()
+            };
+            crate::ir::BuildSession::new(&air_ir, &config, &[top])
+                .build_ir(top)
+                .unwrap()
+        };
+        let shared = build(&["Inc", "Mix"]);
+        assert!(shared.hier_shared_blocks > 0);
+        let mut flat = Simulator::new(build(&[]), None);
+        let mut sim = Simulator::new(shared, None);
+        let mut rng = Rng(7);
+        for step in 0..16 {
+            let (i, j) = (rng.next() & 0xff, rng.next() & 0xff);
+            for s in [&mut flat, &mut sim] {
+                s.set("i", Value::new(i, 8, false));
+                s.set("j", Value::new(j, 8, false));
+                s.step(&Event::clock(VarId::SYNTHETIC));
+            }
+            for name in ["o", "p", "q"] {
+                assert_eq!(sim.get(name), flat.get(name), "{name} step {step} {base:?}");
+            }
+        }
+    }
+}
+
+/// A named module instantiated under a generate loop and an `if` generate,
+/// inside an instance with overridden parameters, still becomes a template.
+#[test]
+fn a_named_template_under_generate_and_a_param_override() {
+    let code = r#"
+    module Sub (a: input logic<8>, x: output logic<8>) { assign x = a + 8'd1; }
+    module Empty (a: input logic<8>, x: output logic<8>) { assign x = a; }
+    module Mid #(param P: u32 = 0) (i: input logic<8>, o: output logic<8>) {
+        var w: logic<8> [3];
+        assign w[0] = i;
+        for k in 0..2 :g {
+            if P == 0 :h {
+                inst s: Sub (a: w[k], x: w[k + 1]);
+            } else {
+                inst e: Empty (a: w[k], x: w[k + 1]);
+            }
+        }
+        assign o = w[2];
+    }
+    module Top (i: input logic<8>, o: output logic<8>) {
+        inst u: Mid #(P: 0) (i, o);
+    }
+    "#;
+    let top: veryl_parser::resource_table::StrId = "Top".into();
+    let air_ir = analyze_air(code);
+    let config = Config {
+        use_jit: true,
+        shared_modules: vec!["Sub".to_string()],
+        ..Default::default()
+    };
+    let ir = crate::ir::BuildSession::new(&air_ir, &config, &[top])
+        .build_ir(top)
+        .unwrap();
+    assert!(ir.hier_shared_blocks > 0, "not a template");
+}

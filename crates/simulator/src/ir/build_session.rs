@@ -71,6 +71,12 @@ impl<'ir> BuildSession<'ir> {
         Ok(self.instantiate(&entry))
     }
 
+    /// `Config::shared_modules` entries none of the session's tops
+    /// instantiates twice.
+    pub fn unmatched_shared_modules(&self) -> &[String] {
+        &self.dut_reuse.unmatched_shared_modules
+    }
+
     fn convert(&self, top: StrId) -> Result<CacheEntry, SimulatorError> {
         let module = self.ir.components.iter().find_map(|c| match c {
             air::Component::Module(m) if m.name == top => Some(m),
@@ -79,14 +85,17 @@ impl<'ir> BuildSession<'ir> {
         let module = module.ok_or_else(|| SimulatorError::TopModuleNotFound {
             module_name: top.to_string(),
         })?;
-        let templates = self.config.hier_templates.is_some();
+        let templates = self.config.has_hier_templates();
         if templates && !self.fell_back.lock().unwrap().contains(&top) {
             let (proto, fell_back) = self.convert_with(module, &self.config, &self.dut_reuse)?;
-            if !fell_back {
+            let Some(why) = fell_back else {
                 return Ok(CacheEntry {
                     proto,
                     token: module.token,
                 });
+            };
+            if !self.config.shared_modules.is_empty() {
+                log::warn!("[test] shared_modules: {top} is built without them: {why}");
             }
             self.fell_back.lock().unwrap().insert(top);
         }
@@ -94,6 +103,7 @@ impl<'ir> BuildSession<'ir> {
             let (config, dut_reuse) = self.flat.get_or_init(|| {
                 let mut config = self.config.clone();
                 config.hier_templates = None;
+                config.shared_modules.clear();
                 let dut_reuse = Arc::new(DutReuseCache::new(self.ir, &self.tops, &config));
                 (config, dut_reuse)
             });
@@ -108,14 +118,14 @@ impl<'ir> BuildSession<'ir> {
         })
     }
 
-    /// The top converted under `config`, and whether its hierarchy templates
-    /// fell back.
+    /// The top converted under `config`, and why its hierarchy templates fell
+    /// back if they did.
     fn convert_with(
         &self,
         module: &air::Module,
         config: &Config,
         dut_reuse: &Arc<DutReuseCache>,
-    ) -> Result<(ProtoModule, bool), SimulatorError> {
+    ) -> Result<(ProtoModule, Option<String>), SimulatorError> {
         let mut backends = BackendRegistry::for_config(config);
         backends.chunk_cache = Arc::clone(&self.chunk_cache);
         let mut context = Context {
