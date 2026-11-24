@@ -2573,42 +2573,47 @@ impl Emitter {
         &mut self,
         token: &VerylToken,
         target: &Symbol,
-        target_map: &Vec<GenericMap>,
+        target_map: &[GenericMap],
         driver: Option<&Symbol>,
         driver_map: Option<&Vec<GenericMap>>,
     ) -> bool {
         fn get_type_symbol(
             symbol: &Symbol,
-            map: &Vec<GenericMap>,
-        ) -> Option<(Symbol, Vec<SymbolId>, GenericTables)> {
-            let r#type = symbol.kind.get_type();
-            if r#type.is_none() || !r#type.unwrap().width.is_empty() {
+            map: &[GenericMap],
+        ) -> Option<(Symbol, Vec<SymbolId>, GenericTables, Vec<GenericMap>)> {
+            // A cast to the named type would not fit a packed or unpacked array of it.
+            let r#type = symbol.kind.get_type()?;
+            if !r#type.width.is_empty() || !r#type.array.is_empty() {
                 return None;
             }
 
-            let user_defined = r#type.unwrap().get_user_defined()?;
+            let user_defined = r#type.get_user_defined()?;
+            let mut map = map.to_vec();
+            map.extend(symbol_table::mixin_member_map(symbol.id, &map));
             let (type_symbol, _) = resolve_generic_path(
                 &user_defined.path,
                 scope::intern_namespace(&symbol.namespace),
                 &symbol.namespace.define_context,
-                Some(map),
+                Some(&map),
             );
             type_symbol.ok().map(|x| {
                 (
                     (*x.found).clone(),
                     x.full_path.clone(),
                     x.generic_tables.clone(),
+                    map,
                 )
             })
         }
 
-        let Some((target_type, target_path, target_tables)) = get_type_symbol(target, target_map)
+        let Some((target_type, target_path, target_tables, target_map)) =
+            get_type_symbol(target, target_map)
         else {
             return false;
         };
 
         if let (Some(driver), Some(driver_map)) = (driver, driver_map)
-            && let Some((driver_type, _, _)) = get_type_symbol(driver, driver_map)
+            && let Some((driver_type, _, _, _)) = get_type_symbol(driver, driver_map)
             && target_type.id == driver_type.id
         {
             return false;
@@ -2620,7 +2625,7 @@ impl Emitter {
             in_import: false,
             in_direction_modport: false,
             emit_package_prefix: false,
-            generic_map: target_map.clone(),
+            generic_map: target_map,
             bound_namespace: self.bound_namespace.clone(),
         };
         let text = symbol_string(
@@ -6511,6 +6516,12 @@ impl VerylWalker for Emitter {
                         self.align_finish(align_kind::DIRECTION);
                         self.space(1);
 
+                        // The member's type and dimensions name the parameters
+                        // of the interface it was mixed in from.
+                        let mixin = port.mixin_map.clone();
+                        if let Some(map) = &mixin {
+                            self.generic_map.push(vec![map.clone()]);
+                        }
                         self.scalar_type(&array_type.scalar_type);
                         self.space(1);
 
@@ -6526,6 +6537,9 @@ impl VerylWalker for Emitter {
                             self.align_dummy_location(align_kind::ARRAY, loc);
                         }
                         self.align_finish(align_kind::ARRAY);
+                        if mixin.is_some() {
+                            self.generic_map.pop();
+                        }
 
                         if i != last {
                             self.str(",");

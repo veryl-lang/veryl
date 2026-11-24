@@ -98,6 +98,12 @@ impl CmdBuild {
         for context in contexts.drain(..) {
             if !context.skip && !context.path.example {
                 let path = &context.path;
+                let bundle = temp_dir.is_some();
+                // `$std` ships with the compiler: a check neither compares its
+                // output nor rewrites it with this version's copy.
+                if self.opt.check && !bundle && path.prj == "$std" {
+                    continue;
+                }
                 let (dst, map) = if let Some(ref temp_dir) = temp_dir {
                     let output_dir = metadata.output_dir();
                     let dst_temp = temp_dir
@@ -115,18 +121,15 @@ impl CmdBuild {
                 emitter.emit(&context.parser.veryl, &context.input);
 
                 let dst_dir = dst.parent().unwrap();
-                if !dst_dir.exists() {
-                    std::fs::create_dir_all(dst.parent().unwrap()).into_diagnostic()?;
+                if (bundle || !self.opt.check) && !dst_dir.exists() {
+                    std::fs::create_dir_all(dst_dir).into_diagnostic()?;
                 }
-
-                let exclude_check = context.path.prj == "$std";
-                let bundle = temp_dir.is_some();
 
                 if self.opt.check && bundle {
                     // Stage in the temp dir; the bundle is compared as a whole
                     // after the loop.
                     utils::write_file_if_changed(&dst, emitter.as_str().as_bytes())?;
-                } else if self.opt.check && !exclude_check {
+                } else if self.opt.check {
                     let output = fs::read_to_string(&dst).unwrap_or(String::new());
                     if output != emitter.as_str() {
                         if !quiet {
@@ -783,6 +786,46 @@ exclude_std = true
 
         Analyzer::new(metadata).clear();
         pass
+    }
+
+    #[test]
+    fn build_check_leaves_std_output_alone() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (_, project_path) = create_project(tempdir.path(), "check_std", FilelistType::Absolute);
+        let toml = project_path.join("Veryl.toml");
+        let text = fs::read_to_string(&toml).unwrap();
+        fs::write(&toml, text.replace("exclude_std = true\n", "")).unwrap();
+
+        fs::write(
+            project_path.join("src/foo.veryl"),
+            "module Foo (\n    i: input logic<4>,\n    o: output logic<4>,\n) {\n    inst u: $std::gray_encoder #(WIDTH: 4) (i_bin: i, o_gray: o);\n}\n",
+        )
+        .unwrap();
+        let mut metadata = Metadata::load(&toml).unwrap();
+        run_build(&mut metadata, None);
+        // As if built by another version: the check neither flags nor
+        // rewrites it.
+        let mut dirs = vec![project_path.join("dependencies")];
+        let mut std_output = None;
+        while let (None, Some(dir)) = (&std_output, dirs.pop()) {
+            for entry in fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|x| x == "sv") {
+                    std_output = Some(path);
+                }
+            }
+        }
+        let std_output = std_output.unwrap();
+        fs::write(&std_output, "// other version\n").unwrap();
+
+        assert!(run_build_check(&mut metadata));
+        assert_eq!(
+            fs::read_to_string(&std_output).unwrap(),
+            "// other version\n"
+        );
     }
 
     // Regression: check mode compared each file against an empty temp path, so

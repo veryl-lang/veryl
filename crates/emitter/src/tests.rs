@@ -5977,6 +5977,333 @@ endinterface
 }
 
 #[test]
+fn mixin_interface_member_types() {
+    // A member mixed in from a generic interface names that interface's
+    // parameter, bound by the `mixin` arguments.
+    let code = r#"
+proto package ProtoPkg {
+    type data_t;
+}
+package PkgA for ProtoPkg {
+    type data_t = logic<8>;
+}
+interface ReqIf::<PKG: ProtoPkg> {
+    var data: PKG::data_t;
+    modport master {
+        data: output,
+    }
+    modport slave {
+        data: input,
+    }
+}
+interface BusIf::<PKG: ProtoPkg> {
+    mixin ReqIf::<PKG>;
+}
+#[expand(modport)]
+module ModuleA (
+    a_if: modport BusIf::<PkgA>::master,
+) {
+    assign a_if.data = 0;
+}
+module ModuleB (
+    s_if: modport ReqIf::<PkgA>::slave [2],
+) {
+    inst b_if: BusIf::<PkgA> [2];
+    for i in 0..2 :g {
+        connect b_if[i].master <> s_if[i];
+    }
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    typedef logic [8-1:0] data_t;
+endpackage
+interface prj___ReqIf__PkgA;
+    prj_PkgA::data_t data;
+    modport master (
+        output data
+    );
+    modport slave (
+        input data
+    );
+endinterface
+interface prj___BusIf__PkgA;
+    prj_PkgA::data_t data;
+    modport master (
+        output data
+    );
+    modport slave (
+        input data
+    );
+
+endinterface
+
+module prj_ModuleA (
+    output var prj_PkgA::data_t __a_if_data
+);
+    prj___BusIf__PkgA a_if ();
+    always_comb begin
+        __a_if_data = a_if.data;
+    end
+    always_comb a_if.data = 0;
+endmodule
+module prj_ModuleB (
+    prj___ReqIf__PkgA.slave s_if [2]
+);
+    prj___BusIf__PkgA b_if [2] ();
+    for (genvar i = 0; i < 2; i++) begin :g
+        always_comb begin
+            b_if[i].data = s_if[i].data;
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn mixin_interface_member_casts_and_dims() {
+    // A non-generic host binds the mixin parameters by the `mixin` arguments;
+    // a member's dimensions name them too, and a cast to a mixed-in member's
+    // type is spelled by the same binding.
+    let code = r#"
+proto package ProtoPkg {
+    const N: u32;
+    type data_t;
+}
+package PkgA for ProtoPkg {
+    const N: u32 = 3;
+    type data_t = logic<8>;
+}
+package PkgB for ProtoPkg {
+    const N: u32 = 3;
+    type data_t = logic<8>;
+}
+interface ReqIf::<PKG: ProtoPkg> {
+    var data: PKG::data_t;
+    var arr : logic       [PKG::N];
+    modport master {
+        data: output,
+        arr : output,
+    }
+    modport slave {
+        data: input,
+        arr : input,
+    }
+}
+interface FixIf {
+    mixin ReqIf::<PkgB>;
+}
+#[expand(modport)]
+module ModuleA (
+    f_if: modport FixIf::master,
+) {
+    assign f_if.data = 0;
+    assign f_if.arr  = '{0, 0, 0};
+}
+module ModuleB (
+    p_if: modport ReqIf::<PkgA>::slave,
+) {
+    inst f_if: FixIf;
+    connect f_if.master <> p_if;
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    localparam int unsigned         N      = 3;
+    typedef logic        [8-1:0] data_t;
+endpackage
+package prj_PkgB;
+    localparam int unsigned         N      = 3;
+    typedef logic        [8-1:0] data_t;
+endpackage
+interface prj___ReqIf__PkgB;
+    prj_PkgB::data_t data              ;
+    logic            arr  [prj_PkgB::N];
+    modport master (
+        output data,
+        output arr 
+    );
+    modport slave (
+        input data,
+        input arr 
+    );
+endinterface
+interface prj___ReqIf__PkgA;
+    prj_PkgA::data_t data              ;
+    logic            arr  [prj_PkgA::N];
+    modport master (
+        output data,
+        output arr 
+    );
+    modport slave (
+        input data,
+        input arr 
+    );
+endinterface
+interface prj_FixIf;
+    prj_PkgB::data_t data              ;
+    logic            arr  [prj_PkgB::N];
+    modport master (
+        output data,
+        output arr 
+    );
+    modport slave (
+        input data,
+        input arr 
+    );
+
+endinterface
+
+module prj_ModuleA (
+    output var prj_PkgB::data_t __f_if_data,
+    output var logic            __f_if_arr  [prj_PkgB::N]
+);
+    prj_FixIf f_if ();
+    always_comb begin
+        __f_if_data = f_if.data;
+        __f_if_arr  = f_if.arr ;
+    end
+    always_comb f_if.data = 0;
+    always_comb f_if.arr  = '{0, 0, 0};
+endmodule
+module prj_ModuleB (
+    prj___ReqIf__PkgA.slave p_if
+);
+    prj_FixIf f_if      ();
+    always_comb begin
+        f_if.data = prj_PkgB::data_t'(p_if.data);
+        f_if.arr  = p_if.arr;
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn mixin_interface_default_args_and_array_connect() {
+    // An omitted `mixin` argument takes its default, and an array member is
+    // connected without a cast to its element type.
+    let code = r#"
+proto package ProtoPkg {
+    type data_t;
+}
+package PkgA for ProtoPkg {
+    type data_t = logic<8>;
+}
+package PkgB for ProtoPkg {
+    type data_t = logic<8>;
+}
+interface ReqIf::<PKG: ProtoPkg = PkgB> {
+    var data: PKG::data_t [2];
+    modport master {
+        data: output,
+    }
+    modport slave {
+        data: input,
+    }
+}
+interface FixIf {
+    mixin ReqIf;
+}
+#[expand(modport)]
+module ModuleA (
+    f_if: modport FixIf::master,
+) {
+    assign f_if.data = '{0, 0};
+}
+module ModuleB (
+    p_if: modport ReqIf::<PkgA>::slave,
+) {
+    inst f_if: FixIf;
+    connect f_if.master <> p_if;
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    typedef logic [8-1:0] data_t;
+endpackage
+package prj_PkgB;
+    typedef logic [8-1:0] data_t;
+endpackage
+interface prj___ReqIf__PkgB;
+    prj_PkgB::data_t data [2];
+    modport master (
+        output data
+    );
+    modport slave (
+        input data
+    );
+endinterface
+interface prj___ReqIf__PkgA;
+    prj_PkgA::data_t data [2];
+    modport master (
+        output data
+    );
+    modport slave (
+        input data
+    );
+endinterface
+interface prj_FixIf;
+    prj_PkgB::data_t data [2];
+    modport master (
+        output data
+    );
+    modport slave (
+        input data
+    );
+
+endinterface
+
+module prj_ModuleA (
+    output var prj_PkgB::data_t __f_if_data [2]
+);
+    prj_FixIf f_if ();
+    always_comb begin
+        __f_if_data = f_if.data;
+    end
+    always_comb f_if.data = '{0, 0};
+endmodule
+module prj_ModuleB (
+    prj___ReqIf__PkgA.slave p_if
+);
+    prj_FixIf f_if      ();
+    always_comb begin
+        f_if.data = p_if.data;
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn hoisted_declaration_keeps_ifdef_guard() {
     // Statement-block declarations are hoisted to the top of the begin/end
     // block; the hoist used to flatten the groups and drop their

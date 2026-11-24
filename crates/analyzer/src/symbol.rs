@@ -100,7 +100,6 @@ impl DocComment {
         let mut in_wavedrom = false;
         let mut json_lines = Vec::new();
         let mut fence_line = 0u32;
-        let mut end_line = 0u32;
         let mut content_lines: Vec<(String, u32)> = Vec::new();
 
         for entry in &self.0 {
@@ -125,7 +124,7 @@ impl DocComment {
                     fence_line = entry.line;
                 }
             } else if trimmed == "```" {
-                end_line = entry.line;
+                let end_line = entry.line;
                 let json = json_lines.join("\n");
                 if !json.trim().is_empty() {
                     return Some(WavedromBlock {
@@ -405,7 +404,10 @@ impl Symbol {
 
         // empty map for non-generic
         if ret.is_empty() && !self.kind.is_generic() {
-            ret.push(GenericMap::default());
+            ret.push(GenericMap {
+                parameter_owner: Some(self.id),
+                ..Default::default()
+            });
         }
         ret
     }

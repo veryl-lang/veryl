@@ -2804,9 +2804,8 @@ fn probe_r4_wide_src_rhs_select() {
     );
     let mut sim = Simulator::new(ir, None);
     // Distinctive payload: low word pattern + a set bit near the top window.
-    let mut src = Value::new(0, 472, false);
     // set bits so both windows carry data: bit 72.. and 176..
-    src = Value::from_u128((0x1234_5678u128) << 72, 0, 472, false);
+    let src = Value::from_u128((0x1234_5678u128) << 72, 0, 472, false);
     sim.set("src", src);
     sim.step(&Event::clock(VarId::SYNTHETIC));
     // narr = src[119:72] = 0x1234_5678 low 48 bits.
