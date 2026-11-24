@@ -475,7 +475,7 @@ pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
         builder.create_sized_stack_slot(StackSlotData::new(
             cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
             size,
-            8,
+            3, // log2 of the 8-byte alignment for wide-value limbs.
         ))
     });
     SCRATCH.with_borrow_mut(|p| p.live.push((size, slot)));
