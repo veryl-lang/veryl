@@ -1149,6 +1149,39 @@ impl Ir {
         self.dataflow_live.set(false);
     }
 
+    /// The marks `dataflow_mark_ptr` would set for `len` bytes at `ptr`,
+    /// resolved ahead for a write that repeats.
+    pub(crate) fn dataflow_output_marks(
+        &self,
+        ptr: *const u8,
+        len: usize,
+    ) -> crate::component::runtime::OutputMarks {
+        use crate::component::runtime::OutputMarks;
+        let Some(df) = self.dataflow.as_ref() else {
+            return OutputMarks::None;
+        };
+        let p = ptr as usize;
+        let comb = self.comb_values.as_ptr() as usize;
+        let ff = self.ff_values.as_ptr() as usize;
+        let (table, a) = if (comb..comb + self.comb_values.len()).contains(&p) {
+            (&df.plan.comb_marked, p - comb)
+        } else if (ff..ff + self.ff_values.len()).contains(&p) {
+            (&df.plan.ff_marked, p - ff)
+        } else {
+            return OutputMarks::All;
+        };
+        let mut dirty = vec![0u64; self.dataflow_dirty.borrow().len()];
+        mark_readers(table, &mut dirty, a, a + len);
+        OutputMarks::Words(
+            dirty
+                .iter()
+                .enumerate()
+                .filter(|(_, bits)| **bits != 0)
+                .map(|(w, bits)| (w as u32, *bits))
+                .collect(),
+        )
+    }
+
     /// Mark the readers of `len` bytes stored at `ptr`, in whichever buffer
     /// holds them; anywhere else marks everything.
     pub(crate) fn dataflow_mark_ptr(&self, ptr: *const u8, len: usize) {

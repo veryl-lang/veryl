@@ -1380,6 +1380,9 @@ impl Simulator {
         }
         let mut components = build_components(&self.ir, seed_base, test_name)?;
         for c in &mut components {
+            c.resolve_output_marks(self.ir.use_4state, |ptr, len| {
+                self.ir.dataflow_output_marks(ptr, len)
+            });
             c.on_init();
             c.drain_logs();
             if c.apply_outputs(self.ir.use_4state) && self.dump.is_some() {
@@ -1427,20 +1430,28 @@ impl Simulator {
         }
         let mut components = std::mem::take(&mut self.components);
         let mut wrote = false;
+        let ir = &self.ir;
+        let mut all = false;
         for c in &mut components {
             if c.listens_to(event) {
                 c.fire(event, self.time);
                 c.drain_logs();
-                wrote |= c.apply_outputs(self.ir.use_4state);
+                wrote |= c.apply_outputs_marking(
+                    ir.use_4state,
+                    &mut ir.dataflow_dirty.borrow_mut(),
+                    &mut all,
+                );
                 if c.host.failed() || c.host.finish_requested() {
                     self.status.request_stop();
                 }
             }
         }
         self.components = components;
+        if all {
+            self.ir.dataflow_mark_all();
+        }
         if wrote {
             self.comb_dirty = true;
-            self.ir.dataflow_mark_all();
             // A waveform's gate hears about writes only through the log.  The
             // test is what keeps a run without one off this path entirely.
             if self.dump.is_some() {

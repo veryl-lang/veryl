@@ -11207,26 +11207,25 @@ pub fn emit_dataflow_function(
             // before every run.  An event store to them in between marks this
             // cell's readers itself, and they run after this cell in the same
             // settle; leaving the whole-settle entry reruns every cell.
-            let (mut conds, mut copies) = (Vec::new(), Vec::new());
-            for &(a, b) in watch {
+            c.push_str(&format!(
+                "    uint8_t *_sh = (uint8_t *)(dirty + {shadow_base});\n"
+            ));
+            for (r, &(a, b)) in watch.iter().enumerate() {
                 let len = b - a;
-                conds.push(format!(
-                    "__builtin_memcmp(_sh + {shadow_at}, comb_values + {a:#x}, {len}) != 0"
+                c.push_str(&format!(
+                    "    if (__builtin_memcmp(_sh + {shadow_at}, comb_values + {a:#x}, {len}) != 0) {{\n        __builtin_memcpy(_sh + {shadow_at}, comb_values + {a:#x}, {len});\n"
                 ));
-                copies.push(format!(
-                    "        __builtin_memcpy(_sh + {shadow_at}, comb_values + {a:#x}, {len});\n"
-                ));
+                let marks = plan
+                    .range_consumers
+                    .get(k)
+                    .and_then(|v| v.get(r))
+                    .unwrap_or(&plan.consumers[k]);
+                for &(w, m) in marks {
+                    c.push_str(&format!("        {}\n", mark(w, m)));
+                }
+                c.push_str("    }\n");
                 shadow_at += len;
             }
-            c.push_str(&format!(
-                "    uint8_t *_sh = (uint8_t *)(dirty + {shadow_base});\n    if ({}) {{\n{}",
-                conds.join(" || "),
-                copies.concat()
-            ));
-            for &(w, m) in &plan.consumers[k] {
-                c.push_str(&format!("        {}\n", mark(w, m)));
-            }
-            c.push_str("    }\n");
         } else if always {
             for &(w, m) in &plan.consumers[k] {
                 c.push_str(&format!("    {}\n", mark(w, m)));

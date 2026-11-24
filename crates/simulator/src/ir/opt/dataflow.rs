@@ -86,6 +86,9 @@ const CELL_CAP_STMTS: u32 = 64;
 /// A byte range and the cells that read it.
 pub type Readers = Vec<(u32, u32, Vec<u32>)>;
 
+/// A byte range and the `(word, mask)` of the cells reading it.
+type MarkedSpan = (u32, u32, Vec<(u32, u64)>);
+
 #[derive(Clone, Debug, Default, Hash)]
 pub struct DataflowPlan {
     /// Statement indices per cell, in execution order.  Cells are numbered
@@ -95,6 +98,8 @@ pub struct DataflowPlan {
     pub boundary: Vec<Vec<(u32, u32)>>,
     /// `(word, mask)` of the cells reading each cell's boundary outputs.
     pub consumers: Vec<Vec<(u32, u64)>>,
+    /// Per boundary range, the `(word, mask)` of the cells reading it.
+    pub range_consumers: Vec<Vec<Vec<(u32, u64)>>>,
     /// Cells holding a print, assert or `$finish`: dirty at every settle.
     pub always_run: Vec<u32>,
     /// Cells that write FF storage another cell reads (a comb assignment to
@@ -145,6 +150,17 @@ impl DataflowPlan {
     pub fn ff_store_marks(&self) -> MarkTable {
         fold_marks(&self.ff_marked)
     }
+}
+
+fn add_word_mask(list: &mut Vec<(u32, u64)>, w: u32, m: u64) {
+    match list.iter_mut().find(|x| x.0 == w) {
+        Some(x) => x.1 |= m,
+        None => list.push((w, m)),
+    }
+}
+
+fn add_mark(list: &mut Vec<(u32, u64)>, cell: u32) {
+    add_word_mask(list, cell / 64, 1u64 << (cell % 64));
 }
 
 fn fold_marks(table: &Readers) -> MarkTable {
@@ -471,6 +487,62 @@ fn read_bits(s: &ProtoStatement, out: &mut Reads) -> bool {
     }
 }
 
+/// The `[lo, hi]` bit ranges of a whole-variable assign that can change: a
+/// concatenation element copying the destination's own bits back to where
+/// they sit, as in `x = {x[7:4], y}`, leaves those bits as they were.
+fn changed_bits(
+    x: &crate::ir::statement::ProtoAssignStatement,
+    lo: usize,
+    hi: usize,
+) -> Vec<(usize, usize)> {
+    let whole = vec![(lo, hi)];
+    if x.select.is_some() || x.dynamic_select.is_some() || x.rhs_select.is_some() {
+        return whole;
+    }
+    let ProtoExpression::Concatenation { elements, .. } = &x.expr else {
+        return whole;
+    };
+    let total: usize = elements.iter().map(|(_, r, w)| r * w).sum();
+    if total != x.dst_width {
+        return whole;
+    }
+    let mut kept: Vec<(usize, usize)> = Vec::new();
+    let mut top = total;
+    for (e, repeat, width) in elements {
+        let span = repeat * width;
+        let (el, eh) = (top - span, top - 1);
+        top -= span;
+        if *repeat == 1
+            && let ProtoExpression::Variable {
+                var_offset,
+                select: Some((sh, sl)),
+                dynamic_select: None,
+                ..
+            } = e.as_ref()
+            && *var_offset == x.dst
+            && (*sl, *sh) == (el, eh)
+        {
+            kept.push((el, eh));
+        }
+    }
+    if kept.is_empty() {
+        return whole;
+    }
+    let mut out = Vec::new();
+    let mut at = lo;
+    kept.sort_unstable();
+    for (kl, kh) in kept {
+        if kl > at {
+            out.push((at, kl - 1));
+        }
+        at = kh + 1;
+    }
+    if at <= hi {
+        out.push((at, hi));
+    }
+    out
+}
+
 /// The bits each assignment in `s` writes, `(target, lo, hi)` relative to the
 /// target, from the assignment's own width and select.  False when a write
 /// cannot be bounded that way (a runtime index).
@@ -478,7 +550,9 @@ fn write_bits(s: &ProtoStatement, out: &mut Vec<(VarOffset, usize, usize)>) -> b
     match s {
         ProtoStatement::Assign(x) => {
             let (hi, lo) = x.select.unwrap_or((x.dst_width.max(1) - 1, 0));
-            out.push((x.dst, lo, hi));
+            for (l, h) in changed_bits(x, lo, hi) {
+                out.push((x.dst, l, h));
+            }
             true
         }
         ProtoStatement::If(x) => x
@@ -1159,7 +1233,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<DataflowPl
     let comb_marked = finish(comb_out);
     let ff_marked = finish(ff_out);
 
-    let mut boundary: Vec<Vec<(u32, u32)>> = vec![Vec::new(); ncells];
+    let mut spans_of: Vec<Vec<MarkedSpan>> = vec![Vec::new(); ncells];
     let mut consumers: Vec<Vec<(u32, u64)>> = vec![Vec::new(); ncells];
     let mut mark_always = vec![false; ncells];
     let spans = comb_readers
@@ -1176,43 +1250,48 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<DataflowPl
             continue;
         };
         let wcell = cell_of[wc as usize];
-        let mut any = false;
+        let mut span_marks: Vec<(u32, u64)> = Vec::new();
         for &rc in readers {
             // An earlier cell reads only bits this one leaves alone (see
             // `unordered`): nothing to mark.
             if rc <= wcell {
                 continue;
             }
-            any = true;
-            let (w, m) = (rc / 64, 1u64 << (rc % 64));
-            let list = &mut consumers[wcell as usize];
-            match list.iter_mut().find(|x| x.0 == w) {
-                Some(x) => x.1 |= m,
-                None => list.push((w, m)),
-            }
+            add_mark(&mut span_marks, rc);
+            add_mark(&mut consumers[wcell as usize], rc);
         }
-        if any {
+        if !span_marks.is_empty() {
             if is_ff {
                 mark_always[wcell as usize] = true;
             } else {
-                boundary[wcell as usize].push((*a, *b));
+                spans_of[wcell as usize].push((*a, *b, span_marks));
             }
         }
     }
     for c in &mut consumers {
         c.sort_unstable();
     }
-    // Abutting spans compare as one: the marks are per cell, not per span.
-    for b in &mut boundary {
-        b.sort_unstable();
-        let mut merged: Vec<(u32, u32)> = Vec::with_capacity(b.len());
-        for &(lo, hi) in b.iter() {
+    // Abutting spans compare as one when they mark the same cells.
+    let mut boundary: Vec<Vec<(u32, u32)>> = Vec::with_capacity(ncells);
+    let mut range_consumers: Vec<Vec<Vec<(u32, u64)>>> = Vec::with_capacity(ncells);
+    for mut spans in spans_of {
+        spans.sort_unstable_by_key(|s| (s.0, s.1));
+        let mut merged: Vec<MarkedSpan> = Vec::with_capacity(spans.len());
+        for (lo, hi, mut marks) in spans {
+            marks.sort_unstable();
             match merged.last_mut() {
-                Some(last) if last.1 >= lo => last.1 = last.1.max(hi),
-                _ => merged.push((lo, hi)),
+                Some(last) if last.1 > lo || (last.1 == lo && last.2 == marks) => {
+                    last.1 = last.1.max(hi);
+                    for (w, m) in marks {
+                        add_word_mask(&mut last.2, w, m);
+                    }
+                    last.2.sort_unstable();
+                }
+                _ => merged.push((lo, hi, marks)),
             }
         }
-        *b = merged;
+        boundary.push(merged.iter().map(|m| (m.0, m.1)).collect());
+        range_consumers.push(merged.into_iter().map(|m| m.2).collect());
     }
 
     let mut written: Vec<(u32, u32, u32)> = io
@@ -1249,6 +1328,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<DataflowPl
         cells,
         boundary,
         consumers,
+        range_consumers,
         mark_always,
         written_ff,
         always_run,
@@ -1831,6 +1911,52 @@ mod tests {
         assert!(plan(&stmts, &inputs(3)).is_none());
     }
 
+    #[test]
+    fn a_read_of_bits_the_writer_copies_back_plans() {
+        // `b = a[4]` before `a = {a[7:4], x[3:0]}`: the writer only changes
+        // the low half, so bit 4 reads the same either side of it.
+        let (x, a, b) = (0, 8, 16);
+        let part = |off: isize, h: usize, l: usize| ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: Some((h, l)),
+            dynamic_select: None,
+            width: h - l + 1,
+            var_full_width: 8,
+            expr_context: ExpressionContext {
+                width: h - l + 1,
+                signed: false,
+            },
+        };
+        let read = assign_expr(b, part(a, 4, 4));
+        let concat = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(part(a, 7, 4)), 1, 4),
+                (Box::new(part(x, 3, 0)), 1, 4),
+            ],
+            width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: false,
+            },
+        };
+        let stmts = vec![read, assign_expr(a, concat)];
+        assert!(plan(&stmts, &inputs(3)).is_some());
+        // Copying the bits to another position changes them.
+        let shifted = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(part(x, 3, 0)), 1, 4),
+                (Box::new(part(a, 7, 4)), 1, 4),
+            ],
+            width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: false,
+            },
+        };
+        let stmts = vec![assign_expr(b, part(a, 4, 4)), assign_expr(a, shifted)];
+        assert!(plan(&stmts, &inputs(3)).is_none());
+    }
+
     fn ctx(width: usize) -> ExpressionContext {
         ExpressionContext {
             width,
@@ -1993,16 +2119,53 @@ mod tests {
                         .any(|&(w, m)| w == word && m & mask != 0),
                     "cell {wc} does not mark reader {r} of [{a}, {b})"
                 );
+                let range = p.boundary[wc as usize]
+                    .iter()
+                    .position(|&(lo, hi)| lo <= *a && *b <= hi);
+                let range = range.unwrap_or_else(|| panic!("cell {wc} does not watch [{a}, {b})"));
                 assert!(
-                    p.boundary[wc as usize]
+                    p.range_consumers[wc as usize][range]
                         .iter()
-                        .any(|&(lo, hi)| lo <= *a && *b <= hi),
-                    "cell {wc} does not watch [{a}, {b})"
+                        .any(|&(w, m)| w == word && m & mask != 0),
+                    "a change of [{a}, {b}) in cell {wc} does not mark reader {r}"
                 );
                 checked += 1;
             }
         }
         assert!(checked > 0, "one cell holds everything: {:?}", p.cells);
+    }
+
+    #[test]
+    fn a_change_marks_only_the_readers_of_the_changed_range() {
+        // `c` and `d` share their writer's inputs, so one cell writes both;
+        // `e` reads only `c` and `f` only `d`, each joined with another cell.
+        let (a, x, y, c, d, g, h, e, f) = (0, 8, 16, 24, 32, 40, 48, 56, 64);
+        let stmts = vec![
+            assign(c, a),
+            assign(d, a),
+            assign(g, x),
+            assign(h, y),
+            assign_expr(e, add(c, g)),
+            assign_expr(f, add(d, h)),
+        ];
+        let p = plan(&stmts, &inputs(9)).expect("plannable");
+        let cell = |s: u32| p.cells.iter().position(|c| c.contains(&s)).unwrap() as u32;
+        let (wc, ec, fc) = (cell(0), cell(4), cell(5));
+        assert_eq!(wc, cell(1), "{:?}", p.cells);
+        assert_ne!(ec, fc, "{:?}", p.cells);
+        let marks_of = |off: u32| {
+            let k = p.boundary[wc as usize]
+                .iter()
+                .position(|&(lo, hi)| lo <= off && off < hi)
+                .unwrap_or_else(|| panic!("{:?}", p.boundary));
+            let mut cells = Vec::new();
+            for &(w, m) in &p.range_consumers[wc as usize][k] {
+                cells.extend((0..64).filter(|b| m & (1u64 << b) != 0).map(|b| w * 64 + b));
+            }
+            cells
+        };
+        assert_eq!(marks_of(c as u32), vec![ec]);
+        assert_eq!(marks_of(d as u32), vec![fc]);
     }
 
     #[test]
