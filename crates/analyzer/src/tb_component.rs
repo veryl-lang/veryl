@@ -74,8 +74,6 @@ fn insert_method(
             token: port_token,
             r#type: port_type,
             direction: *direction,
-            prefix: None,
-            suffix: None,
             clock_domain: ClockDomain::None,
             default_value: None,
             is_proto: false,
@@ -113,7 +111,7 @@ fn insert_method(
     };
     let func_symbol = Symbol::new(
         &func_token,
-        SymbolKind::Function(func_prop),
+        SymbolKind::Function(Box::new(func_prop)),
         parent_ns,
         true,
         DocComment::default(),
