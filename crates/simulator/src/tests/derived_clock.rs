@@ -2005,3 +2005,67 @@ fn copy_of_a_divided_clock_joins_its_event() {
         );
     }
 }
+
+/// A gate enable driven by a flop leaves the comb settled between steps, so
+/// the rising edge only needs the master's cone.  Its result must match the
+/// full settle's; the `o_t` chain reads the counter outside the cone.
+#[test]
+fn gated_clock_master_cone() {
+    let n = 80u64;
+    let mut ports = String::new();
+    let mut body = String::new();
+    for i in 0..n {
+        ports += &format!("        o_t{i}: output logic<8>,\n");
+        let prev = if i == 0 {
+            "o_cnt".to_string()
+        } else {
+            format!("o_t{}", i - 1)
+        };
+        body += &format!("        assign o_t{i} = {prev} ^ 8'd{i};\n");
+    }
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+{ports}    ) {{
+        var en: logic;
+        always_ff (i_clk, i_rst) {{
+            if_reset {{ en = 0; }} else {{ en = ~en; }}
+        }}
+        let clk_g: '_ clock = i_clk & en;
+        always_ff (clk_g, i_rst) {{
+            if_reset {{ o_cnt = 0; }} else {{ o_cnt += 1; }}
+        }}
+{body}    }}
+"#
+    );
+    let last = |cnt: u64| (0..n).fold(cnt, |a, i| a ^ i);
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        assert!(ir.master_cone.is_some(), "{config:?}");
+        // A dataflow settle keeps chunk-local bytes out of storage.
+        let cone_usable = ir.dataflow.is_none();
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for step in 1..=10u64 {
+            sim.step(&clk);
+            let cnt = step / 2;
+            assert_eq!(
+                sim.get("o_cnt").unwrap(),
+                Value::new(cnt, 8, false),
+                "{step} {config:?}"
+            );
+            assert_eq!(
+                sim.get(&format!("o_t{}", n - 1)).unwrap(),
+                Value::new(last(cnt), 8, false),
+                "{step} {config:?}"
+            );
+        }
+        assert_eq!(sim.master_cone_settles > 0, cone_usable, "{config:?}");
+    }
+}

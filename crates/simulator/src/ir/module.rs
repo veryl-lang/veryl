@@ -85,6 +85,9 @@ pub struct Module {
     /// value here is a duplication artifact in the simulator IR assembly.
     /// Exposed for regression tests.
     pub nontrivial_comb_scc: usize,
+    /// See `derived_clock::master_cone`; run instead of a full settle when
+    /// only the master clocks changed.
+    pub master_cone: Option<Vec<Statement>>,
     /// Dataflow settle (off under `VERYL_DATAFLOW=0`); see `opt::dataflow`.
     /// `None` keeps `settle_comb` on the per-chunk Cranelift loop.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
@@ -160,6 +163,8 @@ pub struct ProtoModule {
     pub derived_clock_schedule: DerivedClockSchedule,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
+    /// See `Module::master_cone`.
+    pub master_cone: Option<ProtoStatements>,
     /// See `Module::dataflow`.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// See `Module::whole_events`.  Built in `conv()`, shared
@@ -471,6 +476,15 @@ impl ProtoModule {
             inst_layout: self.inst_layout.clone(),
             derived_clock_schedule: self.derived_clock_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
+            master_cone: self.master_cone.as_ref().map(|c| {
+                batch_compiled_statements(c.to_statements(
+                    ff_ptr,
+                    ff_len,
+                    comb_ptr,
+                    comb_len,
+                    self.use_4state,
+                ))
+            }),
             dataflow: self.dataflow.clone(),
             #[cfg(not(target_family = "wasm"))]
             dataflow_interp: self
@@ -6982,6 +6996,12 @@ impl Conv<&air::Module> for ProtoModule {
                 &negedge_inputs,
             )
         };
+        let master_cone = crate::ir::derived_clock::master_cone(
+            &derived_clock_schedule,
+            &pre_jit_stmts,
+            &input_clock_offsets,
+        )
+        .map(|stmts| try_jit(context, stmts));
         for &(copy, source) in &derived_clock_schedule.aliases {
             if let Some(stmts) = all_event_statements.remove(&Event::clock(copy)) {
                 event_comb_writes.remove(&Event::clock(copy));
@@ -7423,6 +7443,7 @@ impl Conv<&air::Module> for ProtoModule {
             inst_layout,
             derived_clock_schedule,
             nontrivial_comb_scc,
+            master_cone,
             dataflow,
             whole_events,
             external_components: all_external_components,

@@ -127,6 +127,8 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
+    /// See `Module::master_cone`.
+    pub master_cone: Option<Vec<Statement>>,
     /// See `Module::dataflow`.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// See `Module::dataflow_interp`, by cell.
@@ -277,6 +279,7 @@ impl Ir {
             disable_ff_opt: config.disable_ff_opt,
             derived_clock_schedule: module.derived_clock_schedule,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
+            master_cone: module.master_cone,
             dataflow_dirty: std::cell::RefCell::new(vec![
                 0;
                 module
@@ -595,6 +598,26 @@ impl Ir {
         for s in &mut self.comb_statements {
             patch_stmt_log_buf(s, log_buf);
         }
+        for s in self.master_cone.iter_mut().flatten() {
+            patch_stmt_log_buf(s, log_buf);
+        }
+    }
+
+    /// Run the master clocks' cone on a settled comb; `false` when there is
+    /// none, and the caller must settle in full.
+    pub fn settle_master_cone(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> bool {
+        let Some(cone) = &self.master_cone else {
+            return false;
+        };
+        // A dataflow settle leaves chunk-local bytes stale in storage.
+        #[cfg(not(target_family = "wasm"))]
+        if self.dataflow.is_some() {
+            return false;
+        }
+        for x in cone {
+            dispatch_stmt_fast(x, mask_cache, status);
+        }
+        true
     }
 
     /// Settle the comb: through the dataflow cells when the module has a
