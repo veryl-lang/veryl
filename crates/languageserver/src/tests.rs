@@ -93,14 +93,17 @@ impl TestServer {
         serde_json::from_str(&res).unwrap()
     }
 
-    /// Receives until a response (a message carrying `result`) arrives,
-    /// skipping interleaved notifications.
+    /// Receives until a response arrives, acknowledging interleaved progress requests.
     async fn recv_response_skipping(&mut self) -> Value {
         loop {
             let msg = self.recv_message().await;
             let value: Value = serde_json::from_str(&msg).unwrap();
             if value.get("result").is_some() {
                 return value;
+            }
+            if value["method"] == "window/workDoneProgress/create" {
+                let request: Request = serde_json::from_str(&msg).unwrap();
+                self.send_ack(request.id().unwrap()).await;
             }
         }
     }
@@ -123,12 +126,464 @@ fn build_initialized() -> Request {
     Request::build("initialized").params(json!(params)).finish()
 }
 
+#[tokio::test]
+#[ntest::timeout(10000)]
+async fn semantic_tokens_refresh_after_editing_a_declaration_file() {
+    check_semantic_tokens_after_declaration_edit(
+        "package Types { const WIDTH: u32 = 8; }",
+        "package Types {}",
+        "module Top {
+    import Types::WIDTH;
+    let _qualified: u32 = Types::WIDTH;
+    let _imported: u32 = WIDTH;
+}",
+        &[1, 2, 3],
+        (Position::new(3, 26), 0),
+        Some("module Disk { let _n: u32 = Types::WIDTH; }"),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ntest::timeout(10000)]
+async fn semantic_tokens_refresh_after_editing_a_generic_declaration_file() {
+    check_semantic_tokens_after_declaration_edit(
+        "package Types::<N: u32> { const WIDTH: u32 = N; }",
+        "package Other {}",
+        "module Top {
+    let _qualified: u32 = Types::<8>::WIDTH;
+}",
+        &[1],
+        (Position::new(1, 40), 0),
+        None,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ntest::timeout(10000)]
+async fn project_references_follow_transitive_imports_after_editing() {
+    check_semantic_tokens_after_declaration_edit(
+        "package Target { const WIDTH: u32 = 32; }
+package Actual { const WIDTH: u32 = 8; }
+package Group { alias package Target = Actual; }",
+        "package Target { const WIDTH: u32 = 32; }
+package Actual {}
+package Group { alias package Target = Actual; }",
+        "module Top {
+    import Bridge::Selected::*;
+    let _qualified: u32 = Bridge::Selected::WIDTH;
+    let _imported: u32 = WIDTH;
+}",
+        &[2, 3],
+        (Position::new(3, 26), 1),
+        Some(
+            "package Bridge {
+    import Group::Target;
+    alias package Selected = Target;
+    const USE: u32 = Selected::WIDTH;
+}",
+        ),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ntest::timeout(10000)]
+async fn watched_sources_update_references_without_reloading_the_project() {
+    let project = tempfile::tempdir().unwrap();
+    let root = editor_project_root(&project);
+    std::fs::write(
+        root.join("Veryl.toml"),
+        "[project]\nname = \"watched_test\"\nversion = \"0.1.0\"\n[build]\nexclude_std = true\nincremental = false\n",
+    )
+    .unwrap();
+    let definitions = root.join("definitions.veryl");
+    let definitions_uri = Url::from_file_path(&definitions).unwrap();
+    let references = "module Top { let _value: u32 = Types::WIDTH; }";
+    let references_file = root.join("references.veryl");
+    std::fs::write(&references_file, references).unwrap();
+    std::fs::write(root.join("unrelated.veryl"), "module Unrelated {}").unwrap();
+    let references_uri = Url::from_file_path(references_file).unwrap();
+    let provider = "package Types { const WIDTH: u32 = 8; }";
+
+    let mut server = TestServer::new(Backend::new);
+    server
+        .send_request(
+            Request::build("initialize")
+                .params(json!({"capabilities": {"workspace": {
+                    "semanticTokens": {"refreshSupport": true},
+                    "didChangeWatchedFiles": {"dynamicRegistration": true}
+                }}}))
+                .id(1)
+                .finish(),
+        )
+        .await;
+    let initialize = server.recv_response_skipping().await;
+    let variable =
+        initialize["result"]["capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|token| token == "variable")
+            .unwrap() as u32;
+    server.send_request(build_initialized()).await;
+    loop {
+        let request = server.recv_notification().await;
+        if request.method() == "client/registerCapability" {
+            let registration = &request.params().unwrap()["registrations"][0];
+            assert_eq!(registration["method"], "workspace/didChangeWatchedFiles");
+            assert_eq!(
+                registration["registerOptions"]["watchers"][0]["globPattern"],
+                "**/*.veryl"
+            );
+            server.send_ack(request.id().unwrap()).await;
+            break;
+        }
+    }
+
+    for (uri, text) in [(&references_uri, references), (&definitions_uri, provider)] {
+        server
+            .send_request(
+                Request::build("textDocument/didOpen")
+                    .params(json!({"textDocument": {"uri": uri, "languageId": "veryl", "version": 1, "text": text}}))
+                    .finish(),
+            )
+            .await;
+        let analyzed = wait_for_refresh(&mut server).await;
+        if uri == &references_uri {
+            assert_eq!(analyzed, 1);
+            assert!(
+                semantic_lines(&mut server, &references_uri, references, variable)
+                    .await
+                    .is_empty()
+            );
+        } else {
+            assert_eq!(analyzed, 0);
+            assert_eq!(
+                semantic_lines(&mut server, &references_uri, references, variable).await,
+                [0]
+            );
+        }
+    }
+
+    // Saving externally while the editor is open leaves its buffer authoritative.
+    std::fs::write(&definitions, "package Types {}").unwrap();
+    let watched = |typ| {
+        Request::build("workspace/didChangeWatchedFiles")
+            .params(json!({"changes": [{"uri": definitions_uri, "type": typ}]}))
+            .finish()
+    };
+    server.send_request(watched(FileChangeType::CREATED)).await;
+    assert_eq!(
+        semantic_lines(&mut server, &references_uri, references, variable).await,
+        [0]
+    );
+    server
+        .send_request(
+            Request::build("textDocument/didClose")
+                .params(json!({"textDocument": {"uri": definitions_uri}}))
+                .finish(),
+        )
+        .await;
+    assert_eq!(wait_for_refresh(&mut server).await, 0);
+    assert!(
+        semantic_lines(&mut server, &references_uri, references, variable)
+            .await
+            .is_empty()
+    );
+
+    for (typ, contents, highlighted) in [
+        (FileChangeType::CHANGED, Some(provider), true),
+        (FileChangeType::CHANGED, Some("package"), false),
+        (FileChangeType::CHANGED, Some(provider), true),
+        (FileChangeType::DELETED, None, false),
+        (FileChangeType::CREATED, Some(provider), true),
+        (FileChangeType::DELETED, None, false),
+    ] {
+        if let Some(contents) = contents {
+            std::fs::write(&definitions, contents).unwrap();
+        } else {
+            std::fs::remove_file(&definitions).unwrap();
+        }
+        server.send_request(watched(typ)).await;
+        assert_eq!(wait_for_refresh(&mut server).await, 0);
+        assert_eq!(
+            !semantic_lines(&mut server, &references_uri, references, variable)
+                .await
+                .is_empty(),
+            highlighted,
+        );
+    }
+
+    let old_path = root.join("renamed-from.veryl");
+    let old_uri = Url::from_file_path(&old_path).unwrap();
+    std::fs::write(&old_path, provider).unwrap();
+    server
+        .send_request(
+            Request::build("workspace/didChangeWatchedFiles")
+                .params(json!({"changes": [{"uri": old_uri, "type": FileChangeType::CREATED}]}))
+                .finish(),
+        )
+        .await;
+    assert_eq!(wait_for_refresh(&mut server).await, 0);
+
+    std::fs::rename(&old_path, &definitions).unwrap();
+    server
+        .send_request(
+            Request::build("workspace/didRenameFiles")
+                .params(json!({"files": [{"oldUri": old_uri, "newUri": definitions_uri}]}))
+                .finish(),
+        )
+        .await;
+    assert_eq!(wait_for_refresh(&mut server).await, 0);
+    assert_eq!(
+        semantic_lines(&mut server, &references_uri, references, variable).await,
+        [0]
+    );
+    server
+        .send_request(
+            Request::build("textDocument/definition")
+                .params(json!({
+                    "textDocument": {"uri": references_uri},
+                    "position": {"line": 0, "character": references.find("WIDTH").unwrap()},
+                }))
+                .id(2)
+                .finish(),
+        )
+        .await;
+    let response = server.recv_response_skipping().await;
+    assert_eq!(response["result"]["uri"], json!(definitions_uri));
+}
+
+async fn wait_for_refresh(server: &mut TestServer) -> usize {
+    let mut files_analyzed = 0;
+    loop {
+        let request = server.recv_notification().await;
+        if request.method() == "workspace/semanticTokens/refresh" {
+            server.send_ack(request.id().unwrap()).await;
+            return files_analyzed;
+        }
+        if request.method() == "window/logMessage"
+            && request
+                .params()
+                .and_then(|params| params["message"].as_str())
+                .is_some_and(|message| message.starts_with("background_analyze: "))
+        {
+            files_analyzed += 1;
+        }
+    }
+}
+
+async fn semantic_lines(
+    server: &mut TestServer,
+    uri: &Url,
+    references: &str,
+    variable: u32,
+) -> Vec<u32> {
+    server
+        .send_request(
+            Request::build("textDocument/semanticTokens/full")
+                .params(json!({"textDocument": {"uri": uri}}))
+                .id(22)
+                .finish(),
+        )
+        .await;
+    let response = server.recv_response_skipping().await;
+    let tokens: SemanticTokens = serde_json::from_value(response["result"].clone()).unwrap();
+    let mut line = 0;
+    let mut column = 0;
+    let mut highlighted = Vec::new();
+    let lines: Vec<_> = references.lines().collect();
+    for token in tokens.data {
+        line += token.delta_line;
+        column = if token.delta_line == 0 {
+            column + token.delta_start
+        } else {
+            token.delta_start
+        };
+        let source = lines[line as usize];
+        let text = &source[column as usize..(column + token.length) as usize];
+        if token.token_type == variable && text == "WIDTH" {
+            highlighted.push(line);
+        }
+    }
+    highlighted
+}
+
+async fn check_semantic_tokens_after_declaration_edit(
+    definitions: &str,
+    without_width: &str,
+    references: &str,
+    expected_lines: &[u32],
+    navigation: (Position, u32),
+    disk_source: Option<&str>,
+) {
+    let project = tempfile::tempdir().unwrap();
+    let root = editor_project_root(&project);
+    std::fs::write(
+        root.join("Veryl.toml"),
+        "[project]\nname = \"highlight_test\"\nversion = \"0.1.0\"\n[build]\nexclude_std = true\nincremental = false\n",
+    )
+    .unwrap();
+    let definitions_file = root.join("definitions.veryl");
+    let references_file = root.join("references.veryl");
+    std::fs::write(&definitions_file, definitions).unwrap();
+    std::fs::write(&references_file, references).unwrap();
+    let definitions_uri = Url::from_file_path(definitions_file).unwrap();
+    let references_uri = Url::from_file_path(references_file).unwrap();
+    let disk_uri = if let Some(disk_source) = disk_source {
+        let file = root.join("disk.veryl");
+        std::fs::write(&file, disk_source).unwrap();
+        Some(Url::from_file_path(file).unwrap())
+    } else {
+        None
+    };
+
+    let mut server = TestServer::new(Backend::new);
+    server
+        .send_request(
+            Request::build("initialize")
+                .params(json!({"capabilities": {"workspace": {"semanticTokens": {"refreshSupport": true}}}}))
+                .id(1)
+                .finish(),
+        )
+        .await;
+    let initialize = server.recv_response_skipping().await;
+    let variable =
+        initialize["result"]["capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|x| x == "variable")
+            .unwrap() as u32;
+    server.send_request(build_initialized()).await;
+
+    let edited_definitions = format!("{definitions}\n\n");
+    let edited_references = format!("{references}\n");
+    let updates = [
+        (&references_uri, 1, references, expected_lines),
+        (&definitions_uri, 1, definitions, expected_lines),
+        (
+            &definitions_uri,
+            2,
+            edited_definitions.as_str(),
+            expected_lines,
+        ),
+        (&definitions_uri, 3, without_width, &[]),
+        (&definitions_uri, 4, "package", &[]),
+        (&definitions_uri, 5, definitions, expected_lines),
+        (
+            &references_uri,
+            2,
+            edited_references.as_str(),
+            expected_lines,
+        ),
+    ];
+    for (step, (uri, version, text, expected_lines)) in updates.into_iter().enumerate() {
+        let method = if version == 1 {
+            "textDocument/didOpen"
+        } else {
+            "textDocument/didChange"
+        };
+        let params = if method == "textDocument/didOpen" {
+            json!({"textDocument": {"uri": uri, "languageId": "veryl", "version": version, "text": text}})
+        } else {
+            json!({"textDocument": {"uri": uri, "version": version}, "contentChanges": [{"text": text}]})
+        };
+        server
+            .send_request(Request::build(method).params(params).finish())
+            .await;
+        let files_analyzed = wait_for_refresh(&mut server).await;
+        if step == 0 {
+            assert!(files_analyzed > 0, "the first open should load the project");
+        } else {
+            assert_eq!(files_analyzed, 0, "the loaded project should be reused");
+        }
+        if step % 2 == 1 {
+            assert_eq!(
+                semantic_lines(&mut server, &references_uri, references, variable).await,
+                expected_lines
+            );
+        }
+
+        let (position, definition_line) = navigation;
+        let params = json!({
+            "textDocument": {"uri": references_uri},
+            "position": position,
+            "context": {"includeDeclaration": false},
+        });
+        server
+            .send_request(
+                Request::build("textDocument/definition")
+                    .params(params.clone())
+                    .id(20)
+                    .finish(),
+            )
+            .await;
+        let response = server.recv_response_skipping().await;
+        let definition: Option<Location> =
+            serde_json::from_value(response["result"].clone()).unwrap();
+        assert_eq!(
+            definition
+                .as_ref()
+                .map(|location| (&location.uri, location.range.start.line)),
+            (!expected_lines.is_empty()).then_some((&definitions_uri, definition_line)),
+        );
+        server
+            .send_request(
+                Request::build("textDocument/references")
+                    .params(params)
+                    .id(21)
+                    .finish(),
+            )
+            .await;
+        let response = server.recv_response_skipping().await;
+        let locations: Vec<Location> = serde_json::from_value(response["result"].clone()).unwrap();
+        let mut open_lines: Vec<_> = locations
+            .iter()
+            .filter(|location| location.uri == references_uri)
+            .map(|location| location.range.start.line)
+            .collect();
+        open_lines.sort_unstable();
+        assert_eq!(open_lines, expected_lines);
+        if let Some(disk_uri) = &disk_uri {
+            assert_eq!(
+                locations.iter().any(|location| location.uri == *disk_uri),
+                !expected_lines.is_empty()
+            );
+        }
+        if step % 2 == 0 {
+            assert_eq!(
+                semantic_lines(&mut server, &references_uri, references, variable).await,
+                expected_lines
+            );
+        }
+    }
+}
+
+fn editor_project_root(project: &tempfile::TempDir) -> PathBuf {
+    #[cfg(unix)]
+    {
+        let real = project.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let alias = project.path().join("editor");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        alias
+    }
+    #[cfg(not(unix))]
+    project.path().to_path_buf()
+}
+
 fn build_did_open(text: &str) -> Request {
     let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     path.pop();
     path.pop();
     path.push("test.veryl");
-    let uri = Url::from_file_path(path).unwrap();
+    build_did_open_at(Url::from_file_path(path).unwrap(), text)
+}
+
+fn build_did_open_at(uri: Url, text: &str) -> Request {
     let text_document = TextDocumentItem {
         uri,
         language_id: "veryl".to_string(),
@@ -143,30 +598,24 @@ fn build_did_open(text: &str) -> Request {
         .finish()
 }
 
-fn build_completion(id: i64, line: u32, character: u32) -> Request {
-    build_completion_with_context(
-        id,
-        line,
-        character,
-        CompletionContext {
-            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-            trigger_character: Some(".".to_string()),
-        },
+fn completion_project() -> (tempfile::TempDir, Url) {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("Veryl.toml"),
+        "[project]\nname = \"completion_test\"\nversion = \"0.1.0\"\n[build]\nexclude_std = true\nincremental = false\n",
     )
+    .unwrap();
+    let uri = Url::from_file_path(project.path().join("test.veryl")).unwrap();
+    (project, uri)
 }
 
-fn build_completion_with_context(
+fn build_completion(
+    uri: Url,
     id: i64,
     line: u32,
     character: u32,
     context: CompletionContext,
 ) -> Request {
-    let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    path.pop();
-    path.pop();
-    path.push("test.veryl");
-    let uri = Url::from_file_path(path).unwrap();
-
     let params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
@@ -186,6 +635,7 @@ fn build_completion_with_context(
 #[tokio::test]
 #[ntest::timeout(60000)]
 async fn completion_tb_component_method() {
+    let (_project, uri) = completion_project();
     let mut server = TestServer::new(Backend::new);
 
     let req = build_initialize(1);
@@ -202,11 +652,20 @@ async fn completion_tb_component_method() {
     // cursor ends with the member access under completion while the whole
     // document still parses.
     let code = "#[test(t)]\nmodule t {\n    inst clk: $tb::clock_gen;\n    initial {\n        clk.\n        next();\n    }\n}\n";
-    let req = build_did_open(code);
+    let req = build_did_open_at(uri.clone(), code);
     server.send_request(req).await;
 
     // Cursor right after `clk.` (0-based position).
-    let req = build_completion(2, 4, 12);
+    let req = build_completion(
+        uri,
+        2,
+        4,
+        12,
+        CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        },
+    );
     server.send_request(req).await;
 
     let res = server.recv_response_skipping().await;
@@ -220,6 +679,7 @@ async fn completion_tb_component_method() {
 #[tokio::test]
 #[ntest::timeout(60000)]
 async fn completion_in_unparsable_document() {
+    let (_project, uri) = completion_project();
     let mut server = TestServer::new(Backend::new);
 
     let req = build_initialize(1);
@@ -234,14 +694,14 @@ async fn completion_in_unparsable_document() {
 
     // The only open source does not parse, so nothing of the project has been analyzed.
     let code = "module t {\n    let a: logic = mo\n}\n";
-    let req = build_did_open(code);
+    let req = build_did_open_at(uri.clone(), code);
     server.send_request(req).await;
 
     let context = CompletionContext {
         trigger_kind: CompletionTriggerKind::INVOKED,
         trigger_character: None,
     };
-    let req = build_completion_with_context(2, 1, 21, context);
+    let req = build_completion(uri, 2, 1, 21, context);
     server.send_request(req).await;
 
     let res = server.recv_response_skipping().await;

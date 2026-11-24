@@ -133,6 +133,7 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
+    "test:grammar": "npm run compile && mocha --ui tdd out/test/suite/grammar.test.js",
     "update-wavedrom-scripts": "mkdir -p localScripts/skins && curl -k -o localScripts/wavedrom.min.js https://wavedrom.com/wavedrom.min.js && curl -k -o localScripts/skins/dark.js https://wavedrom.com/skins/dark.js && curl -k -o localScripts/skins/default.js https://wavedrom.com/skins/default.js && curl -k -o localScripts/skins/lowkey.js https://wavedrom.com/skins/lowkey.js && curl -k -o localScripts/skins/narrow.js https://wavedrom.com/skins/narrow.js && curl -k -o localScripts/skins/narrower.js https://wavedrom.com/skins/narrower.js && curl -k -o localScripts/skins/narrowerer.js https://wavedrom.com/skins/narrowerer.js && curl -k -o localScripts/skins/width.html https://wavedrom.com/skins/width.html",
     "deploy:linux-x64": "vsce publish --target linux-x64",
     "deploy:linux-arm64": "vsce publish --target linux-arm64",
@@ -153,7 +154,9 @@
     "eslint": "^9.31.0",
     "glob": "^11.1.0",
     "mocha": "^11.0.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

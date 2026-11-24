@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::server::{
     Capability, MsgFromServer, MsgToServer, Server, ServerConfigItem, semantic_legend,
@@ -17,6 +18,7 @@ pub struct Backend {
     client: Client,
     rcv: Receiver<MsgFromServer>,
     snd: Sender<MsgToServer>,
+    register_file_watcher: AtomicBool,
 }
 
 impl Backend {
@@ -32,6 +34,7 @@ impl Backend {
             client,
             rcv: rx_from,
             snd: tx_to,
+            register_file_watcher: AtomicBool::new(false),
         }
     }
 
@@ -54,13 +57,26 @@ impl Backend {
 
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let register_file_watcher = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.did_change_watched_files.as_ref())
+            .and_then(|files| files.dynamic_registration)
+            .unwrap_or(false);
+        self.register_file_watcher
+            .store(register_file_watcher, Ordering::Relaxed);
         let capability: Capability = params.capabilities.into();
         self.send(MsgToServer::Initialize { capability }).await;
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        ..Default::default()
+                    },
                 )),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
@@ -80,16 +96,7 @@ impl LanguageServer for Backend {
                                 },
                             }],
                         }),
-                        will_rename: Some(FileOperationRegistrationOptions {
-                            filters: vec![FileOperationFilter {
-                                scheme: Some("file".to_string()),
-                                pattern: FileOperationPattern {
-                                    glob: "**/*.veryl".to_string(),
-                                    matches: Some(FileOperationPatternKind::File),
-                                    options: None,
-                                },
-                            }],
-                        }),
+                        will_rename: None,
                         did_delete: None,
                         will_delete: Some(FileOperationRegistrationOptions {
                             filters: vec![FileOperationFilter {
@@ -146,6 +153,22 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
+        if self.register_file_watcher.load(Ordering::Relaxed) {
+            let options = DidChangeWatchedFilesRegistrationOptions {
+                watchers: vec![FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.veryl".into()),
+                    kind: None,
+                }],
+            };
+            let _ = self
+                .client
+                .register_capability(vec![Registration {
+                    id: "veryl-source-files".into(),
+                    method: "workspace/didChangeWatchedFiles".into(),
+                    register_options: Some(serde_json::to_value(options).unwrap()),
+                }])
+                .await;
+        }
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -171,15 +194,20 @@ impl LanguageServer for Backend {
             .await;
     }
 
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.send(MsgToServer::DidClose {
+            url: params.text_document.uri,
+        })
+        .await;
+    }
+
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        for change in params.changes {
-            self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!("did_change_watched_files: {change:?}"),
-                )
-                .await;
-        }
+        let urls = params
+            .changes
+            .into_iter()
+            .map(|change| change.uri)
+            .collect();
+        self.send(MsgToServer::DiskSourcesChanged(urls)).await;
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
@@ -192,32 +220,14 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn will_rename_files(&self, params: RenameFilesParams) -> Result<Option<WorkspaceEdit>> {
-        self.client
-            .log_message(MessageType::INFO, "will_rename_files")
-            .await;
-
-        for file in params.files {
-            if let Ok(url) = Url::from_str(file.old_uri.as_str()) {
-                self.send(MsgToServer::WillRenameFile { old_url: url })
-                    .await;
-            }
-        }
-        Ok(None)
-    }
-
     async fn did_rename_files(&self, params: RenameFilesParams) {
-        self.client
-            .log_message(MessageType::INFO, "did_rename_files")
-            .await;
-
-        // Currently it only triggers a background analysis, so no need to send all the uris.
-        for file in params.files {
-            if let Ok(url) = Url::from_str(file.old_uri.as_str()) {
-                self.send(MsgToServer::DidRenameFile { new_url: url }).await;
-                break;
-            }
-        }
+        let urls = params
+            .files
+            .into_iter()
+            .flat_map(|file| [file.old_uri, file.new_uri])
+            .filter_map(|uri| Url::from_str(&uri).ok())
+            .collect();
+        self.send(MsgToServer::DiskSourcesChanged(urls)).await;
     }
 
     async fn will_delete_files(&self, params: DeleteFilesParams) -> Result<Option<WorkspaceEdit>> {

@@ -125,6 +125,7 @@ impl From<&InstPortItem> for ReferenceCandidate {
 pub struct ReferenceTable {
     candidates: Vec<ReferenceCandidate>,
     errors: Vec<AnalyzerError>,
+    collected_references: Option<Vec<(SymbolId, Token)>>,
     /// Alias symbols currently being expanded, to break cyclic alias chains.
     alias_stack: Vec<SymbolId>,
     /// Begin token of the expression-position candidate path currently
@@ -233,6 +234,14 @@ fn is_testbench_hier_ref(
 }
 
 impl ReferenceTable {
+    fn record_reference(&mut self, id: SymbolId, token: Token) {
+        if let Some(references) = self.collected_references.as_mut() {
+            references.push((id, token));
+        } else {
+            symbol_table::add_reference(id, &token);
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -443,7 +452,7 @@ impl ReferenceTable {
                                 define_context,
                             );
                         }
-                        symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
+                        self.record_reference(symbol.found.id, path.paths[i].base);
                     }
 
                     // A user-defined component takes its parameters as
@@ -549,7 +558,8 @@ impl ReferenceTable {
                     }
 
                     if (params.len() + n_args) == 0 {
-                        if symbol.found.is_global_function() {
+                        if self.collected_references.is_none() && symbol.found.is_global_function()
+                        {
                             // A non-generic global function may call generic global functions.
                             // `insert_subordinate_generic_instances` is used to connect the current namespace
                             // and such functions.
@@ -592,7 +602,9 @@ impl ReferenceTable {
 
                     path.paths[i].arguments.append(&mut args);
                     if path.is_generic_reference() {
-                        Self::add_generic_reference(&target_symbol, &namespace, &path, i);
+                        if self.collected_references.is_none() {
+                            Self::add_generic_reference(&target_symbol, &namespace, &path, i);
+                        }
                     } else {
                         Self::insert_generic_instance(
                             &path,
@@ -899,7 +911,7 @@ impl ReferenceTable {
                     self.check_declaration_order(&symbol.found, token, scope, &define_context);
                 }
                 for id in symbol.full_path.iter().copied() {
-                    symbol_table::add_reference(id, &token.beg);
+                    self.record_reference(id, token.beg);
                 }
             }
             Err(err) => {
@@ -958,11 +970,18 @@ impl ReferenceTable {
     }
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
+        let candidates = std::mem::take(&mut self.candidates);
+        self.apply_candidates(&candidates)
+    }
+
+    fn apply_candidates<'a>(
+        &mut self,
+        candidates: impl IntoIterator<Item = &'a ReferenceCandidate>,
+    ) -> Vec<AnalyzerError> {
         symbol_table::suppress_cache_clear();
         EXPANDED.with(|e| e.borrow_mut().clear());
-        let candidates: Vec<_> = std::mem::take(&mut self.candidates);
 
-        for x in &candidates {
+        for x in candidates {
             match x {
                 ReferenceCandidate::Identifier { arg } => {
                     self.check_simple_identifier(&arg.into(), &arg.into(), None, false);
@@ -1138,4 +1157,22 @@ pub fn export_candidates_since(watermark: usize) -> Vec<ReferenceCandidate> {
 
 pub fn apply() -> Vec<AnalyzerError> {
     REFERENCE_TABLE.with(|f| f.borrow_mut().apply())
+}
+
+/// Resolves the candidates against current declarations without replacing analyzed references.
+pub fn collect_references<'a>(
+    candidates: impl Iterator<Item = &'a ReferenceCandidate> + Clone,
+) -> Vec<(SymbolId, Token)> {
+    loop {
+        let instances = symbol_table::generic_instance_count();
+        let mut table = ReferenceTable {
+            collected_references: Some(Vec::new()),
+            ..ReferenceTable::new()
+        };
+        table.apply_candidates(candidates.clone());
+        // Resolving one file can restore a specialization another file needs.
+        if symbol_table::generic_instance_count() == instances {
+            return table.collected_references.unwrap();
+        }
+    }
 }
