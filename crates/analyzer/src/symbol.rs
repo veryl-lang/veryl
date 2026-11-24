@@ -1057,7 +1057,7 @@ pub enum SymbolKind {
     AliasModule(AliasModuleProperty),
     Interface(InterfaceProperty),
     AliasInterface(AliasInterfaceProperty),
-    Function(FunctionProperty),
+    Function(Box<FunctionProperty>),
     Parameter(ParameterProperty),
     Instance(InstanceProperty),
     Block,
@@ -2604,8 +2604,6 @@ impl fmt::Display for ClockDomain {
 pub struct VariableProperty {
     pub r#type: Type,
     pub affiliation: Affiliation,
-    pub prefix: Option<String>,
-    pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
     pub loop_variable: bool,
 }
@@ -2631,8 +2629,6 @@ pub struct PortProperty {
     pub token: Token,
     pub r#type: Type,
     pub direction: Direction,
-    pub prefix: Option<String>,
-    pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
     pub default_value: Option<syntax_tree::Expression>,
     pub is_proto: bool,
@@ -2935,6 +2931,42 @@ pub struct StructProperty {
     pub members: Vec<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
+}
+
+impl StructProperty {
+    /// The clock/reset kind of a struct made of clock/reset only.
+    /// It is given by the first leaf member, since a struct mixing
+    /// clock/reset with other kinds is an error.
+    /// User-defined types have to be resolved before calling it.
+    pub fn clock_reset_kind(&self) -> Option<TypeKind> {
+        let first_member_type = |members: &[SymbolId]| {
+            if let SymbolKind::StructMember(x) = symbol_table::get(*members.first()?)?.kind {
+                Some(x.r#type)
+            } else {
+                None
+            }
+        };
+
+        let mut r#type = first_member_type(&self.members)?;
+        let mut visited = Vec::new();
+        loop {
+            let TypeKind::UserDefined(x) = &r#type.kind else {
+                let kind = r#type.kind;
+                return (kind.is_clock() || kind.is_reset()).then_some(kind);
+            };
+            let id = x.symbol?;
+            // Recursive types are reported by other checks.
+            if visited.contains(&id) {
+                return None;
+            }
+            visited.push(id);
+            r#type = match symbol_table::get(id)?.kind {
+                SymbolKind::Struct(x) => first_member_type(&x.members)?,
+                SymbolKind::TypeDef(x) => x.r#type?,
+                _ => return None,
+            };
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
