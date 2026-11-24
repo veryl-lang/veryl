@@ -527,6 +527,62 @@ fn hier_ref_generate_block_through_inst() {
     }
 }
 
+#[test]
+fn hier_ref_generate_block_through_if_generate() {
+    // An `if` generate block (`g`) has no index, but the hop must still
+    // descend into it so the generate labels below its instance fold.
+    // The genvar of a testbench generate block is a constant index.
+    let code = format!(
+        r#"
+    {GEN_HIER_DUT}
+
+    module GEmpty (
+        clk: input clock,
+    ) {{
+        #[allow(unused_variable)]
+        var mem: logic<32>;
+        assign mem = 32'hdead_beef;
+    }}
+
+    module GIfTop (
+        clk: input clock,
+    ) {{
+        for v in 0..2 :g_v {{
+            if v == 0 :g {{
+                inst u: GMid (clk);
+            }} else {{
+                inst u: GEmpty (clk);
+            }}
+        }}
+    }}
+
+    #[test(hier_test)]
+    module hier_test {{
+        inst clk: $tb::clock_gen;
+        inst dut: GIfTop (clk);
+
+        for p in 0..2 :g_p {{
+            initial {{
+                clk.next();
+                $assert(dut.g_v[0].g.u.g_leaf[p].u_leaf.mem == 32'hcafe_0000 + p, "if");
+            }}
+        }}
+
+        initial {{
+            clk.next();
+            $assert(dut.g_v[1].g.u.mem == 32'hdead_beef, "else");
+            $finish();
+        }}
+    }}
+    "#
+    );
+    let results = run_hier_test(&code);
+    assert!(!results.is_empty());
+    for (config, result, _) in results {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
 // A hierarchical read whose element index is a runtime value (a testbench
 // loop variable) must evaluate the index at simulation time, not fold it to
 // a compile-time constant. Each element carries a distinct value so a wrong
