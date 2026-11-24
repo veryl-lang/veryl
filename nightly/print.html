@@ -38,7 +38,7 @@
             const default_dark_theme = "navy";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-5ded7007.js"></script>
+        <script src="toc-b6926b1f.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,6 +183,12 @@
 <table class="table_list">
 <tbody>
 <tr>
+    <th class="table_list_item"><a href="#arbiter">arbiter</a></th>
+    <td class="table_list_item"> Arbiter
+</td>
+</tr>
+
+<tr>
     <th class="table_list_item"><a href="#async_fifos">async_fifo::&lt;S&gt;</a></th>
     <td class="table_list_item"> Asynchronous FIFO
 </td>
@@ -255,6 +261,12 @@
 </tr>
 
 <tr>
+    <th class="table_list_item"><a href="#fixed_priority_arbiter">fixed_priority_arbiter</a></th>
+    <td class="table_list_item"> Fixed priority arbiter
+</td>
+</tr>
+
+<tr>
     <th class="table_list_item"><a href="#gray_counter">gray_counter</a></th>
     <td class="table_list_item"> Value counter using Gray Encoding
 </td>
@@ -290,6 +302,12 @@
 <tr>
     <th class="table_list_item"><a href="#ram">ram</a></th>
     <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item"><a href="#round_robin_arbiter">round_robin_arbiter</a></th>
+    <td class="table_list_item"> Round robin arbiter
+</td>
 </tr>
 
 <tr>
@@ -356,6 +374,12 @@
 
 <table class="table_list">
 <tbody>
+<tr>
+    <th class="table_list_item"><a href="#arbiter_pkg">arbiter_pkg</a></th>
+    <td class="table_list_item"> Arbiter package
+</td>
+</tr>
+
 <tr>
     <th class="table_list_item"><a href="#axi3_config">axi3_config</a></th>
     <td class="table_list_item">### AXI3 configuration definitions
@@ -465,6 +489,12 @@
 <table class="table_list">
 <tbody>
 <tr>
+    <th class="table_list_item"><a href="#arbiter">arbiter</a></th>
+    <td class="table_list_item"> Arbiter
+</td>
+</tr>
+
+<tr>
     <th class="table_list_item"><a href="#async_fifos">async_fifo::&lt;S&gt;</a></th>
     <td class="table_list_item"> Asynchronous FIFO
 </td>
@@ -537,6 +567,12 @@
 </tr>
 
 <tr>
+    <th class="table_list_item"><a href="#fixed_priority_arbiter">fixed_priority_arbiter</a></th>
+    <td class="table_list_item"> Fixed priority arbiter
+</td>
+</tr>
+
+<tr>
     <th class="table_list_item"><a href="#gray_counter">gray_counter</a></th>
     <td class="table_list_item"> Value counter using Gray Encoding
 </td>
@@ -575,6 +611,12 @@
 </tr>
 
 <tr>
+    <th class="table_list_item"><a href="#round_robin_arbiter">round_robin_arbiter</a></th>
+    <td class="table_list_item"> Round robin arbiter
+</td>
+</tr>
+
+<tr>
     <th class="table_list_item"><a href="#slicer">slicer</a></th>
     <td class="table_list_item"></td>
 </tr>
@@ -582,6 +624,204 @@
 <tr>
     <th class="table_list_item"><a href="#synchronizer_basic">synchronizer_basic</a></th>
     <td class="table_list_item"> Basic synchronizer implementation using single-bit FF scheme
+</td>
+</tr>
+
+</tbody>
+
+</table>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="arbiter"><a class="header" href="#arbiter">arbiter</a></h1>
+<p>Arbiter</p>
+<p>Grants one of the requests by the arbitration scheme specified by <code>KIND</code>.</p>
+<ul>
+<li><code>KIND == ROUND_ROBIN</code>   : Uses <code>round_robin_arbiter</code></li>
+<li><code>KIND == FIXED_PRIORITY</code>: Uses <code>fixed_priority_arbiter</code></li>
+</ul>
+<p>When <code>KEEP_RESULT</code> is enabled, the grant is kept until it is released by <code>i_free</code>.
+New requests are not arbitrated while the grant is kept.</p>
+<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
+<hr>
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">REQUESTS</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">KIND</th>
+    <td class="table_list_item"><span class="hljs-type">arbiter_kind</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">ONEHOT_GRANT</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">KEEP_RESULT</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">GRANT_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">FREE_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY_ENABLE</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">FIXED_PRIORITY</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY</th>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;REQUESTS, PRIORITY_WIDTH&gt;</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">WEIGHT_ENABLE</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">WEIGHT_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">INITIAL_WEIGHT</th>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;REQUESTS, WEIGHT_WIDTH&gt;</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">SELECTOR_KIND</th>
+    <td class="table_list_item"><span class="hljs-type">selector_kind</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+</tbody>
+
+</table>
+
+<h3 id="ports"><a class="header" href="#ports">Ports</a></h3>
+<hr>
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_clk</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">clock</span></td>
+    <td class="table_list_item"> Clock
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_rst</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">reset</span></td>
+    <td class="table_list_item"> Reset
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_init</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"> Initialize the round robin state and weights (`ROUND_ROBIN` only)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_priority</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS, PRIORITY_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Priority of each request (used when `PRIORITY_ENABLE` and `!FIXED_PRIORITY`)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_weight_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"> Use `i_weight` as the weights for the next round (`ROUND_ROBIN` only)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_weight</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS, WEIGHT_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Weight of each request (`ROUND_ROBIN` only)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_request</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS&gt;</span></td>
+    <td class="table_list_item"> Requests
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">o_grant</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;GRANT_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Grant (onehot or binary index)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_free</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;FREE_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Release the kept grant (used when `KEEP_RESULT`)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_update_state</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"> Update the arbiter state by the current grant
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">o_current_state</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;N_SLOTS, STATE_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Current round robin state (`ROUND_ROBIN` only)
 </td>
 </tr>
 
@@ -607,7 +847,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
 
 </table>
 
-<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
+<h3 id="parameters-1"><a class="header" href="#parameters-1">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -694,7 +934,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
 
 </table>
 
-<h3 id="ports"><a class="header" href="#ports">Ports</a></h3>
+<h3 id="ports-1"><a class="header" href="#ports-1">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -819,7 +1059,7 @@ Generic parameter <code>S</code> is a module name of synchrinoizer.</p>
 
 </table>
 
-<h3 id="parameters-1"><a class="header" href="#parameters-1">Parameters</a></h3>
+<h3 id="parameters-2"><a class="header" href="#parameters-2">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -892,7 +1132,7 @@ Generic parameter <code>S</code> is a module name of synchrinoizer.</p>
 
 </table>
 
-<h3 id="ports-1"><a class="header" href="#ports-1">Ports</a></h3>
+<h3 id="ports-2"><a class="header" href="#ports-2">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -995,7 +1235,7 @@ Generic parameter <code>S</code> is a module name of synchrinoizer.</p>
 <p>A binary decoder.</p>
 <p>Converts a bit vector from a binary encoding to
 a bit vector with a unary encoding.</p>
-<h3 id="parameters-2"><a class="header" href="#parameters-2">Parameters</a></h3>
+<h3 id="parameters-3"><a class="header" href="#parameters-3">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1010,7 +1250,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-2"><a class="header" href="#ports-2">Ports</a></h3>
+<h3 id="ports-3"><a class="header" href="#ports-3">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1046,7 +1286,7 @@ a bit vector with a unary encoding.</p>
 <h1 id="binary_encoder"><a class="header" href="#binary_encoder">binary_encoder</a></h1>
 <p>A binary encoder.</p>
 <p>Transforms a unary encoded value into a binary encoding.</p>
-<h3 id="parameters-3"><a class="header" href="#parameters-3">Parameters</a></h3>
+<h3 id="parameters-4"><a class="header" href="#parameters-4">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1061,7 +1301,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-3"><a class="header" href="#ports-3">Ports</a></h3>
+<h3 id="ports-4"><a class="header" href="#ports-4">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1096,7 +1336,7 @@ a bit vector with a unary encoding.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="counter"><a class="header" href="#counter">counter</a></h1>
 <p>Value counter</p>
-<h3 id="parameters-4"><a class="header" href="#parameters-4">Parameters</a></h3>
+<h3 id="parameters-5"><a class="header" href="#parameters-5">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1139,7 +1379,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-4"><a class="header" href="#ports-4">Ports</a></h3>
+<h3 id="ports-5"><a class="header" href="#ports-5">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1229,7 +1469,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="countones"><a class="header" href="#countones">countones</a></h1>
-<h3 id="parameters-5"><a class="header" href="#parameters-5">Parameters</a></h3>
+<h3 id="parameters-6"><a class="header" href="#parameters-6">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1243,7 +1483,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-5"><a class="header" href="#ports-5">Ports</a></h3>
+<h3 id="ports-6"><a class="header" href="#ports-6">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1268,7 +1508,7 @@ a bit vector with a unary encoding.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="delay"><a class="header" href="#delay">delay</a></h1>
 <p>Delay input by configured cycle</p>
-<h3 id="parameters-6"><a class="header" href="#parameters-6">Parameters</a></h3>
+<h3 id="parameters-7"><a class="header" href="#parameters-7">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1297,7 +1537,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-6"><a class="header" href="#ports-6">Ports</a></h3>
+<h3 id="ports-7"><a class="header" href="#ports-7">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1339,7 +1579,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="demux"><a class="header" href="#demux">demux</a></h1>
-<h3 id="parameters-7"><a class="header" href="#parameters-7">Parameters</a></h3>
+<h3 id="parameters-8"><a class="header" href="#parameters-8">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1383,7 +1623,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-7"><a class="header" href="#ports-7">Ports</a></h3>
+<h3 id="ports-8"><a class="header" href="#ports-8">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1414,7 +1654,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ecc_decoder"><a class="header" href="#ecc_decoder">ecc_decoder</a></h1>
-<h3 id="parameters-8"><a class="header" href="#parameters-8">Parameters</a></h3>
+<h3 id="parameters-9"><a class="header" href="#parameters-9">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1434,7 +1674,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-8"><a class="header" href="#ports-8">Ports</a></h3>
+<h3 id="ports-9"><a class="header" href="#ports-9">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1479,7 +1719,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ecc_encoder"><a class="header" href="#ecc_encoder">ecc_encoder</a></h1>
-<h3 id="parameters-9"><a class="header" href="#parameters-9">Parameters</a></h3>
+<h3 id="parameters-10"><a class="header" href="#parameters-10">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1499,7 +1739,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-9"><a class="header" href="#ports-9">Ports</a></h3>
+<h3 id="ports-10"><a class="header" href="#ports-10">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1531,7 +1771,7 @@ a bit vector with a unary encoding.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="edge_detector"><a class="header" href="#edge_detector">edge_detector</a></h1>
 <p>Edge detector</p>
-<h3 id="parameters-10"><a class="header" href="#parameters-10">Parameters</a></h3>
+<h3 id="parameters-11"><a class="header" href="#parameters-11">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1553,7 +1793,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-10"><a class="header" href="#ports-10">Ports</a></h3>
+<h3 id="ports-11"><a class="header" href="#ports-11">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1619,7 +1859,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="fifo"><a class="header" href="#fifo">fifo</a></h1>
-<h3 id="parameters-11"><a class="header" href="#parameters-11">Parameters</a></h3>
+<h3 id="parameters-12"><a class="header" href="#parameters-12">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1693,7 +1933,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-11"><a class="header" href="#ports-11">Ports</a></h3>
+<h3 id="ports-12"><a class="header" href="#ports-12">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1780,7 +2020,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="fifo_controller"><a class="header" href="#fifo_controller">fifo_controller</a></h1>
-<h3 id="parameters-12"><a class="header" href="#parameters-12">Parameters</a></h3>
+<h3 id="parameters-13"><a class="header" href="#parameters-13">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1848,7 +2088,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-12"><a class="header" href="#ports-12">Ports</a></h3>
+<h3 id="ports-13"><a class="header" href="#ports-13">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -1962,9 +2202,105 @@ a bit vector with a unary encoding.</p>
 </table>
 
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="fixed_priority_arbiter"><a class="header" href="#fixed_priority_arbiter">fixed_priority_arbiter</a></h1>
+<p>Fixed priority arbiter</p>
+<p>Grants the request with the lowest index.</p>
+<ul>
+<li><code>PRIORITY_ENABLE</code>: Requests are classified by their priority and the request with the highest priority is granted.
+Among requests with the same priority, the request with the lowest index is granted.</li>
+</ul>
+<h3 id="parameters-14"><a class="header" href="#parameters-14">Parameters</a></h3>
+<hr>
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">REQUESTS</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">ONEHOT_GRANT</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">GRANT_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY_ENABLE</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">FIXED_PRIORITY</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY</th>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;REQUESTS, PRIORITY_WIDTH&gt;</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">SELECTOR_KIND</th>
+    <td class="table_list_item"><span class="hljs-type">selector_kind</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+</tbody>
+
+</table>
+
+<h3 id="ports-14"><a class="header" href="#ports-14">Ports</a></h3>
+<hr>
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_priority</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS, PRIORITY_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Priority of each request (used when `PRIORITY_ENABLE` and `!FIXED_PRIORITY`)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_request</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS&gt;</span></td>
+    <td class="table_list_item"> Requests
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">o_grant</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;GRANT_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Grant (onehot or binary index)
+</td>
+</tr>
+
+</tbody>
+
+</table>
+
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="gray_counter"><a class="header" href="#gray_counter">gray_counter</a></h1>
 <p>Value counter using Gray Encoding</p>
-<h3 id="parameters-13"><a class="header" href="#parameters-13">Parameters</a></h3>
+<h3 id="parameters-15"><a class="header" href="#parameters-15">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2007,7 +2343,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-13"><a class="header" href="#ports-13">Ports</a></h3>
+<h3 id="ports-15"><a class="header" href="#ports-15">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2102,7 +2438,7 @@ a bit vector with a unary encoding.</p>
 <li>Space Complexity: O(WIDTH log WIDTH)</li>
 <li>Time Complexity: O(log WIDTH)</li>
 </ul>
-<h3 id="parameters-14"><a class="header" href="#parameters-14">Parameters</a></h3>
+<h3 id="parameters-16"><a class="header" href="#parameters-16">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2117,7 +2453,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-14"><a class="header" href="#ports-14">Ports</a></h3>
+<h3 id="ports-16"><a class="header" href="#ports-16">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2149,7 +2485,7 @@ a bit vector with a unary encoding.</p>
 <li>Space Complexity: O(WIDTH)</li>
 <li>Time Complexity: O(1)</li>
 </ul>
-<h3 id="parameters-15"><a class="header" href="#parameters-15">Parameters</a></h3>
+<h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2164,7 +2500,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-15"><a class="header" href="#ports-15">Ports</a></h3>
+<h3 id="ports-17"><a class="header" href="#ports-17">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2190,7 +2526,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="lfsr_galois"><a class="header" href="#lfsr_galois">lfsr_galois</a></h1>
-<h3 id="parameters-16"><a class="header" href="#parameters-16">Parameters</a></h3>
+<h3 id="parameters-18"><a class="header" href="#parameters-18">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2213,7 +2549,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-16"><a class="header" href="#ports-16">Ports</a></h3>
+<h3 id="ports-18"><a class="header" href="#ports-18">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2263,7 +2599,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="mux"><a class="header" href="#mux">mux</a></h1>
-<h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
+<h3 id="parameters-19"><a class="header" href="#parameters-19">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2295,7 +2631,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-17"><a class="header" href="#ports-17">Ports</a></h3>
+<h3 id="ports-19"><a class="header" href="#ports-19">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2326,7 +2662,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="onehot"><a class="header" href="#onehot">onehot</a></h1>
-<h3 id="parameters-18"><a class="header" href="#parameters-18">Parameters</a></h3>
+<h3 id="parameters-20"><a class="header" href="#parameters-20">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2340,7 +2676,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-18"><a class="header" href="#ports-18">Ports</a></h3>
+<h3 id="ports-20"><a class="header" href="#ports-20">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2373,7 +2709,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ram"><a class="header" href="#ram">ram</a></h1>
-<h3 id="parameters-19"><a class="header" href="#parameters-19">Parameters</a></h3>
+<h3 id="parameters-21"><a class="header" href="#parameters-21">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2423,7 +2759,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-19"><a class="header" href="#ports-19">Ports</a></h3>
+<h3 id="ports-21"><a class="header" href="#ports-21">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2502,8 +2838,181 @@ a bit vector with a unary encoding.</p>
 </table>
 
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="round_robin_arbiter"><a class="header" href="#round_robin_arbiter">round_robin_arbiter</a></h1>
+<p>Round robin arbiter</p>
+<p>Grants one of the requests in round robin order.
+The round robin state holds the index of the last granted request and
+the request with the next index has the highest priority.</p>
+<ul>
+<li><code>PRIORITY_ENABLE</code>: Requests are classified by their priority and the request with the highest priority is granted.
+The round robin state is kept for each priority class.</li>
+<li><code>WEIGHT_ENABLE</code>  : Each request can be granted <code>weight</code> times in a round.</li>
+</ul>
+<h3 id="parameters-22"><a class="header" href="#parameters-22">Parameters</a></h3>
+<hr>
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">REQUESTS</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">ONEHOT_GRANT</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">GRANT_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY_ENABLE</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">FIXED_PRIORITY</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">PRIORITY</th>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;REQUESTS, PRIORITY_WIDTH&gt;</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">WEIGHT_ENABLE</th>
+    <td class="table_list_item"><span class="hljs-type">bbool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">WEIGHT_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">INITIAL_WEIGHT</th>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;REQUESTS, WEIGHT_WIDTH&gt;</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+<tr>
+    <th class="table_list_item">SELECTOR_KIND</th>
+    <td class="table_list_item"><span class="hljs-type">selector_kind</span></td>
+    <td class="table_list_item"></td>
+</tr>
+
+</tbody>
+
+</table>
+
+<h3 id="ports-22"><a class="header" href="#ports-22">Ports</a></h3>
+<hr>
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_clk</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">clock</span></td>
+    <td class="table_list_item"> Clock
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_rst</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">reset</span></td>
+    <td class="table_list_item"> Reset
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_init</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"> Initialize the round robin state and weights
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_priority</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS, PRIORITY_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Priority of each request (used when `PRIORITY_ENABLE` and `!FIXED_PRIORITY`)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_weight_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"> Use `i_weight` as the weights for the next round
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_weight</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS, WEIGHT_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Weight of each request
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_request</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;REQUESTS&gt;</span></td>
+    <td class="table_list_item"> Requests
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">o_grant</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;GRANT_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Grant (onehot or binary index)
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">i_update_state</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"> Update the round robin state by the current grant
+</td>
+</tr>
+
+<tr>
+    <th class="table_list_item">o_current_state</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;N_SLOTS, STATE_WIDTH&gt;</span></td>
+    <td class="table_list_item"> Current round robin state
+</td>
+</tr>
+
+</tbody>
+
+</table>
+
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="slicer"><a class="header" href="#slicer">slicer</a></h1>
-<h3 id="parameters-20"><a class="header" href="#parameters-20">Parameters</a></h3>
+<h3 id="parameters-23"><a class="header" href="#parameters-23">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2553,7 +3062,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-20"><a class="header" href="#ports-20">Ports</a></h3>
+<h3 id="ports-23"><a class="header" href="#ports-23">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2620,7 +3129,7 @@ a bit vector with a unary encoding.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="synchronizer_basic"><a class="header" href="#synchronizer_basic">synchronizer_basic</a></h1>
 <p>Basic synchronizer implementation using single-bit FF scheme</p>
-<h3 id="parameters-21"><a class="header" href="#parameters-21">Parameters</a></h3>
+<h3 id="parameters-24"><a class="header" href="#parameters-24">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2662,7 +3171,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-21"><a class="header" href="#ports-21">Ports</a></h3>
+<h3 id="ports-24"><a class="header" href="#ports-24">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2718,7 +3227,7 @@ a bit vector with a unary encoding.</p>
 
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="synchronizer"><a class="header" href="#synchronizer">synchronizer</a></h1>
-<h3 id="parameters-22"><a class="header" href="#parameters-22">Parameters</a></h3>
+<h3 id="parameters-25"><a class="header" href="#parameters-25">Parameters</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -2760,7 +3269,7 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-<h3 id="ports-22"><a class="header" href="#ports-22">Ports</a></h3>
+<h3 id="ports-25"><a class="header" href="#ports-25">Ports</a></h3>
 <hr>
 <table class="table_list">
 <tbody>
@@ -3039,6 +3548,12 @@ These and are used to connect compatible AXI4-Lite slaves to a full AXI4 interfa
 <table class="table_list">
 <tbody>
 <tr>
+    <th class="table_list_item"><a href="#arbiter_pkg">arbiter_pkg</a></th>
+    <td class="table_list_item"> Arbiter package
+</td>
+</tr>
+
+<tr>
     <th class="table_list_item"><a href="#axi3_config">axi3_config</a></th>
     <td class="table_list_item">### AXI3 configuration definitions
 </td>
@@ -3141,6 +3656,10 @@ These and are used to connect compatible AXI4-Lite slaves to a full AXI4 interfa
 
 </table>
 
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="arbiter_pkg"><a class="header" href="#arbiter_pkg">arbiter_pkg</a></h1>
+<p>Arbiter package</p>
+<p>Provides types and helper functions used by arbiter modules.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="axi3_config"><a class="header" href="#axi3_config">axi3_config</a></h1>
 <h3 id="axi3-configuration-definitions"><a class="header" href="#axi3-configuration-definitions">AXI3 configuration definitions</a></h3>
