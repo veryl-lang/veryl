@@ -1,0 +1,73 @@
+/// Finds the entry with the maximum value by a comparator tree.
+///
+/// If multiple entries have the same maximum value, the entry with the lowest index is selected.
+/// Generic parameter `N` is the number of entries and `W` is the width of the value.
+pub function arbiter_find_max::<N: p32, W: p32> (
+    value    : input  logic<N, W>                      , /// Value of each entry
+    location : output logic<N>                         , /// Location of the selected entry (onehot)
+    index    : output logic<utils::clog2_clipped(N, 1)>, /// Index of the selected entry
+    max_value: output logic<W>                         , /// Value of the selected entry
+) {
+    const DEPTH      : u32 = $clog2(N);
+    const INDEX_WIDTH: u32 = utils::clog2_clipped(N, 1);
+
+    var stride          : u32                   ;
+    var current_n       : u32                   ;
+    var current_location: logic<N>              ;
+    var current_index   : logic<INDEX_WIDTH> [N];
+    var current_value   : logic<W>           [N];
+    var next_n          : u32                   ;
+    var next_location   : logic<N>              ;
+    var next_index      : logic<INDEX_WIDTH> [N];
+    var next_value      : logic<W>           [N];
+
+    next_n        = N;
+    next_location = '1;
+    for i in 0..N {
+        next_index[i] = i as INDEX_WIDTH;
+        next_value[i] = value[i];
+    }
+
+    for i in 0..DEPTH {
+        current_n        = next_n;
+        current_location = next_location;
+        current_index    = next_index;
+        current_value    = next_value;
+
+        next_n = (current_n / 2) + (current_n % 2);
+        stride = 2 ** i;
+
+        for j in 0..next_n {
+            var select_even: logic;
+
+            if (j + 1) == next_n && (current_n % 2) == 1 {
+                select_even = true;
+            } else {
+                select_even = current_value[2 * j + 0] >= current_value[2 * j + 1];
+            }
+
+            if select_even {
+                next_index[j] = current_index[2 * j + 0];
+                next_value[j] = current_value[2 * j + 0];
+            } else {
+                next_index[j] = current_index[2 * j + 1];
+                next_value[j] = current_value[2 * j + 1];
+            }
+
+            for k in 0..(2 * stride) {
+                let entry: u32 = 2 * stride * j + k;
+                if entry <: N {
+                    if k <: stride {
+                        next_location[entry] = select_even && current_location[entry];
+                    } else {
+                        next_location[entry] = !select_even && current_location[entry];
+                    }
+                }
+            }
+        }
+    }
+
+    location  = next_location;
+    index     = next_index[0];
+    max_value = next_value[0];
+}

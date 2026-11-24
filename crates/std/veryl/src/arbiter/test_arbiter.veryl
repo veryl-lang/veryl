@@ -1,0 +1,582 @@
+#[test(test_round_robin_arbiter)]
+module test_round_robin_arbiter {
+    gen REQUESTS: u32 = 5;
+    gen N_KINDS : u32 = 3;
+
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (
+        clk: clk,
+    );
+
+    var request     : logic            <REQUESTS>         ;
+    var grant       : logic            <N_KINDS, REQUESTS>;
+    var grant_binary: logic            <N_KINDS, 3>       ;
+    var last        : u32                                 ;
+    var expected    : u32                                 ;
+    var request_gen : $tb::random::<u8>                   ;
+
+    for i in 0..N_KINDS :g_dut {
+        const SELECTOR_KIND: arbiter_pkg::selector_kind = if i == 0 ?
+            arbiter_pkg::selector_kind::FIND_MAX
+        : if i == 1 ?
+            arbiter_pkg::selector_kind::LOWEST_BIT
+        :
+            arbiter_pkg::selector_kind::LZC
+        ;
+
+        inst u_onehot: arbiter #(
+            REQUESTS     : REQUESTS                              ,
+            KIND         : arbiter_pkg::arbiter_kind::ROUND_ROBIN,
+            KEEP_RESULT  : false                                 ,
+            SELECTOR_KIND: SELECTOR_KIND                         ,
+        ) (
+            i_clk    : clk     ,
+            i_rst    : rst     ,
+            i_request: request ,
+            o_grant  : grant[i],
+            i_free   : '0      ,
+        );
+
+        inst u_binary: arbiter #(
+            REQUESTS     : REQUESTS                              ,
+            KIND         : arbiter_pkg::arbiter_kind::ROUND_ROBIN,
+            ONEHOT_GRANT : false                                 ,
+            KEEP_RESULT  : false                                 ,
+            SELECTOR_KIND: SELECTOR_KIND                         ,
+        ) (
+            i_clk    : clk            ,
+            i_rst    : rst            ,
+            i_request: request        ,
+            o_grant  : grant_binary[i],
+            i_free   : '0             ,
+        );
+    }
+
+    function next_grant (
+        req      : input logic<REQUESTS>,
+        last_grnt: input u32            ,
+    ) -> u32 {
+        for k in 1..=REQUESTS {
+            let j: u32 = (last_grnt + k) % REQUESTS;
+            if req[j] {
+                return j;
+            }
+        }
+        return 0;
+    }
+
+    initial {
+        request = '0;
+        last    = 0;
+
+        rst.assert();
+        clk.next(2);
+
+        // All requests: grants rotate
+        request = '1;
+        for _i in 0..(2 * REQUESTS) {
+            clk.next(1);
+            last     = next_grant(request, last);
+            expected = next_grant(request, last);
+            for k in 0..N_KINDS {
+                $display(
+                    "all: kind %0d request %b grant %b binary %0d expected %0d",
+                    k,
+                    request,
+                    grant[k],
+                    grant_binary[k],
+                    expected,
+                );
+                $assert(grant[k] == ((1 as REQUESTS) << expected));
+                $assert(grant_binary[k] == expected);
+            }
+        }
+
+        // Random requests
+        for _i in 0..500 {
+            request = request_gen.get() as REQUESTS;
+            clk.next(1);
+            if request != '0 {
+                last = next_grant(request, last);
+            }
+            expected = next_grant(request, last);
+            for k in 0..N_KINDS {
+                $display(
+                    "rand: kind %0d request %b grant %b binary %0d expected %0d",
+                    k,
+                    request,
+                    grant[k],
+                    grant_binary[k],
+                    expected,
+                );
+                if request == '0 {
+                    $assert(grant[k] == '0);
+                } else {
+                    $assert(grant[k] == ((1 as REQUESTS) << expected));
+                    $assert(grant_binary[k] == expected);
+                }
+            }
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_round_robin_arbiter_priority)]
+module test_round_robin_arbiter_priority {
+    gen REQUESTS      : u32 = 5;
+    gen PRIORITY_WIDTH: u32 = 2;
+
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (
+        clk: clk,
+    );
+
+    var request         : logic             <REQUESTS>                    ;
+    var request_priority: bit               <REQUESTS, PRIORITY_WIDTH>    ;
+    var grant           : logic             <REQUESTS>                    ;
+    var state           : logic             <4, 3>                        ;
+    var last            : u32                                          [4];
+    var expected        : u32                                             ;
+    var request_gen     : $tb::random::<u8>                               ;
+    var priority_gen    : $tb::random::<u16>                              ;
+
+    inst u_dut: arbiter #(
+        REQUESTS       : REQUESTS                              ,
+        KIND           : arbiter_pkg::arbiter_kind::ROUND_ROBIN,
+        KEEP_RESULT    : false                                 ,
+        PRIORITY_ENABLE: true                                  ,
+        PRIORITY_WIDTH : PRIORITY_WIDTH                        ,
+    ) (
+        i_clk          : clk             ,
+        i_rst          : rst             ,
+        i_priority     : request_priority,
+        i_request      : request         ,
+        o_grant        : grant           ,
+        i_free         : '0              ,
+        o_current_state: state           ,
+    );
+
+    function max_priority (
+        req: input logic<REQUESTS>                ,
+        pri: input bit  <REQUESTS, PRIORITY_WIDTH>,
+    ) -> u32 {
+        var max: u32;
+        max = 0;
+        for i in 0..REQUESTS {
+            if req[i] && pri[i] >: max {
+                max = pri[i];
+            }
+        }
+        return max;
+    }
+
+    function next_grant (
+        req      : input logic<REQUESTS>                ,
+        pri      : input logic<REQUESTS, PRIORITY_WIDTH>,
+        p        : input u32                            ,
+        last_grnt: input u32                            ,
+    ) -> u32 {
+        for k in 1..=REQUESTS {
+            let j: u32 = (last_grnt + k) % REQUESTS;
+            if req[j] && pri[j] == p {
+                return j;
+            }
+        }
+        return 0;
+    }
+
+    initial {
+        request          = '0;
+        request_priority = '0;
+        for i in 0..4 {
+            last[i] = 0;
+        }
+
+        rst.assert();
+        clk.next(2);
+
+        for _i in 0..500 {
+            var p: u32;
+
+            request          = request_gen.get() as REQUESTS;
+            request_priority = priority_gen.get() as (REQUESTS * PRIORITY_WIDTH);
+            p                = max_priority(request, request_priority);
+            expected         = next_grant(request, request_priority, p, last[p]);
+
+            // The state of the granted priority class is updated at the clock edge
+            clk.next(1);
+            if request != '0 {
+                last[p] = expected;
+            }
+            for j in 0..4 {
+                $assert(state[j] == last[j]);
+            }
+
+            // The next grant is evaluated with the updated state
+            if request != '0 {
+                $assert(grant == ((1 as REQUESTS) << next_grant(request, request_priority, p, last[p])));
+            }
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_round_robin_arbiter_weight)]
+module test_round_robin_arbiter_weight {
+    gen REQUESTS    : u32 = 4;
+    gen WEIGHT_WIDTH: u32 = 3;
+    gen CYCLES      : u32 = 1000;
+
+    // Weights: request 0 = 1, request 1 = 2, request 2 = 3, request 3 = 4
+    const INITIAL_WEIGHT: bit<REQUESTS, WEIGHT_WIDTH> = {3'd4, 3'd3, 3'd2, 3'd1};
+    // Weights loaded by i_weight: request 0 = 4, request 1 = 1, request 2 = 1, request 3 = 2
+    const UPDATED_WEIGHT: bit<REQUESTS, WEIGHT_WIDTH> = {3'd2, 3'd1, 3'd1, 3'd4};
+
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (
+        clk: clk,
+    );
+
+    var init        : logic                                   ;
+    var weight_valid: logic                                   ;
+    var weight      : bit  <REQUESTS, WEIGHT_WIDTH>           ;
+    var request     : logic<REQUESTS>                         ;
+    var grant       : logic<REQUESTS>                         ;
+    var count       : u32                           [REQUESTS];
+
+    inst u_dut: arbiter #(
+        REQUESTS      : REQUESTS                              ,
+        KIND          : arbiter_pkg::arbiter_kind::ROUND_ROBIN,
+        KEEP_RESULT   : false                                 ,
+        WEIGHT_ENABLE : true                                  ,
+        WEIGHT_WIDTH  : WEIGHT_WIDTH                          ,
+        INITIAL_WEIGHT: INITIAL_WEIGHT                        ,
+    ) (
+        i_clk         : clk         ,
+        i_rst         : rst         ,
+        i_init        : init        ,
+        i_weight_valid: weight_valid,
+        i_weight      : weight      ,
+        i_request     : request     ,
+        o_grant       : grant       ,
+        i_free        : '0          ,
+    );
+
+    // Checks that the ratio of the grant counts matches the ratio of the weights.
+    // The tolerance is 2% of the total grants.
+    function check_ratio (
+        cnt: input u32                         [REQUESTS],
+        w  : input bit<REQUESTS, WEIGHT_WIDTH>           ,
+    ) {
+        var total_weight: u32;
+        total_weight = 0;
+        for i in 0..REQUESTS {
+            total_weight += w[i];
+        }
+        for i in 0..REQUESTS {
+            var expected: u32;
+            expected = CYCLES * w[i] / total_weight;
+            $display("request %0d: weight %0d grants %0d expected %0d", i, w[i], cnt[i], expected);
+            $assert(cnt[i] + (CYCLES / 50) >= expected && cnt[i] <= expected + (CYCLES / 50));
+        }
+    }
+
+    initial {
+        init         = false;
+        weight_valid = false;
+        weight       = '0;
+        request      = '0;
+
+        rst.assert();
+        clk.next(2);
+
+        // Grants with the initial weights
+        request = '1;
+        for i in 0..REQUESTS {
+            count[i] = 0;
+        }
+        for _i in 0..CYCLES {
+            for i in 0..REQUESTS {
+                if grant[i] {
+                    count[i] += 1;
+                }
+            }
+            clk.next(1);
+        }
+        check_ratio(count, INITIAL_WEIGHT);
+
+        // Load new weights by i_init and i_weight_valid
+        request      = '0;
+        init         = true;
+        weight_valid = true;
+        weight       = UPDATED_WEIGHT;
+        clk.next(1);
+        init = false;
+
+        request = '1;
+        for i in 0..REQUESTS {
+            count[i] = 0;
+        }
+        for _i in 0..CYCLES {
+            for i in 0..REQUESTS {
+                if grant[i] {
+                    count[i] += 1;
+                }
+            }
+            clk.next(1);
+        }
+        check_ratio(count, UPDATED_WEIGHT);
+
+        $finish();
+    }
+}
+
+#[test(test_fixed_priority_arbiter)]
+module test_fixed_priority_arbiter {
+    gen REQUESTS: u32 = 5;
+    gen N_KINDS : u32 = 3;
+
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (
+        clk: clk,
+    );
+
+    var request     : logic            <REQUESTS>         ;
+    var grant       : logic            <N_KINDS, REQUESTS>;
+    var grant_binary: logic            <N_KINDS, 3>       ;
+    var expected    : u32                                 ;
+    var request_gen : $tb::random::<u8>                   ;
+
+    for i in 0..N_KINDS :g_dut {
+        const SELECTOR_KIND: arbiter_pkg::selector_kind = if i == 0 ?
+            arbiter_pkg::selector_kind::FIND_MAX
+        : if i == 1 ?
+            arbiter_pkg::selector_kind::LOWEST_BIT
+        :
+            arbiter_pkg::selector_kind::LZC
+        ;
+
+        inst u_onehot: arbiter #(
+            REQUESTS     : REQUESTS                                 ,
+            KIND         : arbiter_pkg::arbiter_kind::FIXED_PRIORITY,
+            KEEP_RESULT  : false                                    ,
+            SELECTOR_KIND: SELECTOR_KIND                            ,
+        ) (
+            i_clk    : clk     ,
+            i_rst    : rst     ,
+            i_request: request ,
+            o_grant  : grant[i],
+            i_free   : '0      ,
+        );
+
+        inst u_binary: arbiter #(
+            REQUESTS     : REQUESTS                                 ,
+            KIND         : arbiter_pkg::arbiter_kind::FIXED_PRIORITY,
+            ONEHOT_GRANT : false                                    ,
+            KEEP_RESULT  : false                                    ,
+            SELECTOR_KIND: SELECTOR_KIND                            ,
+        ) (
+            i_clk    : clk            ,
+            i_rst    : rst            ,
+            i_request: request        ,
+            o_grant  : grant_binary[i],
+            i_free   : '0             ,
+        );
+    }
+
+    function lowest_index (
+        req: input logic<REQUESTS>,
+    ) -> u32 {
+        for i in 0..REQUESTS {
+            if req[i] {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    initial {
+        request = '0;
+
+        rst.assert();
+        clk.next(2);
+
+        for _i in 0..500 {
+            request = request_gen.get() as REQUESTS;
+            clk.next(1);
+
+            expected = lowest_index(request);
+            for k in 0..N_KINDS {
+                if request == '0 {
+                    $assert(grant[k] == '0);
+                } else {
+                    $assert(grant[k] == ((1 as REQUESTS) << expected));
+                    $assert(grant_binary[k] == expected);
+                }
+            }
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_fixed_priority_arbiter_priority)]
+module test_fixed_priority_arbiter_priority {
+    gen REQUESTS      : u32 = 5;
+    gen PRIORITY_WIDTH: u32 = 2;
+
+    // Priority given by the PRIORITY parameter: request 4 > 2 > 0, 1, 3
+    const FIXED_VALUE: bit<REQUESTS, PRIORITY_WIDTH> = {2'd2, 2'd0, 2'd1, 2'd0, 2'd0};
+
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (
+        clk: clk,
+    );
+
+    var request          : logic             <REQUESTS>                ;
+    var request_priority : bit               <REQUESTS, PRIORITY_WIDTH>;
+    var grant_priority   : logic             <REQUESTS>                ;
+    var grant_fixed_value: logic             <REQUESTS>                ;
+    var request_gen      : $tb::random::<u8>                           ;
+    var priority_gen     : $tb::random::<u16>                          ;
+
+    inst u_priority: arbiter #(
+        REQUESTS       : REQUESTS                                 ,
+        KIND           : arbiter_pkg::arbiter_kind::FIXED_PRIORITY,
+        KEEP_RESULT    : false                                    ,
+        PRIORITY_ENABLE: true                                     ,
+        PRIORITY_WIDTH : PRIORITY_WIDTH                           ,
+    ) (
+        i_clk     : clk             ,
+        i_rst     : rst             ,
+        i_priority: request_priority,
+        i_request : request         ,
+        o_grant   : grant_priority  ,
+        i_free    : '0              ,
+    );
+
+    inst u_fixed_value: arbiter #(
+        REQUESTS       : REQUESTS                                 ,
+        KIND           : arbiter_pkg::arbiter_kind::FIXED_PRIORITY,
+        KEEP_RESULT    : false                                    ,
+        PRIORITY_ENABLE: true                                     ,
+        PRIORITY_WIDTH : PRIORITY_WIDTH                           ,
+        FIXED_PRIORITY : true                                     ,
+        PRIORITY       : FIXED_VALUE                              ,
+    ) (
+        i_clk    : clk              ,
+        i_rst    : rst              ,
+        i_request: request          ,
+        o_grant  : grant_fixed_value,
+        i_free   : '0               ,
+    );
+
+    // The request with the highest priority is granted.
+    // Among requests with the same priority, the request with the lowest index is granted.
+    function priority_grant (
+        req: input logic<REQUESTS>                ,
+        pri: input bit  <REQUESTS, PRIORITY_WIDTH>,
+    ) -> u32 {
+        var max: u32;
+        max = 0;
+        for i in 0..REQUESTS {
+            if req[i] && pri[i] >: max {
+                max = pri[i];
+            }
+        }
+        for i in 0..REQUESTS {
+            if req[i] && pri[i] == max {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    initial {
+        request          = '0;
+        request_priority = '0;
+
+        rst.assert();
+        clk.next(2);
+
+        for _i in 0..500 {
+            request          = request_gen.get() as REQUESTS;
+            request_priority = priority_gen.get() as (REQUESTS * PRIORITY_WIDTH);
+            clk.next(1);
+
+            if request == '0 {
+                $assert(grant_priority == '0);
+                $assert(grant_fixed_value == '0);
+            } else {
+                $assert(grant_priority == ((1 as REQUESTS) << priority_grant(request, request_priority)));
+                $assert(grant_fixed_value == ((1 as REQUESTS) << priority_grant(request, FIXED_VALUE)));
+            }
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_arbiter_keep_result)]
+module test_arbiter_keep_result {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (
+        clk: clk,
+    );
+
+    var request: logic<4>;
+    var free   : logic<4>;
+    var grant  : logic<4>;
+
+    inst u_dut: arbiter #(
+        REQUESTS   : 4                                     ,
+        KIND       : arbiter_pkg::arbiter_kind::ROUND_ROBIN,
+        KEEP_RESULT: true                                  ,
+    ) (
+        i_clk    : clk    ,
+        i_rst    : rst    ,
+        i_request: request,
+        o_grant  : grant  ,
+        i_free   : free   ,
+    );
+
+    initial {
+        request = '0;
+        free    = '0;
+
+        rst.assert();
+        clk.next(2);
+
+        // Request 1 is granted (the round robin state is 0 after reset)
+        request = 4'b0110;
+        clk.next(1);
+        $assert(grant == 4'b0010);
+
+        // The grant is kept until it is released
+        request = 4'b1111;
+        clk.next(3);
+        $assert(grant == 4'b0010);
+
+        // Releasing another request does not affect the grant
+        free = 4'b0100;
+        clk.next(1);
+        $assert(grant == 4'b0010);
+
+        // Release the grant: the next request is arbitrated after the release
+        free = 4'b0010;
+        clk.next(1);
+        free = 4'b0000;
+        $assert(grant == 4'b0100);
+        clk.next(1);
+        $assert(grant == 4'b0100);
+
+        free = 4'b0100;
+        clk.next(1);
+        free = 4'b0000;
+        $assert(grant == 4'b1000);
+
+        $finish();
+    }
+}
