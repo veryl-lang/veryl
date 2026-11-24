@@ -2353,7 +2353,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
-            &collect_string_widths(&child_module.variables, child_decls)?,
+            &collect_string_widths(
+                &child_module.variables,
+                &child_analyzer_context.functions,
+                child_decls,
+            )?,
             &child_ff_table,
             &multi_rmw_set,
             &dyn_indexed,

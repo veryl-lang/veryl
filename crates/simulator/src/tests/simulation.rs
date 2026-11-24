@@ -35611,6 +35611,43 @@ fn string_array_const_element_keeps_its_text() {
 }
 
 #[test]
+fn display_runtime_function_string_return_keeps_its_text() {
+    // The literal call is constant-folded, but the variable-argument call reads
+    // the function's runtime return slot and must preserve the whole string.
+    let code = r#"
+    module Top {
+        function ts(a: input bit) -> string {
+            case a {
+                0: return "huhu";
+                default: return "haha";
+            }
+        }
+
+        #[allow(initial_assign)]
+        var v1: bit;
+
+        initial {
+            $display("%s", ts(0));
+            v1 = 0;
+            $display("%s", ts(v1));
+            v1 = 1;
+            $display("%s", ts(v1));
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        output_buffer::enable();
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+
+        assert_eq!(output, "huhu\nhuhu\nhaha\n", "config={config:?}");
+    }
+}
+
+#[test]
 fn nested_self_call_is_composition_not_recursion() {
     // The inliner marked the callee as expanding BEFORE converting its
     // arguments, so a call to the same function inside an argument tripped the

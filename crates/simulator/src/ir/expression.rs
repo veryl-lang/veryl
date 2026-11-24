@@ -3852,9 +3852,31 @@ impl Conv<&air::Expression> for ProtoExpression {
                 }
                 air::Factor::FunctionCall(call) => {
                     let ret_offsets = inline_function_call(context, call)?;
-                    let width = call.comptime.r#type.total_width().unwrap();
+                    let mut expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+                    let width = if call.comptime.r#type.is_string() {
+                        let func = context
+                            .scope()
+                            .analyzer_context
+                            .functions
+                            .get(&call.id)
+                            .unwrap();
+                        let body = if let Some(ref idx) = call.index {
+                            func.get_function(idx).unwrap()
+                        } else {
+                            func.get_function(&[]).unwrap()
+                        };
+                        let width = context
+                            .scope()
+                            .variable_meta
+                            .get(&body.ret.unwrap())
+                            .unwrap()
+                            .width;
+                        expr_context.width = expr_context.width.max(width);
+                        width
+                    } else {
+                        call.comptime.r#type.total_width().unwrap()
+                    };
                     let var_full_width = width;
-                    let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
 
                     Ok(ProtoExpression::Variable {
                         var_offset: ret_offsets[0],

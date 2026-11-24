@@ -356,6 +356,7 @@ fn report_subject(v: &air::Variable) -> String {
 /// takes that variable's width, hence the fixed point.
 pub fn collect_string_widths(
     variables: &HashMap<VarId, air::Variable>,
+    functions: &HashMap<VarId, air::Function>,
     decls: &[air::Declaration],
 ) -> Result<HashMap<VarId, usize>, SimulatorError> {
     let mut assigns: Vec<(VarId, &air::Expression)> = Vec::new();
@@ -371,7 +372,13 @@ pub fn collect_string_widths(
             collect_string_assigns(stmt, variables, &mut assigns);
         }
     }
-
+    for function in functions.values() {
+        for body in &function.functions {
+            for stmt in &body.statements {
+                collect_string_assigns(stmt, variables, &mut assigns);
+            }
+        }
+    }
     let mut widths: HashMap<VarId, usize> = HashMap::default();
     for (id, v) in variables {
         if v.r#type.is_string() && !matches!(v.kind, air::VarKind::Param | air::VarKind::Const) {
@@ -394,7 +401,7 @@ pub fn collect_string_widths(
     loop {
         let mut changed = false;
         for (id, expr) in &assigns {
-            let width = string_expr_width(expr, &widths);
+            let width = string_expr_width(expr, &widths, functions);
             if let Some(x) = widths.get_mut(id)
                 && width > *x
             {
@@ -451,18 +458,29 @@ fn collect_string_assigns<'a>(
     }
 }
 
-fn string_expr_width(expr: &air::Expression, widths: &HashMap<VarId, usize>) -> usize {
+fn string_expr_width(
+    expr: &air::Expression,
+    widths: &HashMap<VarId, usize>,
+    functions: &HashMap<VarId, air::Function>,
+) -> usize {
     match expr {
-        air::Expression::Term(factor) => {
-            if let air::Factor::Variable(id, _, _, _) = factor.as_ref()
-                && let Some(x) = widths.get(id)
-            {
-                return *x;
+        air::Expression::Term(factor) => match factor.as_ref() {
+            air::Factor::Variable(id, _, _, _) if widths.contains_key(id) => {
+                *widths.get(id).unwrap()
             }
-            comptime_string_width(factor.comptime())
-        }
+            air::Factor::FunctionCall(call)
+                if let Some(body) = functions
+                    .get(&call.id)
+                    .and_then(|f| f.get_function(call.index.as_deref().unwrap_or(&[])))
+                    && let Some(ret) = body.ret
+                    && let Some(width) = widths.get(&ret) =>
+            {
+                (*width).max(comptime_string_width(factor.comptime()))
+            }
+            _ => comptime_string_width(factor.comptime()),
+        },
         air::Expression::Ternary(_, x, y, _) => {
-            string_expr_width(x, widths).max(string_expr_width(y, widths))
+            string_expr_width(x, widths, functions).max(string_expr_width(y, widths, functions))
         }
         _ => comptime_string_width(expr.comptime()),
     }
