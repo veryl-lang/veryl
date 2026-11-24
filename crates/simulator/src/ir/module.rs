@@ -1595,6 +1595,7 @@ fn run_comb_pipeline(
 
     stage.mark("required_passes");
     let unified_sorted = dce_aggressive(unified_sorted);
+    stage.mark("dce");
 
     // Dead Variable DCE: drop full-width `Assign`s whose dst has zero
     // consumers anywhere in this module's pre-JIT comb stmts and every
@@ -1666,6 +1667,7 @@ fn run_comb_pipeline(
     let cone_reorder = crate::ir::opt::dataflow::enabled()
         && crate::ir::opt::dataflow::decline_reason(&context.config, required_comb_passes)
             .is_none();
+    stage.mark("dead_var_dce");
     let mut fusion_alt: Option<(Vec<ProtoStatement>, Vec<isize>)> = None;
     let (mut unified_sorted, mut fused_offsets) = if comb_fusion::enabled(context.config.use_4state)
     {
@@ -1674,20 +1676,40 @@ fn run_comb_pipeline(
             externals.extend(extra.iter().copied());
         }
         let sel = comb_fusion::sel_enabled();
-        if sel && cone_reorder && cone_inputs.is_some() {
+        let events: &HashMap<Event, Vec<ProtoStatement>> = all_event_statements;
+        if sel && cone_reorder && cone_inputs.is_some() && cfg!(test) {
+            // Test knobs live in this thread's locals.
             fusion_alt = Some(comb_fusion::inline_single_readers(
                 unified_sorted.clone(),
-                all_event_statements,
+                events,
                 &externals,
                 false,
             ));
+            comb_fusion::inline_single_readers(unified_sorted, events, &externals, sel)
+        } else if sel && cone_reorder && cone_inputs.is_some() {
+            // The two candidates are independent; the slower one sets the pace.
+            let base = unified_sorted.clone();
+            let (alt, main) = std::thread::scope(|sc| {
+                let alt = std::thread::Builder::new()
+                    .stack_size(crate::IR_WALK_STACK_BYTES)
+                    .spawn_scoped(sc, || {
+                        comb_fusion::inline_single_readers(base, events, &externals, false)
+                    })
+                    .expect("spawn fusion");
+                let main =
+                    comb_fusion::inline_single_readers(unified_sorted, events, &externals, sel);
+                (alt.join().expect("fusion thread"), main)
+            });
+            fusion_alt = Some(alt);
+            main
+        } else {
+            comb_fusion::inline_single_readers(unified_sorted, events, &externals, sel)
         }
-        comb_fusion::inline_single_readers(unified_sorted, all_event_statements, &externals, sel)
     } else {
         (unified_sorted, Vec::new())
     };
 
-    stage.mark("dce+fusion");
+    stage.mark("fusion");
 
     // Cone reorder: cluster each qualifying module subtree into few
     // contiguous runs.  A dataflow node takes in whatever a sequential chain
@@ -1709,8 +1731,14 @@ fn run_comb_pipeline(
     let mut chosen_plan: Option<Option<cone_order::ConeOrder>> = None;
     if let (Some(ci), Some((base_stmts, base_off))) = (cone_inputs, fusion_alt.take()) {
         let segs = |p: &Option<cone_order::ConeOrder>| p.as_ref().map(|o| o.segments);
-        let p_sel = cone_order::cone_order(&unified_sorted, ci);
-        let p_base = cone_order::cone_order(&base_stmts, ci);
+        let (p_sel, p_base) = std::thread::scope(|sc| {
+            let base = std::thread::Builder::new()
+                .stack_size(crate::IR_WALK_STACK_BYTES)
+                .spawn_scoped(sc, || cone_order::cone_order(&base_stmts, ci))
+                .expect("spawn cone order");
+            let sel = cone_order::cone_order(&unified_sorted, ci);
+            (sel, base.join().expect("cone order thread"))
+        });
         let retired = base_stmts.len().saturating_sub(unified_sorted.len());
         let retired_frac = retired as f64 / base_stmts.len().max(1) as f64;
         let keep_sel = comb_fusion::adopt_field_defs(segs(&p_sel), segs(&p_base), retired_frac);
@@ -1842,6 +1870,8 @@ fn run_comb_pipeline(
         layout,
         nontrivial_comb_scc,
         vsplit_temp_bytes,
+        gate_comb: Default::default(),
+        master_cone: Default::default(),
     })
 }
 
@@ -6207,6 +6237,9 @@ impl Conv<&air::Module> for ProtoModule {
                         &mut meta_units,
                     );
                 }
+                // The maps iterate in their insertion order, which differs
+                // between tests sharing a DUT; the key must not.
+                meta_units.sort_unstable();
                 Some(meta_units)
             } else {
                 None
@@ -6617,6 +6650,9 @@ impl Conv<&air::Module> for ProtoModule {
             let (mut block_vo, mut ranges) =
                 crate::ir::opt::dead_var_dce::collect_localize_info(&event_slices);
             ranges.extend(cached.localize_comb_ranges.iter().copied());
+            // The events come in map order, which differs between tests
+            // sharing a DUT; the dataflow cache key hashes this list.
+            ranges.sort_unstable();
             // Protect externally-visible comb offsets (mirrors the
             // dead_var_dce protect set): a parent module's comb or a
             // testbench reads these from comb_values, bypassing any local.
@@ -6996,12 +7032,38 @@ impl Conv<&air::Module> for ProtoModule {
                 &negedge_inputs,
             )
         };
-        let master_cone = crate::ir::derived_clock::master_cone(
-            &derived_clock_schedule,
-            &pre_jit_stmts,
-            &input_clock_offsets,
-        )
-        .map(|stmts| try_jit(context, stmts));
+        let master_cone = {
+            let mut masters: Vec<isize> = input_clock_offsets
+                .iter()
+                .filter(|(_, v)| derived_clock_schedule.master_input_clocks.contains(v))
+                .map(|(o, _)| o.raw())
+                .collect();
+            masters.sort_unstable();
+            let mut slot = match cached.master_cone.lock() {
+                Ok(slot) => slot,
+                // A test that panicked while holding it may have left it half
+                // built; start over rather than fail every later test.
+                Err(poisoned) => {
+                    let mut slot = poisoned.into_inner();
+                    *slot = None;
+                    slot
+                }
+            };
+            let cone = match slot.as_ref() {
+                Some((key, cone)) if *key == masters => cone.clone(),
+                _ => {
+                    let cone = crate::ir::derived_clock::master_cone(
+                        &derived_clock_schedule,
+                        &pre_jit_stmts,
+                        &input_clock_offsets,
+                    );
+                    *slot = Some((masters, cone.clone()));
+                    cone
+                }
+            };
+            drop(slot);
+            cone.map(|stmts| try_jit(context, stmts))
+        };
         for &(copy, source) in &derived_clock_schedule.aliases {
             if let Some(stmts) = all_event_statements.remove(&Event::clock(copy)) {
                 event_comb_writes.remove(&Event::clock(copy));
@@ -7017,18 +7079,26 @@ impl Conv<&air::Module> for ProtoModule {
         let mut event_gates: HashMap<Event, Vec<crate::ir::opt::event_gate::EventGate>> =
             HashMap::default();
         let mut event_gate_flags: Vec<u32> = Vec::new();
-        if let Some(ci) = cached.cone_inputs.as_deref()
+        if let Some(ci) = cached.cone_inputs.as_ref()
             && crate::ir::opt::event_gate::enabled()
         {
-            // The comb walk dwarfs planning one event, so share it.
-            let mut comb_context = None;
+            let mut comb_context = match cached.gate_comb.lock() {
+                Ok(slot) => slot,
+                // A test that panicked while holding it may have left it half
+                // built; start over rather than fail every later test.
+                Err(poisoned) => {
+                    let mut slot = poisoned.into_inner();
+                    *slot = None;
+                    slot
+                }
+            };
             for (event, stmts) in all_event_statements.iter() {
                 if !matches!(event, Event::Clock(..)) {
                     continue;
                 }
                 let comb_context = comb_context.get_or_insert_with(|| {
                     crate::ir::opt::event_gate::CombContext::new(
-                        ci,
+                        Arc::clone(ci),
                         &pre_jit_stmts[..],
                         &comb_touched_offsets,
                     )
@@ -7109,11 +7179,16 @@ impl Conv<&air::Module> for ProtoModule {
         #[cfg(not(target_family = "wasm"))]
         let dataflow_key =
             crate::ir::opt::dataflow::cache_key(key, &context.config, localize_info.as_ref());
+        // The claim lives to the end of the build, past `cache_put`, so a
+        // test building the same DUT meanwhile waits for this settle.
         #[cfg(not(target_family = "wasm"))]
-        let dataflow_cached = if dataflow_wanted {
-            crate::ir::opt::dataflow::cache_get(dataflow_key)
+        let (dataflow_cached, _dataflow_claim) = if dataflow_wanted {
+            match crate::ir::opt::dataflow::cache_get(dataflow_key) {
+                Ok(rt) => (Some(rt), None),
+                Err(claim) => (None, claim),
+            }
         } else {
-            None
+            (None, None)
         };
         #[cfg(not(target_family = "wasm"))]
         let dataflow_plan: Option<crate::ir::opt::dataflow::DataflowPlan> =

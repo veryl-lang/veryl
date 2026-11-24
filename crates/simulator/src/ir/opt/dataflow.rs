@@ -1368,8 +1368,37 @@ pub fn compile_jit(
 /// Dataflow settles by the comb pipeline's structural key: a module converted
 /// again (another test, another instance) reuses the plan and the compile.
 #[cfg(not(target_family = "wasm"))]
-static CACHE: std::sync::Mutex<Option<HashMap<u128, std::sync::Arc<DataflowRt>>>> =
-    std::sync::Mutex::new(None);
+static CACHE: std::sync::Mutex<Option<HashMap<u128, CacheSlot>>> = std::sync::Mutex::new(None);
+#[cfg(not(target_family = "wasm"))]
+static CACHE_READY: std::sync::Condvar = std::sync::Condvar::new();
+
+#[cfg(not(target_family = "wasm"))]
+enum CacheSlot {
+    /// A build holds the `CacheClaim`; tests needing the same settle wait.
+    Computing,
+    Done(std::sync::Arc<DataflowRt>),
+    /// The claimant produced no settle; each build now decides for itself.
+    Abandoned,
+}
+
+/// Held by the build planning and compiling a settle until `cache_put`.
+#[cfg(not(target_family = "wasm"))]
+pub struct CacheClaim {
+    key: u128,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl Drop for CacheClaim {
+    fn drop(&mut self) {
+        if let Ok(mut c) = CACHE.lock()
+            && let Some(slot) = c.as_mut().and_then(|m| m.get_mut(&self.key))
+            && matches!(slot, CacheSlot::Computing)
+        {
+            *slot = CacheSlot::Abandoned;
+            CACHE_READY.notify_all();
+        }
+    }
+}
 
 /// The `CACHE` key: the comb pipeline's key pins the statements and the plan,
 /// so this adds what the compile reads besides them.  The cache outlives a
@@ -1401,15 +1430,36 @@ pub fn cache_key(
     comb_key ^ u128::from(h.finish())
 }
 
+/// The settle another build stored under `key`, waiting for one in flight.
+/// `Err` carries the claim to compute it, or `None` when an earlier claimant
+/// gave up and the caller must decide alone.
 #[cfg(not(target_family = "wasm"))]
-pub fn cache_get(key: u128) -> Option<std::sync::Arc<DataflowRt>> {
-    CACHE.lock().ok()?.as_ref()?.get(&key).cloned()
+pub fn cache_get(key: u128) -> Result<std::sync::Arc<DataflowRt>, Option<CacheClaim>> {
+    let Ok(mut c) = CACHE.lock() else {
+        return Err(None);
+    };
+    loop {
+        match c.get_or_insert_with(HashMap::default).get(&key) {
+            Some(CacheSlot::Done(rt)) => return Ok(std::sync::Arc::clone(rt)),
+            Some(CacheSlot::Abandoned) => return Err(None),
+            Some(CacheSlot::Computing) => match CACHE_READY.wait(c) {
+                Ok(g) => c = g,
+                Err(_) => return Err(None),
+            },
+            None => {
+                c.as_mut().unwrap().insert(key, CacheSlot::Computing);
+                return Err(Some(CacheClaim { key }));
+            }
+        }
+    }
 }
 
 #[cfg(not(target_family = "wasm"))]
 pub fn cache_put(key: u128, rt: std::sync::Arc<DataflowRt>) {
     if let Ok(mut c) = CACHE.lock() {
-        c.get_or_insert_with(HashMap::default).insert(key, rt);
+        c.get_or_insert_with(HashMap::default)
+            .insert(key, CacheSlot::Done(rt));
+        CACHE_READY.notify_all();
     }
 }
 

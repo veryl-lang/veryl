@@ -2431,7 +2431,8 @@ fn emit_log_entry(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
 /// AOT-C fallback diagnostics gate (`VERYL_AOT_C_DIAG=1` covers both
 /// comb and event; legacy `VERYL_AOT_C_EVENT_DIAG=1` is event-only).
 pub fn diag_enabled() -> bool {
-    std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1")
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1"))
 }
 
 /// `VERYL_AOT_C_BOOLFOLD`: branchless LogicAnd/LogicOr (see `emit_expr_inner`).
@@ -2504,9 +2505,11 @@ fn is_cheap_boolfold_arm(e: &ProtoExpression, depth: u32) -> bool {
 fn ev_diag(msg: &str) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static N: AtomicUsize = AtomicUsize::new(0);
-    if (std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1") || diag_enabled())
-        && N.fetch_add(1, Ordering::Relaxed) < 24
-    {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *ON.get_or_init(|| {
+        std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1") || diag_enabled()
+    });
+    if on && N.fetch_add(1, Ordering::Relaxed) < 24 {
         eprintln!("[aot_event_ff] {msg}");
     }
 }
@@ -2955,7 +2958,8 @@ fn narrow_field_store(
 /// Clean-bits mask elision knob (`VERYL_AOT_C_CLEAN`, default on, `=0` to
 /// opt out — the A/B lever for the redundant-mask removal).
 fn clean_elide() -> bool {
-    std::env::var("VERYL_AOT_C_CLEAN").as_deref() != Ok("0")
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_AOT_C_CLEAN").as_deref() != Ok("0"))
 }
 
 /// Conservative cleanliness analysis: true when the C value that
@@ -5742,47 +5746,60 @@ const SYSFN_SET: &str = "void veryl_set_sysfn_cb(";
 const CROSS_UNIT: [&str; 4] = [WIDEOPS_DEF, WIDEOPS_SET, SYSFN_DEF, SYSFN_SET];
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
 
+/// The compiler, its source-independent flags, and whether event sources
+/// drop SLP vectorization.  Read once: every emitted unit asks.
+fn compile_toolchain() -> &'static (String, Vec<String>, bool) {
+    static TOOL: std::sync::OnceLock<(String, Vec<String>, bool)> = std::sync::OnceLock::new();
+    TOOL.get_or_init(|| {
+        let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
+        // Full flag list, built once and used for both the cache key and the
+        // invocation so they can never drift apart.
+        let mut flags: Vec<String> = [
+            // -fstrict-aliasing (default at -O3) lets gcc assume the differently
+            // typed pointer views of one FF (e.g. uint64_t store vs uint32_t
+            // bit-select read) don't alias and cache stale values; -fno-strict-
+            // aliasing prevents that.  -fvisibility=hidden frees LTO to inline/DCE.
+            "-O3",
+            "-fPIC",
+            "-shared",
+            "-fvisibility=hidden",
+            "-fno-strict-aliasing",
+            "-Wno-unused-but-set-variable",
+            "-Wno-overflow",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        // Without -march, gcc expands the fixed-size shadow copies (event
+        // gates, dataflow boundaries) as `rep movsq`, whose startup stall
+        // dominates at these sizes.  Guarded: clang rejects the flag, and the
+        // failing compile would silently drop the module to Cranelift.  Name
+        // check instead of a probe: a subprocess here would sit on the
+        // async-compile path.
+        if cfg!(all(target_arch = "x86_64", target_os = "linux")) && !cc_name.contains("clang") {
+            flags
+                .push("-mmemcpy-strategy=unrolled_loop:256:noalign,libcall:-1:noalign".to_string());
+        }
+        // Optional extra flags via VERYL_AOT_CFLAGS (e.g. PGO sweeps).
+        if let Ok(extra) = std::env::var("VERYL_AOT_CFLAGS") {
+            flags.extend(extra.split_whitespace().map(str::to_string));
+        }
+        // Event sources compile without SLP vectorization: on the single big
+        // event function SLP's dependence checking (alias stmt walking) blows
+        // up superlinearly, and its vectorized stores have not shown run-time
+        // wins on event .so.  The header comment is emitted by this file, so
+        // the match can't drift.  VERYL_AOT_C_EVENT_NOSLP=0 opts back in.
+        let event_noslp = std::env::var("VERYL_AOT_C_EVENT_NOSLP").map_or(true, |v| v != "0");
+        (cc_name, flags, event_noslp)
+    })
+}
+
 /// The compiler, its flags and the cache hash for `src`.
 fn compile_key(src: &str) -> (String, Vec<String>, String) {
-    let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
-    // Full flag list, built once and used for both the cache key and the
-    // invocation so they can never drift apart.
-    let mut flags: Vec<String> = [
-        // -fstrict-aliasing (default at -O3) lets gcc assume the differently
-        // typed pointer views of one FF (e.g. uint64_t store vs uint32_t
-        // bit-select read) don't alias and cache stale values; -fno-strict-
-        // aliasing prevents that.  -fvisibility=hidden frees LTO to inline/DCE.
-        "-O3",
-        "-fPIC",
-        "-shared",
-        "-fvisibility=hidden",
-        "-fno-strict-aliasing",
-        "-Wno-unused-but-set-variable",
-        "-Wno-overflow",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-    // Without -march, gcc expands the fixed-size shadow copies (event
-    // gates, dataflow boundaries) as `rep movsq`, whose startup stall
-    // dominates at these sizes.  Guarded: clang rejects the flag, and the
-    // failing compile would silently drop the module to Cranelift.  Name
-    // check instead of a probe: a subprocess here would sit on the
-    // async-compile path.
-    if cfg!(all(target_arch = "x86_64", target_os = "linux")) && !cc_name.contains("clang") {
-        flags.push("-mmemcpy-strategy=unrolled_loop:256:noalign,libcall:-1:noalign".to_string());
-    }
-    // Optional extra flags via VERYL_AOT_CFLAGS (e.g. PGO sweeps).
-    if let Ok(extra) = std::env::var("VERYL_AOT_CFLAGS") {
-        flags.extend(extra.split_whitespace().map(str::to_string));
-    }
-    // Event sources compile without SLP vectorization: on the single big
-    // event function SLP's dependence checking (alias stmt walking) blows
-    // up superlinearly, and its vectorized stores have not shown run-time
-    // wins on event .so.  The header comment is emitted by this file, so
-    // the match can't drift.  VERYL_AOT_C_EVENT_NOSLP=0 opts back in.
-    let event_noslp = std::env::var("VERYL_AOT_C_EVENT_NOSLP").map_or(true, |v| v != "0");
-    if event_noslp && src.starts_with("// AOT-C event") {
+    let (cc_name, base_flags, event_noslp) = compile_toolchain();
+    let cc_name = cc_name.clone();
+    let mut flags = base_flags.clone();
+    if *event_noslp && src.starts_with("// AOT-C event") {
         flags.push("-fno-tree-slp-vectorize".to_string());
     }
     // Comb sources carry the (noslp) header marker when their wide-op
@@ -6483,11 +6500,13 @@ fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
 /// refusing it is the only lever.  The default sits orders of magnitude above
 /// what healthy designs emit per statement.
 fn max_stmt_bytes() -> usize {
-    std::env::var("VERYL_AOT_C_MAX_STMT_MB")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(16)
-        * 1024
+    static MB: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *MB.get_or_init(|| {
+        std::env::var("VERYL_AOT_C_MAX_STMT_MB")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(16)
+    }) * 1024
         * 1024
 }
 

@@ -24,6 +24,7 @@ use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::{VarOffset, native_bytes};
 use crate::ir::write_log::WriteLogBuffer;
 use crate::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// One gated range `[lo, hi)` of an event's top-level statements.
@@ -451,9 +452,9 @@ struct CombInfo {
 
 /// What every event of a module shares.  Building it walks the whole comb
 /// list, which dwarfs any one event's statements, so a module builds it once
-/// and plans each event over it.
-pub struct CombContext<'a> {
-    inputs: &'a OwnerInputs,
+/// and plans each event over it, and tests sharing the comb share it too.
+pub struct CombContext {
+    inputs: Arc<OwnerInputs>,
     /// Sorted by the owner's tour entry number, so a subtree is one slice.
     combs: Vec<CombInfo>,
     comb_touched_comb: Spans,
@@ -475,11 +476,11 @@ struct SubtreeReads {
     ff_unless_written: Vec<(u32, u32)>,
 }
 
-impl<'a> CombContext<'a> {
+impl CombContext {
     /// `comb_stmts` is the settled comb list, `comb_touched` every offset the
     /// comb touches.
     pub fn new(
-        inputs: &'a OwnerInputs,
+        inputs: Arc<OwnerInputs>,
         comb_stmts: &[ProtoStatement],
         comb_touched: &HashSet<VarOffset>,
     ) -> Self {
@@ -519,13 +520,14 @@ impl<'a> CombContext<'a> {
                 .map(|o| (o.raw() as usize, o.raw() as usize + 1))
                 .collect(),
         );
+        let candidate = vec![false; inputs.node_parent.len()];
         CombContext {
             inputs,
             combs,
             comb_touched_comb,
             produced: HashMap::default(),
             reads: HashMap::default(),
-            candidate: vec![false; inputs.node_parent.len()],
+            candidate,
         }
     }
 
@@ -579,7 +581,6 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
         reads: reads_by_node,
         candidate,
     } = ctx;
-    let inputs: &OwnerInputs = inputs;
     let tour = inputs.tour();
     let diag_on = diag();
     // Event statements: owning node (by the FFs written), reads, writes, and
@@ -1338,7 +1339,7 @@ mod tests {
         };
         // Deliberately not in tour order, so a missing sort shows up.
         let stmts: Vec<ProtoStatement> = [32, 16, 0, 24, 8].map(comb_write).into_iter().collect();
-        let ctx = CombContext::new(&inputs, &stmts, &HashSet::default());
+        let ctx = CombContext::new(Arc::new(inputs.clone()), &stmts, &HashSet::default());
         assert_eq!(ctx.combs.len(), 5, "every statement has an owner");
         let tour = inputs.tour();
         for n in 0..inputs.node_parent.len() as u32 {
@@ -1397,7 +1398,7 @@ mod tests {
             a.dst_ff_current_offset = -1;
         }
         let stmts = [ff_block(0, MIN_MASS), scratch, ff_block(4, MIN_MASS)];
-        let mut ctx = CombContext::new(&inputs, &[], &HashSet::default());
+        let mut ctx = CombContext::new(Arc::new(inputs), &[], &HashSet::default());
         let gates = plan(&stmts, &mut ctx, "t");
         let mut ranges: Vec<(usize, usize, &str)> = gates
             .iter()
@@ -1488,14 +1489,14 @@ mod tests {
         (comb, event)
     }
 
-    fn a_context<'a>(inputs: &'a OwnerInputs, comb: &[ProtoStatement]) -> CombContext<'a> {
+    fn a_context(inputs: &OwnerInputs, comb: &[ProtoStatement]) -> CombContext {
         use VarOffset::Comb;
         let touched: HashSet<VarOffset> = [Comb(0x100), Comb(0x104), Comb(0x108), Comb(0x400)]
             .into_iter()
             .chain([Comb(0x500)])
             .flat_map(bytes)
             .collect();
-        CombContext::new(inputs, comb, &touched)
+        CombContext::new(Arc::new(inputs.clone()), comb, &touched)
     }
 
     type GateKey = (usize, usize, Vec<(bool, u32, u32)>, Vec<(u32, u32)>, String);
