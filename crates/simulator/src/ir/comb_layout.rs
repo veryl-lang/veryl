@@ -310,6 +310,14 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
             }
             ProtoExpression::HierVariable(_) | ProtoExpression::Value { .. } => {}
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                expr(x, out);
+                if let Some(d) = dynamic_select {
+                    expr(&d.index_expr, out);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 expr(x, out);
                 expr(y, out);

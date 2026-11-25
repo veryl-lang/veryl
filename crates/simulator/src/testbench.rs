@@ -50,7 +50,7 @@ pub enum TestbenchStatement {
     /// variable's name, used as the file-table key.
     FileOpen {
         handle: StrId,
-        path: String,
+        path: crate::ir::Text,
         append: bool,
     },
     /// `f.write(format, ...)`.
@@ -1607,8 +1607,6 @@ fn take_edges<'a>(
     ExecResult::Continue
 }
 
-/// A statement that neither branches nor waits: runs to completion in zero
-/// simulated time.
 fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
     match stmt {
         TestbenchStatement::Assert {
@@ -1660,7 +1658,9 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             path,
             append,
         } => {
-            crate::file_table::open_handle(*handle, path, *append);
+            sim.ensure_comb_updated();
+            let path = path.eval(&mut sim.mask_cache);
+            crate::file_table::open_handle(*handle, &path, *append);
             ExecResult::Continue
         }
         TestbenchStatement::FileWrite {
@@ -1692,9 +1692,9 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             let mut host_args = Vec::with_capacity(args.len());
             for arg in args {
                 match arg {
-                    ComponentArg::Str(s) => {
-                        host_args.push(crate::component::host::HostValue::Str(s.clone()))
-                    }
+                    ComponentArg::Text(x) => host_args.push(
+                        crate::component::host::HostValue::Str(x.eval(&mut sim.mask_cache)),
+                    ),
                     ComponentArg::Expr(e) => {
                         let value = e.eval(&mut sim.mask_cache);
                         host_args.push(crate::component::runtime::host_value_from(&value));

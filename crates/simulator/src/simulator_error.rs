@@ -83,7 +83,7 @@ pub enum SimulatorError {
         severity(Error),
         code(unsupported_string),
         help(
-            "the simulator supports `string` in a `const`, and in a `let` or `var` written only by assignments in its own module"
+            "a `string` variable takes a whole text, so it cannot be one part of a concatenation destination"
         )
     )]
     #[error("{subject} of type `string` is not supported by the simulator")]
@@ -92,7 +92,18 @@ pub enum SimulatorError {
         subject: String,
         #[source_code]
         input: MultiSources,
-        #[label("the text would not fit in the storage the simulator gives it")]
+        #[label("a text has no fixed window here")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(severity(Error), code(unsupported_string_operation))]
+    #[error("this `string` cannot be used for {operation} in this context")]
+    UnsupportedStringOperation {
+        operation: String,
+        #[source_code]
+        input: MultiSources,
+        #[label]
         error_location: SourceSpan,
         token_source: TokenSource,
     },
@@ -223,6 +234,19 @@ impl SimulatorError {
             input,
             error_location: (*token).into(),
             token_source: token.beg.source,
+        }
+    }
+
+    pub fn unsupported_string_operation(operation: &str, token: &TokenRange) -> Self {
+        let source = token.beg.source;
+        let input = MultiSources {
+            sources: vec![Source::new(source.to_string(), source.get_text())],
+        };
+        SimulatorError::UnsupportedStringOperation {
+            operation: operation.to_string(),
+            input,
+            error_location: (*token).into(),
+            token_source: source,
         }
     }
 

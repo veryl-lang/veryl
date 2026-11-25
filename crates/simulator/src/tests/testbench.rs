@@ -1406,6 +1406,96 @@ fn testbench_array_input_port() {
 }
 
 #[test]
+fn testbench_dumps_string_text() {
+    // A `string` stores a handle of its text: VCD dumps the text as a string
+    // value, FST (without string values) the bytes of the text at the width
+    // of its longest text.
+    let code = r#"
+    #[test(test_str)]
+    module test_str {
+        inst clk: $tb::clock_gen;
+        var s: string;
+        initial {
+            s = "hi there";
+            clk.next();
+            s = "bye";
+            clk.next();
+            $finish();
+        }
+    }
+    "#;
+
+    let run = |config: &Config, dumper: crate::wave_dumper::WaveDumper| {
+        let ir = analyze_top(code, config, "test_str").unwrap();
+        let mut sim = Simulator::new(ir, Some(dumper));
+        let event_map = build_event_map(&sim.ir);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
+        let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+        assert_eq!(run_testbench(&mut sim, &tb_stmts), TestResult::Pass);
+    };
+
+    for config in Config::all() {
+        use crate::wave_dumper::{SharedVec, WaveDumper};
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        run(
+            &config,
+            WaveDumper::new_vcd(Box::new(SharedVec(dump_buf.clone()))),
+        );
+        let dump = std::sync::Arc::try_unwrap(dump_buf)
+            .unwrap()
+            .into_inner()
+            .unwrap();
+        let mut parser = vcd::Parser::new(dump.as_slice());
+        let header = parser.parse_header().unwrap();
+        let var = header
+            .find_var(&["test_str", "s"])
+            .expect("s not found in VCD");
+        assert_eq!(var.var_type, vcd::VarType::String);
+        let code = var.code;
+        let texts: Vec<String> = parser
+            .filter_map(|x| match x.unwrap() {
+                vcd::Command::ChangeString(id, text) if id == code => Some(text),
+                _ => None,
+            })
+            .filter(|x| !x.is_empty())
+            .collect();
+        assert_eq!(texts, ["hi\\x20there", "bye"], "config={config:?}");
+    }
+
+    let fst_path = format!(
+        "{}/fst_string_{}.fst",
+        std::env::temp_dir().display(),
+        std::process::id()
+    );
+    run(
+        &Config::default(),
+        crate::wave_dumper::WaveDumper::new_fst(&fst_path),
+    );
+    let mut wave = wellen::simple::read(&fst_path).expect("failed to read FST");
+    let sref = {
+        let hier = wave.hierarchy();
+        let var = hier
+            .all_vars()
+            .find(|v| hier[*v].name(hier) == "s")
+            .expect("s not found in FST");
+        hier[var].signal_ref()
+    };
+    wave.load_signals(&[sref]);
+    let signal = wave.get_signal(sref).unwrap();
+    let mut last = None;
+    for t in 0..wave.time_table().len() {
+        if let Some(offset) = signal.get_offset(t as u32)
+            && let wellen::SignalValueRef::BitVec(bv) = signal.get_value_at(&offset, 0)
+        {
+            last = bv.be_bytes().map(|x| x.to_vec());
+        }
+    }
+    assert_eq!(last, Some(b"\0\0\0\0\0bye".to_vec()));
+    std::fs::remove_file(&fst_path).ok();
+}
+
+#[test]
 fn testbench_vcd_comb_only_clock_reset() {
     let code = r#"
     module CombOnly (
