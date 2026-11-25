@@ -2498,17 +2498,17 @@ fn input_port_array_variable(
     Ok(Some(expressions))
 }
 
-/// At a hierarchy template's boundary, point the instance's event reads of a
-/// clock or reset port at the parent net it is wired to, as aliasing would.  The port
-/// copy settles with the comb logic, after the derived edge that fires the
-/// event has already been taken from the parent net.
-fn read_clock_reset_from_parent(
+/// At a hierarchy template's boundary, the parent net each clock or reset
+/// port is wired to: the instance's events read it instead of the port, as
+/// aliasing would.  The port copy settles with the comb logic, after the
+/// derived edge that fires the event has already been taken from the parent
+/// net.
+fn clock_reset_inputs(
     context: &mut Context,
     src: &air::InstDeclaration,
     child: &air::Module,
     child_meta: &HashMap<air::VarId, VariableMeta>,
-    events: &mut HashMap<Event, Vec<ProtoStatement>>,
-) {
+) -> HashMap<VarOffset, VarOffset> {
     let mut map: HashMap<VarOffset, VarOffset> = HashMap::default();
     let scope = context.scope();
     for input in &src.inputs {
@@ -2547,14 +2547,7 @@ fn read_clock_reset_from_parent(
             map.insert(c.current, p.current);
         }
     }
-    if map.is_empty() {
-        return;
-    }
-    for stmts in events.values_mut() {
-        for s in stmts {
-            s.remap_offsets(&map);
-        }
-    }
+    map
 }
 
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
@@ -2952,7 +2945,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 });
                 let comb = Arc::new(std::mem::take(&mut all_comb_statements).into_vec());
                 all_comb_statements = CombList::shared(Arc::clone(&comb));
-                context.dut_reuse.hier_store(
+                let nodes = context.dut_reuse.hier_store(
                     component_key,
                     ff_start,
                     comb_start,
@@ -2965,6 +2958,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     &context.comb_reloc[comb_reloc_start..],
                     template,
                 );
+                if let Some(nodes) = nodes {
+                    all_event_statements = nodes;
+                }
             } else if !has_reference_aliases {
                 let mut comb = std::mem::take(&mut all_comb_statements).into_vec();
                 try_compile_inst_chunks(
@@ -3383,13 +3379,20 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // A template's events compile after this point, so all of them see
         // the remap; a reused DUT's are already compiled chunks.
         if hier_template {
-            read_clock_reset_from_parent(
-                context,
-                src,
-                child_module,
-                &child_variable_meta,
-                &mut all_event_statements,
-            );
+            let map = clock_reset_inputs(context, src, child_module, &child_variable_meta);
+            if !map.is_empty() {
+                let mut inputs: Vec<(VarOffset, VarOffset)> =
+                    map.iter().map(|(a, b)| (*a, *b)).collect();
+                inputs.sort_unstable_by_key(|(a, _)| (a.is_ff(), a.raw()));
+                for stmts in all_event_statements.values_mut() {
+                    for s in stmts {
+                        match s {
+                            ProtoStatement::HierEvents(h) => h.inputs = inputs.clone(),
+                            other => other.remap_offsets(&map),
+                        }
+                    }
+                }
+            }
         }
 
         let mut remapped_events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();

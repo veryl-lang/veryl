@@ -398,6 +398,9 @@ impl ProtoModule {
                     &ProtoStatement::HierAssign(_) => {
                         unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
                     }
+                    &ProtoStatement::HierEvents(_) => {
+                        unreachable!("template events are expanded by expand_hier_events")
+                    }
                 };
                 *hist.entry(kind).or_insert(0) += 1;
             }
@@ -1146,6 +1149,9 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         };
         eprintln!("[stmtord] {module_name} {tag} {path} {kind} tok={tok} out={outs:?} in={ins:?}");
         match s {
@@ -1292,6 +1298,9 @@ pub(crate) fn collect_event_written_comb(
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
     let mut out = HashSet::default();
@@ -1392,6 +1401,9 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
             ProtoStatement::Break => true,
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -1584,9 +1596,10 @@ fn run_comb_pipeline(
         // cascade via `VERYL_DEAD_VAR_DCE_MULTI=0`.
         let multi_pass = std::env::var("VERYL_DEAD_VAR_DCE_MULTI").ok().as_deref() != Some("0");
         let mut unified_sorted = unified_sorted;
-        let mut slices: Vec<&[ProtoStatement]> = Vec::with_capacity(1 + all_event_statements.len());
+        let flat = crate::ir::statement::flat_events(all_event_statements);
+        let mut slices: Vec<&[ProtoStatement]> = Vec::with_capacity(1 + flat.len());
         slices.push(unified_sorted.as_slice());
-        for stmts in all_event_statements.values() {
+        for stmts in flat.values() {
             slices.push(stmts.as_slice());
         }
         let mut dead = if multi_pass {
@@ -1606,6 +1619,7 @@ fn run_comb_pipeline(
                 *stmts = new_stmts;
                 dropped += d;
             }
+            dead_var_dce::apply_to_hier_events(all_event_statements, &dead);
             if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
                 eprintln!(
                     "[DeadVarDce] module={} dead_set={} dropped_stmts={}",
@@ -1638,6 +1652,8 @@ fn run_comb_pipeline(
         && crate::ir::opt::dataflow::decline_reason(&context.config, required_comb_passes)
             .is_none();
     stage.mark("dead_var_dce");
+    // The passes below only read the events.
+    let events_view = crate::ir::statement::flat_events(all_event_statements);
     let mut fusion_alt: Option<(Vec<ProtoStatement>, Vec<isize>)> = None;
     let (mut unified_sorted, mut fused_offsets) = if comb_fusion::enabled(context.config.use_4state)
     {
@@ -1646,7 +1662,7 @@ fn run_comb_pipeline(
             externals.extend(extra.iter().copied());
         }
         let sel = comb_fusion::sel_enabled();
-        let events: &HashMap<Event, Vec<ProtoStatement>> = all_event_statements;
+        let events: &HashMap<Event, Vec<ProtoStatement>> = &events_view;
         if sel && cone_reorder && cone_inputs.is_some() && cfg!(test) {
             // Test knobs live in this thread's locals.
             fusion_alt = Some(comb_fusion::inline_single_readers(
@@ -1783,7 +1799,7 @@ fn run_comb_pipeline(
         comb_layout::build_schedule(
             &li.meta_units,
             &unified_sorted,
-            all_event_statements,
+            &events_view,
             &li.extra_offsets,
             // The live total, not the Conv-time one: version_split just
             // bump-allocated its rename temps above it, and they need units too.
@@ -4628,6 +4644,9 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
                     &ProtoStatement::HierAssign(_) => {
                         unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
                     }
+                    &ProtoStatement::HierEvents(_) => {
+                        unreachable!("template events are expanded by expand_hier_events")
+                    }
                 };
                 *kind_hist.entry(kind).or_insert(0) += 1;
                 for &off in &stmt_outputs[idx] {
@@ -6171,7 +6190,10 @@ impl Conv<&air::Module> for ProtoModule {
             let mut h = DefaultHasher::new();
             offs.hash(&mut h);
             context.comb_total_bytes.hash(&mut h);
-            field_unfuse::event_census_digest(&all_event_statements).hash(&mut h);
+            field_unfuse::event_census_digest(&crate::ir::statement::flat_events(
+                &all_event_statements,
+            ))
+            .hash(&mut h);
             // The high bit keeps an enabled pass apart from the 0 of a disabled one.
             u128::from(h.finish()) | (1u128 << 64)
         } else {
@@ -6274,33 +6296,34 @@ impl Conv<&air::Module> for ProtoModule {
         // gates.  `None` when the event writes cannot be bounded declines
         // all three.
         let cone_event_written: Option<HashSet<isize>> =
-            collect_event_written_comb(&all_event_statements).map(|mut evt| {
-                // External components write their output connects into comb
-                // storage between settles, outside both the comb list and the
-                // event statements.  Add every connect's variable offsets
-                // (conservatively: inputs too) so a component write counts
-                // as an event write.
-                let mut ins: Vec<VarOffset> = Vec::new();
-                // The owner tables are keyed on unfolded offsets.
-                let unfolded = BigArrayFold::default();
-                for ext in &all_external_components {
-                    for c in &ext.connects {
-                        ins.clear();
-                        c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
-                        for o in &ins {
-                            if let VarOffset::Comb(x) = o {
-                                evt.insert(*x);
+            collect_event_written_comb(&crate::ir::statement::flat_events(&all_event_statements))
+                .map(|mut evt| {
+                    // External components write their output connects into comb
+                    // storage between settles, outside both the comb list and the
+                    // event statements.  Add every connect's variable offsets
+                    // (conservatively: inputs too) so a component write counts
+                    // as an event write.
+                    let mut ins: Vec<VarOffset> = Vec::new();
+                    // The owner tables are keyed on unfolded offsets.
+                    let unfolded = BigArrayFold::default();
+                    for ext in &all_external_components {
+                        for c in &ext.connects {
+                            ins.clear();
+                            c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
+                            for o in &ins {
+                                if let VarOffset::Comb(x) = o {
+                                    evt.insert(*x);
+                                }
                             }
                         }
                     }
-                }
-                evt
-            });
+                    evt
+                });
         let key = {
             let base = comb_pipeline_key(
                 unified_fp,
                 unfuse_inputs_digest,
-                &all_event_statements,
+                &crate::ir::statement::flat_events(&all_event_statements),
                 &dce_protect,
             );
             if layout_meta_units.is_some()
@@ -6337,6 +6360,7 @@ impl Conv<&air::Module> for ProtoModule {
                         let taken = std::mem::take(stmts);
                         *stmts = dead_var_dce::apply_counting(taken, &dead).0;
                     }
+                    dead_var_dce::apply_to_hier_events(&mut all_event_statements, &dead);
                 }
                 // ...nor did field unfuse or the version-split pass, whose
                 // storage the cached statements address.  A key match implies
@@ -6384,9 +6408,10 @@ impl Conv<&air::Module> for ProtoModule {
                         *comb_total += crate::ir::variable::value_size(nb, use_4state);
                         off
                     };
+                    let events = crate::ir::statement::flat_events(&all_event_statements);
                     let (stats, field_offsets) = field_unfuse::run(
                         &mut unified,
-                        &all_event_statements,
+                        &events,
                         &unfuse_blocklist,
                         &mut alloc,
                         &mut context.comb_reloc,
@@ -6457,6 +6482,24 @@ impl Conv<&air::Module> for ProtoModule {
         // stay clear of the packed region.
         if let Some(sched) = cached.layout.clone() {
             for stmts in all_event_statements.values_mut() {
+                if stmts
+                    .iter()
+                    .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+                {
+                    let taken = std::mem::take(stmts);
+                    for s in taken {
+                        match s {
+                            ProtoStatement::HierEvents(mut h) => {
+                                if comb_layout::shift_hier_events(&mut h, &sched) {
+                                    stmts.push(ProtoStatement::HierEvents(h));
+                                } else {
+                                    stmts.extend(h.expand());
+                                }
+                            }
+                            other => stmts.push(other),
+                        }
+                    }
+                }
                 comb_layout::apply_to_stmts(stmts, &sched);
             }
             comb_layout::translate_meta_map(&mut variable_meta, &sched);
@@ -6532,7 +6575,7 @@ impl Conv<&air::Module> for ProtoModule {
                 }
             }
             for stmts in all_event_statements.values() {
-                for stmt in stmts {
+                for stmt in crate::ir::statement::flat_stmts(stmts).iter() {
                     ins.clear();
                     outs.clear();
                     stmt.gather_variable_offsets(&mut ins, &mut outs);
@@ -6597,7 +6640,7 @@ impl Conv<&air::Module> for ProtoModule {
                 if event.is_initial() || *event == Event::Final {
                     continue;
                 }
-                for stmt in stmts {
+                for stmt in crate::ir::statement::flat_stmts(stmts).iter() {
                     ins.clear();
                     outs.clear();
                     stmt.gather_variable_offsets(&mut ins, &mut outs);
@@ -6657,7 +6700,7 @@ impl Conv<&air::Module> for ProtoModule {
         // appear inside event scopes (always_ff blocks).
         let mut site_table = SiteTable::new();
         for stmts in all_event_statements.values() {
-            site_table.extend_from_protos(stmts);
+            site_table.extend_from_protos(&crate::ir::statement::flat_stmts(stmts));
         }
 
         if std::env::var("VERYL_SITE_TABLE_DIAG").ok().as_deref() == Some("1") {
@@ -6682,10 +6725,11 @@ impl Conv<&air::Module> for ProtoModule {
         #[cfg(not(target_family = "wasm"))]
         let localize_info: Option<LocalizeInfo> = if crate::backend::aot_c::emit::localize_enabled()
         {
-            let event_slices: Vec<&[ProtoStatement]> = all_event_statements
+            let flat: Vec<std::borrow::Cow<'_, [ProtoStatement]>> = all_event_statements
                 .values()
-                .map(|v| v.as_slice())
+                .map(|v| crate::ir::statement::flat_stmts(v))
                 .collect();
+            let event_slices: Vec<&[ProtoStatement]> = flat.iter().map(|v| v.as_ref()).collect();
             let (mut block_vo, mut ranges) =
                 crate::ir::opt::dead_var_dce::collect_localize_info(&event_slices);
             ranges.extend(cached.localize_comb_ranges.iter().copied());
@@ -6754,7 +6798,7 @@ impl Conv<&air::Module> for ProtoModule {
                 std::collections::BTreeSet::default();
             let mut max_chain_per_offset: BTreeMap<u32, u32> = BTreeMap::new();
             for stmts in all_event_statements.values() {
-                let mw = collect_max_writes(stmts);
+                let mw = collect_max_writes(&crate::ir::statement::flat_stmts(stmts));
                 for (off, cnt) in mw {
                     if cnt >= 2 {
                         true_multi.insert(off);
@@ -6816,9 +6860,40 @@ impl Conv<&air::Module> for ProtoModule {
                 // Clock events only: a testbench `initial` may assign a
                 // reset-typed variable, making the condition mutable between
                 // two dispatches.  `always_ff` cannot (`invalid_clock_assignment`).
+                // Each entry holds its source so the address stays unique.
+                type Fused = (Arc<Vec<ProtoStatement>>, Arc<Vec<ProtoStatement>>);
+                let mut bodies: HashMap<usize, Fused> = HashMap::default();
                 for (event, stmts) in all_event_statements.iter_mut() {
                     if matches!(event, Event::Clock(..)) {
                         merge_reset_dispatch(stmts, &reset_offsets);
+                        // A template's shared statements fuse once, in the
+                        // reference coordinates: its own reset nets shift
+                        // back, and a port read from a parent reset net
+                        // stands for that net.
+                        for s in stmts.iter_mut() {
+                            if let ProtoStatement::HierEvents(h) = s {
+                                let fused = bodies
+                                    .entry(Arc::as_ptr(&h.stmts) as usize)
+                                    .or_insert_with(|| {
+                                        let back =
+                                            |o: &VarOffset| o.adjust(-h.ff_delta, -h.comb_delta);
+                                        let resets: crate::HashSet<VarOffset> = reset_offsets
+                                            .iter()
+                                            .map(back)
+                                            .chain(
+                                                h.inputs
+                                                    .iter()
+                                                    .filter(|(_, to)| reset_offsets.contains(to))
+                                                    .map(|(from, _)| back(from)),
+                                            )
+                                            .collect();
+                                        let mut body = h.stmts.as_ref().clone();
+                                        merge_reset_dispatch(&mut body, &resets);
+                                        (Arc::clone(&h.stmts), Arc::new(body))
+                                    });
+                                h.stmts = Arc::clone(&fused.1);
+                            }
+                        }
                     }
                 }
             }
@@ -6882,7 +6957,7 @@ impl Conv<&air::Module> for ProtoModule {
             let n = pre_jit_stmts.len()
                 + all_event_statements
                     .values()
-                    .map(|v| v.len())
+                    .map(|v| crate::ir::statement::flat_stmts(v).len())
                     .sum::<usize>();
             n >= context.config.aot_c_min_stmts
         };
@@ -6894,7 +6969,12 @@ impl Conv<&air::Module> for ProtoModule {
         let mut event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>> =
             all_event_statements
                 .iter()
-                .map(|(e, stmts)| (e.clone(), event_comb_write_offsets(stmts)))
+                .map(|(e, stmts)| {
+                    (
+                        e.clone(),
+                        event_comb_write_offsets(&crate::ir::statement::flat_stmts(stmts)),
+                    )
+                })
                 .collect();
         // Collect derived clocks + input-clock offsets BEFORE
         // `variable_meta` moves into `module_variable_meta`.  We must look
@@ -7111,7 +7191,10 @@ impl Conv<&air::Module> for ProtoModule {
                     .entry(Event::clock(source))
                     .or_default();
                 merged.extend(stmts);
-                event_comb_writes.insert(Event::clock(source), event_comb_write_offsets(merged));
+                event_comb_writes.insert(
+                    Event::clock(source),
+                    event_comb_write_offsets(&crate::ir::statement::flat_stmts(merged)),
+                );
             }
         }
 
@@ -7162,6 +7245,11 @@ impl Conv<&air::Module> for ProtoModule {
                     event_gates.insert(event.clone(), gates);
                 }
             }
+        }
+        for (event, stmts) in all_event_statements.iter_mut() {
+            let mut none = Vec::new();
+            let gates = event_gates.get_mut(event).unwrap_or(&mut none);
+            crate::ir::statement::expand_gated(stmts, gates);
         }
         // A gate compares comb bytes its event may never name, so a C local
         // would leave it a stale buffer. Per byte: ranges are scanned linearly.

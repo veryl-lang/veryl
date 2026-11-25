@@ -1606,6 +1606,122 @@ pub enum ProtoStatement {
     /// stage ever sees this — the write-side twin of
     /// `ProtoExpression::HierVariable`.
     HierAssign(Box<ProtoHierAssign>),
+    /// One template instance's statements of one clock or reset event, kept
+    /// whole from its conversion until `expand_hier_events` lays them out.
+    HierEvents(Box<ProtoHierEvents>),
+}
+
+#[derive(Clone, Debug, Hash)]
+pub struct ProtoHierEvents {
+    /// The template's statements in the reference instance's coordinates,
+    /// shared by every instance.
+    pub(crate) stmts: Arc<Vec<ProtoStatement>>,
+    pub(crate) ff_delta: isize,
+    pub(crate) comb_delta: isize,
+    /// Port storage the instance reads from its parent instead, in the
+    /// instance's coordinates (see `read_clock_reset_from_parent`).
+    pub(crate) inputs: Vec<(VarOffset, VarOffset)>,
+}
+
+impl ProtoHierEvents {
+    pub(crate) fn expand(&self) -> Vec<ProtoStatement> {
+        let map: HashMap<VarOffset, VarOffset> = self.inputs.iter().copied().collect();
+        self.stmts
+            .iter()
+            .map(|s| {
+                let mut s = s.clone();
+                s.adjust_offsets(self.ff_delta, self.comb_delta);
+                if !map.is_empty() {
+                    s.remap_offsets(&map);
+                }
+                s
+            })
+            .collect()
+    }
+}
+
+/// `stmts` with every template node laid out, for a pass that only reads
+/// them; borrowed when there is none.
+pub(crate) fn flat_stmts(stmts: &[ProtoStatement]) -> std::borrow::Cow<'_, [ProtoStatement]> {
+    if !stmts
+        .iter()
+        .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+    {
+        return std::borrow::Cow::Borrowed(stmts);
+    }
+    let mut flat = Vec::with_capacity(stmts.len());
+    for s in stmts {
+        match s {
+            ProtoStatement::HierEvents(h) => flat.extend(h.expand()),
+            other => flat.push(other.clone()),
+        }
+    }
+    std::borrow::Cow::Owned(flat)
+}
+
+/// `events` with every template node laid out, for a pass that only reads
+/// them; borrowed when there is none.
+pub(crate) fn flat_events(
+    events: &HashMap<crate::ir::Event, Vec<ProtoStatement>>,
+) -> std::borrow::Cow<'_, HashMap<crate::ir::Event, Vec<ProtoStatement>>> {
+    let any = events
+        .values()
+        .flatten()
+        .any(|s| matches!(s, ProtoStatement::HierEvents(_)));
+    if !any {
+        return std::borrow::Cow::Borrowed(events);
+    }
+    let mut flat = events.clone();
+    expand_hier_events(&mut flat);
+    std::borrow::Cow::Owned(flat)
+}
+
+/// Lay one event's template nodes out in place, moving each gate's range of
+/// top-level statements with the statements it covers.  A gate never splits
+/// a node, so its ends map exactly.
+pub(crate) fn expand_gated(
+    stmts: &mut Vec<ProtoStatement>,
+    gates: &mut [crate::ir::opt::event_gate::EventGate],
+) {
+    if !stmts
+        .iter()
+        .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+    {
+        return;
+    }
+    let taken = std::mem::take(stmts);
+    let mut at = Vec::with_capacity(taken.len() + 1);
+    for s in taken {
+        at.push(stmts.len());
+        match s {
+            ProtoStatement::HierEvents(h) => stmts.extend(h.expand()),
+            other => stmts.push(other),
+        }
+    }
+    at.push(stmts.len());
+    for g in gates {
+        g.lo = at[g.lo];
+        g.hi = at[g.hi];
+    }
+}
+
+/// Lay every template instance's event statements out in place.
+pub(crate) fn expand_hier_events(events: &mut HashMap<crate::ir::Event, Vec<ProtoStatement>>) {
+    for stmts in events.values_mut() {
+        if !stmts
+            .iter()
+            .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+        {
+            continue;
+        }
+        let taken = std::mem::take(stmts);
+        for s in taken {
+            match s {
+                ProtoStatement::HierEvents(h) => stmts.extend(h.expand()),
+                other => stmts.push(other),
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1669,6 +1785,9 @@ impl ProtoStatement {
                     .map(ProtoStatement::statement_mass)
                     .sum(),
             },
+            ProtoStatement::HierEvents(h) => {
+                h.stmts.iter().map(ProtoStatement::statement_mass).sum()
+            }
             _ => 0,
         };
         1 + kids
@@ -1703,6 +1822,9 @@ impl ProtoStatement {
             | ProtoStatement::TbMethodCall { .. } => false,
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -1874,6 +1996,14 @@ impl ProtoStatement {
             &mut ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            ProtoStatement::HierEvents(h) => {
+                h.ff_delta += ff_delta;
+                h.comb_delta += comb_delta;
+                for (from, to) in &mut h.inputs {
+                    *from = from.adjust(ff_delta, comb_delta);
+                    *to = to.adjust(ff_delta, comb_delta);
+                }
+            }
         }
     }
 
@@ -1926,6 +2056,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2088,6 +2221,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &mut ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &mut ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2267,6 +2403,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
 
@@ -2374,6 +2513,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
 
@@ -2393,6 +2535,9 @@ impl ProtoStatement {
             }
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
             ProtoStatement::AssignDynamic(_)
             | ProtoStatement::Assign(_)
@@ -2569,6 +2714,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
 
@@ -2658,6 +2806,9 @@ impl ProtoStatement {
             ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2754,6 +2905,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
 
@@ -2817,6 +2971,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
         result
@@ -3389,6 +3546,9 @@ impl ProtoStatement {
                 }
                 &ProtoStatement::HierAssign(_) => {
                     unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+                }
+                &ProtoStatement::HierEvents(_) => {
+                    unreachable!("template events are expanded by expand_hier_events")
                 }
             }
         }

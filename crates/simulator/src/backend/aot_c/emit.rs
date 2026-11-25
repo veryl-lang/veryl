@@ -575,6 +575,9 @@ impl LocalAnalysis {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
 
@@ -746,6 +749,9 @@ impl LocalAnalysis {
             ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2631,6 +2637,9 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
         ProtoStatement::Break => out.push("Break".to_string()),
         ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
+        ProtoStatement::HierEvents(_) => {
+            unreachable!("template events are expanded by expand_hier_events")
         }
     }
 }
@@ -8396,6 +8405,9 @@ fn emit_stmt_shape(stmt: &ProtoStatement) -> Option<String> {
         }
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
+        &ProtoStatement::HierEvents(_) => {
+            unreachable!("template events are expanded by expand_hier_events")
         }
     }
 }

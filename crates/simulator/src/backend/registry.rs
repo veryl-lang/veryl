@@ -377,6 +377,9 @@ fn classify_proto_stmt(s: &ProtoStatement) -> String {
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
+        &ProtoStatement::HierEvents(_) => {
+            unreachable!("template events are expanded by expand_hier_events")
+        }
     }
 }
 

@@ -145,7 +145,11 @@ impl DutReuseCache {
             ff_delta: ff_start - entry.conv.ref_ff_start,
             comb_delta: comb_start - entry.conv.ref_comb_start,
         });
-        HierOutcome::Hit(relocate_entry(&entry.conv, ff_start, comb_start), inst)
+        let mut reused = relocate_entry(&entry.conv, ff_start, comb_start, inst.is_none());
+        if let Some(inst) = &inst {
+            reused.event_statements = event_nodes(&entry.events, inst.ff_delta, inst.comb_delta);
+        }
+        HierOutcome::Hit(reused, inst)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -162,13 +166,26 @@ impl DutReuseCache {
         derived_clock_candidates: &[crate::ir::EdgeCandidate],
         comb_reloc: &[(isize, isize, usize)],
         template: Option<Arc<HierTemplate>>,
-    ) {
+    ) -> Option<HashMap<Event, Vec<ProtoStatement>>> {
+        let events: HashMap<Event, Arc<Vec<ProtoStatement>>> = if template.is_some() {
+            event_statements
+                .iter()
+                .map(|(e, s)| (e.clone(), Arc::new(s.clone())))
+                .collect()
+        } else {
+            HashMap::default()
+        };
+        let nodes = template.is_some().then(|| event_nodes(&events, 0, 0));
         let conv = CachedStatements {
             ref_ff_start: ff_start,
             ref_comb_start: comb_start,
             ff_size,
             comb_size,
-            event_statements: event_statements.clone(),
+            event_statements: if template.is_some() {
+                HashMap::default()
+            } else {
+                event_statements.clone()
+            },
             comb_statements,
             post_comb_fns: Vec::new(),
             child_modules: child_modules.to_vec(),
@@ -184,9 +201,14 @@ impl DutReuseCache {
             .entry(component_key as usize)
             .or_insert(HierSlot::Computing);
         if !matches!(slot, HierSlot::Done(_)) {
-            *slot = HierSlot::Done(Arc::new(HierEntry { conv, template }));
+            *slot = HierSlot::Done(Arc::new(HierEntry {
+                conv,
+                template,
+                events,
+            }));
         }
         self.hier_ready.notify_all();
+        nodes
     }
 
     /// De-alias only the topmost recurring DUT boundary. Its internals remain
@@ -309,6 +331,35 @@ struct CachedStatements {
 struct HierEntry {
     conv: CachedStatements,
     template: Option<Arc<HierTemplate>>,
+    /// The template's events in the reference coordinates, shared by every
+    /// instance's nodes; empty when the template fell back to flat.
+    events: HashMap<Event, Arc<Vec<ProtoStatement>>>,
+}
+
+/// A template instance's events: each clock and reset event as one node
+/// over the shared statements, the rest laid out.
+fn event_nodes(
+    events: &HashMap<Event, Arc<Vec<ProtoStatement>>>,
+    ff_delta: isize,
+    comb_delta: isize,
+) -> HashMap<Event, Vec<ProtoStatement>> {
+    events
+        .iter()
+        .map(|(event, stmts)| {
+            let node = crate::ir::ProtoHierEvents {
+                stmts: Arc::clone(stmts),
+                ff_delta,
+                comb_delta,
+                inputs: Vec::new(),
+            };
+            let laid = if matches!(event, Event::Clock(..) | Event::Reset(..)) {
+                vec![ProtoStatement::HierEvents(Box::new(node))]
+            } else {
+                node.expand()
+            };
+            (event.clone(), laid)
+        })
+        .collect()
 }
 
 enum HierSlot {
@@ -469,6 +520,7 @@ fn relocate_entry(
     entry: &CachedStatements,
     ff_start: isize,
     comb_start: isize,
+    with_events: bool,
 ) -> ReusedStatements {
     let ff_delta = ff_start - entry.ref_ff_start;
     let comb_delta = comb_start - entry.ref_comb_start;
@@ -483,11 +535,15 @@ fn relocate_entry(
             reloc_stmts(stmts, ff_delta, comb_delta)
         }
     };
-    let event_statements = entry
-        .event_statements
-        .iter()
-        .map(|(ev, stmts)| (ev.clone(), reloc(stmts)))
-        .collect();
+    let event_statements = if with_events {
+        entry
+            .event_statements
+            .iter()
+            .map(|(ev, stmts)| (ev.clone(), reloc(stmts)))
+            .collect()
+    } else {
+        HashMap::default()
+    };
     let child_modules = entry
         .child_modules
         .iter()
@@ -614,7 +670,7 @@ impl DutReuseCache {
                 Some(Slot::Done(entry)) => {
                     let entry = Arc::clone(entry);
                     drop(cache);
-                    return ReuseOutcome::Hit(relocate_entry(&entry, ff_start, comb_start));
+                    return ReuseOutcome::Hit(relocate_entry(&entry, ff_start, comb_start, true));
                 }
                 Some(Slot::Computing) => {
                     cache = self.ready.wait(cache).unwrap();

@@ -392,6 +392,9 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
+        &ProtoStatement::HierEvents(_) => {
+            unreachable!("template events are expanded by expand_hier_events")
+        }
     }
 }
 
@@ -616,6 +619,80 @@ pub fn collect_localize_info(
         }
     }
     (blocklist, ranges)
+}
+
+/// `apply_counting` over template nodes: a store leaves a template's shared
+/// statements only when its offset is dead in every instance.
+pub fn apply_to_hier_events(
+    events: &mut crate::HashMap<crate::ir::Event, Vec<ProtoStatement>>,
+    dead: &HashSet<VarOffset>,
+) {
+    use std::sync::Arc;
+    if dead.is_empty() {
+        return;
+    }
+    type Instances = (Arc<Vec<ProtoStatement>>, Vec<(isize, isize)>);
+    let mut deltas: crate::HashMap<usize, Instances> = crate::HashMap::default();
+    for stmts in events.values() {
+        for s in stmts {
+            if let ProtoStatement::HierEvents(h) = s {
+                deltas
+                    .entry(Arc::as_ptr(&h.stmts) as usize)
+                    .or_insert_with(|| (Arc::clone(&h.stmts), Vec::new()))
+                    .1
+                    .push((h.ff_delta, h.comb_delta));
+            }
+        }
+    }
+    let mut rebuilt: crate::HashMap<usize, Arc<Vec<ProtoStatement>>> = crate::HashMap::default();
+    for (key, (body, ds)) in deltas {
+        let mut dsts: Vec<VarOffset> = Vec::new();
+        collect_plain_dsts(&body, &mut dsts);
+        let in_all: HashSet<VarOffset> = dsts
+            .into_iter()
+            .filter(|o| ds.iter().all(|&(f, c)| dead.contains(&o.adjust(f, c))))
+            .collect();
+        if in_all.is_empty() {
+            continue;
+        }
+        let (kept, _) = apply_counting(body.as_ref().clone(), &in_all);
+        rebuilt.insert(key, Arc::new(kept));
+    }
+    for stmts in events.values_mut() {
+        for s in stmts {
+            if let ProtoStatement::HierEvents(h) = s
+                && let Some(body) = rebuilt.get(&(Arc::as_ptr(&h.stmts) as usize))
+            {
+                h.stmts = Arc::clone(body);
+            }
+        }
+    }
+}
+
+/// The destinations `apply_counting` may drop: whole-variable assignments.
+fn collect_plain_dsts(stmts: &[ProtoStatement], out: &mut Vec<VarOffset>) {
+    for s in stmts {
+        match s {
+            ProtoStatement::Assign(a)
+                if a.select.is_none() && a.dynamic_select.is_none() && a.rhs_select.is_none() =>
+            {
+                out.push(a.dst);
+            }
+            ProtoStatement::SequentialBlock(body) => collect_plain_dsts(body, out),
+            ProtoStatement::If(x) => {
+                collect_plain_dsts(&x.true_side, out);
+                collect_plain_dsts(&x.false_side, out);
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    collect_plain_dsts(&arm.body, out);
+                }
+                collect_plain_dsts(&x.default, out);
+            }
+            ProtoStatement::For(x) => collect_plain_dsts(&x.body, out),
+            _ => {}
+        }
+    }
 }
 
 /// Filter out every `Assign` whose dst is in `dead`.  Recurses into

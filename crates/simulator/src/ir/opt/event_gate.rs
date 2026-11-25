@@ -311,6 +311,11 @@ pub(crate) fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &m
         ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
+        ProtoStatement::HierEvents(h) => {
+            for t in &h.expand() {
+                stmt_ranges(t, reads, writes);
+            }
+        }
     }
 }
 

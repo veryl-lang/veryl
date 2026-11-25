@@ -43,8 +43,8 @@ pub use opt::field_unfuse::force_disable as force_disable_field_unfuse;
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
-    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
-    ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,
+    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoHierEvents,
+    ProtoIfStatement, ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,
     ProtoSystemFunctionCall, RetWidthCheck, RuntimeArgOp, RuntimeForBound, RuntimeForRange,
     Statement, SystemFunctionCall, TbMethodKind, format_assert_message, format_output,
     parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,

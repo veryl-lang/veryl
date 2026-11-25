@@ -158,6 +158,9 @@ pub fn collect_stmt_deps(stmt: &ProtoStatement, deps: &mut StmtDeps) {
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
+        &ProtoStatement::HierEvents(_) => {
+            unreachable!("template events are expanded by expand_hier_events")
+        }
     }
 }
 

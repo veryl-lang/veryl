@@ -1278,6 +1278,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
     pub fn build_binary(
@@ -1376,6 +1379,9 @@ impl ProtoStatement {
             ProtoStatement::Break => None,
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }

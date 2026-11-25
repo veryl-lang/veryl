@@ -655,6 +655,37 @@ pub fn build_schedule(
     Some(sched)
 }
 
+/// Moves a template node through `sched` by its deltas alone, when every comb
+/// offset its statements name moves by the same amount; `false` otherwise.
+pub fn shift_hier_events(h: &mut crate::ir::ProtoHierEvents, sched: &CombLayoutSchedule) -> bool {
+    let seen = std::cell::RefCell::new(Vec::new());
+    for s in h.stmts.iter() {
+        let mut t = s.clone();
+        t.remap_offsets_with(&|o| {
+            if let VarOffset::Comb(c) = o {
+                seen.borrow_mut().push(c);
+            }
+            o
+        });
+    }
+    let mut shift = None;
+    for c in seen.into_inner() {
+        let at = c + h.comb_delta;
+        let d = sched.translate(at) - at;
+        match shift {
+            None => shift = Some(d),
+            Some(x) if x == d => {}
+            Some(_) => return false,
+        }
+    }
+    h.comb_delta += shift.unwrap_or(0);
+    for (from, to) in &mut h.inputs {
+        *from = sched.translate_off(*from);
+        *to = sched.translate_off(*to);
+    }
+    true
+}
+
 /// Rewrite every comb offset in `stmts` through the schedule.
 /// `CompiledBlock`s shift rigidly (their whole span is one unit by
 /// construction, so a single delta is exact).
@@ -672,6 +703,8 @@ fn apply_one(
 ) {
     match s {
         ProtoStatement::CompiledBlock(cb) => rigid_shift(cb, sched),
+        // Moved by `shift_hier_events` beforehand.
+        ProtoStatement::HierEvents(_) => {}
         ProtoStatement::SequentialBlock(body) => {
             for t in body {
                 apply_one(t, sched, f);
