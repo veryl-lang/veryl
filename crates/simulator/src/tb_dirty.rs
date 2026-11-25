@@ -201,18 +201,18 @@ impl SpanTable {
         // One span per element in the worst case: millions on an SoC memory.
         let capacity: usize = {
             let mut n = 0usize;
-            let mut stack = vec![&ir.module_variables];
+            let mut stack = vec![ir.module_variables.clone()];
             while let Some(vars) = stack.pop() {
                 for var in vars.variables.values() {
                     n += var.current_values.len() + var.next_values.len();
                 }
-                stack.extend(vars.children.iter());
+                stack.extend(vars.children());
             }
             n
         };
         let mut ff: Vec<Span> = Vec::with_capacity(capacity);
         let mut comb: Vec<Span> = Vec::new();
-        let mut stack = vec![&ir.module_variables];
+        let mut stack = vec![ir.module_variables.clone()];
         while let Some(vars) = stack.pop() {
             for var in vars.variables.values() {
                 // An unpacked array lays its elements out consecutively and
@@ -267,9 +267,7 @@ impl SpanTable {
                     }
                 }
             }
-            for child in &vars.children {
-                stack.push(child);
-            }
+            stack.extend(vars.children());
         }
         SpanTable {
             ff: disjoint_cover(ff).into(),

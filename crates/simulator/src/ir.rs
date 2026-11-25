@@ -374,7 +374,7 @@ impl Ir {
     fn declared_reset_polarity(&self, var: &Variable) -> Option<bool> {
         let &ptr = var.current_values.first()?;
         let mut found: Option<bool> = None;
-        let mut stack = vec![&self.module_variables];
+        let mut stack = vec![self.module_variables.clone()];
         while let Some(vars) = stack.pop() {
             for other in vars.variables.values() {
                 if other.current_values.first() != Some(&ptr) {
@@ -391,9 +391,7 @@ impl Ir {
                     Some(_) => {}
                 }
             }
-            for child in &vars.children {
-                stack.push(child);
-            }
+            stack.extend(vars.children());
         }
         found
     }
@@ -428,7 +426,7 @@ impl Ir {
         let comb_end = comb_base + self.comb_values.len();
         let ff_base = self.ff_values.as_ptr() as usize;
         let ff_end = ff_base + self.ff_values.len();
-        let mut stack = vec![(String::new(), &self.module_variables)];
+        let mut stack = vec![(String::new(), self.module_variables.clone())];
         while let Some((prefix, m)) = stack.pop() {
             let here = if prefix.is_empty() {
                 m.name.to_string()
@@ -452,7 +450,7 @@ impl Ir {
                     );
                 }
             }
-            stack.extend(m.children.iter().map(|c| (here.clone(), c)));
+            stack.extend(m.children().map(|c| (here.clone(), c)));
         }
     }
 
@@ -1283,8 +1281,8 @@ impl Ir {
                     }
                 }
             }
-            for child in &module.children {
-                if let Some(n) = find(child, addr, &format!("{prefix}{}.", child.name)) {
+            for child in module.children() {
+                if let Some(n) = find(&child, addr, &format!("{prefix}{}.", child.name)) {
                     return Some(n);
                 }
             }

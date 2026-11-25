@@ -277,57 +277,6 @@ fn fill_buffers_recursive(
     }
 }
 
-fn create_variables_recursive(
-    module_meta: &ModuleVariableMeta,
-    ff_base: *mut u8,
-    comb_base: *mut u8,
-) -> ModuleVariables {
-    let mut variables = HashMap::default();
-
-    for (id, meta) in &module_meta.variable_meta {
-        let mut current_values: Vec<*mut u8> = vec![];
-        let mut next_values: Vec<*mut u8> = vec![];
-
-        for element in &meta.elements {
-            let current = unsafe {
-                let base = if element.is_ff() { ff_base } else { comb_base };
-                base.add(element.current_offset() as usize)
-            };
-            current_values.push(current);
-
-            if element.is_ff() {
-                let next = unsafe { ff_base.add(element.next_offset as usize) };
-                next_values.push(next);
-            }
-        }
-
-        variables.insert(
-            *id,
-            Variable {
-                path: meta.path.clone(),
-                r#type: meta.r#type.clone(),
-                width: meta.width,
-                native_bytes: meta.native_bytes,
-                current_values,
-                next_values,
-                string_width: meta.string_width,
-            },
-        );
-    }
-
-    let children = module_meta
-        .children
-        .iter()
-        .map(|child| create_variables_recursive(child, ff_base, comb_base))
-        .collect();
-
-    ModuleVariables {
-        name: module_meta.name,
-        variables,
-        children,
-    }
-}
-
 impl ProtoModule {
     pub fn instantiate(&self) -> Module {
         log::trace!(
@@ -346,8 +295,7 @@ impl ProtoModule {
         let ff_base = ff_values.as_mut_ptr();
         let comb_base = comb_values.as_mut_ptr();
 
-        let module_variables =
-            create_variables_recursive(&self.module_variable_meta, ff_base, comb_base);
+        let module_variables = ModuleVariables::new(&self.module_variable_meta, ff_base, comb_base);
 
         let ff_ptr = ff_values.as_mut_ptr();
         let comb_ptr = comb_values.as_mut_ptr();
@@ -522,7 +470,7 @@ impl ProtoModule {
                     x.instantiate(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state)
                 })
                 .collect(),
-            tb_variables: create_variables_recursive(
+            tb_variables: ModuleVariables::new(
                 &ModuleVariableMeta {
                     name: self.name,
                     hierarchy: vec![],

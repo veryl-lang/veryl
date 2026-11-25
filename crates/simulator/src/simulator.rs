@@ -166,7 +166,7 @@ fn comb_element_cover(ir: &Ir) -> Vec<(usize, usize, usize)> {
     let comb_base = ir.comb_values.as_ptr() as usize;
     let comb_end = comb_base + ir.comb_values.len();
     let mut v: Vec<(usize, usize, usize)> = Vec::new();
-    let mut stack = vec![&ir.module_variables];
+    let mut stack = vec![ir.module_variables.clone()];
     while let Some(vars) = stack.pop() {
         for var in vars.variables.values() {
             // A 4-state element stores its mask bytes after the payload.
@@ -185,9 +185,7 @@ fn comb_element_cover(ir: &Ir) -> Vec<(usize, usize, usize)> {
                 }
             }
         }
-        for child in &vars.children {
-            stack.push(child);
-        }
+        stack.extend(vars.children());
     }
     v.sort_unstable();
     let mut out: Vec<(usize, usize, usize)> = Vec::with_capacity(v.len());
@@ -637,9 +635,9 @@ impl Simulator {
                         return Some(format!("{prefix}{}", v.path));
                     }
                 }
-                for child in &module.children {
+                for child in module.children() {
                     if let Some(n) =
-                        find_var_by_ptr(child, ptr, &format!("{prefix}{}.", child.name))
+                        find_var_by_ptr(&child, ptr, &format!("{prefix}{}.", child.name))
                     {
                         return Some(n);
                     }
@@ -675,8 +673,8 @@ impl Simulator {
                 for var in module.variables.values() {
                     eprintln!("[step_watch_list] {prefix}{}", var.path);
                 }
-                for child in &module.children {
-                    dump_tree(child, &format!("{prefix}{}.", child.name));
+                for child in module.children() {
+                    dump_tree(&child, &format!("{prefix}{}.", child.name));
                 }
             }
             dump_tree(&ret.ir.module_variables, "");
@@ -1083,10 +1081,10 @@ impl Simulator {
     ) -> Option<Value> {
         // If target has multiple segments, try matching child module by name first
         if target.0.len() > 1 {
-            for child in &module.children {
+            for child in module.children() {
                 if child.name == target.0[0] {
                     let sub = VarPath::from_slice(&target.0[1..]);
-                    if let Some(v) = Self::find_var_in_module(child, &sub, use_4state) {
+                    if let Some(v) = Self::find_var_in_module(&child, &sub, use_4state) {
                         return Some(v);
                     }
                 }
@@ -1121,9 +1119,9 @@ impl Simulator {
         out: &mut Vec<(*const u8, usize, u32)>,
     ) {
         if let Some((head, rest)) = target.split_once('.') {
-            for child in &module.children {
+            for child in module.children() {
                 if child.name.to_string() == head {
-                    Self::collect_var_meta_in_module(child, rest, elem, out);
+                    Self::collect_var_meta_in_module(&child, rest, elem, out);
                 }
             }
         }
