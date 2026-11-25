@@ -98,6 +98,9 @@ pub struct CombPipeline {
     /// master input clock offsets it starts from.
     #[allow(clippy::type_complexity)]
     pub master_cone: Mutex<Option<(Vec<isize>, Option<Vec<ProtoStatement>>)>>,
+    /// Child-module meta lists translated through `layout`, shared by the
+    /// tests whose reused subtrees hand in the same lists.
+    pub layout_meta: Mutex<crate::ir::comb_layout::MetaMemo>,
 }
 
 enum Slot {

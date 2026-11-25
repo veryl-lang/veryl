@@ -33,7 +33,7 @@ impl InstLayout {
     /// contains at least one FF VariableElement.
     pub fn build_from_top(top: &ModuleVariableMeta) -> Self {
         let mut ranges = Vec::with_capacity(top.children.len());
-        for child in &top.children {
+        for child in top.children.iter() {
             if let Some((s, e)) = compute_ff_extent(child) {
                 ranges.push(InstFfRange {
                     name: child.name,
@@ -88,7 +88,7 @@ fn accumulate(meta: &ModuleVariableMeta, min: &mut Option<u32>, max: &mut Option
             }
         }
     }
-    for child in &meta.children {
+    for child in meta.children.iter() {
         accumulate(child, min, max);
     }
 }

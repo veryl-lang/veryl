@@ -465,7 +465,7 @@ pub fn build_inputs(
             &mut comb_var,
             &mut ff_next_alias,
         );
-        for c in &m.children {
+        for c in m.children.iter() {
             stack.push((id, c));
         }
     }

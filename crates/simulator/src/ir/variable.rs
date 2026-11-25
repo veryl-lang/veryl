@@ -771,7 +771,8 @@ pub struct ModuleVariableMeta {
     /// `air::InstDeclaration::hierarchy`; empty for a plain instance or the top.
     pub hierarchy: Vec<StrId>,
     pub variable_meta: HashMap<VarId, VariableMeta>,
-    pub children: Vec<ModuleVariableMeta>,
+    /// Shared: tests reusing a subtree share its metadata too.
+    pub children: std::sync::Arc<Vec<ModuleVariableMeta>>,
 }
 
 /// Hierarchical variable tree with resolved pointers into the flat buffers.

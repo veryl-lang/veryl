@@ -1342,9 +1342,93 @@ fn trace_sort_cycles(
     }
 }
 
+/// A comb statement list whose reused parts stay shared with the cache they
+/// came from: a test hitting the comb pipeline cache only fingerprints them.
+#[derive(Default)]
+pub struct CombList(Vec<CombPart>);
+
+enum CombPart {
+    Owned(Vec<ProtoStatement>),
+    Shared(Arc<Vec<ProtoStatement>>),
+}
+
+impl CombPart {
+    fn as_slice(&self) -> &[ProtoStatement] {
+        match self {
+            CombPart::Owned(v) => v,
+            CombPart::Shared(v) => v,
+        }
+    }
+}
+
+impl From<Vec<ProtoStatement>> for CombList {
+    fn from(stmts: Vec<ProtoStatement>) -> Self {
+        Self(vec![CombPart::Owned(stmts)])
+    }
+}
+
+impl CombList {
+    pub fn push(&mut self, stmt: ProtoStatement) {
+        self.extend(std::iter::once(stmt));
+    }
+
+    pub fn shared(stmts: Arc<Vec<ProtoStatement>>) -> Self {
+        Self(vec![CombPart::Shared(stmts)])
+    }
+
+    pub fn append(&mut self, other: &mut CombList) {
+        self.0.append(&mut other.0);
+    }
+
+    pub fn extend(&mut self, stmts: impl IntoIterator<Item = ProtoStatement>) {
+        if !matches!(self.0.last(), Some(CombPart::Owned(_))) {
+            self.0.push(CombPart::Owned(Vec::new()));
+        }
+        if let Some(CombPart::Owned(v)) = self.0.last_mut() {
+            v.extend(stmts);
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ProtoStatement> {
+        self.0.iter().flat_map(|p| p.as_slice().iter())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.iter().map(|p| p.as_slice().len()).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn into_vec(self) -> Vec<ProtoStatement> {
+        let mut out = Vec::with_capacity(self.len());
+        for part in self.0 {
+            match part {
+                CombPart::Owned(mut v) => out.append(&mut v),
+                CombPart::Shared(v) => match Arc::try_unwrap(v) {
+                    Ok(mut v) => out.append(&mut v),
+                    Err(v) => out.extend(v.iter().cloned()),
+                },
+            }
+        }
+        out
+    }
+}
+
+impl std::hash::Hash for CombList {
+    /// Hashes as the concatenated slice would.
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.len());
+        for s in self.iter() {
+            s.hash(state);
+        }
+    }
+}
+
 pub struct ProtoDeclaration {
     pub event_statements: HashMap<Event, Vec<ProtoStatement>>,
-    pub comb_statements: Vec<ProtoStatement>,
+    pub comb_statements: CombList,
     /// Post-comb functions: child comb-only JIT functions for pre-event eval.
     pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
@@ -1422,7 +1506,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 }
                 Ok(ProtoDeclaration {
                     event_statements: HashMap::default(),
-                    comb_statements,
+                    comb_statements: comb_statements.into(),
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
@@ -1498,7 +1582,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
 
                 Ok(ProtoDeclaration {
                     event_statements,
-                    comb_statements: vec![],
+                    comb_statements: CombList::default(),
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
@@ -1531,7 +1615,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 event_statements.insert(Event::Initial, initial_statements);
                 Ok(ProtoDeclaration {
                     event_statements,
-                    comb_statements: vec![],
+                    comb_statements: CombList::default(),
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
@@ -1549,7 +1633,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 event_statements.insert(Event::Final, final_statements);
                 Ok(ProtoDeclaration {
                     event_statements,
-                    comb_statements: vec![],
+                    comb_statements: CombList::default(),
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
@@ -1622,7 +1706,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 }
                 Ok(ProtoDeclaration {
                     event_statements: HashMap::default(),
-                    comb_statements: vec![],
+                    comb_statements: CombList::default(),
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
@@ -1639,7 +1723,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
             }
             air::Declaration::Null => Ok(ProtoDeclaration {
                 event_statements: HashMap::default(),
-                comb_statements: vec![],
+                comb_statements: CombList::default(),
                 post_comb_fns: vec![],
                 child_modules: vec![],
                 derived_clock_candidates: vec![],
@@ -2611,7 +2695,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         }
 
         let mut all_event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
-        let mut all_comb_statements: Vec<ProtoStatement> = vec![];
+        let mut all_comb_statements = CombList::default();
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut all_derived_clock_candidates: Vec<EdgeCandidate> = vec![];
@@ -2737,6 +2821,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.scope_contexts.pop();
 
             if !has_reference_aliases {
+                let mut comb = std::mem::take(&mut all_comb_statements).into_vec();
                 try_compile_inst_chunks(
                     context,
                     src,
@@ -2744,8 +2829,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     comb_start,
                     alias_enabled,
                     &mut all_event_statements,
-                    &mut all_comb_statements,
+                    &mut comb,
                 );
+                all_comb_statements = CombList::from(comb);
             }
 
             // Publish this component's whole internal subtree (statements +
@@ -2758,13 +2844,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             if let Some(guard) = claim_guard {
                 let ff_size = context.ff_total_bytes - ff_start as usize;
                 let comb_size = context.comb_total_bytes - comb_start as usize;
+                let comb = Arc::new(std::mem::take(&mut all_comb_statements).into_vec());
+                all_comb_statements = CombList::shared(Arc::clone(&comb));
                 guard.store(
                     ff_start,
                     comb_start,
                     ff_size,
                     comb_size,
                     &all_event_statements,
-                    &all_comb_statements,
+                    comb,
                     &all_post_comb_fns,
                     &all_child_modules,
                     &all_derived_clock_candidates,
@@ -2792,7 +2880,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
             let input_expr = &input.expr;
             if let Some(expressions) = input_port_array_elements(context, input_expr, child_meta)? {
-                all_comb_statements.append(&mut context.pending_statements);
+                all_comb_statements.extend(context.pending_statements.drain(..));
                 for (element, expr) in child_meta.elements.iter().zip(expressions) {
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: element.current,
@@ -3336,7 +3424,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             name: src.name,
             hierarchy: src.hierarchy.clone(),
             variable_meta: child_variable_meta,
-            children: all_child_modules,
+            children: Arc::new(all_child_modules),
         };
 
         Ok(ProtoDeclaration {

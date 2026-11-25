@@ -272,7 +272,7 @@ fn fill_buffers_recursive(
         }
     }
 
-    for child in &module_meta.children {
+    for child in module_meta.children.iter() {
         fill_buffers_recursive(child, ff_values, comb_values, use_4state);
     }
 }
@@ -527,7 +527,7 @@ impl ProtoModule {
                     name: self.name,
                     hierarchy: vec![],
                     variable_meta: self.tb_variables.clone(),
-                    children: vec![],
+                    children: Default::default(),
                 },
                 ff_base,
                 comb_base,
@@ -640,7 +640,7 @@ fn validate_meta_offsets(
             }
         }
     }
-    for child in &meta.children {
+    for child in meta.children.iter() {
         validate_meta_offsets(child, ff_bytes, comb_bytes, use_4state);
     }
 }
@@ -1872,6 +1872,7 @@ fn run_comb_pipeline(
         vsplit_temp_bytes,
         gate_comb: Default::default(),
         master_cone: Default::default(),
+        layout_meta: Default::default(),
     })
 }
 
@@ -4711,7 +4712,7 @@ fn build_offset_path_map(meta: &ModuleVariableMeta) -> HashMap<VarOffset, String
                 out.insert(element.current, display);
             }
         }
-        for child in &meta.children {
+        for child in meta.children.iter() {
             walk(child, &mod_prefix, out);
         }
     }
@@ -6003,7 +6004,7 @@ impl Conv<&air::Module> for ProtoModule {
         context.scope_contexts.push(scope);
 
         let mut all_event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
-        let mut all_comb_statements: Vec<ProtoStatement> = vec![];
+        let mut all_comb_statements = super::declaration::CombList::default();
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut nested_derived_clock_candidates: Vec<crate::ir::EdgeCandidate> = vec![];
@@ -6074,15 +6075,18 @@ impl Conv<&air::Module> for ProtoModule {
         // expanded on demand by `analyze_dependency` Phase 2 when fine-grained
         // ordering is needed.  This eliminates the false SCC artifact from
         // keeping both CB and its originals in the parent's `unified` list.
-        let mut unified: Vec<ProtoStatement> = all_comb_statements
-            .into_iter()
-            .chain(all_post_comb_fns)
-            .collect();
+        // Kept as its parts, which a reused subtree shares with the cache,
+        // until the miss path needs to own it.
+        let mut unified_parts = all_comb_statements;
+        unified_parts.extend(all_post_comb_fns);
 
         // Before the expansion below splices a reused child's tree in; see
         // `comb_pipeline_key` for why this still pins the pipeline's input.
-        let unified_fp =
-            crate::backend::registry::comb_list_fingerprint(context.config.use_4state, &unified, 0);
+        let unified_fp = crate::backend::registry::comb_list_fingerprint(
+            context.config.use_4state,
+            &unified_parts,
+            0,
+        );
 
         // Baked inst-chunk artifacts would freeze their spans into rigid
         // units (see `expand_compiled_blocks`) — expand them BEFORE the key
@@ -6340,6 +6344,7 @@ impl Conv<&air::Module> for ProtoModule {
             // unfuse the comb list, run the pipeline once (it DCEs the events
             // in place) and publish.
             other => {
+                let mut unified = unified_parts.into_vec();
                 if comb_layout::enabled(context.config.use_4state) {
                     comb_layout::expand_compiled_blocks(&mut unified);
                 }
@@ -6431,8 +6436,9 @@ impl Conv<&air::Module> for ProtoModule {
                 comb_layout::apply_to_stmts(stmts, &sched);
             }
             comb_layout::translate_meta_map(&mut variable_meta, &sched);
+            let mut memo = cached.layout_meta.lock().unwrap();
             for child in &mut all_child_modules {
-                comb_layout::translate_meta_tree(child, &sched);
+                comb_layout::translate_meta_shared(child, &sched, &mut memo);
             }
             for (_, off, _, _, _) in &mut nested_derived_clock_candidates {
                 *off = sched.translate_off(*off);
@@ -6991,7 +6997,7 @@ impl Conv<&air::Module> for ProtoModule {
             name: src.name,
             hierarchy: vec![],
             variable_meta,
-            children: all_child_modules,
+            children: Arc::new(all_child_modules),
         };
 
         let inst_layout = InstLayout::build_from_top(&module_variable_meta);
@@ -7750,7 +7756,7 @@ fn collect_reset_offsets(
 
 fn collect_reset_offsets_recursive(m: &ModuleVariableMeta, out: &mut crate::HashSet<VarOffset>) {
     collect_reset_offsets(&m.variable_meta, out);
-    for child in &m.children {
+    for child in m.children.iter() {
         collect_reset_offsets_recursive(child, out);
     }
 }
