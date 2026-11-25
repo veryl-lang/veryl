@@ -1317,9 +1317,8 @@ fn struct_constructor_wide_member_offset() {
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
 
-        crate::assert_buffer::reset();
         sim.step(&Event::Initial);
-        assert!(!crate::assert_buffer::has_fatal(), "{config:?}");
+        assert!(!sim.status.has_fatal(), "{config:?}");
     }
 }
 
@@ -9717,10 +9716,9 @@ fn assert_fail() {
     let config = Config::default();
     let ir = analyze(code, &config);
     let mut sim = Simulator::new(ir, None);
-    crate::assert_buffer::reset();
     sim.step(&Event::Initial);
-    assert!(crate::assert_buffer::has_fatal());
-    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert!(sim.status.has_fatal());
+    let msg = sim.status.take_failure().unwrap();
     assert_eq!(msg, "assertion failed");
 }
 
@@ -9758,10 +9756,9 @@ fn assert_with_format_fail() {
     let config = Config::default();
     let ir = analyze(code, &config);
     let mut sim = Simulator::new(ir, None);
-    crate::assert_buffer::reset();
     sim.step(&Event::Initial);
-    assert!(crate::assert_buffer::has_fatal());
-    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert!(sim.status.has_fatal());
+    let msg = sim.status.take_failure().unwrap();
     assert_eq!(msg, "mismatch: a=5 b=9");
 }
 
@@ -9780,10 +9777,9 @@ fn assert_continue_accumulates_failures() {
     let config = Config::default();
     let ir = analyze(code, &config);
     let mut sim = Simulator::new(ir, None);
-    crate::assert_buffer::reset();
     sim.step(&Event::Initial);
-    assert!(!crate::assert_buffer::has_fatal());
-    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert!(!sim.status.has_fatal());
+    let msg = sim.status.take_failure().unwrap();
     assert_eq!(msg, "first\nsecond");
 }
 
@@ -25823,7 +25819,6 @@ fn runtime_stepped_for_stall_guard_terminates() {
     "#;
     for config in Config::all() {
         dbg!(&config);
-        crate::assert_buffer::reset();
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
         sim.set("i_n", Value::new(10, 8, false));
@@ -25835,10 +25830,9 @@ fn runtime_stepped_for_stall_guard_terminates() {
             "config={config:?}"
         );
         assert!(
-            crate::assert_buffer::has_fatal(),
+            sim.status.has_fatal(),
             "non-progressing loop should be reported: config={config:?}"
         );
-        crate::assert_buffer::reset();
     }
 }
 

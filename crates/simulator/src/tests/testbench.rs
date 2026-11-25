@@ -2300,6 +2300,143 @@ fn tb_assert_fatal_stops_execution() {
     }
 }
 
+/// Runs every `initial` block of `top` as the native testbench does, and
+/// keeps the simulator to look at where the run stopped.
+#[track_caller]
+fn run_blocks_keeping_sim(
+    code: &str,
+    top: &str,
+    config: &Config,
+    dump: bool,
+) -> (TestResult, Simulator) {
+    let ir = analyze_top(code, config, top)
+        .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+    let dump = dump.then(|| {
+        use crate::wave_dumper::{SharedVec, WaveDumper};
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        WaveDumper::new_vcd(Box::new(SharedVec(buf)))
+    });
+    let mut sim = Simulator::new(ir, dump);
+    let event_map = build_event_map(&sim.ir);
+    let clock_periods = build_clock_periods(&sim.ir.event_statements);
+    let mut initials: Vec<(u32, Vec<crate::ir::Statement>)> = sim
+        .ir
+        .event_statements
+        .iter()
+        .filter_map(|(event, stmts)| event.initial_index().map(|i| (i, stmts.clone())))
+        .collect();
+    initials.sort_by_key(|(i, _)| *i);
+    let blocks: Vec<Vec<TestbenchStatement>> = initials
+        .iter()
+        .map(|(_, stmts)| convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3))
+        .collect();
+    let slices: Vec<&[TestbenchStatement]> = blocks.iter().map(Vec::as_slice).collect();
+    let result = crate::testbench::run_testbench_blocks(&mut sim, &slices);
+    (result, sim)
+}
+
+/// `$assert` and `$finish` in the design end the run at the end of the
+/// cycle they are evaluated in, whether the testbench is one process stepping
+/// the clock in place or several run by the scheduler, and whether the
+/// statement is in an `always_ff` with other writes, in one with none, or in
+/// an `always_comb`.  Dumping a waveform, which settles the comb after each
+/// edge, does not move the stop.
+#[test]
+fn design_assert_and_finish_stop_at_their_cycle() {
+    let template = r#"
+    module Counter (
+        i_clk: input  clock   ,
+        i_rst: input  reset   ,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+                FF_BODY
+            }
+        }
+        OTHER
+    }
+
+    #[test(test_stop)]
+    module test_stop {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            rst.assert();
+            clk.next(100);
+            $finish();
+        }
+        EXTRA_INITIAL
+    }
+    "#;
+    // (body of the `always_ff`, another item of `Counter`, whether the run
+    // fails, `o_cnt` once it stopped)
+    let cases = [
+        ("$assert(o_cnt != 20);", "", true, 21),
+        ("if o_cnt == 20 { $finish(); }", "", false, 21),
+        ("", "always_ff { if o_cnt == 20 { $finish(); } }", false, 21),
+        // Guarded: before the reset `o_cnt` is X, which fails a bare
+        // `$assert(o_cnt != 20)` in four-state mode.
+        (
+            "",
+            "always_ff { if o_cnt == 20 { $assert(1 == 0); } }",
+            true,
+            21,
+        ),
+        // The comb settles lazily, at the start of the next step, so it sees
+        // `o_cnt == 20` only then, and the run stops after that edge.
+        (
+            "",
+            "always_comb { if o_cnt == 20 { $finish(); } }",
+            false,
+            21,
+        ),
+        // The run stops at the edge that finished it, and the comb's failure
+        // in the state it left is still reported, whether or not a dump
+        // settled the comb before the run ended.
+        (
+            "if o_cnt == 20 { $finish(); }",
+            "always_comb { if o_cnt == 21 { $assert(1 == 0); } }",
+            true,
+            21,
+        ),
+    ];
+    let extras = ["", "initial { clk.next(200); }"];
+    for (ff_body, other, fails, cnt) in cases {
+        for extra in extras {
+            let code = template
+                .replace("FF_BODY", ff_body)
+                .replace("OTHER", other)
+                .replace("EXTRA_INITIAL", extra);
+            for (config, dump) in Config::all()
+                .into_iter()
+                .flat_map(|c| [(c.clone(), false), (c, true)])
+            {
+                let (result, mut sim) = run_blocks_keeping_sim(&code, "test_stop", &config, dump);
+                let label = format!("{ff_body} {other} {extra} dump={dump} {config:?}");
+                match (&result, fails) {
+                    (TestResult::Fail(msg), true) => {
+                        assert_eq!(msg, "assertion failed", "{label}");
+                    }
+                    (TestResult::Pass, false) => {}
+                    _ => panic!("unexpected {result:?}: {label}"),
+                }
+                assert_eq!(
+                    sim.get_var("o_cnt").unwrap(),
+                    Value::new(cnt, 8, false),
+                    "{label}"
+                );
+            }
+        }
+    }
+}
+
 // Regression: a `for ... step <<<= 1` loop (un-unrolled in a test module,
 // JIT-compiled) was lowered with an `i + step` fallback for every step op
 // except Mul/LSL, so the JIT iterated 1,2,3,... instead of 1,2,4,8,16.
