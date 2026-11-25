@@ -2170,15 +2170,79 @@ fn extend_scalar_operand(s: &str, src_width: usize, width: usize, signed: bool) 
     }
 }
 
+/// An FF byte offset as event code logs it.  Every offset a push records
+/// goes through this type (and `log_const`), so code shared by several
+/// instances has one place to make it relative.
+#[derive(Clone)]
+pub(super) enum LogOffset {
+    /// Known when the code is generated.
+    At(u32),
+    /// A C expression evaluated at run time.
+    Runtime(String),
+}
+
+impl LogOffset {
+    pub(super) fn constant(off: isize) -> Self {
+        match u32::try_from(off) {
+            Ok(o) => LogOffset::At(o),
+            Err(_) => LogOffset::Runtime(format!("{off:#x}")),
+        }
+    }
+
+    fn c(&self) -> String {
+        match self {
+            LogOffset::At(o) => log_const(*o as isize),
+            LogOffset::Runtime(e) => e.clone(),
+        }
+    }
+
+    /// `self + k`, folded for a constant so that `df_ff_push_target` can
+    /// place the push instead of marking every reader.
+    fn plus(&self, k: usize) -> Self {
+        match self {
+            LogOffset::At(o) => LogOffset::At(o + k as u32),
+            LogOffset::Runtime(e) if k == 0 => LogOffset::Runtime(e.clone()),
+            LogOffset::Runtime(e) => LogOffset::Runtime(format!("(({e}) + {k}u)")),
+        }
+    }
+}
+
+/// A logged FF offset written into a runtime offset expression.  Code shared
+/// by template instances logs relative to the instance's FF delta, `_ffr`.
+pub(super) fn log_const(off: isize) -> String {
+    if shared_event() {
+        format!("({off:#x} + _ffr)")
+    } else {
+        format!("{off:#x}")
+    }
+}
+
+/// `log_const` as an `unsigned` operand.
+fn log_const_u(off: isize) -> String {
+    if shared_event() {
+        format!("(unsigned)({off:#x} + _ffr)")
+    } else {
+        format!("{off:#x}u")
+    }
+}
+
+/// `log_const` as an `unsigned long long` operand.
+pub(super) fn log_const_ull(off: isize) -> String {
+    if shared_event() {
+        format!("(unsigned long long)({off} + _ffr)")
+    } else {
+        format!("{off}ull")
+    }
+}
+
 /// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
-/// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`
-/// (a C expression), known to lie in FF bytes `span` (see
-/// `emit_log_push_in`).  Each entry holds ≤56 bytes; larger values chunk.
+/// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`,
+/// known to lie in FF bytes `span` (see `emit_log_push_in`).  Each entry holds ≤56 bytes; larger values chunk.
 /// Unchecked: the event prologue's bulk reserve guarantees room.
 /// Mirrors `event_write_log_push_wide` and Cranelift's `emit_wide_log_chunks`.
 fn emit_wide_log_chunks(
     src_ptr: &str,
-    base_off: &str,
+    base_off: &LogOffset,
     nb: usize,
     span: Option<(u32, u32)>,
 ) -> String {
@@ -2208,7 +2272,7 @@ fn emit_wide_log_chunks(
             o_off = WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
             o_nb = WRITE_LOG_WIDE_ENTRY_OFFSET_NB,
             o_pay = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD,
-            base = base_off,
+            base = base_off.c(),
             src = src_ptr,
             w = written,
         ));
@@ -2225,35 +2289,25 @@ fn emit_wide_log_chunks(
 /// the range, so `elem_ptr` must hold the pending value over those words.
 fn emit_ff_elem_log(
     elem_ptr: &str,
-    elem_off: &str,
+    elem_off: &LogOffset,
     ff_nb: usize,
     (blo, blen): (usize, usize),
     span: Option<(u32, u32)>,
 ) -> String {
     let from = format!("(({elem_ptr}) + {blo}u)");
-    let at = offset_plus(elem_off, blo);
+    let at = elem_off.plus(blo);
     if ff_nb > 16 {
         return emit_wide_log_chunks(&from, &at, blen, span);
     }
     let mut out = df_ff_wide_push_mark(&at, &from, blen, span);
     for w in blo / 8..(blo + blen).div_ceil(8) {
         out.push_str(&emit_log_entry(
-            &offset_plus(elem_off, w * 8),
+            &elem_off.plus(w * 8),
             &format!("*(const veryl_u64_ua *)(({elem_ptr}) + {}u)", w * 8),
             8,
         ));
     }
     out
-}
-
-/// `base + k` as a C offset, folded when `base` is a constant so that
-/// `df_ff_push_target` can place the push instead of marking every reader.
-fn offset_plus(base: &str, k: usize) -> String {
-    match parse_offset(base) {
-        Some(b) => format!("{:#x}", b as usize + k),
-        None if k == 0 => base.to_string(),
-        None => format!("(({base}) + {k}u)"),
-    }
 }
 
 /// Lazily-published compiled `.so`.  `None` while the background
@@ -2267,6 +2321,19 @@ pub type AotCell = Arc<OnceLock<EmittedModule>>;
 // everything else bails to Cranelift.
 use std::cell::Cell;
 thread_local! {
+    /// Emitting a template's event statements shared by its instances.
+    static SHARED_EVENT: Cell<bool> = const { Cell::new(false) };
+    /// Port storage a shared template body reads through an input pointer.
+    static SHARED_INPUTS: RefCell<Vec<(VarOffset, String)>> = const { RefCell::new(Vec::new()) };
+    /// The marks a shared template body sets, in the reference instance's
+    /// offsets, each with its first entry in the instance's mark table.
+    static SHARED_MARKS: RefCell<Vec<MarkSite>> = const { RefCell::new(Vec::new()) };
+    /// Every instance's deltas of each shared body, by the body's address:
+    /// a write is marked when any of them has readers there.
+    static TEV_PEERS: RefCell<TevPeers> =
+        RefCell::new(HashMap::default());
+    /// The peers of the body being emitted.
+    static SHARED_PEERS: RefCell<Arc<Vec<(isize, isize)>>> = RefCell::new(Arc::new(Vec::new()));
     static EVENT_MODE: Cell<bool> = const { Cell::new(false) };
     static EVENT_SKIP_UNCHANGED: Cell<bool> = const { Cell::new(false) };
     // Worst-case narrow/wide pushes per `veryl_aot_eval` invocation,
@@ -2278,6 +2345,18 @@ thread_local! {
 }
 fn event_mode() -> bool {
     EVENT_MODE.with(|c| c.get())
+}
+fn shared_event() -> bool {
+    SHARED_EVENT.with(|c| c.get())
+}
+/// The input pointer a shared template body reads `off` through.
+fn input_read(off: &VarOffset) -> Option<String> {
+    SHARED_INPUTS.with(|v| {
+        v.borrow()
+            .iter()
+            .find(|(o, _)| o == off)
+            .map(|(_, nm)| nm.clone())
+    })
 }
 fn set_event_mode(on: bool) {
     EVENT_MODE.with(|c| c.set(on));
@@ -2394,24 +2473,24 @@ fn guard_push(changed: &str, push: &str) -> String {
 /// Inline narrow WriteLogEntry push.  `offset_expr` / `payload_expr`
 /// are C expressions; `wc` is native bytes ∈ {1,2,4,8}.  Unchecked: the
 /// event prologue's bulk reserve guarantees room.
-fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
-    emit_log_push_in(offset_expr, payload_expr, wc, None)
+fn emit_log_push(offset: &LogOffset, payload_expr: &str, wc: usize) -> String {
+    emit_log_push_in(offset, payload_expr, wc, None)
 }
 
 /// `emit_log_push` for a runtime offset known to lie in FF bytes `span`: the
 /// change test reads the runtime slot, the marks cover every reader of `span`.
 fn emit_log_push_in(
-    offset_expr: &str,
+    offset: &LogOffset,
     payload_expr: &str,
     wc: usize,
     span: Option<(u32, u32)>,
 ) -> String {
-    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
-    format!("{mark}{}", emit_log_entry(offset_expr, payload_expr, wc))
+    let mark = df_ff_push_mark(offset, payload_expr, wc, span);
+    format!("{mark}{}", emit_log_entry(offset, payload_expr, wc))
 }
 
 /// The narrow entry push of `emit_log_push_in`, without its dataflow mark.
-fn emit_log_entry(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
+fn emit_log_entry(offset: &LogOffset, payload_expr: &str, wc: usize) -> String {
     // Offsets shared with the Cranelift push via write_log.rs consts,
     // so a layout change can't silently desync this emitted C.
     use crate::ir::write_log::{
@@ -2437,7 +2516,7 @@ fn emit_log_entry(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
         o_mask = WRITE_LOG_ENTRY_OFFSET_MASK_XZ,
         o_wc = WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS,
         o_pay = WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
-        off = offset_expr,
+        off = offset.c(),
         pay = payload_expr,
         wc = wc,
     )
@@ -3229,7 +3308,7 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -
         &format!("_c{d}"),
         &emit_ff_elem_log(
             &format!("(uint8_t*)_w{d}"),
-            &format!("{cur_off:#x}"),
+            &LogOffset::constant(cur_off),
             native_bytes(a.dst_width),
             (0, nb),
             None,
@@ -3294,7 +3373,7 @@ fn emit_wide_ff_rmw_tail(
         &flag,
         &emit_ff_elem_log(
             &format!("(uint8_t*){reg}"),
-            &format!("{cur_off:#x}"),
+            &LogOffset::constant(cur_off),
             nb,
             (blo, blen),
             None,
@@ -3343,7 +3422,7 @@ fn emit_event_ff_assign_wide_field(
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
         let log = emit_ff_elem_log(
             &format!("(uint8_t*)(ff_values + {dst_raw:#x})"),
-            &format!("{cur_off:#x}"),
+            &LogOffset::constant(cur_off),
             nb,
             (blo, blen),
             None,
@@ -3488,7 +3567,7 @@ fn emit_event_ff_assign_wide_select(
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
         body.push_str(&guard_push(
             &flag,
-            &emit_ff_elem_log(&dst, &format!("{cur_off:#x}"), nb, (blo, blen), None),
+            &emit_ff_elem_log(&dst, &LogOffset::constant(cur_off), nb, (blo, blen), None),
         ));
         return Some(format!("{{ {body} }}"));
     }
@@ -3751,7 +3830,10 @@ fn emit_event_ff_assign_wide_dynsel(
         &format!("_c{d}"),
         &emit_ff_elem_log(
             &format!("(uint8_t*)_w{d}"),
-            &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
+            &LogOffset::Runtime(format!(
+                "({} + (unsigned)(_di{d} * {nb}u))",
+                log_const_u(cur_off)
+            )),
             native_bytes(a.dst_width),
             (0, nb),
             u32::try_from(cur_off)
@@ -3800,7 +3882,7 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
     // Dual-slot FF: dst is the next slot (cur_off + nb); mirror the interpret
     // path by writing the next slot directly AND pushing the log at cur_off.
     let packed = dst_raw == cur_off;
-    let log_off = format!("{:#x}", cur_off);
+    let log_off = LogOffset::constant(cur_off);
     let dst_off = format!("{:#x}", dst_raw);
     let dwmask = width_mask(a.dst_width);
     let rhs = apply_rhs_select(emit_expr_root(&a.expr)?, a.rhs_select)?;
@@ -4003,7 +4085,7 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
         )
     };
     let span = dyn_ff_span(a, cur_base, nb);
-    let push = emit_log_push_in("_woff", "_wval", nb, span);
+    let push = emit_log_push_in(&LogOffset::Runtime("_woff".into()), "_wval", nb, span);
     // Packed: skip the in-place store; the log push delivers it read-OLD (NBA).
     // See AssignDynamicStatement::ff_is_packed. Unpacked keeps it.
     let ff_is_packed = dst_base_raw == cur_base;
@@ -4023,13 +4105,13 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
             {g0}{sel_guard}uint64_t _wval = {pay}; \
             {store}\
-            unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
+            unsigned int _woff = (unsigned int)((intptr_t){cbase} + (intptr_t){stride} * (intptr_t)_idx); \
             {push}{sel_close}{g1} }});",
         idx = idx,
         max = max_idx,
         pay = payload,
         store = store,
-        cbase = cur_base,
+        cbase = log_const(cur_base),
         stride = a.dst_stride,
         push = push,
     ))
@@ -4161,21 +4243,27 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
     let span = dyn_ff_span(a, cur_base, nb);
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_ff_elem_log(&format!("(uint8_t*)_w{d}"), "_woff", nb, (0, nb), span),
+        &emit_ff_elem_log(
+            &format!("(uint8_t*)_w{d}"),
+            &LogOffset::Runtime("_woff".into()),
+            nb,
+            (0, nb),
+            span,
+        ),
     );
     let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
         "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
             {g0}{pre}{flag}{store}\
-            unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
+            unsigned int _woff = (unsigned int)((intptr_t){cbase} + (intptr_t){stride} * (intptr_t)_idx); \
             {push}{sel_close}{g1} }}",
         idx = idx,
         max = max_idx,
         pre = pre,
         flag = flag,
         store = store,
-        cbase = cur_base,
+        cbase = log_const(cur_base),
         stride = a.dst_stride,
         push = push,
     ))
@@ -4318,7 +4406,9 @@ fn compile_pool() -> &'static CompileQueue {
                         // the pool (compile_source returns Err for all expected
                         // failures, so this only ever fires on a bug).
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            if let Ok(m) = compile_source(&job.src) {
+                            if let Ok(m) = compile_source(&job.src)
+                                && tev_ready(&job.src)
+                            {
                                 publish(m, &job.cell, &job.fanout);
                             }
                         }));
@@ -4370,7 +4460,9 @@ fn compile_into(src: String, async_mode: bool, cell: AotCell, fanout: Vec<AotCel
             jobs.push(job);
             pool.ready.notify_one();
         }
-    } else if let Ok(m) = compile_source(&src) {
+    } else if let Ok(m) = compile_source(&src)
+        && tev_ready(&src)
+    {
         publish(m, &cell, &fanout);
     }
 }
@@ -4407,7 +4499,7 @@ pub fn prepare_event(
     let marks = DF_EVENT_MARKS.with(|m| m.borrow().clone());
     let comb_marked = marks
         .as_ref()
-        .is_some_and(|marks| dataflow_event_covered(stmts, marks));
+        .is_some_and(|marks| dataflow_event_covered(&crate::ir::flat_stmts(stmts), marks));
     let ff_marked = marks.is_some() && !DF_FF_UNCOVERED.with(|c| c.get());
     if marks.is_some() && crate::ir::opt::dataflow::diag() {
         let why = DF_FF_UNCOVERED_WHY.with(|c| c.replace([0; 2]));
@@ -4504,7 +4596,7 @@ pub fn finish_event_batch(async_mode: bool) {
         let src = batch_source(&header, events.iter().map(|e| e.1.as_str()));
         let (_, _, hash) = compile_key(&src);
         for (k, (p, _)) in events.iter().enumerate() {
-            index_event_slot(p.input, &hash, k, p.comb_marked, p.ff_marked);
+            index_event_slot(p.input, &hash, k, (p.comb_marked, p.ff_marked), &p.src);
         }
         let async_mode = async_mode && !is_compiled(&src);
         let cells = events.into_iter().map(|(p, _)| p.cell).collect();
@@ -4751,8 +4843,24 @@ fn index_event(input: Option<u128>, src: &str, comb_marked: bool, ff_marked: boo
     let (_, _, hash) = compile_key(src);
     let _ = veryl_path::atomic_write(
         &path,
-        format!("{hash} {} {}\n", comb_marked as u8, ff_marked as u8).as_bytes(),
+        format!(
+            "{hash} {} {}{}\n",
+            comb_marked as u8,
+            ff_marked as u8,
+            index_deps(src)
+        )
+        .as_bytes(),
     );
+}
+
+/// The shared template bodies `src` calls, as an index field.
+fn index_deps(src: &str) -> String {
+    let deps = tev_deps(src);
+    if deps.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = deps.iter().map(|d| format!("{d:016x}")).collect();
+    format!(" d:{}", list.join(","))
 }
 
 /// Records that the event of `input` is slot `slot` of the batch whose source
@@ -4761,15 +4869,21 @@ fn index_event_slot(
     input: Option<u128>,
     hash: &str,
     slot: usize,
-    comb_marked: bool,
-    ff_marked: bool,
+    (comb_marked, ff_marked): (bool, bool),
+    src: &str,
 ) {
     let Some(path) = index_path("event", input) else {
         return;
     };
     let _ = veryl_path::atomic_write(
         &path,
-        format!("{hash} {} {} {slot}\n", comb_marked as u8, ff_marked as u8).as_bytes(),
+        format!(
+            "{hash} {} {} {slot}{}\n",
+            comb_marked as u8,
+            ff_marked as u8,
+            index_deps(src)
+        )
+        .as_bytes(),
     );
 }
 
@@ -4798,7 +4912,19 @@ fn load_indexed_event(input: Option<u128>) -> Option<IndexedEvent> {
     }
     let comb_marked = fields.next()? == "1";
     let ff_marked = fields.next()? == "1";
-    let slot: Option<usize> = fields.next().and_then(|f| f.parse().ok());
+    let mut slot: Option<usize> = None;
+    for f in fields {
+        match f.strip_prefix("d:") {
+            Some(deps) => {
+                for d in deps.split(',') {
+                    if !ensure_tev(u64::from_str_radix(d, 16).ok()?) {
+                        return None;
+                    }
+                }
+            }
+            None => slot = f.parse().ok(),
+        }
+    }
     let so_path = path.with_file_name(format!("veryl_aot_{hash}.so"));
     if !so_path.exists() {
         return None;
@@ -5131,6 +5257,462 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
     fns
 }
 
+thread_local! {
+    /// The shared template bodies the event being emitted defines: the body's
+    /// address and input ports, then its definition and per-call pushes.
+    static TEV_BODIES: RefCell<Vec<TevBody>> = const { RefCell::new(Vec::new()) };
+    /// The instances' mark tables the event being emitted defines.
+    static TEV_TABLES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+struct TevBody {
+    key: (usize, Vec<VarOffset>),
+    /// The hash of the body's own source (see `ensure_tev`).
+    hash: u64,
+    /// The body's C type, for the call.
+    fn_type: String,
+    narrow: u64,
+    wide: u64,
+    sites: Vec<MarkSite>,
+}
+
+/// An instance's mark table: its entries, the directory of each site's first
+/// entry (one past the last site at the end), and the comb spans it covers.
+struct InstanceMarks {
+    entries: Vec<(u32, u64)>,
+    dir: Vec<u32>,
+    covered: Vec<(u32, u32)>,
+}
+
+/// The readers' `(word, mask)` of the bytes `kind` names, moved to an
+/// instance, with the comb spans they cover.
+fn site_words(
+    kind: MarkKind,
+    ff: Option<&DataflowMarks>,
+    comb: Option<&DataflowMarks>,
+    ff_delta: isize,
+    comb_delta: isize,
+) -> Option<(MarkWords, Vec<(u32, u32)>)> {
+    let shift = |x: u32, d: isize| u32::try_from(x as isize + d).ok();
+    match kind {
+        MarkKind::Ff { lo, hi } => Some((
+            ff_mark_words(ff?, shift(lo, ff_delta)?, shift(hi, ff_delta)?),
+            Vec::new(),
+        )),
+        MarkKind::Comb { lo, hi } => {
+            let marks = comb?;
+            let (lo, hi) = (shift(lo, comb_delta)?, shift(hi, comb_delta)?);
+            let first = marks.partition_point(|t| t.1 <= lo);
+            let hit: Vec<&crate::ir::opt::dataflow::MarkSpan> =
+                marks[first..].iter().take_while(|t| t.0 < hi).collect();
+            let mut words: Vec<(u32, u64)> = Vec::new();
+            for (_, _, c) in &hit {
+                for &(w, m) in c {
+                    match words.iter_mut().find(|x| x.0 == w) {
+                        Some(x) => x.1 |= m,
+                        None => words.push((w, m)),
+                    }
+                }
+            }
+            Some((words, hit.iter().map(|t| (t.0, t.1)).collect()))
+        }
+    }
+}
+
+/// Whether any instance of the body being emitted has readers of `kind`.
+fn peers_read(kind: MarkKind) -> bool {
+    let ff = DF_FF_MARKS.with(|m| m.borrow().clone());
+    let comb = DF_EVENT_MARKS.with(|m| m.borrow().clone());
+    let peers = SHARED_PEERS.with(|p| Arc::clone(&p.borrow()));
+    peers.iter().any(|&(f, c)| {
+        site_words(kind, ff.as_ref(), comb.as_ref(), f, c).is_some_and(|(w, _)| !w.is_empty())
+    })
+}
+
+/// The readers' spans `[lo, hi)` overlaps in any instance of the body being
+/// emitted, joined and moved back to the body's offsets: the bytes a watch of
+/// a store there compares, as a store names only its first byte.
+fn peers_comb_span(lo: u32, hi: u32) -> Option<(u32, u32)> {
+    let comb = DF_EVENT_MARKS.with(|m| m.borrow().clone())?;
+    let peers = SHARED_PEERS.with(|p| Arc::clone(&p.borrow()));
+    let shift = |x: u32, d: isize| u32::try_from(x as isize + d).ok();
+    let mut span: Option<(u32, u32)> = None;
+    for &(_, d) in peers.iter() {
+        let (Some(l), Some(h)) = (shift(lo, d), shift(hi, d)) else {
+            continue;
+        };
+        let first = comb.partition_point(|t| t.1 <= l);
+        let mut hit = comb[first..].iter().take_while(|t| t.0 < h);
+        let Some(head) = hit.next() else {
+            continue;
+        };
+        let tail = hit.last().unwrap_or(head);
+        let (a, b) = (shift(head.0, -d)?, shift(tail.1, -d)?);
+        span = Some(span.map_or((a, b), |(x, y)| (x.min(a), y.max(b))));
+    }
+    span
+}
+
+/// The `(ff_delta, comb_delta)` of every instance calling a shared body, by
+/// the body's address.
+pub type TevPeers = HashMap<usize, Arc<Vec<(isize, isize)>>>;
+
+/// Every instance's deltas of each shared body, for the events compiled
+/// next; `None` clears them.
+pub fn set_tev_peers(peers: Option<TevPeers>) {
+    TEV_PEERS.with(|p| *p.borrow_mut() = peers.unwrap_or_default());
+}
+
+/// One instance's mark table for `sites`.
+fn instance_marks(sites: &[MarkSite], ff_delta: isize, comb_delta: isize) -> Option<InstanceMarks> {
+    let ff = DF_FF_MARKS.with(|m| m.borrow().clone());
+    let comb = DF_EVENT_MARKS.with(|m| m.borrow().clone());
+    let mut marks = InstanceMarks {
+        entries: Vec::new(),
+        dir: Vec::with_capacity(sites.len() + 1),
+        covered: Vec::new(),
+    };
+    for site in sites {
+        let (words, covered) =
+            site_words(site.kind, ff.as_ref(), comb.as_ref(), ff_delta, comb_delta)?;
+        marks.dir.push(marks.entries.len() as u32);
+        marks.entries.extend(words);
+        marks.covered.extend(covered);
+    }
+    marks.dir.push(marks.entries.len() as u32);
+    Some(marks)
+}
+
+/// One template instance's statements of the event: a call to the template's
+/// shared body, or the statements laid out when the body cannot be shared.
+fn emit_hier_events(h: &crate::ir::ProtoHierEvents) -> Option<String> {
+    let inputs: Vec<(VarOffset, VarOffset)> = h
+        .inputs
+        .iter()
+        .map(|(from, to)| (from.adjust(-h.ff_delta, -h.comb_delta), *to))
+        .collect();
+    let key = (
+        Arc::as_ptr(&h.stmts) as usize,
+        inputs.iter().map(|x| x.0).collect::<Vec<_>>(),
+    );
+    let found = TEV_BODIES.with(|b| b.borrow().iter().position(|t| t.key == key));
+    let k = match found {
+        Some(k) => k,
+        None => {
+            let k = TEV_BODIES.with(|b| b.borrow().len());
+            let peers = TEV_PEERS
+                .with(|p| p.borrow().get(&key.0).cloned())
+                .unwrap_or_else(|| Arc::new(vec![(h.ff_delta, h.comb_delta)]));
+            SHARED_PEERS.with(|p| *p.borrow_mut() = peers);
+            let Some(body) = emit_tev_body(k, &h.stmts, &key.1) else {
+                if crate::ir::hier::diag() {
+                    eprintln!("[hier] event body of {} statements laid out", h.stmts.len());
+                }
+                return emit_laid_out(h);
+            };
+            TEV_BODIES.with(|b| {
+                b.borrow_mut().push(TevBody {
+                    key,
+                    hash: body.0,
+                    fn_type: body.1,
+                    narrow: body.2,
+                    wide: body.3,
+                    sites: body.4,
+                })
+            });
+            k
+        }
+    };
+    let marks = TEV_BODIES.with(|b| {
+        let b = b.borrow();
+        instance_marks(&b[k].sites, h.ff_delta, h.comb_delta)
+    });
+    let Some(marks) = marks else {
+        if crate::ir::hier::diag() {
+            eprintln!(
+                "[hier] event instance at {} laid out: its marks differ",
+                h.ff_delta
+            );
+        }
+        return emit_laid_out(h);
+    };
+    DF_COVERED.with(|c| c.borrow_mut().extend(marks.covered));
+    let table = if marks.dir.len() == 1 {
+        "(const veryl_mk_t *)0, (const unsigned *)0".to_string()
+    } else {
+        TEV_TABLES.with(|t| {
+            let mut t = t.borrow_mut();
+            let name = format!("veryl_tev_{k}_m{}", t.len());
+            let mut list: Vec<String> = marks
+                .entries
+                .iter()
+                .map(|(w, m)| format!("{{{w}u, {m:#x}ULL}}"))
+                .collect();
+            // C has no empty array.
+            if list.is_empty() {
+                list.push("{0u, 0ULL}".to_string());
+            }
+            let dir: Vec<String> = marks.dir.iter().map(|d| format!("{d}u")).collect();
+            t.push(format!(
+                "static const veryl_mk_t {name}[] = {{{}}};\nstatic const unsigned {name}_d[] = {{{}}};\n",
+                list.join(", "),
+                dir.join(", ")
+            ));
+            format!("{name}, {name}_d")
+        })
+    };
+    let (narrow, wide, hash, fn_type) = TEV_BODIES.with(|b| {
+        let t = &b.borrow()[k];
+        (t.narrow, t.wide, t.hash, t.fn_type.clone())
+    });
+    EVENT_NARROW_PUSHES.with(|c| c.set(c.get() + narrow));
+    EVENT_WIDE_PUSHES.with(|c| c.set(c.get() + wide));
+    // The body is found once per call site, then called directly.
+    let mut call = format!(
+        "(({fn_type})({{ static void *_tb; if (__builtin_expect(!_tb, 0)) _tb = veryl_tev_resolve_cb({hash:#018x}ULL); _tb; }}))\
+         (ff_values + ({ff}), comb_values + ({comb}), write_log, ff_delta, (intptr_t)({ff}), {table}",
+        ff = h.ff_delta,
+        comb = h.comb_delta,
+    );
+    for (_, to) in &inputs {
+        let buf = if to.is_ff() {
+            "ff_values"
+        } else {
+            "comb_values"
+        };
+        call.push_str(&format!(", {buf} + {:#x}", to.raw()));
+    }
+    call.push_str(");");
+    Some(call)
+}
+
+fn emit_laid_out(h: &crate::ir::ProtoHierEvents) -> Option<String> {
+    let mut out = String::new();
+    for s in &h.expand() {
+        out.push_str(&emit_stmt(s)?);
+        out.push(' ');
+    }
+    Some(out)
+}
+
+/// The shared body `veryl_tev_<k>` over `stmts`, in the reference instance's
+/// offsets, with the pushes one call makes; `None` when some part of it
+/// cannot be relative to the instance.
+fn emit_tev_body(
+    k: usize,
+    stmts: &[ProtoStatement],
+    inputs: &[VarOffset],
+) -> Option<(u64, String, u64, u64, Vec<MarkSite>)> {
+    let _ = k;
+    let narrow0 = EVENT_NARROW_PUSHES.with(|c| c.get());
+    let wide0 = EVENT_WIDE_PUSHES.with(|c| c.get());
+    let outlined0 = OUTLINED.with(|o| o.borrow().len());
+    SHARED_EVENT.with(|c| c.set(true));
+    SHARED_MARKS.with(|s| s.borrow_mut().clear());
+    SHARED_INPUTS.with(|v| {
+        *v.borrow_mut() = inputs
+            .iter()
+            .enumerate()
+            .map(|(i, o)| (*o, format!("_in{i}")))
+            .collect()
+    });
+    let units = (|| {
+        let mut units = Vec::with_capacity(stmts.len());
+        for s in stmts {
+            units.push(format!("    {}\n", emit_stmt(s)?));
+        }
+        Some(units)
+    })();
+    SHARED_EVENT.with(|c| c.set(false));
+    SHARED_INPUTS.with(|v| v.borrow_mut().clear());
+    let sites = SHARED_MARKS.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    let narrow = EVENT_NARROW_PUSHES.with(|c| c.replace(narrow0)) - narrow0;
+    let wide = EVENT_WIDE_PUSHES.with(|c| c.replace(wide0)) - wide0;
+    // An outlined block takes no `_ffr` or input pointer.
+    let outlined = OUTLINED.with(|o| {
+        let mut o = o.borrow_mut();
+        let grew = o.len() > outlined0;
+        o.truncate(outlined0);
+        grew
+    });
+    if crate::ir::hier::diag() {
+        eprintln!(
+            "[hier] event body: emitted={} outlined={outlined}",
+            units.is_some()
+        );
+    }
+    let units = units?;
+    if outlined {
+        return None;
+    }
+    // A read the input hook did not reach would take the port copy, which
+    // settles after the event fires.
+    for o in inputs {
+        let buf = if o.is_ff() {
+            "ff_values"
+        } else {
+            "comb_values"
+        };
+        let unreached = format!("{buf} + {:#x}", o.raw());
+        let names = |u: &str| {
+            u.match_indices(&unreached).any(|(i, m)| {
+                !u[i + m.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_hexdigit())
+            })
+        };
+        if units.iter().any(|u| names(u)) {
+            if crate::ir::hier::diag() {
+                eprintln!("[hier] event body reads input {unreached} directly");
+            }
+            return None;
+        }
+    }
+    let mut params = String::from(
+        "uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta, intptr_t _ffr, const veryl_mk_t *_mt, const unsigned *_md",
+    );
+    let mut args = String::from("ff_values, comb_values, write_log, ff_delta, _ffr, _mt, _md");
+    let mut types = String::from(
+        "uint8_t *, uint8_t *, uint64_t *, intptr_t, intptr_t, const veryl_mk_t *, const unsigned *",
+    );
+    for i in 0..inputs.len() {
+        params.push_str(&format!(", const uint8_t *_in{i}"));
+        args.push_str(&format!(", _in{i}"));
+        types.push_str(", const uint8_t *");
+    }
+    let src = tev_body_source(&params, &args, &units);
+    let (_, _, hash) = compile_key(&src);
+    let hash = u64::from_str_radix(&hash, 16).ok()?;
+    // Compiled from the first event that needs it, alongside the events.
+    let first = tev_sources()
+        .lock()
+        .ok()?
+        .insert(hash, Arc::new(src.clone()))
+        .is_none();
+    if first {
+        compile_into(src, true, Arc::new(OnceLock::new()), Vec::new());
+    }
+    Some((hash, format!("void (*)({types})"), narrow, wide, sites))
+}
+
+/// A shared template body as a source of its own, compiled once whatever
+/// events call it: part functions over `units` behind one exported entry.
+fn tev_body_source(params: &str, args: &str, units: &[String]) -> String {
+    let mut src = event_header("// AOT-C event template body; do not edit.\n");
+    src.push_str("typedef struct { unsigned w; unsigned long long m; } veryl_mk_t;\n");
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for u in units {
+        cur.push_str(u);
+        if cur.len() >= ENTRY_PART_BYTES {
+            parts.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() || parts.is_empty() {
+        parts.push(cur);
+    }
+    for (k, part) in parts.iter().enumerate() {
+        src.push_str(&format!(
+            "static __attribute__((noinline)) void veryl_aot_tevp{k}({params}) {{\n{part}}}\n\n"
+        ));
+    }
+    src.push_str(ENTRY_SECTION_MARKER);
+    src.push_str(&format!(
+        "\n{ENTRY_ATTR}\nvoid veryl_tev_body({params}) {{\n"
+    ));
+    for k in 0..parts.len() {
+        src.push_str(&format!("    veryl_aot_tevp{k}({args});\n"));
+    }
+    src.push_str("}\n");
+    // `load_module` takes every module by this entry.
+    src.push_str(&format!(
+        "{ENTRY_ATTR}\nvoid veryl_aot_eval{ENTRY_SIG} {{ (void)ff_values; (void)comb_values; (void)write_log; (void)ff_delta; }}\n"
+    ));
+    src
+}
+
+/// The sources of the shared template bodies emitted in this process, by
+/// the hash of each.
+fn tev_sources() -> &'static Mutex<HashMap<u64, Arc<String>>> {
+    static SOURCES: std::sync::LazyLock<Mutex<HashMap<u64, Arc<String>>>> =
+        std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
+    &SOURCES
+}
+
+/// The shared template bodies loaded in this process: each module, kept
+/// alive, and its entry.
+fn tev_loaded() -> &'static Mutex<HashMap<u64, (EmittedModule, usize)>> {
+    static LOADED: std::sync::LazyLock<Mutex<HashMap<u64, (EmittedModule, usize)>>> =
+        std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
+    &LOADED
+}
+
+/// Load the shared template body `hash`, compiling it from the source this
+/// process emitted when the cache does not hold it; `false` when neither can.
+fn ensure_tev(hash: u64) -> bool {
+    if tev_loaded().lock().is_ok_and(|l| l.contains_key(&hash)) {
+        return true;
+    }
+    let Ok(cache_dir) = aot_c_cache_dir() else {
+        return false;
+    };
+    let so_path = cache_dir.join(format!("veryl_aot_{hash:016x}.so"));
+    let module = if so_path.exists() {
+        load_module(&so_path).ok()
+    } else {
+        let src = tev_sources()
+            .lock()
+            .ok()
+            .and_then(|s| s.get(&hash).cloned());
+        src.and_then(|src| compile_source(&src).ok())
+    };
+    let Some(module) = module else {
+        return false;
+    };
+    type Body = unsafe extern "C" fn();
+    // SAFETY: a body module exports `veryl_tev_body`.
+    let Some(entry) = (unsafe { module._lib.get::<Body>(b"veryl_tev_body\0") })
+        .ok()
+        .map(|f| *f as usize)
+    else {
+        return false;
+    };
+    if let Ok(mut l) = tev_loaded().lock() {
+        l.entry(hash).or_insert((module, entry));
+    }
+    true
+}
+
+/// The shared template bodies `src` calls.
+fn tev_deps(src: &str) -> Vec<u64> {
+    const AT: &str = "veryl_tev_resolve_cb(0x";
+    let mut deps: Vec<u64> = src
+        .match_indices(AT)
+        .filter_map(|(i, _)| {
+            u64::from_str_radix(src.get(i + AT.len()..i + AT.len() + 16)?, 16).ok()
+        })
+        .collect();
+    deps.sort_unstable();
+    deps.dedup();
+    deps
+}
+
+/// Whether every shared template body `src` calls is loaded, loading them.
+fn tev_ready(src: &str) -> bool {
+    tev_deps(src).into_iter().all(ensure_tev)
+}
+
+/// The entry of the loaded shared template body `hash`, for the calls an
+/// event makes; null only for a body no published event calls.
+unsafe extern "C" fn veryl_tev_resolve(hash: u64) -> *const c_void {
+    tev_loaded()
+        .lock()
+        .ok()
+        .and_then(|l| l.get(&hash).map(|x| x.1 as *const c_void))
+        .unwrap_or(std::ptr::null())
+}
+
 /// Emit one `veryl_aot_eval` function for an event statement sequence.
 /// FF-target assigns push WriteLogEntries via `write_log` (unused in
 /// the comb path).
@@ -5140,6 +5722,8 @@ fn emit_event_function(
     gates: &[EventGate],
 ) -> Option<String> {
     reset_wide_tmp();
+    TEV_BODIES.with(|b| b.borrow_mut().clear());
+    TEV_TABLES.with(|t| t.borrow_mut().clear());
     DF_WRAP_SEQ.with(|c| c.set(0));
     // Localization never applies to the event path; clear any residue a failed
     // comb emit may have left so event reads never hit `_cl_*`.
@@ -5155,6 +5739,10 @@ fn emit_event_function(
         // them over several part functions instead of one enormous body.
         let mut units: Vec<String> = Vec::with_capacity(stmts.len());
         for (i, stmt) in stmts.iter().enumerate() {
+            if let ProtoStatement::HierEvents(h) = stmt {
+                units.push(format!("    {}\n", emit_hier_events(h)?));
+                continue;
+            }
             let s = match emit_stmt(stmt) {
                 Some(s) => s,
                 None => {
@@ -5268,9 +5856,34 @@ fn emit_event_function(
     // Cranelift (which checks per push) rather than under-reserving.
     let narrow_pushes = u32::try_from(EVENT_NARROW_PUSHES.with(|c| c.get())).ok()?;
     let wide_pushes = u32::try_from(EVENT_WIDE_PUSHES.with(|c| c.get())).ok()?;
-    let mut src = String::from(
-        "// AOT-C event; do not edit.\n\
-         #include <stdint.h>\n\
+    let mut src = event_header("// AOT-C event; do not edit.\n");
+    // Ahead of every function, so each translation unit sees them.
+    if TEV_BODIES.with(|b| !b.borrow().is_empty()) {
+        src.push_str(TEV_CB_C);
+        TEV_TABLES.with(|t| {
+            for table in t.borrow_mut().drain(..) {
+                src.push_str(&table);
+            }
+        });
+    }
+    TEV_BODIES.with(|b| b.borrow_mut().clear());
+    src.push_str(&outlined);
+    src.push_str(&gate_fns);
+    // The bulk reserve is the ENTRY PREAMBLE, not body text: split or not it
+    // stays in `veryl_aot_eval` ahead of the parts, so it dominates every
+    // unchecked push.
+    src.push_str(&split_entry_function(
+        &emit_reserve_prologue(narrow_pushes, wide_pushes),
+        &units,
+    ));
+    Some(src)
+}
+
+/// The declarations every event source starts with, after its first line.
+fn event_header(first_line: &str) -> String {
+    let mut src = String::from(first_line);
+    src.push_str(
+        "#include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
@@ -5283,16 +5896,7 @@ fn emit_event_function(
     src.push_str(WIDEOPS_C_INLINE);
     src.push_str(selection::INLINE);
     src.push('\n');
-    src.push_str(&outlined);
-    src.push_str(&gate_fns);
-    // The bulk reserve is the ENTRY PREAMBLE, not body text: split or not it
-    // stays in `veryl_aot_eval` ahead of the parts, so it dominates every
-    // unchecked push.
-    src.push_str(&split_entry_function(
-        &emit_reserve_prologue(narrow_pushes, wide_pushes),
-        &units,
-    ));
-    Some(src)
+    src
 }
 
 /// `body` with the `_dfm_<word>` its marks collect in declared ahead of it
@@ -5708,7 +6312,7 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
             // Not weak per unit: PE exports no weak definition.
             if part == 0 || !l.starts_with(ENTRY_ATTR) {
                 out.push((*l).to_string());
-            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF, HIER_DEF, HIER_BATCH_DEF]
+            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF, HIER_DEF, HIER_BATCH_DEF, TEV_DEF]
                 .into_iter()
                 .find(|x| cross_unit_hit(l, x))
             {
@@ -5745,8 +6349,8 @@ const SPLIT_FN_PREFIX: &str = "static __attribute__((noinline)) ";
 fn split_fn_signature(line: &str) -> Option<&str> {
     let rest = line.strip_prefix(SPLIT_FN_PREFIX)?;
     let sig = rest.strip_suffix(" {")?;
-    ((sig.contains(" veryl_aot_") || sig.contains(" veryl_evg_")) && sig.ends_with(')'))
-        .then_some(sig)
+    let movable = [" veryl_aot_", " veryl_evg_", " veryl_tev_"];
+    (movable.iter().any(|m| sig.contains(m)) && sig.ends_with(')')).then_some(sig)
 }
 
 /// Whether the header line `line` is the cross-unit definition `def`,
@@ -5803,7 +6407,9 @@ const HIER_DEF: &str = "veryl_hier_t veryl_hier_cb;";
 const HIER_SET: &str = "void veryl_set_hier_cb(";
 const HIER_BATCH_DEF: &str = "veryl_hier_batch_t veryl_hier_batch_cb;";
 const HIER_BATCH_SET: &str = "void veryl_set_hier_batch_cb(";
-const CROSS_UNIT: [&str; 8] = [
+const TEV_DEF: &str = "veryl_tev_resolve_t veryl_tev_resolve_cb;";
+const TEV_SET: &str = "void veryl_set_tev_resolve_cb(";
+const CROSS_UNIT: [&str; 10] = [
     HIER_BATCH_DEF,
     HIER_BATCH_SET,
     WIDEOPS_DEF,
@@ -5812,7 +6418,15 @@ const CROSS_UNIT: [&str; 8] = [
     SYSFN_SET,
     HIER_DEF,
     HIER_SET,
+    TEV_DEF,
+    TEV_SET,
 ];
+/// Declares the mark table entry of a shared template body and the callback
+/// an event finds a body through, by the hash of the body's source.
+const TEV_CB_C: &str = "typedef struct { unsigned w; unsigned long long m; } veryl_mk_t;\n\
+     typedef void *(*veryl_tev_resolve_t)(unsigned long long);\n\
+     __attribute__((visibility(\"default\"))) veryl_tev_resolve_t veryl_tev_resolve_cb;\n\
+     __attribute__((visibility(\"default\"))) void veryl_set_tev_resolve_cb(void *p) { veryl_tev_resolve_cb = (veryl_tev_resolve_t)p; }\n";
 /// Declares the callback a dataflow cell runs a hierarchy template class
 /// through, for a plan that holds one.
 const HIER_CB_C: &str = "typedef void (*veryl_hier_t)(unsigned, long long, unsigned long long);\n\
@@ -6088,6 +6702,12 @@ fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
         unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_hier_cb\0") }
     {
         let cb: unsafe extern "C" fn(u32, i64, u64) = crate::ir::hier_cells::veryl_aot_hier_run;
+        unsafe { setter(cb as *mut c_void) };
+    }
+    if let Ok(setter) =
+        unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_tev_resolve_cb\0") }
+    {
+        let cb: unsafe extern "C" fn(u64) -> *const c_void = veryl_tev_resolve;
         unsafe { setter(cb as *mut c_void) };
     }
     if let Ok(setter) =
@@ -7157,35 +7777,48 @@ fn set_marks_fingerprint(slot: usize, marks: Option<&crate::ir::opt::dataflow::M
     });
 }
 
-fn parse_offset(s: &str) -> Option<u32> {
-    let s = s.trim();
-    match s.strip_prefix("0x") {
-        Some(h) => u32::from_str_radix(h, 16).ok(),
-        None => s.parse().ok(),
-    }
-}
-
 /// Where an FF push's change test reads and which readers it marks: a
 /// constant offset marks the readers of `[off, off + nb)`, a runtime one the
 /// readers of all of `span`.  `None` when nothing needs marking; a push that
 /// cannot be bounded notes the event as uncovered.
 fn df_ff_push_target(
-    offset_expr: &str,
+    offset: &LogOffset,
     nb: usize,
     span: Option<(u32, u32)>,
-) -> Option<(String, Vec<(u32, u64)>)> {
+) -> Option<(String, MarkWords, MarkKind)> {
     if !event_mode() {
         return None;
     }
     let marks = DF_FF_MARKS.with(|m| m.borrow().clone())?;
-    let (off, end, slot) = match (parse_offset(offset_expr), span) {
-        (Some(off), _) => (off, off + nb as u32, format!("{off:#x}")),
-        (None, Some((lo, hi))) => (lo, hi, format!("(intptr_t)({offset_expr})")),
-        (None, None) => {
+    let (off, end, slot) = match (offset, span) {
+        (LogOffset::At(off), _) => (*off, off + nb as u32, format!("{off:#x}")),
+        // The logged offset counts from the buffer, the slot from this
+        // body's FF pointer, which a shared body has moved by `_ffr`.
+        (LogOffset::Runtime(e), Some((lo, hi))) if shared_event() => {
+            (lo, hi, format!("((intptr_t)({e}) - _ffr)"))
+        }
+        (LogOffset::Runtime(e), Some((lo, hi))) => (lo, hi, format!("(intptr_t)({e})")),
+        (LogOffset::Runtime(_), None) => {
             df_ff_uncovered(0);
             return None;
         }
     };
+    let words = ff_mark_words(&marks, off, end);
+    let kind = MarkKind::Ff { lo: off, hi: end };
+    // A shared body marks a push some instance has readers for.
+    let read = if shared_event() {
+        peers_read(kind)
+    } else {
+        !words.is_empty()
+    };
+    if !read {
+        return None;
+    }
+    Some((slot, words, kind))
+}
+
+/// The readers' `(word, mask)` of FF bytes `[off, end)`.
+fn ff_mark_words(marks: &DataflowMarks, off: u32, end: u32) -> Vec<(u32, u64)> {
     let first = marks.partition_point(|t| t.1 <= off);
     let mut words: Vec<(u32, u64)> = Vec::new();
     for (_, _, c) in marks[first..].iter().take_while(|t| t.0 < end) {
@@ -7196,10 +7829,22 @@ fn df_ff_push_target(
             }
         }
     }
-    if words.is_empty() {
-        return None;
-    }
-    Some((slot, words))
+    words
+}
+
+/// The `(word, mask)` pairs a write sets in the dirty buffer.
+type MarkWords = Vec<(u32, u64)>;
+
+/// Where a shared template body marks: FF bytes a log push writes, or comb
+/// bytes a store writes.
+#[derive(Clone, Copy)]
+enum MarkKind {
+    Ff { lo: u32, hi: u32 },
+    Comb { lo: u32, hi: u32 },
+}
+
+struct MarkSite {
+    kind: MarkKind,
 }
 
 #[cfg(test)]
@@ -7209,10 +7854,23 @@ thread_local! {
     pub(crate) static DROP_DF_MARKS: Cell<bool> = const { Cell::new(false) };
 }
 
-fn df_mark_set(words: &[(u32, u64)]) -> String {
+fn df_mark_set(words: &[(u32, u64)], kind: MarkKind) -> String {
     #[cfg(test)]
     if DROP_DF_MARKS.with(|d| d.get()) {
         return String::new();
+    }
+    if shared_event() {
+        let j = SHARED_MARKS.with(|s| {
+            let mut s = s.borrow_mut();
+            s.push(MarkSite { kind });
+            s.len() - 1
+        });
+        let _ = words;
+        // The instance's table holds site `j`'s entries from `_md[j]` up to
+        // `_md[j + 1]`: their number differs between instances.
+        return format!(
+            "if (ff_delta) {{ for (const veryl_mk_t *_e = _mt + _md[{j}], *_z = _mt + _md[{j} + 1]; _e != _z; ++_e) ((uint64_t *)ff_delta)[_e->w] |= _e->m; }} "
+        );
     }
     words
         .iter()
@@ -7223,7 +7881,7 @@ fn df_mark_set(words: &[(u32, u64)]) -> String {
 /// Code marking the dataflow readers of an FF push when the pushed payload
 /// differs from the current value, run before the push.
 fn df_ff_push_mark(
-    offset_expr: &str,
+    offset: &LogOffset,
     payload: &str,
     nb: usize,
     span: Option<(u32, u32)>,
@@ -7239,34 +7897,34 @@ fn df_ff_push_mark(
         4 => ("uint32_t", "veryl_u32_ua"),
         8 => ("uint64_t", "veryl_u64_ua"),
         _ => {
-            if df_ff_push_target(offset_expr, nb, span).is_some() {
+            if df_ff_push_target(offset, nb, span).is_some() {
                 df_ff_uncovered(1);
             }
             return String::new();
         }
     };
-    let Some((slot, words)) = df_ff_push_target(offset_expr, nb, span) else {
+    let Some((slot, words, kind)) = df_ff_push_target(offset, nb, span) else {
         return String::new();
     };
     format!(
         "if (*(const {ld} *)(ff_values + {slot}) != ({ty})({payload})) {{ {}}} ",
-        df_mark_set(&words)
+        df_mark_set(&words, kind)
     )
 }
 
 /// `df_ff_push_mark` for a wide push of the `nb` bytes at `src_ptr`.
 fn df_ff_wide_push_mark(
-    base_off: &str,
+    base_off: &LogOffset,
     src_ptr: &str,
     nb: usize,
     span: Option<(u32, u32)>,
 ) -> String {
-    let Some((slot, words)) = df_ff_push_target(base_off, nb, span) else {
+    let Some((slot, words, kind)) = df_ff_push_target(base_off, nb, span) else {
         return String::new();
     };
     format!(
         "if (__builtin_memcmp(ff_values + {slot}, {src_ptr}, {nb}) != 0) {{ {}}} ",
-        df_mark_set(&words)
+        df_mark_set(&words, kind)
     )
 }
 
@@ -7293,6 +7951,7 @@ struct DfWatch {
     a: u32,
     len: u32,
     words: Vec<(u32, u64)>,
+    kind: MarkKind,
 }
 
 impl DfWatch {
@@ -7302,7 +7961,7 @@ impl DfWatch {
     }
 
     fn set(&self) -> String {
-        df_mark_set(&self.words)
+        df_mark_set(&self.words, self.kind)
     }
 
     /// Snapshot declaration `k`, before the first store.
@@ -7330,10 +7989,17 @@ fn df_watch(stmt: &ProtoStatement, marks: &DataflowMarks) -> Option<DfWatch> {
     let first = marks.partition_point(|t| t.1 <= lo);
     let hit: Vec<&crate::ir::opt::dataflow::MarkSpan> =
         marks[first..].iter().take_while(|t| t.0 < hi).collect();
-    if hit.is_empty() {
+    let read = if shared_event() {
+        peers_read(MarkKind::Comb { lo, hi })
+    } else {
+        !hit.is_empty()
+    };
+    if !read {
         return None;
     }
-    DF_COVERED.with(|c| c.borrow_mut().extend(hit.iter().map(|t| (t.0, t.1))));
+    if !shared_event() {
+        DF_COVERED.with(|c| c.borrow_mut().extend(hit.iter().map(|t| (t.0, t.1))));
+    }
     let mut words: Vec<(u32, u64)> = Vec::new();
     for (_, _, c) in &hit {
         for &(w, m) in c {
@@ -7343,11 +8009,16 @@ fn df_watch(stmt: &ProtoStatement, marks: &DataflowMarks) -> Option<DfWatch> {
             }
         }
     }
-    let (a, b) = (hit[0].0, hit[hit.len() - 1].1);
+    let (a, b) = if shared_event() {
+        peers_comb_span(lo, hi)?
+    } else {
+        (hit[0].0, hit[hit.len() - 1].1)
+    };
     Some(DfWatch {
         a,
         len: b - a,
         words,
+        kind: MarkKind::Comb { lo, hi },
     })
 }
 
@@ -11002,6 +11673,9 @@ fn emit_var_load(var_offset: &VarOffset, width: usize) -> Option<String> {
     // emitted `for` mirrors it into (see `FOR_INDEX`).
     if let Some(nm) = for_index_read(var_offset, width) {
         return Some(format!("(({rt}){nm})", rt = result_ty));
+    }
+    if let Some(nm) = input_read(var_offset) {
+        return Some(format!("(({rt})*((const {cty}*)({nm})))", rt = result_ty));
     }
     Some(format!(
         "(({rt})*((const {ct}*)({b} + {o:#x})))",

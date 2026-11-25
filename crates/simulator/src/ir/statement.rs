@@ -1316,6 +1316,8 @@ pub struct HierRef {
     pub(crate) partition: u32,
     /// The class's reads and writes, standing in for walking `original_stmts`.
     pub(crate) summary: Arc<crate::ir::hier::HierSummary>,
+    /// The template's comb bytes in the reference instance's offsets.
+    pub(crate) region: (isize, isize),
     /// The class's template statements at the template's own offsets, shared
     /// by every instance; `original_stmts` stays empty, since one shifted copy
     /// per instance would hold the template many times over.

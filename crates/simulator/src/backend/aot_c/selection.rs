@@ -198,7 +198,7 @@ fn store(a: Store<'_>) -> Option<String> {
             ));
         }
         if let Some(log) = &a.log {
-            let offset = format!("({log} + _word * 8)");
+            let offset = LogOffset::Runtime(format!("({log} + _word * 8)"));
             // Each FF must stay in one pool: commit drains narrow before wide.
             if nb > 16 {
                 body.push_str(&emit_wide_log_chunks(
@@ -236,7 +236,7 @@ fn store(a: Store<'_>) -> Option<String> {
 }
 
 pub(super) fn assign(a: &ProtoAssignStatement) -> Option<String> {
-    let log = (a.dst.is_ff() && !a.comb_direct).then(|| format!("{}ull", a.dst_ff_current_offset));
+    let log = (a.dst.is_ff() && !a.comb_direct).then(|| log_const_ull(a.dst_ff_current_offset));
     let packed = log.is_some() && a.dst.raw() == a.dst_ff_current_offset;
     store(Store {
         expr: &a.expr,
@@ -263,8 +263,9 @@ pub(super) fn assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<String> 
     );
     let log = (a.dst_base.is_ff() && !a.comb_direct).then(|| {
         format!(
-            "({}ull + _array * {}ll)",
-            a.dst_ff_current_base_offset, a.dst_stride
+            "({} + _array * {}ll)",
+            log_const_ull(a.dst_ff_current_base_offset),
+            a.dst_stride
         )
     });
     let packed = log.is_some() && a.dst_base.raw() == a.dst_ff_current_base_offset;

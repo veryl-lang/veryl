@@ -40,6 +40,8 @@ pub use module::{Module, ProtoModule};
 pub use opt::comb_fusion::force_disable as force_disable_comb_fusion;
 pub use opt::dead_var_dce::force_disable as force_disable_dead_var_dce;
 pub use opt::field_unfuse::force_disable as force_disable_field_unfuse;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) use statement::flat_stmts;
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,

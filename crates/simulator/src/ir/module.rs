@@ -7246,9 +7246,24 @@ impl Conv<&air::Module> for ProtoModule {
                 }
             }
         }
+        // AOT-C emits a template's events once and calls them per instance;
+        // everything else runs them laid out.
+        let mut aot_nodes: HashMap<
+            Event,
+            (
+                Vec<ProtoStatement>,
+                Vec<crate::ir::opt::event_gate::EventGate>,
+            ),
+        > = HashMap::default();
         for (event, stmts) in all_event_statements.iter_mut() {
             let mut none = Vec::new();
             let gates = event_gates.get_mut(event).unwrap_or(&mut none);
+            if stmts
+                .iter()
+                .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+            {
+                aot_nodes.insert(event.clone(), (stmts.clone(), gates.clone()));
+            }
             crate::ir::statement::expand_gated(stmts, gates);
         }
         // A gate compares comb bytes its event may never name, so a C local
@@ -7391,18 +7406,49 @@ impl Conv<&air::Module> for ProtoModule {
                 df_marks: None,
             };
             let mut map = HashMap::default();
+            // Every instance calling a shared body, so the body marks what
+            // any of them has readers for.
+            let mut peers: HashMap<usize, Vec<(isize, isize)>> = HashMap::default();
+            for (nodes, _) in aot_nodes.values() {
+                for s in nodes {
+                    if let ProtoStatement::HierEvents(h) = s {
+                        peers
+                            .entry(Arc::as_ptr(&h.stmts) as usize)
+                            .or_default()
+                            .push((h.ff_delta, h.comb_delta));
+                    }
+                }
+            }
+            #[cfg(not(target_family = "wasm"))]
+            crate::backend::aot_c::emit::set_tev_peers(Some(
+                peers
+                    .into_iter()
+                    .map(|(k, mut v)| {
+                        v.sort_unstable();
+                        v.dedup();
+                        (k, Arc::new(v))
+                    })
+                    .collect(),
+            ));
             for (event, stmts) in all_event_statements.iter() {
-                if let Some(whole) = context.backends.try_compile_whole_event(
-                    &ctx,
-                    event,
-                    stmts,
-                    event_gates.get(event).map_or(&[][..], |v| v.as_slice()),
-                ) {
+                let (stmts, gates) = match aot_nodes.get(event) {
+                    Some((nodes, gates)) => (nodes.as_slice(), gates.as_slice()),
+                    None => (
+                        stmts.as_slice(),
+                        event_gates.get(event).map_or(&[][..], |v| v.as_slice()),
+                    ),
+                };
+                if let Some(whole) = context
+                    .backends
+                    .try_compile_whole_event(&ctx, event, stmts, gates)
+                {
                     map.insert(event.clone(), whole);
                 }
             }
             #[cfg(not(target_family = "wasm"))]
             crate::backend::aot_c::emit::finish_event_batch(context.config.aot_c_async);
+            #[cfg(not(target_family = "wasm"))]
+            crate::backend::aot_c::emit::set_tev_peers(None);
             map
         };
         #[cfg(not(target_family = "wasm"))]

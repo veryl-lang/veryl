@@ -310,6 +310,114 @@ fn hier_templates_match_flat_aot_c() {
     check_seeds_with(128..136, flat, None);
 }
 
+/// The instances of a template call one shared AOT-C event body.
+#[test]
+fn hier_templates_match_flat_aot_c_events() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let flat = Config {
+        use_jit: true,
+        aot_c: true,
+        aot_c_event: true,
+        aot_c_async: false,
+        aot_c_min_stmts: 0,
+        ..Default::default()
+    };
+    crate::backend::aot_c::emit::take_event_sources();
+    check_seeds_with(136..152, flat, None);
+    assert!(
+        crate::backend::aot_c::emit::take_event_sources()
+            .iter()
+            .any(|s| s.contains("veryl_tev_")),
+        "no event called a shared template body"
+    );
+}
+
+/// A shared event body storing a wide value into comb storage marks its
+/// readers when only bytes past the first one change.
+#[test]
+fn a_shared_event_body_marks_a_wide_store_changing_its_upper_bytes() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module Sub (
+        clk: input  clock     ,
+        rst: input  reset     ,
+        a  : input  logic<8>  ,
+        q  : output logic<64> ,
+        y  : output logic<8>  ,
+    ) {
+        var r: logic<64>;
+        always_ff {
+            if_reset { r = 0; } else { r = r + {a, 56'd0}; }
+        }
+        assign q = r;
+        assign y = q[63:56] ^ a;
+    }
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        y0 : output logic<8>,
+        y1 : output logic<8>,
+        y2 : output logic<8>,
+        y3 : output logic<8>,
+        z  : output logic<8>,
+    ) {
+        var q0: logic<64>;
+        var q1: logic<64>;
+        var q2: logic<64>;
+        var q3: logic<64>;
+        inst u0: Sub (clk, rst, a, q: q0, y: y0);
+        inst u1: Sub (clk, rst, a, q: q1, y: y1);
+        inst u2: Sub (clk, rst, a, q: q2, y: y2);
+        inst u3: Sub (clk, rst, a, q: q3, y: y3);
+        assign z = q0[63:56] + q1[63:56] + q2[63:56] + q3[63:56];
+    }
+    "#;
+    let flat = Config {
+        use_jit: true,
+        aot_c: true,
+        aot_c_event: true,
+        aot_c_async: false,
+        aot_c_min_stmts: 0,
+        ..Default::default()
+    };
+    let hier = Config {
+        hier_templates: Some(1),
+        ..flat.clone()
+    };
+    crate::backend::aot_c::emit::take_event_sources();
+    let mut sims: Vec<Simulator> = [&flat, &hier]
+        .into_iter()
+        .map(|c| Simulator::new(analyze_top(code, c, "Top").unwrap(), None))
+        .collect();
+    assert!(
+        crate::backend::aot_c::emit::take_event_sources()
+            .iter()
+            .any(|s| s.contains("veryl_tev_")),
+        "no event called a shared template body"
+    );
+    let ports = ["y0", "y1", "y2", "y3", "z"];
+    for sim in sims.iter_mut() {
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+    }
+    for (step, a) in [1u64, 2, 3, 4, 5].into_iter().enumerate() {
+        let mut got = Vec::new();
+        for sim in sims.iter_mut() {
+            sim.set("a", Value::new(a, 8, false));
+            let clk = sim.get_clock("clk").unwrap();
+            sim.step(&clk);
+            got.push(ports.map(|p| sim.get(p).unwrap()));
+        }
+        assert_eq!(got[0], got[1], "step {step}");
+    }
+}
+
 /// A parent of template classes rebuilt from the same inputs finds its
 /// dataflow cells by those inputs: the class calls do not keep it from the
 /// index.

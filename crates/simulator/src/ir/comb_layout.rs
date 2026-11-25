@@ -209,9 +209,12 @@ fn cb_comb_span(cb: &CompiledBlockStatement) -> Option<(isize, isize)> {
         visit(off);
     }
     if let Some(h) = &cb.hier {
-        if let Some((a, b)) = h.summary.comb_span {
+        // The whole region, so every class of the instance merges into one
+        // unit with the comb variables only its events name.
+        let (a, b) = h.region;
+        if a < b {
             visit(&VarOffset::Comb(a + cb.comb_delta_bytes));
-            visit(&VarOffset::Comb(b + cb.comb_delta_bytes));
+            visit(&VarOffset::Comb(b - 1 + cb.comb_delta_bytes));
         }
     } else {
         let mut ins = vec![];

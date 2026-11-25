@@ -40,8 +40,6 @@ pub(crate) struct HierSummary {
     range_writes: Vec<crate::ir::opt::event_gate::Range>,
     pub(crate) write_spans: Vec<(isize, isize)>,
     pub(crate) dynamic_spans: Vec<(isize, isize)>,
-    /// Lowest and highest comb offset the base+last gather names.
-    pub(crate) comb_span: Option<(isize, isize)>,
 }
 
 fn sorted_dedup<T: Ord>(mut v: Vec<T>) -> Vec<T> {
@@ -84,16 +82,6 @@ impl HierSummary {
         let mut dynamic_spans = Vec::new();
         crate::ir::comb_layout::collect_write_spans(stmts, &mut write_spans);
         crate::ir::comb_layout::collect_dynamic_spans(stmts, &mut dynamic_spans);
-        let comb_span = base_ins
-            .iter()
-            .chain(&base_outs)
-            .filter_map(|o| match o {
-                VarOffset::Comb(c) => Some(*c),
-                VarOffset::Ff(_) => None,
-            })
-            .fold(None, |acc: Option<(isize, isize)>, c| {
-                Some(acc.map_or((c, c), |(a, b)| (a.min(c), b.max(c))))
-            });
         let dep_key = |d: &crate::ir::deps::Dep| (offset_key(d.off), d.bytes);
         let dedup_deps = |mut v: Vec<crate::ir::deps::Dep>| {
             v.sort_unstable_by_key(dep_key);
@@ -118,7 +106,6 @@ impl HierSummary {
             range_writes: sorted_dedup(r_writes),
             write_spans: sorted_dedup(write_spans),
             dynamic_spans: sorted_dedup(dynamic_spans),
-            comb_span,
         }
     }
 
@@ -199,11 +186,6 @@ impl HierSummary {
         let mut ds = Vec::new();
         self.spans(&self.dynamic_spans, cb, &mut ds);
         debug_assert_eq!(sorted_dedup(ds), walked.dynamic_spans);
-        debug_assert_eq!(
-            self.comb_span
-                .map(|(a, b)| (a + cb.comb_delta_bytes, b + cb.comb_delta_bytes)),
-            walked.comb_span
-        );
         debug_assert_eq!(self.mass, walked.mass);
     }
 
@@ -447,6 +429,10 @@ type CellsPlan = (Vec<Vec<u32>>, HashSet<isize>);
 pub(crate) struct HierTemplate {
     name: StrId,
     sorted: Vec<ProtoStatement>,
+    /// The reference instance's comb bytes: an instance moves through the
+    /// comb relayout as one unit, so code shared by the instances finds
+    /// every comb variable at the same place relative to its delta.
+    comb_region: (isize, isize),
     fingerprint: u128,
     compiled: Mutex<HashMap<u64, Arc<Vec<Vec<SharedChunk>>>>>,
     /// The dataflow plan's cells over `sorted`, and the comb offsets the
@@ -591,6 +577,7 @@ impl HierTemplate {
         Ok(Arc::new(HierTemplate {
             name,
             sorted,
+            comb_region: (comb_start, comb_end),
             fingerprint,
             compiled: Mutex::default(),
             cells_plan: std::sync::OnceLock::new(),
@@ -1497,6 +1484,7 @@ fn emit_cells(
                     class: c,
                     partition: u32::MAX,
                     summary: Arc::clone(&summaries[c as usize]),
+                    region: g.template.comb_region,
                     class_stmts: Arc::clone(&class_stmts[c as usize]),
                 }),
             }));
