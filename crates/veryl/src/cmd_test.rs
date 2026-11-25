@@ -553,6 +553,16 @@ impl CmdTest {
                 })
                 .collect();
             let session = BuildSession::new(&ir, &config, &tops);
+            // Tests left to build per top: a worker keeps a converted top only
+            // while another test still needs it, so a run's memory follows the
+            // tests in flight rather than every top it has seen.
+            let mut tops_left: std::collections::HashMap<
+                resource_table::StrId,
+                std::sync::atomic::AtomicUsize,
+            > = Default::default();
+            for &top in &tops {
+                *tops_left.entry(top).or_default().get_mut() += 1;
+            }
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let resource_snapshot = resource_table::export_tables();
             // `SimulatorError` snapshots source text from `text_table` eagerly
@@ -572,6 +582,7 @@ impl CmdTest {
                 let text_snap = &text_snapshot;
                 let print_lock = &print_lock;
                 let reports = &reports;
+                let tops_left = &tops_left;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
                         // Workers conv and emit user designs (see
@@ -610,6 +621,17 @@ impl CmdTest {
                                         metadata_ref,
                                         &mut thread_cache,
                                     );
+                                    let top = pending.top.or_else(|| {
+                                        resource_table::get_str_id(pending.test_name.clone())
+                                    });
+                                    if let Some(top) = top
+                                        && tops_left.get(&top).is_some_and(|n| {
+                                            n.fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
+                                                == 1
+                                        })
+                                    {
+                                        thread_cache.release(top);
+                                    }
                                     #[cfg(feature = "profile")]
                                     let build_el = t_build.elapsed();
                                     #[cfg(feature = "profile")]
