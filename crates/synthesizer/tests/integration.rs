@@ -948,6 +948,46 @@ fn unsigned_divide_4bit() {
 }
 
 #[test]
+fn division_and_remainder_preserve_operands_for_narrow_outputs() {
+    let code = r#"
+        module Top(
+            a: input logic<3>, b: input logic<3>,
+            quotient: output logic<2>, remainder: output logic<2>,
+        ) {
+            assign quotient = a / b;
+            assign remainder = a % b;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let ports: std::collections::HashMap<_, _> = gate
+        .ports
+        .iter()
+        .map(|p| (p.name.to_string(), &p.nets))
+        .collect();
+    for a in 0..8u32 {
+        for b in 1..8u32 {
+            let mut inputs = std::collections::HashMap::new();
+            for (name, value) in [("a", a), ("b", b)] {
+                for (bit, &net) in ports[name].iter().enumerate() {
+                    inputs.insert(net, value & (1 << bit) != 0);
+                }
+            }
+            let mut memo = std::collections::HashMap::new();
+            for (name, expected) in [("quotient", a / b), ("remainder", a % b)] {
+                let actual = ports[name]
+                    .iter()
+                    .enumerate()
+                    .fold(0u32, |word, (bit, &net)| {
+                        word | (u32::from(eval_net(&gate, net, &inputs, &mut memo)) << bit)
+                    });
+                assert_eq!(actual, expected & 3, "{name}: a={a} b={b}");
+            }
+        }
+    }
+}
+
+#[test]
 fn unsigned_modulo_4bit() {
     let code = r#"
         module Top (

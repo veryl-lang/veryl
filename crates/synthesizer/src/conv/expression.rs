@@ -858,14 +858,22 @@ fn synth_binary(
             arith::multiply(ctx, &xs, &ys, result_width, signed)
         }
         Op::Div | Op::Rem => {
-            let xs = synthesize_expr(ctx, x, current, result_width)?;
-            let ys = synthesize_expr(ctx, y, current, result_width)?;
+            // IEEE 1800-2023 11.6.1: a narrow destination truncates the
+            // result, while division still uses both full operand widths.
+            let operand_width = [x, y]
+                .into_iter()
+                .filter_map(|operand| operand.comptime().r#type.total_width())
+                .fold(result_width, usize::max);
+            let xs = synthesize_expr(ctx, x, current, operand_width)?;
+            let ys = synthesize_expr(ctx, y, current, operand_width)?;
             let (quo, rem) = if signed {
-                arith::divide_signed(ctx, &xs, &ys, result_width)?
+                arith::divide_signed(ctx, &xs, &ys, operand_width)?
             } else {
-                arith::divide_unsigned(ctx, &xs, &ys, result_width)?
+                arith::divide_unsigned(ctx, &xs, &ys, operand_width)?
             };
-            Ok(if matches!(op, Op::Div) { quo } else { rem })
+            let mut result = if matches!(op, Op::Div) { quo } else { rem };
+            result.truncate(result_width);
+            Ok(result)
         }
         Op::As => synthesize_expr(ctx, x, current, result_width),
         Op::EqWildcard | Op::NeWildcard => {
