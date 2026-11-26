@@ -100,7 +100,6 @@ impl DocComment {
         let mut in_wavedrom = false;
         let mut json_lines = Vec::new();
         let mut fence_line = 0u32;
-        let mut end_line = 0u32;
         let mut content_lines: Vec<(String, u32)> = Vec::new();
 
         for entry in &self.0 {
@@ -125,7 +124,7 @@ impl DocComment {
                     fence_line = entry.line;
                 }
             } else if trimmed == "```" {
-                end_line = entry.line;
+                let end_line = entry.line;
                 let json = json_lines.join("\n");
                 if !json.trim().is_empty() {
                     return Some(WavedromBlock {
@@ -1058,7 +1057,7 @@ pub enum SymbolKind {
     AliasModule(AliasModuleProperty),
     Interface(InterfaceProperty),
     AliasInterface(AliasInterfaceProperty),
-    Function(FunctionProperty),
+    Function(Box<FunctionProperty>),
     Parameter(ParameterProperty),
     Instance(InstanceProperty),
     Block,
@@ -2605,8 +2604,6 @@ impl fmt::Display for ClockDomain {
 pub struct VariableProperty {
     pub r#type: Type,
     pub affiliation: Affiliation,
-    pub prefix: Option<String>,
-    pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
     pub loop_variable: bool,
 }
@@ -2632,8 +2629,6 @@ pub struct PortProperty {
     pub token: Token,
     pub r#type: Type,
     pub direction: Direction,
-    pub prefix: Option<String>,
-    pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
     pub default_value: Option<syntax_tree::Expression>,
     pub is_proto: bool,
@@ -2938,6 +2933,42 @@ pub struct StructProperty {
     pub generic_references: Vec<GenericSymbolPath>,
 }
 
+impl StructProperty {
+    /// The clock/reset kind of a struct made of clock/reset only.
+    /// It is given by the first leaf member, since a struct mixing
+    /// clock/reset with other kinds is an error.
+    /// User-defined types have to be resolved before calling it.
+    pub fn clock_reset_kind(&self) -> Option<TypeKind> {
+        let first_member_type = |members: &[SymbolId]| {
+            if let SymbolKind::StructMember(x) = symbol_table::get(*members.first()?)?.kind {
+                Some(x.r#type)
+            } else {
+                None
+            }
+        };
+
+        let mut r#type = first_member_type(&self.members)?;
+        let mut visited = Vec::new();
+        loop {
+            let TypeKind::UserDefined(x) = &r#type.kind else {
+                let kind = r#type.kind;
+                return (kind.is_clock() || kind.is_reset()).then_some(kind);
+            };
+            let id = x.symbol?;
+            // Recursive types are reported by other checks.
+            if visited.contains(&id) {
+                return None;
+            }
+            visited.push(id);
+            r#type = match symbol_table::get(id)?.kind {
+                SymbolKind::Struct(x) => first_member_type(&x.members)?,
+                SymbolKind::TypeDef(x) => x.r#type?,
+                _ => return None,
+            };
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructMemberProperty {
     pub r#type: Type,
@@ -3181,6 +3212,9 @@ pub enum TbComponentKind {
     /// Queue declared as `var q: $tb::queue::<T, N>;`. `T` is the element
     /// type and `N` the capacity (`0` for unbounded).
     Queue,
+    /// Runtime arguments (`veryl test --runtime-arg`), declared as
+    /// `var a: $tb::runtime_args;`.
+    RuntimeArgs,
     /// User-defined verification component declared in `[[components]]` of
     /// Veryl.toml; the payload is the component name.
     External(StrId),
@@ -3194,6 +3228,7 @@ impl TbComponentKind {
             TbComponentKind::File
                 | TbComponentKind::Random
                 | TbComponentKind::Queue
+                | TbComponentKind::RuntimeArgs
                 | TbComponentKind::External(_)
         )
     }
@@ -3212,6 +3247,7 @@ impl std::fmt::Display for TbComponentKind {
             TbComponentKind::File => write!(f, "file"),
             TbComponentKind::Random => write!(f, "random"),
             TbComponentKind::Queue => write!(f, "queue"),
+            TbComponentKind::RuntimeArgs => write!(f, "runtime_args"),
             TbComponentKind::External(name) => write!(f, "{name}"),
         }
     }

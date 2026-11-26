@@ -1,0 +1,30 @@
+name: VS Code
+
+on:
+  pull_request:
+    paths:
+      - 'support/vscode/**'
+      - 'support/highlightgen/**'
+      - '.github/workflows/vscode.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'support/vscode/**'
+      - 'support/highlightgen/**'
+      - '.github/workflows/vscode.yml'
+
+jobs:
+  grammar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: support/vscode
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: support/vscode/package-lock.json
+      - run: npm ci
+      - run: npm run test:grammar

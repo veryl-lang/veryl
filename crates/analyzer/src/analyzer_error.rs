@@ -5288,6 +5288,12 @@ pub enum MismatchTypeKind {
         actual: String,
     },
     UnionConstructor,
+    /// A value of another type assigned (or connected, or passed) to a
+    /// `string`, which takes only a string.
+    Assignment {
+        src: String,
+        dst: String,
+    },
 }
 
 impl fmt::Display for MismatchTypeKind {
@@ -5330,6 +5336,9 @@ impl fmt::Display for MismatchTypeKind {
             }
             MismatchTypeKind::UnionConstructor => {
                 "a union holds one member at a time, so it has no constructor; assign to a member instead".fmt(f)
+            }
+            MismatchTypeKind::Assignment { src, dst } => {
+                write!(f, "\"{src}\" can't be assigned to \"{dst}\"")
             }
         }
     }

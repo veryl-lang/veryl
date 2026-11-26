@@ -1,6 +1,7 @@
 use crate::HashMap;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
+use crate::ir::string_type_utils;
 use crate::ir::variable::{
     VarOffset, clip_select_to_width, is_wide_ptr, native_bytes as calc_native_bytes,
     read_native_value, value_size,
@@ -36,6 +37,32 @@ pub fn out_of_range_read(width: usize, signed: bool, use_4state: bool) -> Value 
 /// what stops the three backends answering it differently.
 ///
 /// `beg >= end` throughout: a reversed range is `wrong index order`.
+/// `val`, a variable's whole value (or the bytes of a string's text), with
+/// its select applied: a runtime window, a constant one, or none.
+#[inline(always)]
+fn apply_select(
+    val: Value,
+    select: &Option<(usize, usize)>,
+    dynamic_select: &Option<DynamicBitSelect>,
+    signed: bool,
+    use_4state: bool,
+    mask_cache: &mut MaskCache,
+) -> Value {
+    let mut val = if let Some(dyn_sel) = dynamic_select {
+        let Some(idx) = dyn_sel.index_expr.eval(mask_cache).to_usize() else {
+            return out_of_range_read(dyn_sel.window, signed, use_4state);
+        };
+        dyn_sel.read_value(val, idx, use_4state)
+    } else if let Some((beg, end)) = select {
+        val.select(*beg, *end)
+    } else {
+        val
+    };
+    // `Value::select` drops the sign.
+    val.set_signed(signed);
+    val
+}
+
 pub fn storage_bounded_read(
     select: Option<(usize, usize)>,
     var_width: usize,
@@ -186,6 +213,16 @@ pub enum Expression {
         width: usize,
         signed: bool,
     },
+    /// The bytes of the text of a `string_pool` handle, `bytes` bits wide,
+    /// with a select applied as to an [`Expression::Variable`].
+    StringBytes {
+        x: Box<Expression>,
+        bytes: usize,
+        use_4state: bool,
+        select: Option<(usize, usize)>,
+        dynamic_select: Option<DynamicBitSelect>,
+        signed: bool,
+    },
 }
 
 // SAFETY: Same as Statement — see statement.rs.
@@ -216,21 +253,35 @@ impl Expression {
                 let val = unsafe {
                     read_native_value(*value, *native_bytes, *use_4state, read_width, *signed)
                 };
-                let mut val = if let Some(dyn_sel) = dynamic_select {
-                    let Some(idx) = dyn_sel.index_expr.eval(mask_cache).to_usize() else {
-                        return out_of_range_read(dyn_sel.window, *signed, *use_4state);
-                    };
-                    dyn_sel.read_value(val, idx, *use_4state)
-                } else if let Some((beg, end)) = select {
-                    val.select(*beg, *end)
-                } else {
-                    val
-                };
-                // `Value::select` drops the sign.
-                val.set_signed(*signed);
-                val
+                apply_select(
+                    val,
+                    select,
+                    dynamic_select,
+                    *signed,
+                    *use_4state,
+                    mask_cache,
+                )
             }
             Expression::Value { value } => value.clone(),
+            Expression::StringBytes {
+                x,
+                bytes,
+                use_4state,
+                select,
+                dynamic_select,
+                signed,
+            } => {
+                let handle = x.eval(mask_cache).payload_u64();
+                let val = crate::string_pool::to_value(handle, *bytes);
+                apply_select(
+                    val,
+                    select,
+                    dynamic_select,
+                    *signed,
+                    *use_4state,
+                    mask_cache,
+                )
+            }
             Expression::Unary {
                 op,
                 x,
@@ -339,19 +390,14 @@ impl Expression {
                 let value = unsafe {
                     read_native_value(ptr, *native_bytes, *use_4state, read_width, *signed)
                 };
-                let mut value = if let Some(dyn_sel) = dynamic_select {
-                    let Some(idx) = dyn_sel.index_expr.eval(mask_cache).to_usize() else {
-                        return out_of_range_read(dyn_sel.window, *signed, *use_4state);
-                    };
-                    dyn_sel.read_value(value, idx, *use_4state)
-                } else if let Some((beg, end)) = select {
-                    value.select(*beg, *end)
-                } else {
-                    value
-                };
-                // `Value::select` drops the sign.
-                value.set_signed(*signed);
-                value
+                apply_select(
+                    value,
+                    select,
+                    dynamic_select,
+                    *signed,
+                    *use_4state,
+                    mask_cache,
+                )
             }
         }
     }
@@ -378,6 +424,14 @@ impl Expression {
             Expression::Value { .. } => (),
             Expression::Unary { x, .. } | Expression::Resize { x, .. } => {
                 x.gather_variable(inputs, outputs);
+            }
+            Expression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.gather_variable(inputs, outputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable(inputs, outputs);
+                }
             }
             Expression::Binary { x, y, .. } => {
                 x.gather_variable(inputs, outputs);
@@ -438,6 +492,14 @@ impl ProtoExpression {
             ProtoExpression::Value { .. } => (),
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.gather_variable_offsets(inputs)
+            }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.gather_variable_offsets(inputs);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.gather_variable_offsets(inputs);
+                }
             }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_variable_offsets(inputs);
@@ -520,6 +582,14 @@ impl ProtoExpression {
             ProtoExpression::Value { .. } => (),
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.gather_reads_expanded_ranged(out)
+            }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.gather_reads_expanded_ranged(out);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.gather_reads_expanded_ranged(out);
+                }
             }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_reads_expanded_ranged(out);
@@ -791,6 +861,14 @@ impl ProtoExpression {
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.gather_reads_with_ranges(out)
             }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.gather_reads_with_ranges(out);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.gather_reads_with_ranges(out);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_reads_with_ranges(out);
                 y.gather_reads_with_ranges(out);
@@ -869,6 +947,14 @@ impl ProtoExpression {
             ProtoExpression::Value { .. } => (),
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.gather_variable_offsets_expanded(fold, inputs)
+            }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.gather_variable_offsets_expanded(fold, inputs);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.gather_variable_offsets_expanded(fold, inputs);
+                }
             }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_variable_offsets_expanded(fold, inputs);
@@ -954,6 +1040,14 @@ impl ProtoExpression {
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.collect_big_arrays(fold)
             }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.collect_big_arrays(fold);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.collect_big_arrays(fold);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.collect_big_arrays(fold);
                 y.collect_big_arrays(fold);
@@ -1010,6 +1104,14 @@ impl ProtoExpression {
             ProtoExpression::Value { .. } => (),
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.gather_dynamic_read_ranges(ranges)
+            }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.gather_dynamic_read_ranges(ranges);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.gather_dynamic_read_ranges(ranges);
+                }
             }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_dynamic_read_ranges(ranges);
@@ -1218,6 +1320,21 @@ pub enum ProtoExpression {
         element_native_bytes: usize,
         index_expr: Box<ProtoExpression>,
         num_elements: usize,
+        select: Option<(usize, usize)>,
+        dynamic_select: Option<ProtoDynamicBitSelect>,
+        width: usize,
+        expr_context: ExpressionContext,
+    },
+    /// The bytes of the text of a `string_pool` handle, for an operation on the bits of a `string`. Only the interpreter
+    /// evaluates it: the compiled backends decline any statement that
+    /// contains it.
+    ///
+    /// `bytes` is the width of the text's bytes; `select`/`dynamic_select`
+    /// select from them as from a `bit<bytes>` variable, and `width` is the
+    /// selected width.
+    StringBytes {
+        x: Box<ProtoExpression>,
+        bytes: usize,
         select: Option<(usize, usize)>,
         dynamic_select: Option<ProtoDynamicBitSelect>,
         width: usize,
@@ -1490,6 +1607,14 @@ impl ProtoExpression {
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.adjust_offsets(ff_delta, comb_delta);
             }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.adjust_offsets(ff_delta, comb_delta);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.adjust_offsets(ff_delta, comb_delta);
                 y.adjust_offsets(ff_delta, comb_delta);
@@ -1549,6 +1674,14 @@ impl ProtoExpression {
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.remap_offsets_with(f)
             }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                x.remap_offsets_with(f);
+                if let Some(d) = dynamic_select {
+                    d.index_expr.remap_offsets_with(f);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.remap_offsets_with(f);
                 y.remap_offsets_with(f);
@@ -1577,7 +1710,9 @@ impl ProtoExpression {
             ProtoExpression::HierVariable(x) => x.width,
             ProtoExpression::Variable { width, .. } => *width,
             ProtoExpression::Value { width, .. } => *width,
-            ProtoExpression::Unary { width, .. } => *width,
+            ProtoExpression::Unary { width, .. } | ProtoExpression::StringBytes { width, .. } => {
+                *width
+            }
             ProtoExpression::Binary { width, .. } => *width,
             ProtoExpression::Concatenation { width, .. }
             | ProtoExpression::Resize { width, .. } => *width,
@@ -1613,6 +1748,7 @@ impl ProtoExpression {
     pub fn effective_bits(&self) -> usize {
         match self {
             ProtoExpression::HierVariable(x) => x.width,
+            ProtoExpression::StringBytes { width, .. } => *width,
             ProtoExpression::Variable { width, .. } => *width,
             ProtoExpression::Value {
                 value: Value::U64(v),
@@ -1672,7 +1808,8 @@ impl ProtoExpression {
             ProtoExpression::Variable { expr_context, .. } => expr_context,
             ProtoExpression::Value { expr_context, .. } => expr_context,
             ProtoExpression::Unary { expr_context, .. }
-            | ProtoExpression::Resize { expr_context, .. } => expr_context,
+            | ProtoExpression::Resize { expr_context, .. }
+            | ProtoExpression::StringBytes { expr_context, .. } => expr_context,
             ProtoExpression::Binary { expr_context, .. } => expr_context,
             ProtoExpression::Concatenation { expr_context, .. } => expr_context,
             ProtoExpression::Ternary { expr_context, .. } => expr_context,
@@ -1710,7 +1847,7 @@ impl ProtoExpression {
             return is_wide_ptr(ds.window);
         }
         match self {
-            ProtoExpression::HierVariable(_) => false,
+            ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => false,
             // A static bit-select with a ≤128-bit result extracts into a
             // register, so only a >128-bit result is a pointer.  A dynamic
             // select reads its window out of the wide source the same way, so
@@ -1846,7 +1983,7 @@ impl ProtoExpression {
             operand.is_clean_to_width(limit)
         };
         match self {
-            ProtoExpression::HierVariable(_) => false,
+            ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => false,
             ProtoExpression::Variable {
                 width,
                 select,
@@ -2016,6 +2153,35 @@ impl ProtoExpression {
     ) -> Expression {
         unsafe {
             match self {
+                ProtoExpression::StringBytes {
+                    x,
+                    bytes,
+                    select,
+                    dynamic_select,
+                    expr_context,
+                    ..
+                } => Expression::StringBytes {
+                    x: Box::new(x.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    )),
+                    bytes: *bytes,
+                    use_4state,
+                    select: *select,
+                    dynamic_select: dynamic_select.as_ref().map(|x| {
+                        x.apply_values_ptr(
+                            ff_values_ptr,
+                            ff_len,
+                            comb_values_ptr,
+                            comb_len,
+                            use_4state,
+                        )
+                    }),
+                    signed: expr_context.signed,
+                },
                 ProtoExpression::HierVariable(_) => {
                     unreachable!(
                         "hierarchical reference must be resolved by resolve_hier_refs first"
@@ -2073,19 +2239,14 @@ impl ProtoExpression {
                         );
                         (comb_values_ptr as *const u8).add(var_offset.raw() as usize)
                     };
-                    let dynamic_select = dynamic_select.as_ref().map(|dyn_sel| DynamicBitSelect {
-                        low_adjust: dyn_sel.low_adjust,
-                        row_elements: dyn_sel.row_elements,
-                        index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                    let dynamic_select = dynamic_select.as_ref().map(|dyn_sel| {
+                        dyn_sel.apply_values_ptr(
                             ff_values_ptr,
                             ff_len,
                             comb_values_ptr,
                             comb_len,
                             use_4state,
-                        )),
-                        elem_width: dyn_sel.elem_width,
-                        window: dyn_sel.window,
-                        num_elements: dyn_sel.num_elements,
+                        )
                     });
                     Expression::Variable {
                         value,
@@ -2276,19 +2437,14 @@ impl ProtoExpression {
                         comb_len,
                         use_4state,
                     );
-                    let dynamic_select = dynamic_select.as_ref().map(|dyn_sel| DynamicBitSelect {
-                        low_adjust: dyn_sel.low_adjust,
-                        row_elements: dyn_sel.row_elements,
-                        index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                    let dynamic_select = dynamic_select.as_ref().map(|dyn_sel| {
+                        dyn_sel.apply_values_ptr(
                             ff_values_ptr,
                             ff_len,
                             comb_values_ptr,
                             comb_len,
                             use_4state,
-                        )),
-                        elem_width: dyn_sel.elem_width,
-                        window: dyn_sel.window,
-                        num_elements: dyn_sel.num_elements,
+                        )
                     });
                     Expression::DynamicVariable {
                         base_ptr,
@@ -2310,7 +2466,7 @@ impl ProtoExpression {
 
 /// Resize independently of the result's propagated signedness. In particular,
 /// an unsigned outer expression must not suppress extension inside a cast.
-fn resize_to_width(
+pub(crate) fn resize_to_width(
     expr: ProtoExpression,
     width: usize,
     expr_context: ExpressionContext,
@@ -2904,6 +3060,41 @@ pub(crate) fn packed_select_needs_dynamic(
     false
 }
 
+/// A constant packed select window `(beg, end)`, or a runtime one.
+pub(crate) type PackedSelect = (Option<(usize, usize)>, Option<ProtoDynamicBitSelect>);
+
+/// A packed select of a value of `r#type`: a constant window `(beg, end)`,
+/// or a runtime one when its position (or a constant one past the shape)
+/// needs evaluating at run time; neither when there is no select.
+pub(crate) fn conv_packed_select(
+    context: &mut Context,
+    select: &air::VarSelect,
+    r#type: &air::Type,
+) -> Result<PackedSelect, SimulatorError> {
+    if select.is_empty() {
+        return Ok((None, None));
+    }
+    let need_dynamic = packed_select_needs_dynamic(
+        select,
+        r#type.width(),
+        &mut context.scope().analyzer_context,
+    );
+    if !need_dynamic {
+        let select_val = select.eval_value(&mut context.scope().analyzer_context, r#type, false);
+        return Ok((select_val, None));
+    }
+    let kind_width = r#type.kind.width().unwrap_or(1);
+    let index_is_absolute_bits = !r#type.kind.is_enum();
+    let dynamic_select = build_dynamic_read_select(
+        context,
+        r#type.width(),
+        select,
+        kind_width,
+        index_is_absolute_bits,
+    )?;
+    Ok((None, Some(dynamic_select)))
+}
+
 pub fn build_dynamic_read_select(
     context: &mut Context,
     width_shape: &veryl_analyzer::ir::ShapeRef,
@@ -3248,6 +3439,7 @@ pub(crate) fn snapshot_selectors(
                 }],
                 initial_values: vec![],
                 uniform_buffer: true,
+                string_width: None,
             },
         );
         *index = air::Expression::Term(Box::new(air::Factor::Variable(
@@ -3330,6 +3522,34 @@ pub(crate) fn packed_range_row_type(
 }
 
 impl ProtoDynamicBitSelect {
+    /// # Safety
+    /// As [`ProtoExpression::apply_values_ptr`].
+    pub(crate) unsafe fn apply_values_ptr(
+        &self,
+        ff_values_ptr: *mut u8,
+        ff_len: usize,
+        comb_values_ptr: *mut u8,
+        comb_len: usize,
+        use_4state: bool,
+    ) -> DynamicBitSelect {
+        DynamicBitSelect {
+            low_adjust: self.low_adjust,
+            row_elements: self.row_elements,
+            index_expr: Box::new(unsafe {
+                self.index_expr.apply_values_ptr(
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                )
+            }),
+            elem_width: self.elem_width,
+            window: self.window,
+            num_elements: self.num_elements,
+        }
+    }
+
     fn same_structure(&self, other: &ProtoDynamicBitSelect) -> bool {
         let ProtoDynamicBitSelect {
             low_adjust,
@@ -3432,6 +3652,7 @@ pub(crate) fn build_packed_range_select(
 pub(crate) fn array_slice_elements(
     context: &mut Context,
     expression: &air::Expression,
+    target: Option<&air::Type>,
 ) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
     let air::Expression::Term(factor) = expression else {
         return Ok(None);
@@ -3463,7 +3684,11 @@ pub(crate) fn array_slice_elements(
         let element = reference
             .array_element(&mut context.scope().analyzer_context, &shape, i)
             .ok_or_else(|| SimulatorError::unsupported_description(&reference.token_range()))?;
-        elements.push(Conv::conv(context, &element)?);
+        let element = match target {
+            Some(target) => ProtoExpression::conv_for(context, &element, target)?,
+            None => Conv::conv(context, &element)?,
+        };
+        elements.push(element);
     }
     Ok(Some(elements))
 }
@@ -3593,15 +3818,91 @@ fn lower_runtime_system_function(
     })
 }
 
+/// `$isunknown(x)` of an argument known only at run time. A 2-state
+/// simulation has no x/z bits. In 4-state, the reduction XOR of the argument
+/// is x exactly when some bit is x/z, and an x bit is the only value that
+/// wildcard-matches both 0 and 1.
+fn lower_runtime_isunknown(
+    context: &mut Context,
+    call: &air::SystemFunctionCall,
+    input: &air::Expression,
+) -> Result<ProtoExpression, SimulatorError> {
+    let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+    if !context.config.use_4state {
+        return Ok(ProtoExpression::Value {
+            value: Value::new(0, 1, false),
+            width: 1,
+            expr_context,
+        });
+    }
+    let bit = ExpressionContext {
+        width: 1,
+        signed: false,
+    };
+    let arg: ProtoExpression = Conv::conv(context, input)?;
+    let parity = ProtoExpression::Unary {
+        op: Op::BitXor,
+        x: Box::new(arg),
+        width: 1,
+        expr_context: bit,
+    };
+    let parity = snapshot_expression(context, parity);
+    let matches = |value: u64| ProtoExpression::Binary {
+        x: Box::new(ProtoExpression::Value {
+            value: Value::new(value, 1, false),
+            width: 1,
+            expr_context: bit,
+        }),
+        op: Op::EqWildcard,
+        y: Box::new(parity.clone()),
+        width: 1,
+        expr_context: bit,
+    };
+    let unknown = ProtoExpression::Binary {
+        x: Box::new(matches(0)),
+        op: Op::BitAnd,
+        y: Box::new(matches(1)),
+        width: 1,
+        expr_context: bit,
+    };
+    Ok(ProtoExpression::Resize {
+        x: Box::new(unknown),
+        width: 1,
+        sign_extend: false,
+        expr_context,
+    })
+}
+
+impl ProtoExpression {
+    /// `expr` converted for a destination or an operand peer of type
+    /// `target`: a string going into a string is its handle; anything else
+    /// (a string going into bits included) converts as usual, which reads a
+    /// runtime `string` as the bytes of its text.
+    pub(crate) fn conv_for(
+        context: &mut Context,
+        expr: &air::Expression,
+        target: &air::Type,
+    ) -> Result<ProtoExpression, SimulatorError> {
+        if target.is_string() && string_type_utils::is_expr(expr) {
+            let expr = string_type_utils::to_handle_expr(context, expr)?;
+            Conv::conv(context, &expr)
+        } else {
+            Conv::conv(context, expr)
+        }
+    }
+}
+
 impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut Context, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
             air::Expression::Term(x) => match x.as_ref() {
                 air::Factor::HierVariable(x) => {
-                    // The child sizes its `string` storage from its own
-                    // assignments, which this reference cannot see here.
+                    // Read as a string, the reference reads the handle
+                    // (`ProtoExpression::conv_for`). Read as bits it would
+                    // need the length of a text the child sets, which is not
+                    // known here.
                     if x.comptime.r#type.is_string() {
-                        return Err(SimulatorError::unsupported_string(
+                        return Err(SimulatorError::unsupported_string_operation(
                             "a hierarchical reference",
                             &x.comptime.token,
                         ));
@@ -3620,6 +3921,11 @@ impl Conv<&air::Expression> for ProtoExpression {
                     })))
                 }
                 air::Factor::Variable(id, index, select, comptime) => {
+                    // A runtime `string` read as bits (`ProtoExpression::conv_for`
+                    // reads its handle where it goes into a string).
+                    if comptime.r#type.is_string() && string_type_utils::is_var(context, id) {
+                        return string_type_utils::conv_bits(context, id, index, select, comptime);
+                    }
                     if let Some(row_type) = packed_range_row_type(context, *id, select) {
                         let meta = context.scope().variable_meta.get(id).unwrap().clone();
                         let dynamic_select = build_packed_range_select(
@@ -3686,60 +3992,24 @@ impl Conv<&air::Expression> for ProtoExpression {
                         }
                     }
 
-                    // Try constant index first
-                    let (
-                        select_val,
-                        const_index,
-                        need_dynamic_select,
-                        width_shape,
-                        kind_width,
-                        index_is_absolute_bits,
-                    ) = {
-                        let scope = context.scope();
-                        let meta = scope.variable_meta.get(id).unwrap();
-                        let need_dynamic = packed_select_needs_dynamic(
-                            select,
-                            meta.r#type.width(),
-                            &mut scope.analyzer_context,
-                        );
-                        let select_val = if !select.is_empty() && !need_dynamic {
-                            // Use the variable's original type (from meta) rather
-                            // than comptime.r#type, which may have had its width
-                            // dimensions drained by gather_context/eval_comptime.
-                            select.eval_value(&mut scope.analyzer_context, &meta.r#type, false)
-                        } else {
-                            None
-                        };
-                        let const_index = if index.is_const() {
-                            index.eval_value(&mut scope.analyzer_context)
-                        } else {
-                            None
-                        };
-                        let select_val = if need_dynamic { None } else { select_val };
-                        let width_shape = meta.r#type.width().clone();
-                        let kind_width = meta.r#type.kind.width().unwrap_or(1);
-                        let index_is_absolute_bits = !meta.r#type.kind.is_enum();
-                        (
-                            select_val,
-                            const_index,
-                            need_dynamic,
-                            width_shape,
-                            kind_width,
-                            index_is_absolute_bits,
-                        )
-                    };
-                    let use_4state = context.config.use_4state;
-                    let dynamic_select = if need_dynamic_select {
-                        Some(build_dynamic_read_select(
-                            context,
-                            &width_shape,
-                            select,
-                            kind_width,
-                            index_is_absolute_bits,
-                        )?)
+                    let const_index = if index.is_const() {
+                        index.eval_value(&mut context.scope().analyzer_context)
                     } else {
                         None
                     };
+                    // Use the variable's original type (from meta) rather
+                    // than comptime.r#type, which may have had its width
+                    // dimensions drained by gather_context/eval_comptime.
+                    let var_type = context
+                        .scope()
+                        .variable_meta
+                        .get(id)
+                        .unwrap()
+                        .r#type
+                        .clone();
+                    let (select_val, dynamic_select) =
+                        conv_packed_select(context, select, &var_type)?;
+                    let use_4state = context.config.use_4state;
 
                     if let Some(idx_vals) = const_index {
                         let scope = context.scope();
@@ -3852,16 +4122,56 @@ impl Conv<&air::Expression> for ProtoExpression {
                 }
                 air::Factor::FunctionCall(call) => {
                     let ret_offsets = inline_function_call(context, call)?;
-                    let width = call.comptime.r#type.total_width().unwrap();
-                    let var_full_width = width;
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
-
+                    // A `string` return value is a handle: read as a string
+                    // (`ProtoExpression::conv_for`) it is the handle itself,
+                    // read as bits the bytes of its text.
+                    if call.comptime.r#type.is_string() {
+                        let func = context
+                            .scope()
+                            .analyzer_context
+                            .functions
+                            .get(&call.id)
+                            .unwrap();
+                        let body = if let Some(ref idx) = call.index {
+                            func.get_function(idx).unwrap()
+                        } else {
+                            func.get_function(&[]).unwrap()
+                        };
+                        let ret = body.ret.unwrap();
+                        let string_width = context
+                            .scope()
+                            .variable_meta
+                            .get(&ret)
+                            .and_then(|x| x.string_width);
+                        let width = crate::string_pool::HANDLE_WIDTH;
+                        let read = ProtoExpression::Variable {
+                            var_offset: ret_offsets[0],
+                            select: None,
+                            dynamic_select: None,
+                            width,
+                            var_full_width: width,
+                            expr_context: ExpressionContext {
+                                width,
+                                signed: false,
+                            },
+                        };
+                        return string_type_utils::cast(
+                            read,
+                            string_width,
+                            false,
+                            "a bit operation",
+                            &call.comptime.token,
+                            expr_context,
+                        );
+                    }
+                    let width = call.comptime.r#type.total_width().unwrap();
                     Ok(ProtoExpression::Variable {
                         var_offset: ret_offsets[0],
                         select: None,
                         dynamic_select: None,
                         width,
-                        var_full_width,
+                        var_full_width: width,
                         expr_context,
                     })
                 }
@@ -3878,6 +4188,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                             ProtoExpression::Variable { expr_context, .. }
                             | ProtoExpression::Value { expr_context, .. }
                             | ProtoExpression::Unary { expr_context, .. }
+                            | ProtoExpression::StringBytes { expr_context, .. }
                             | ProtoExpression::Resize { expr_context, .. }
                             | ProtoExpression::Binary { expr_context, .. }
                             | ProtoExpression::Concatenation { expr_context, .. }
@@ -3904,6 +4215,11 @@ impl Conv<&air::Expression> for ProtoExpression {
                     // A function body is shared by every caller, so an
                     // argument constant at only some call sites is a runtime
                     // value here; evaluating it would read a stale binding.
+                    air::SystemFunctionKind::IsUnknown(input)
+                        if !context.config.use_4state || !input.0.comptime().is_const =>
+                    {
+                        lower_runtime_isunknown(context, call, &input.0)
+                    }
                     air::SystemFunctionKind::Clog2(input)
                     | air::SystemFunctionKind::Onehot(input)
                         if !input.0.comptime().is_const =>
@@ -4028,8 +4344,22 @@ impl Conv<&air::Expression> for ProtoExpression {
 
                 let x_kind = x.comptime().r#type.kind.clone();
                 let y_kind = y.comptime().r#type.kind.clone();
-                let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
-                let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
+                // Strings compared for equality compare their handles, each
+                // operand converted for its peer; any other operation reads a
+                // runtime `string` as bits.
+                let (x, y) = if matches!(op, Op::Eq | Op::Ne | Op::EqWildcard | Op::NeWildcard) {
+                    let x_type = x.comptime().r#type.clone();
+                    let y_type = y.comptime().r#type.clone();
+                    (
+                        ProtoExpression::conv_for(context, x, &y_type)?,
+                        ProtoExpression::conv_for(context, y, &x_type)?,
+                    )
+                } else {
+                    (
+                        Conv::conv(context, x.as_ref())?,
+                        Conv::conv(context, y.as_ref())?,
+                    )
+                };
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
                 let operand_signed =

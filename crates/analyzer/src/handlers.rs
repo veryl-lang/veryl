@@ -16,7 +16,7 @@ use create_literal_table::*;
 use create_symbol_table::*;
 
 use crate::analyzer_error::AnalyzerError;
-use veryl_metadata::{Build, Lint};
+use veryl_metadata::Lint;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_walker::Handler;
 
@@ -32,12 +32,7 @@ pub struct Pass1Handlers {
 }
 
 impl Pass1Handlers {
-    pub fn new(
-        build_opt: &Build,
-        lint_opt: &Lint,
-        is_dependency: bool,
-        project_name: StrId,
-    ) -> Self {
+    pub fn new(lint_opt: &Lint, is_dependency: bool, project_name: StrId) -> Self {
         Self {
             check_attribute: CheckAttribute::new(lint_opt, is_dependency, project_name),
             check_embed_include: CheckEmbedInclude::new(),
@@ -46,7 +41,7 @@ impl Pass1Handlers {
             check_statement: CheckStatement::new(),
             check_unsafe: CheckUnsafe::new(),
             create_literal_table: CreateLiteralTable::new(),
-            create_symbol_table: CreateSymbolTable::new(build_opt, project_name),
+            create_symbol_table: CreateSymbolTable::new(project_name),
         }
     }
 

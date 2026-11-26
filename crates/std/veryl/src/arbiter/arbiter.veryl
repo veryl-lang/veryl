@@ -1,0 +1,169 @@
+/// Arbiter
+///
+/// Grants one of the requests by the arbitration scheme specified by `KIND`.
+///
+/// * `KIND == ROUND_ROBIN`   : Uses `round_robin_arbiter`
+/// * `KIND == FIXED_PRIORITY`: Uses `fixed_priority_arbiter`
+///
+/// When `KEEP_RESULT` is enabled, the grant is kept until it is released by `i_free`.
+/// New requests are not arbitrated while the grant is kept.
+pub module arbiter #(
+    param REQUESTS       : u32                                     = 2                                            ,
+    param KIND           : arbiter_kind                            = arbiter_kind::ROUND_ROBIN                    ,
+    param ONEHOT_GRANT   : bbool                                   = true                                         ,
+    param KEEP_RESULT    : bbool                                   = true                                         ,
+    param GRANT_WIDTH    : u32                                     = calc_grant_width(REQUESTS, ONEHOT_GRANT)     ,
+    param FREE_WIDTH     : u32                                     = REQUESTS                                     ,
+    param PRIORITY_ENABLE: bbool                                   = false                                        ,
+    param PRIORITY_WIDTH : u32                                     = 1                                            ,
+    param FIXED_PRIORITY : bbool                                   = false                                        ,
+    param PRIORITY       : bit          <REQUESTS, PRIORITY_WIDTH> = '0                                           ,
+    param WEIGHT_ENABLE  : bbool                                   = false                                        ,
+    param WEIGHT_WIDTH   : u32                                     = 1                                            ,
+    param INITIAL_WEIGHT : bit          <REQUESTS, WEIGHT_WIDTH>   = '1                                           ,
+    param SELECTOR_KIND  : selector_kind                           = selector_kind::LZC                           ,
+    const STATE_WIDTH    : u32                                     = clog2_clipped(REQUESTS, 1)                   ,
+    const N_SLOTS        : u32                                     = calc_n_slots(PRIORITY_ENABLE, PRIORITY_WIDTH),
+) (
+    i_clk          : input  clock                                  , /// Clock
+    i_rst          : input  reset                                  , /// Reset
+    i_init         : input  logic                           = false, /// Initialize the round robin state and weights (`ROUND_ROBIN` only)
+    i_priority     : input  logic<REQUESTS, PRIORITY_WIDTH> = '0   , /// Priority of each request (used when `PRIORITY_ENABLE` and `!FIXED_PRIORITY`)
+    i_weight_valid : input  logic                           = false, /// Use `i_weight` as the weights for the next round (`ROUND_ROBIN` only)
+    i_weight       : input  logic<REQUESTS, WEIGHT_WIDTH>   = '0   , /// Weight of each request (`ROUND_ROBIN` only)
+    i_request      : input  logic<REQUESTS>                        , /// Requests
+    o_grant        : output logic<GRANT_WIDTH>                     , /// Grant (onehot or binary index)
+    i_free         : input  logic<FREE_WIDTH>                      , /// Release the kept grant (used when `KEEP_RESULT`)
+    i_update_state : input  logic                           = true , /// Update the arbiter state by the current grant
+    o_current_state: output logic<N_SLOTS, STATE_WIDTH>     = _    , /// Current round robin state (`ROUND_ROBIN` only)
+) {
+    import arbiter_pkg::*;
+    import utils::clog2_clipped;
+
+    if REQUESTS >= 2 :g {
+        var request: logic<REQUESTS>   ;
+        var grant  : logic<GRANT_WIDTH>;
+        var busy   : logic             ;
+
+        always_comb {
+            request = if !busy ? i_request : '0;
+        }
+
+        if KIND == arbiter_kind::ROUND_ROBIN :g_arbiter {
+            inst u_arbiter: round_robin_arbiter #(
+                REQUESTS       : REQUESTS       ,
+                ONEHOT_GRANT   : ONEHOT_GRANT   ,
+                PRIORITY_ENABLE: PRIORITY_ENABLE,
+                PRIORITY_WIDTH : PRIORITY_WIDTH ,
+                FIXED_PRIORITY : FIXED_PRIORITY ,
+                PRIORITY       : PRIORITY       ,
+                WEIGHT_ENABLE  : WEIGHT_ENABLE  ,
+                WEIGHT_WIDTH   : WEIGHT_WIDTH   ,
+                INITIAL_WEIGHT : INITIAL_WEIGHT ,
+                SELECTOR_KIND  : SELECTOR_KIND  ,
+            ) (
+                i_clk          : i_clk          ,
+                i_rst          : i_rst          ,
+                i_init         : i_init         ,
+                i_priority     : i_priority     ,
+                i_weight_valid : i_weight_valid ,
+                i_weight       : i_weight       ,
+                i_request      : request        ,
+                o_grant        : grant          ,
+                i_update_state : i_update_state ,
+                o_current_state: o_current_state,
+            );
+        } else {
+            inst u_arbiter: fixed_priority_arbiter #(
+                REQUESTS       : REQUESTS       ,
+                ONEHOT_GRANT   : ONEHOT_GRANT   ,
+                PRIORITY_ENABLE: PRIORITY_ENABLE,
+                PRIORITY_WIDTH : PRIORITY_WIDTH ,
+                FIXED_PRIORITY : FIXED_PRIORITY ,
+                PRIORITY       : PRIORITY       ,
+                SELECTOR_KIND  : SELECTOR_KIND  ,
+            ) (
+                i_priority: i_priority,
+                i_request : request   ,
+                o_grant   : grant     ,
+            );
+
+            always_comb {
+                o_current_state = '0;
+            }
+        }
+
+        if KEEP_RESULT :g_grant {
+            var free         : logic             ;
+            var update       : logic             ;
+            var current_grant: logic<GRANT_WIDTH>;
+            var grant_latched: logic<GRANT_WIDTH>;
+
+            always_comb {
+                o_grant = current_grant;
+            }
+
+            always_comb {
+                if !busy {
+                    current_grant = grant;
+                } else {
+                    current_grant = grant_latched;
+                }
+            }
+
+            always_comb {
+                update = i_update_state && (request != '0);
+            }
+
+            always_ff {
+                if_reset {
+                    busy = false;
+                } else if free {
+                    busy = false;
+                } else if update {
+                    busy = true;
+                }
+            }
+
+            always_ff {
+                if_reset {
+                    grant_latched = 0 as GRANT_WIDTH;
+                } else if update {
+                    grant_latched = grant;
+                }
+            }
+
+            if FREE_WIDTH == 1 :g_free {
+                always_comb {
+                    free = i_free;
+                }
+            } else if ONEHOT_GRANT {
+                always_comb {
+                    free = (i_free & current_grant) != '0;
+                }
+            } else {
+                always_comb {
+                    free = i_free[current_grant];
+                }
+            }
+        } else {
+            always_comb {
+                o_grant = grant;
+            }
+
+            always_comb {
+                busy = false;
+            }
+        }
+    } else if ONEHOT_GRANT {
+        always_comb {
+            o_grant         = '1;
+            o_current_state = '0;
+        }
+    } else {
+        always_comb {
+            o_grant         = 0 as GRANT_WIDTH;
+            o_current_state = '0;
+        }
+    }
+}

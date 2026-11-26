@@ -1,6 +1,5 @@
 use crate::HashMap;
 use crate::HashSet;
-use crate::assert_buffer;
 use crate::backend::ChunkArtifact;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
@@ -10,6 +9,7 @@ use crate::ir::expression::{
 };
 use crate::ir::module::BitRange;
 use crate::ir::partial_index::partial_index_base;
+use crate::ir::string_type_utils::{self, ProtoText, Text};
 use crate::ir::variable::{
     VarOffset, clip_select_to_width, native_bytes as calc_native_bytes, read_native_value,
     write_native_value,
@@ -20,6 +20,7 @@ use crate::ir::write_log::{
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
+use crate::sim_status::SimStatus;
 use crate::simulator_error::SimulatorError;
 use num_bigint::BigUint;
 use std::sync::Arc;
@@ -70,26 +71,47 @@ fn remaining_array_shape(
 
 /// `None` on a shape mismatch, leaving the caller's generic path to report it.
 pub(crate) fn const_array_element_exprs(
+    context: &mut Context,
     expr: &air::Expression,
+    target: Option<&air::Type>,
     elements: usize,
-) -> Option<Vec<ProtoExpression>> {
-    let (comptime, values) = const_array_operand(expr)?;
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
+    let Some((comptime, values)) = const_array_operand(expr) else {
+        return Ok(None);
+    };
     if values.len() != elements {
-        return None;
+        return Ok(None);
     }
-    let width = comptime.r#type.total_width()?;
-    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+    let Some(width) = comptime.r#type.total_width() else {
+        return Ok(None);
+    };
+    if let Some(target) = target
+        && comptime.r#type.is_string()
+    {
+        let mut element = comptime.clone();
+        element.r#type.array.clear();
+        element.value = ValueVariant::Unknown;
 
-    Some(
-        values
-            .iter()
-            .map(|value| ProtoExpression::Value {
-                value: value.clone(),
-                width,
-                expr_context,
-            })
-            .collect(),
-    )
+        let mut expressions = Vec::with_capacity(elements);
+        for value in values {
+            let mut comptime = element.clone();
+            comptime.value = ValueVariant::Numeric(value.clone());
+            let expr = air::Expression::Term(Box::new(air::Factor::Value(comptime)));
+            expressions.push(ProtoExpression::conv_for(context, &expr, target)?);
+        }
+        return Ok(Some(expressions));
+    }
+
+    let expr_context = (&comptime.expr_context).into();
+    let expressions = values
+        .iter()
+        .map(|value| ProtoExpression::Value {
+            value: value.clone(),
+            width,
+            expr_context,
+        })
+        .collect();
+    Ok(Some(expressions))
 }
 
 /// An array literal wired straight to an unpacked-array port, e.g.
@@ -101,38 +123,43 @@ pub(crate) fn array_literal_element_exprs(
     expr: &air::Expression,
     r#type: &air::Type,
     elements: usize,
-) -> Option<Vec<ProtoExpression>> {
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
     if !matches!(expr, air::Expression::ArrayLiteral(..)) {
-        return None;
+        return Ok(None);
     }
     let mut expr = expr.clone();
-    let array_exprs = eval_array_literal(
+    let Ok(Some(array_exprs)) = eval_array_literal(
         &mut context.scope().analyzer_context,
         Some(&r#type.array),
         Some(r#type.width()),
         &mut expr,
-    )
-    .ok()??;
+    ) else {
+        return Ok(None);
+    };
 
     // The expansion emits one entry per element in flattened order, so the
     // k-th entry belongs to the k-th element.  A non-empty `select` means the
     // literal filled a packed vector rather than the array; that is not this
     // wiring.
     if array_exprs.iter().any(|x| !x.select.is_empty()) {
-        return None;
+        return Ok(None);
     }
 
     let mut out = Vec::with_capacity(elements);
     for array_expr in &array_exprs {
         if let Some(values) =
-            super::expression::array_slice_elements(context, &array_expr.expr).ok()?
+            super::expression::array_slice_elements(context, &array_expr.expr, Some(r#type))?
         {
             out.extend(values);
         } else {
-            out.push(Conv::conv(context, &array_expr.expr).ok()?);
+            out.push(ProtoExpression::conv_for(
+                context,
+                &array_expr.expr,
+                r#type,
+            )?);
         }
     }
-    (out.len() == elements).then_some(out)
+    Ok((out.len() == elements).then_some(out))
 }
 
 #[derive(Clone)]
@@ -220,7 +247,7 @@ pub enum SystemFunctionCall {
         args: Vec<Expression>,
     },
     Readmemh {
-        filename: String,
+        filename: Text,
         /// Shared because building the testbench program clones the statement.
         elements: Arc<[ReadmemhSlot]>,
         width: usize,
@@ -270,12 +297,16 @@ pub enum ProtoTbMethodKind {
         count: Option<ProtoExpression>,
         period: Option<ProtoExpression>,
     },
+    ClockStart {
+        max_cycles: Option<ProtoExpression>,
+        period: Option<ProtoExpression>,
+    },
     ResetAssert {
         clock: StrId,
         duration: Option<ProtoExpression>,
     },
     FileOpen {
-        path: String,
+        path: ProtoText,
         append: bool,
     },
     FileWrite {
@@ -319,6 +350,44 @@ pub enum ProtoTbMethodKind {
         capacity: u32,
         ret: Option<(VarId, RetWidthCheck)>,
     },
+    /// `$tb::runtime_args` methods.
+    RuntimeArg {
+        name: ProtoText,
+        op: ProtoRuntimeArgOp,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+}
+
+#[derive(Clone, Debug, Hash)]
+pub enum ProtoRuntimeArgOp {
+    Exists,
+    GetInt(ProtoExpression),
+    GetString(ProtoText),
+}
+
+/// Pointer-bound form of [`ProtoRuntimeArgOp`].
+#[derive(Clone)]
+pub enum RuntimeArgOp {
+    Exists,
+    GetInt(Expression),
+    GetString(Text),
+}
+
+impl ProtoRuntimeArgOp {
+    /// The expression of the default value, if any.
+    pub fn default_expr(&self) -> Option<&ProtoExpression> {
+        match self {
+            ProtoRuntimeArgOp::Exists => None,
+            ProtoRuntimeArgOp::GetInt(x) | ProtoRuntimeArgOp::GetString(ProtoText(x)) => Some(x),
+        }
+    }
+
+    pub fn default_expr_mut(&mut self) -> Option<&mut ProtoExpression> {
+        match self {
+            ProtoRuntimeArgOp::Exists => None,
+            ProtoRuntimeArgOp::GetInt(x) | ProtoRuntimeArgOp::GetString(ProtoText(x)) => Some(x),
+        }
+    }
 }
 
 /// How a component method's returned width is validated before it lands
@@ -333,11 +402,11 @@ pub enum RetWidthCheck {
     Exact(u32),
 }
 
-/// Argument of a user-defined component method call: string literals are
-/// extracted at conv time, everything else stays an evaluatable expression.
+/// Argument of a user-defined component method call: a string (a constant
+/// or a runtime `string`) is passed as its text, anything else as its value.
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoComponentArg {
-    Str(String),
+    Text(ProtoText),
     Expr(ProtoExpression),
 }
 
@@ -347,12 +416,16 @@ pub enum TbMethodKind {
         count: Option<Expression>,
         period: Option<Expression>,
     },
+    ClockStart {
+        max_cycles: Option<Expression>,
+        period: Option<Expression>,
+    },
     ResetAssert {
         clock: StrId,
         duration: Option<Expression>,
     },
     FileOpen {
-        path: String,
+        path: Text,
         append: bool,
     },
     FileWrite {
@@ -393,12 +466,17 @@ pub enum TbMethodKind {
         capacity: u32,
         ret: Option<(VarId, RetWidthCheck)>,
     },
+    RuntimeArg {
+        name: Text,
+        op: RuntimeArgOp,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
 }
 
 /// Pointer-bound form of [`ProtoComponentArg`].
 #[derive(Clone)]
 pub enum ComponentArg {
-    Str(String),
+    Text(Text),
     Expr(Expression),
 }
 
@@ -552,7 +630,7 @@ impl Statement {
         matches!(self, Statement::Compiled(_) | Statement::CompiledBatch(_))
     }
 
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> ControlFlow {
         match self {
             Statement::Assign(x) => {
                 x.eval_step(mask_cache);
@@ -562,8 +640,8 @@ impl Statement {
                 x.eval_step(mask_cache);
                 ControlFlow::Continue
             }
-            Statement::If(x) => x.eval_step(mask_cache),
-            Statement::Case(x) => x.eval_step(mask_cache),
+            Statement::If(x) => x.eval_step(mask_cache, status),
+            Statement::Case(x) => x.eval_step(mask_cache, status),
             Statement::For(x) => {
                 let r = &x.range;
                 let (start, start_shape) = r.start.eval(mask_cache);
@@ -579,7 +657,7 @@ impl Statement {
                         write_native_value(x.var_ptr, x.var_native_bytes, x.var_use_4state, &val);
                     }
                     for s in &x.body {
-                        if s.eval_step(mask_cache) == ControlFlow::Break {
+                        if s.eval_step(mask_cache, status) == ControlFlow::Break {
                             return ControlFlow::Break;
                         }
                     }
@@ -619,7 +697,7 @@ impl Statement {
                                 i = n
                             }
                             _ => {
-                                assert_buffer::record_fatal(format!(
+                                status.record_fatal(format!(
                                     "for-loop step does not advance the loop variable (stuck at {i}) at {}:{}:{}",
                                     x.token.beg.source, x.token.beg.line, x.token.beg.column
                                 ));
@@ -652,14 +730,14 @@ impl Statement {
             },
             Statement::SequentialBlock(body) => {
                 for s in body {
-                    if s.eval_step(mask_cache) == ControlFlow::Break {
+                    if s.eval_step(mask_cache, status) == ControlFlow::Break {
                         return ControlFlow::Break;
                     }
                 }
                 ControlFlow::Continue
             }
             Statement::SystemFunctionCall(x) => {
-                x.eval_step(mask_cache);
+                x.eval_step(mask_cache, status);
                 ControlFlow::Continue
             }
             Statement::TbMethodCall { .. } => ControlFlow::Continue,
@@ -769,6 +847,69 @@ fn trim_leading_zeros(s: &str) -> String {
     }
 }
 
+/// One `%[-][0][width]<conv>` conversion of a `$display` format string.
+pub(crate) struct FormatSpec {
+    pub left_justify: bool,
+    /// A leading `0` is C's pad-with-zeros flag; `%0d` is its degenerate
+    /// case, which Verilog reads as the minimal form.
+    pub zero_pad: bool,
+    pub width: Option<usize>,
+    /// Index of the conversion character; `None` when the string ends
+    /// before it.
+    pub conv: Option<usize>,
+}
+
+/// Parses the conversion starting at the `%` at `chars[start]`. The width
+/// belongs to the spec and has to be consumed with it: left in place, `%0d`
+/// prints literally AND leaves its argument to the next conversion, sliding
+/// every later one along.
+pub(crate) fn parse_format_spec(chars: &[char], start: usize) -> FormatSpec {
+    let mut j = start + 1;
+    let left_justify = chars.get(j) == Some(&'-');
+    if left_justify {
+        j += 1;
+    }
+    let digits_start = j;
+    while chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
+        j += 1;
+    }
+    let zero_pad = chars.get(digits_start) == Some(&'0');
+    let width: Option<usize> = (j > digits_start).then(|| {
+        chars[digits_start..j].iter().fold(0usize, |acc, c| {
+            acc.saturating_mul(10)
+                .saturating_add(c.to_digit(10).unwrap() as usize)
+                .min(MAX_FIELD_WIDTH)
+        })
+    });
+    FormatSpec {
+        left_justify,
+        zero_pad,
+        width,
+        conv: (j < chars.len()).then_some(j),
+    }
+}
+
+/// Whether a conversion character consumes an argument.
+pub(crate) fn format_conv_takes_arg(conv: char) -> bool {
+    matches!(
+        conv,
+        'h' | 'H'
+            | 'x'
+            | 'X'
+            | 'd'
+            | 'D'
+            | 'o'
+            | 'O'
+            | 'b'
+            | 'B'
+            | 'c'
+            | 'C'
+            | 's'
+            | 'S'
+            | crate::string_pool::HANDLE_SPEC
+    )
+}
+
 fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
     let chars: Vec<char> = format_str.chars().collect();
     let mut result = String::new();
@@ -781,34 +922,18 @@ fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
             i += 1;
             continue;
         }
-        // `%[-][0][width]<conv>`.  The width belongs to the spec and has to
-        // be consumed with it: left in place, `%0d` prints literally AND
-        // leaves its argument to the next conversion, sliding every later
-        // one along.
         let start = i;
-        let mut j = i + 1;
-        let left_justify = chars.get(j) == Some(&'-');
-        if left_justify {
-            j += 1;
-        }
-        let digits_start = j;
-        while chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
-            j += 1;
-        }
-        // A leading `0` is C's pad-with-zeros flag; `%0d` is its degenerate
-        // case, which Verilog reads as the minimal form.
-        let zero_pad = chars.get(digits_start) == Some(&'0');
-        let width: Option<usize> = (j > digits_start).then(|| {
-            chars[digits_start..j].iter().fold(0usize, |acc, c| {
-                acc.saturating_mul(10)
-                    .saturating_add(c.to_digit(10).unwrap() as usize)
-                    .min(MAX_FIELD_WIDTH)
-            })
-        });
-        let Some(&spec) = chars.get(j) else {
+        let FormatSpec {
+            left_justify,
+            zero_pad,
+            width,
+            conv,
+        } = parse_format_spec(&chars, start);
+        let Some(j) = conv else {
             result.extend(&chars[start..]);
             break;
         };
+        let spec = chars[j];
         i = j + 1;
 
         let mut take = |f: &dyn Fn(&AnalyzerValue) -> String| -> String {
@@ -829,6 +954,7 @@ fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
             'b' | 'B' => take(&|v| v.format_bin()),
             'c' | 'C' => take(&|v| ((v.payload_u64() & 0xFF) as u8 as char).to_string()),
             's' | 'S' => take(&byte_value_to_string_lossy),
+            crate::string_pool::HANDLE_SPEC => take(&|v| crate::string_pool::text(v.payload_u64())),
             'm' | 'M' => "<hierarchy>".to_string(),
             't' | 'T' => "0".to_string(),
             _ => {
@@ -955,7 +1081,10 @@ pub unsafe extern "C" fn veryl_aot_sysfn_print(
 }
 
 impl SystemFunctionCall {
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) {
+        if output_buffer::muted() {
+            return;
+        }
         match self {
             SystemFunctionCall::Display { format_str, args } => {
                 let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
@@ -986,7 +1115,7 @@ impl SystemFunctionCall {
                 elements,
                 width,
             } => {
-                let content = read_hex_file(filename);
+                let content = read_hex_file(&filename.eval(mask_cache));
                 let mut i = 0usize;
                 for_each_hex_item(&content, *width, |item| {
                     let value = match item {
@@ -1021,14 +1150,14 @@ impl SystemFunctionCall {
                 if val.payload_u64() == 0 {
                     let msg = format_assert_message(format_str, args, mask_cache);
                     match kind {
-                        AssertKind::Fatal => assert_buffer::record_fatal(msg),
-                        AssertKind::Continue => assert_buffer::record_continue(msg),
+                        AssertKind::Fatal => status.record_fatal(msg),
+                        AssertKind::Continue => status.record_continue(msg),
                     }
                 }
             }
-            SystemFunctionCall::Finish => {
-                // Handled by testbench driver
-            }
+            // `$finish` in an `initial` block is a testbench statement; here
+            // it is in the design, and ends the run at the end of the cycle.
+            SystemFunctionCall::Finish => status.record_finish(),
         }
     }
 
@@ -1040,7 +1169,10 @@ impl SystemFunctionCall {
                     e.gather_variable(inputs, &mut dummy_outputs);
                 }
             }
-            SystemFunctionCall::Readmemh { .. } => {}
+            SystemFunctionCall::Readmemh { filename, .. } => {
+                let mut dummy_outputs = vec![];
+                filename.0.gather_variable(inputs, &mut dummy_outputs);
+            }
             SystemFunctionCall::Assert { condition, .. } => {
                 let mut dummy_outputs = vec![];
                 condition.gather_variable(inputs, &mut dummy_outputs);
@@ -1061,7 +1193,7 @@ pub enum ProtoSystemFunctionCall {
         args: Vec<ProtoExpression>,
     },
     Readmemh {
-        filename: String,
+        filename: ProtoText,
         elements: Vec<ReadmemhElement>,
         width: usize,
         /// A target inside an instance.  Its offsets exist only once the
@@ -1538,7 +1670,10 @@ impl ProtoStatement {
                         arg.adjust_offsets(ff_delta, comb_delta);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { elements, .. } => {
+                ProtoSystemFunctionCall::Readmemh {
+                    filename, elements, ..
+                } => {
+                    filename.0.adjust_offsets(ff_delta, comb_delta);
                     for elem in elements {
                         elem.current = elem.current.adjust(ff_delta, comb_delta);
                         if let Some(next) = &mut elem.next_offset {
@@ -1589,7 +1724,11 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::TbMethodCall { method, .. } => match method {
-                ProtoTbMethodKind::ClockNext { count, period } => {
+                ProtoTbMethodKind::ClockNext { count, period }
+                | ProtoTbMethodKind::ClockStart {
+                    max_cycles: count,
+                    period,
+                } => {
                     if let Some(c) = count {
                         c.adjust_offsets(ff_delta, comb_delta);
                     }
@@ -1609,9 +1748,9 @@ impl ProtoStatement {
                 }
                 ProtoTbMethodKind::Component { args, .. } => {
                     for a in args {
-                        if let ProtoComponentArg::Expr(e) = a {
-                            e.adjust_offsets(ff_delta, comb_delta);
-                        }
+                        let (ProtoComponentArg::Expr(e) | ProtoComponentArg::Text(ProtoText(e))) =
+                            a;
+                        e.adjust_offsets(ff_delta, comb_delta);
                     }
                 }
                 ProtoTbMethodKind::RandomSeed { value } => {
@@ -1626,8 +1765,16 @@ impl ProtoStatement {
                     min.adjust_offsets(ff_delta, comb_delta);
                     max.adjust_offsets(ff_delta, comb_delta);
                 }
-                ProtoTbMethodKind::FileOpen { .. }
-                | ProtoTbMethodKind::FileClose
+                ProtoTbMethodKind::FileOpen { path, .. } => {
+                    path.0.adjust_offsets(ff_delta, comb_delta);
+                }
+                ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                    name.0.adjust_offsets(ff_delta, comb_delta);
+                    if let Some(e) = op.default_expr_mut() {
+                        e.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoTbMethodKind::FileClose
                 | ProtoTbMethodKind::FileFlush
                 | ProtoTbMethodKind::RandomGet { .. }
                 | ProtoTbMethodKind::RandomGetSeed { .. } => {}
@@ -1748,7 +1895,10 @@ impl ProtoStatement {
                         arg.remap_offsets_with(f);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { elements, .. } => {
+                ProtoSystemFunctionCall::Readmemh {
+                    filename, elements, ..
+                } => {
+                    filename.0.remap_offsets_with(f);
                     for elem in elements {
                         elem.current = f(elem.current);
                     }
@@ -1789,7 +1939,11 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::TbMethodCall { method, .. } => match method {
-                ProtoTbMethodKind::ClockNext { count, period } => {
+                ProtoTbMethodKind::ClockNext { count, period }
+                | ProtoTbMethodKind::ClockStart {
+                    max_cycles: count,
+                    period,
+                } => {
                     if let Some(c) = count {
                         c.remap_offsets_with(f);
                     }
@@ -1809,9 +1963,9 @@ impl ProtoStatement {
                 }
                 ProtoTbMethodKind::Component { args, .. } => {
                     for a in args {
-                        if let ProtoComponentArg::Expr(e) = a {
-                            e.remap_offsets_with(f);
-                        }
+                        let (ProtoComponentArg::Expr(e) | ProtoComponentArg::Text(ProtoText(e))) =
+                            a;
+                        e.remap_offsets_with(f);
                     }
                 }
                 ProtoTbMethodKind::RandomSeed { value } => {
@@ -1826,8 +1980,16 @@ impl ProtoStatement {
                     min.remap_offsets_with(f);
                     max.remap_offsets_with(f);
                 }
-                ProtoTbMethodKind::FileOpen { .. }
-                | ProtoTbMethodKind::FileClose
+                ProtoTbMethodKind::FileOpen { path, .. } => {
+                    path.0.remap_offsets_with(f);
+                }
+                ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                    name.0.remap_offsets_with(f);
+                    if let Some(e) = op.default_expr_mut() {
+                        e.remap_offsets_with(f);
+                    }
+                }
+                ProtoTbMethodKind::FileClose
                 | ProtoTbMethodKind::FileFlush
                 | ProtoTbMethodKind::RandomGet { .. }
                 | ProtoTbMethodKind::RandomGetSeed { .. } => {}
@@ -1918,7 +2080,9 @@ impl ProtoStatement {
                         arg.gather_variable_offsets(inputs);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Readmemh { filename, .. } => {
+                    filename.0.gather_variable_offsets(inputs);
+                }
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
@@ -2064,7 +2228,9 @@ impl ProtoStatement {
                         arg.gather_reads_with_ranges(out);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Readmemh { filename, .. } => {
+                    filename.0.gather_reads_with_ranges(out);
+                }
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
@@ -2241,7 +2407,9 @@ impl ProtoStatement {
                         arg.gather_variable_offsets_expanded(fold, inputs);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Readmemh { filename, .. } => {
+                    filename.0.gather_variable_offsets_expanded(fold, inputs);
+                }
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
@@ -2360,7 +2528,10 @@ impl ProtoStatement {
                         arg.collect_big_arrays(fold);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Readmemh { filename, .. } => {
+                    filename.0.collect_big_arrays(fold);
+                }
+                ProtoSystemFunctionCall::Finish => {}
             },
             ProtoStatement::CompiledBlock(x) => {
                 // The cached offset lists carry no array shape, so only the
@@ -2439,7 +2610,9 @@ impl ProtoStatement {
                         arg.gather_dynamic_read_ranges(ranges);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Readmemh { filename, .. } => {
+                    filename.0.gather_dynamic_read_ranges(ranges);
+                }
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
@@ -2700,7 +2873,13 @@ impl ProtoStatement {
                             })
                             .collect();
                         Statement::SystemFunctionCall(SystemFunctionCall::Readmemh {
-                            filename: filename.clone(),
+                            filename: filename.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            ),
                             elements: resolved,
                             width: *width,
                         })
@@ -2887,7 +3066,11 @@ impl ProtoStatement {
                 ProtoStatement::Break => Statement::Break,
                 ProtoStatement::TbMethodCall { inst, method } => {
                     let method = match method {
-                        ProtoTbMethodKind::ClockNext { count, period } => {
+                        ProtoTbMethodKind::ClockNext { count, period }
+                        | ProtoTbMethodKind::ClockStart {
+                            max_cycles: count,
+                            period,
+                        } => {
                             let count = count.as_ref().map(|e| {
                                 e.apply_values_ptr(
                                     ff_values_ptr,
@@ -2906,7 +3089,14 @@ impl ProtoStatement {
                                     use_4state,
                                 )
                             });
-                            TbMethodKind::ClockNext { count, period }
+                            if matches!(method, ProtoTbMethodKind::ClockNext { .. }) {
+                                TbMethodKind::ClockNext { count, period }
+                            } else {
+                                TbMethodKind::ClockStart {
+                                    max_cycles: count,
+                                    period,
+                                }
+                            }
                         }
                         ProtoTbMethodKind::ResetAssert { clock, duration } => {
                             let duration = duration.as_ref().map(|e| {
@@ -2924,9 +3114,37 @@ impl ProtoStatement {
                             }
                         }
                         ProtoTbMethodKind::FileOpen { path, append } => TbMethodKind::FileOpen {
-                            path: path.clone(),
+                            path: path.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            ),
                             append: *append,
                         },
+                        ProtoTbMethodKind::RuntimeArg { name, op, ret } => {
+                            let bind = |x: &ProtoExpression| {
+                                x.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            };
+                            TbMethodKind::RuntimeArg {
+                                name: Text(bind(&name.0)),
+                                op: match op {
+                                    ProtoRuntimeArgOp::Exists => RuntimeArgOp::Exists,
+                                    ProtoRuntimeArgOp::GetInt(x) => RuntimeArgOp::GetInt(bind(x)),
+                                    ProtoRuntimeArgOp::GetString(x) => {
+                                        RuntimeArgOp::GetString(Text(bind(&x.0)))
+                                    }
+                                },
+                                ret: *ret,
+                            }
+                        }
                         ProtoTbMethodKind::FileWrite { format_str, args } => {
                             let args = args
                                 .iter()
@@ -2951,7 +3169,15 @@ impl ProtoStatement {
                             let args = args
                                 .iter()
                                 .map(|a| match a {
-                                    ProtoComponentArg::Str(s) => ComponentArg::Str(s.clone()),
+                                    ProtoComponentArg::Text(x) => {
+                                        ComponentArg::Text(x.apply_values_ptr(
+                                            ff_values_ptr,
+                                            ff_len,
+                                            comb_values_ptr,
+                                            comb_len,
+                                            use_4state,
+                                        ))
+                                    }
                                     ProtoComponentArg::Expr(e) => {
                                         ComponentArg::Expr(e.apply_values_ptr(
                                             ff_values_ptr,
@@ -3538,7 +3764,7 @@ pub struct IfStatement {
 }
 
 impl IfStatement {
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> ControlFlow {
         let cond = self
             .cond
             .as_ref()
@@ -3546,13 +3772,13 @@ impl IfStatement {
 
         if cond {
             for x in &self.true_side {
-                if x.eval_step(mask_cache) == ControlFlow::Break {
+                if x.eval_step(mask_cache, status) == ControlFlow::Break {
                     return ControlFlow::Break;
                 }
             }
         } else {
             for x in &self.false_side {
-                if x.eval_step(mask_cache) == ControlFlow::Break {
+                if x.eval_step(mask_cache, status) == ControlFlow::Break {
                     return ControlFlow::Break;
                 }
             }
@@ -3604,11 +3830,11 @@ pub struct CaseArm {
 }
 
 impl CaseStatement {
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> ControlFlow {
         for arm in &self.arms {
             if value_is_true(&arm.cond.eval(mask_cache)) {
                 for x in &arm.body {
-                    if x.eval_step(mask_cache) == ControlFlow::Break {
+                    if x.eval_step(mask_cache, status) == ControlFlow::Break {
                         return ControlFlow::Break;
                     }
                 }
@@ -3616,7 +3842,7 @@ impl CaseStatement {
             }
         }
         for x in &self.default {
-            if x.eval_step(mask_cache) == ControlFlow::Break {
+            if x.eval_step(mask_cache, status) == ControlFlow::Break {
                 return ControlFlow::Break;
             }
         }
@@ -3750,40 +3976,20 @@ fn extract_display_args(
     context: &mut Context,
     inputs: &[SystemFunctionInput],
 ) -> Result<(String, Vec<ProtoExpression>), SimulatorError> {
-    let mut format_str = String::new();
-    let mut exprs = Vec::new();
-    let mut iter = inputs.iter();
-    let mut has_format = false;
-
-    // Check if the first argument is a string literal
-    if let Some(first) = iter.next() {
-        if is_string_literal(&first.0) {
-            has_format = true;
-            format_str = extract_string_value(&first.0)
-                .ok_or_else(|| SimulatorError::unsupported_description(&first.0.token_range()))?;
-        } else {
-            // Not a string literal; treat as expression argument
-            let proto: ProtoExpression = Conv::conv(context, &first.0)?;
-            exprs.push(proto);
-        }
-    }
-
-    for input in iter {
-        // A `string` exists only at elaboration and has no simulator variable
-        // behind it, so its bytes are taken here. Converting it as a variable
-        // reference looks for a `VariableMeta` that was never created.
-        let proto = if let Some(x) = string_arg_expression(&input.0) {
-            x
-        } else {
-            Conv::conv(context, &input.0)?
-        };
-        exprs.push(proto);
-    }
+    // A leading string literal is the format string.
+    let (mut format_str, args) = match inputs.first() {
+        Some(first) if is_string_literal(&first.0) => (
+            extract_string_value(&first.0)
+                .ok_or_else(|| SimulatorError::unsupported_description(&first.0.token_range()))?,
+            &inputs[1..],
+        ),
+        _ => (String::new(), inputs),
+    };
 
     // Without a format string every argument prints in its default format,
     // which for a `string` is its text, not the hex of its bytes.
-    if !has_format && inputs.iter().any(|x| x.0.comptime().r#type.is_string()) {
-        format_str = inputs
+    if args.len() == inputs.len() && args.iter().any(|x| x.0.comptime().r#type.is_string()) {
+        format_str = args
             .iter()
             .map(|x| {
                 if x.0.comptime().r#type.is_string() {
@@ -3794,6 +4000,30 @@ fn extract_display_args(
             })
             .collect::<Vec<_>>()
             .join(" ");
+    }
+
+    let specs = string_type_utils::format_arg_specs(&format_str, args.len());
+    let mut exprs = Vec::new();
+    // Whether each argument is a handle (printed by its text).
+    let mut handle_args = Vec::new();
+    for (input, spec) in args.iter().zip(&specs) {
+        // A `string` constant has no simulator variable behind it, so its
+        // bytes are taken here. A runtime `string` printed by `%s` passes its
+        // handle; under any other conversion it prints the bytes of its text.
+        let (proto, is_handle) = if let Some(x) = string_arg_expression(&input.0) {
+            (x, false)
+        } else if string_type_utils::is_expr(&input.0) && matches!(spec, Some('s' | 'S')) {
+            let r#type = input.0.comptime().r#type.clone();
+            (ProtoExpression::conv_for(context, &input.0, &r#type)?, true)
+        } else {
+            (Conv::conv(context, &input.0)?, false)
+        };
+        exprs.push(proto);
+        handle_args.push(is_handle);
+    }
+
+    if handle_args.iter().any(|x| *x) {
+        format_str = string_type_utils::mark_handle_specs(&format_str, &handle_args);
     }
 
     Ok((format_str, exprs))
@@ -3847,13 +4077,6 @@ fn extract_string_value(expr: &air::Expression) -> Option<String> {
         return veryl_analyzer::value::byte_value_to_string(value);
     }
     None
-}
-
-/// Strips exactly the delimiting quotes of a string-literal token (one
-/// leading, one trailing); quote characters inside the content survive.
-fn strip_string_quotes(s: &str) -> &str {
-    let s = s.strip_prefix('"').unwrap_or(s);
-    s.strip_suffix('"').unwrap_or(s)
 }
 
 impl Conv<&air::Statement> for Vec<ProtoStatement> {
@@ -3947,10 +4170,10 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     )]
                 }
                 SystemFunctionKind::Readmemh(input, output) => {
-                    let raw = extract_string_value(&input.0).ok_or_else(|| {
-                        SimulatorError::unsupported_description(&x.comptime.token)
-                    })?;
-                    let filename = raw.trim_matches('"').to_string();
+                    let filename =
+                        string_type_utils::conv_text(context, &input.0)?.ok_or_else(|| {
+                            SimulatorError::unsupported_description(&x.comptime.token)
+                        })?;
                     let call = match output {
                         // Left for `resolve_hier_refs` (see the `hier` field).
                         air::SystemFunctionOutput::Hier(hier) => {
@@ -4031,7 +4254,11 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     }
                 };
                 let method = match &x.method {
-                    air::TbMethod::ClockNext { count, period } => {
+                    air::TbMethod::ClockNext { count, period }
+                    | air::TbMethod::ClockStart {
+                        max_cycles: count,
+                        period,
+                    } => {
                         let count = if let Some(expr) = count {
                             Some(Conv::conv(context, expr)?)
                         } else {
@@ -4042,7 +4269,14 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         } else {
                             None
                         };
-                        ProtoTbMethodKind::ClockNext { count, period }
+                        if matches!(x.method, air::TbMethod::ClockNext { .. }) {
+                            ProtoTbMethodKind::ClockNext { count, period }
+                        } else {
+                            ProtoTbMethodKind::ClockStart {
+                                max_cycles: count,
+                                period,
+                            }
+                        }
                     }
                     air::TbMethod::ResetAssert { clock, duration } => {
                         let duration = if let Some(expr) = duration {
@@ -4056,12 +4290,10 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         }
                     }
                     air::TbMethod::FileOpen { name, append } => {
-                        let path = extract_string_value(&name.0)
-                            .ok_or_else(|| {
+                        let path =
+                            string_type_utils::conv_text(context, &name.0)?.ok_or_else(|| {
                                 SimulatorError::unsupported_description(&name.0.token_range())
-                            })?
-                            .trim_matches('"')
-                            .to_string();
+                            })?;
                         ProtoTbMethodKind::FileOpen {
                             path,
                             append: *append,
@@ -4080,10 +4312,8 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         let args = args
                             .iter()
                             .map(|a| {
-                                if is_string_literal(&a.0)
-                                    && let Some(s) = extract_string_value(&a.0)
-                                {
-                                    Ok(ProtoComponentArg::Str(strip_string_quotes(&s).to_string()))
+                                if let Some(text) = string_type_utils::conv_text(context, &a.0)? {
+                                    Ok(ProtoComponentArg::Text(text))
                                 } else {
                                     let expr: ProtoExpression = Conv::conv(context, &a.0)?;
                                     Ok(ProtoComponentArg::Expr(expr))
@@ -4143,6 +4373,39 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                             signed: *signed,
                             four_state: *four_state,
                             capacity: *capacity,
+                            ret: tb_ret,
+                        }
+                    }
+                    air::TbMethod::RuntimeArg { name, op } => {
+                        let text = |context: &mut Context, x: &air::Expression| {
+                            string_type_utils::conv_text(context, x)?.ok_or_else(|| {
+                                SimulatorError::unsupported_description(&x.token_range())
+                            })
+                        };
+                        let name = text(context, name)?;
+                        let op = match op {
+                            air::RuntimeArgOp::Exists => ProtoRuntimeArgOp::Exists,
+                            air::RuntimeArgOp::GetInt { default } => {
+                                ProtoRuntimeArgOp::GetInt(Conv::conv(context, default)?)
+                            }
+                            air::RuntimeArgOp::GetString { default } => {
+                                // The text, whose length is known only at run
+                                // time, lands in a `string` as its handle;
+                                // bits of it would need that length.
+                                if let Some(dst) = &x.ret
+                                    && !string_type_utils::is_var(context, &dst.id)
+                                {
+                                    return Err(SimulatorError::unsupported_string_operation(
+                                        "a bit operation",
+                                        &dst.token,
+                                    ));
+                                }
+                                ProtoRuntimeArgOp::GetString(text(context, default)?)
+                            }
+                        };
+                        ProtoTbMethodKind::RuntimeArg {
+                            name,
+                            op,
                             ret: tb_ret,
                         }
                     }
@@ -4266,6 +4529,32 @@ fn conv_assign_statements(
     context: &mut Context,
     src: &air::AssignStatement,
 ) -> Result<Vec<ProtoStatement>, SimulatorError> {
+    let [dst] = src.dst.as_slice() else {
+        return conv_assign_statements_inner(context, src);
+    };
+    if !string_type_utils::is_var(context, &dst.id) {
+        // A non-string destination reads a string as bits.
+        return conv_assign_statements_inner(context, src);
+    }
+
+    // A runtime `string` destination stores the handle of the string it is
+    // given (the analyzer rejects anything else).
+    string_type_utils::check_dst(
+        &dst.comptime.r#type,
+        &dst.select,
+        "a bit operation",
+        &dst.token,
+    )?;
+    let mut x = src.clone();
+    x.expr = string_type_utils::to_handle_expr(context, &src.expr)?;
+    x.width = Some(crate::string_pool::HANDLE_WIDTH);
+    conv_assign_statements_inner(context, &x)
+}
+
+fn conv_assign_statements_inner(
+    context: &mut Context,
+    src: &air::AssignStatement,
+) -> Result<Vec<ProtoStatement>, SimulatorError> {
     {
         let in_initial = context.in_initial;
         let in_comb = context.in_comb;
@@ -4276,7 +4565,8 @@ fn conv_assign_statements(
             let dst0 = &src.dst[0];
             if let Some(dst_shape) = remaining_array_shape(context, &dst0.id, &dst0.index) {
                 let total: usize = dst_shape.iter().map(|d| d.unwrap_or(1)).product();
-                if let Some(elements) = super::expression::array_slice_elements(context, &src.expr)?
+                if let Some(elements) =
+                    super::expression::array_slice_elements(context, &src.expr, None)?
                 {
                     if elements.len() != total {
                         return Err(SimulatorError::unsupported_description(&src.token));
@@ -5012,18 +5302,19 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         // A child-instance destination has no offset yet — the instance tree is
         // not assembled at conv time — so it travels as a path.
         if let Some(hier) = &src.hier_dst {
-            if hier.comptime.r#type.is_string() {
-                return Err(SimulatorError::unsupported_string(
-                    "a hierarchical reference",
-                    &hier.token,
-                ));
-            }
+            string_type_utils::check_dst(
+                &hier.comptime.r#type,
+                &hier.select,
+                "a hierarchical reference",
+                &hier.token,
+            )?;
             // An array literal is lowered per element against the destination's
             // shape, which a hierarchical path does not carry at conv time.
             if matches!(src.expr, air::Expression::ArrayLiteral(..)) {
                 return Err(SimulatorError::unsupported_description(&hier.token));
             }
-            let expr = ProtoExpression::conv(context, &src.expr)?;
+            // A child's `string` takes the handle of the text it is given.
+            let expr = ProtoExpression::conv_for(context, &src.expr, &hier.comptime.r#type)?;
             return Ok(ProtoStatement::HierAssign(Box::new(ProtoHierAssign {
                 inst_path: hier.inst_path.clone(),
                 var_path: hier.var_path.clone(),
@@ -5530,7 +5821,8 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             }
 
             if let Some(arg_meta) = arg_meta_clone.as_ref()
-                && let Some(elements) = super::expression::array_slice_elements(context, expr)?
+                && let Some(elements) =
+                    super::expression::array_slice_elements(context, expr, None)?
             {
                 if elements.len() != arg_meta.elements.len() {
                     return Err(SimulatorError::unsupported_description(&src.comptime.token));
@@ -5555,7 +5847,8 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
 
             // Array argument fed by a const array (`f(pk::TBL)`).
             if let Some(arg_meta) = arg_meta_clone.as_ref()
-                && let Some(exprs) = const_array_element_exprs(expr, arg_meta.elements.len())
+                && let Some(exprs) =
+                    const_array_element_exprs(context, expr, None, arg_meta.elements.len())?
             {
                 for (arg_element, expr) in arg_meta.elements.iter().zip(exprs) {
                     result.push(ProtoStatement::Assign(ProtoAssignStatement {
@@ -5632,7 +5925,11 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 }
             }
 
-            let mut proto_expr: ProtoExpression = Conv::conv(context, expr)?;
+            // A `string` argument takes the handle of the text it is given.
+            let mut proto_expr: ProtoExpression = match &arg_meta_clone {
+                Some(meta) => ProtoExpression::conv_for(context, expr, &meta.r#type)?,
+                None => Conv::conv(context, expr)?,
+            };
             let scope = context.scope();
             let meta = scope.variable_meta.get(arg_var_id).unwrap();
             let element = &meta.elements[0];
@@ -5688,6 +5985,13 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             for dst in destinations {
                 let scope = context.scope();
                 let dst_meta = scope.variable_meta.get(&dst.id).unwrap();
+                let dst_is_string = dst_meta.r#type.is_string();
+                string_type_utils::check_dst(
+                    &dst_meta.r#type,
+                    &dst.select,
+                    "a bit operation",
+                    &dst.token,
+                )?;
                 // An array output binds a whole array or a constant partial
                 // index (`o` / `o[i]`).
                 let (first, last) = dst
@@ -5716,6 +6020,25 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                             width: arg_meta.width,
                             signed: false,
                         },
+                    };
+                    // A `string` argument's handle moves into a `string`; a
+                    // non-string reads it as the bytes of its text, at the
+                    // width of the function's longest text for it.
+                    let arg_expr = if arg_meta.r#type.is_string() {
+                        string_type_utils::cast(
+                            arg_expr,
+                            arg_meta.string_width,
+                            dst_is_string,
+                            "a bit operation",
+                            &dst.token,
+                            // No context of its own: the bytes' width.
+                            ExpressionContext {
+                                width: 0,
+                                signed: false,
+                            },
+                        )?
+                    } else {
+                        arg_expr
                     };
 
                     // Same slot choice as an assignment statement: a

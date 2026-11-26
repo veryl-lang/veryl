@@ -1,0 +1,102 @@
+/// Fixed priority arbiter
+///
+/// Grants the request with the lowest index.
+///
+/// * `PRIORITY_ENABLE`: Requests are classified by their priority and the request with the highest priority is granted.
+///                      Among requests with the same priority, the request with the lowest index is granted.
+pub module fixed_priority_arbiter #(
+    param REQUESTS       : u32                                     = 4                                       ,
+    param ONEHOT_GRANT   : bbool                                   = true                                    ,
+    param GRANT_WIDTH    : u32                                     = calc_grant_width(REQUESTS, ONEHOT_GRANT),
+    param PRIORITY_ENABLE: bbool                                   = false                                   ,
+    param PRIORITY_WIDTH : u32                                     = 1                                       ,
+    param FIXED_PRIORITY : bbool                                   = false                                   ,
+    param PRIORITY       : bit          <REQUESTS, PRIORITY_WIDTH> = '0                                      ,
+    param SELECTOR_KIND  : selector_kind                           = selector_kind::LZC                      ,
+    const INDEX_WIDTH    : u32                                     = clog2_clipped(REQUESTS, 1)              ,
+) (
+    i_priority: input  logic<REQUESTS, PRIORITY_WIDTH> = '0, /// Priority of each request (used when `PRIORITY_ENABLE` and `!FIXED_PRIORITY`)
+    i_request : input  logic<REQUESTS>                     , /// Requests
+    o_grant   : output logic<GRANT_WIDTH>                  , /// Grant (onehot or binary index)
+) {
+    import arbiter_pkg::*;
+    import utils::clog2_clipped;
+
+    const COMPARE_WIDTH: u32 = 1 + (if PRIORITY_ENABLE ? PRIORITY_WIDTH : 0);
+    const REQUEST_LSB  : u32 = COMPARE_WIDTH - 1;
+
+    var grant_location: logic<REQUESTS>   ;
+    var grant_index   : logic<INDEX_WIDTH>;
+
+    always_comb {
+        if ONEHOT_GRANT {
+            o_grant = grant_location as GRANT_WIDTH;
+        } else {
+            o_grant = grant_index as GRANT_WIDTH;
+        }
+    }
+
+    if PRIORITY_ENABLE || SELECTOR_KIND == selector_kind::FIND_MAX
+        || (SELECTOR_KIND == selector_kind::LZC && REQUESTS >: 64) :g_arbiter {
+
+        var compare_value: logic<REQUESTS, COMPARE_WIDTH>;
+        var location     : logic<REQUESTS>               ;
+        var max_value    : logic<COMPARE_WIDTH>          ;
+
+        always_comb {
+            for i in 0..REQUESTS {
+                compare_value[i]              = '0;
+                compare_value[i][REQUEST_LSB] = i_request[i];
+                if PRIORITY_ENABLE {
+                    if FIXED_PRIORITY {
+                        compare_value[i][0+:PRIORITY_WIDTH] = PRIORITY[i];
+                    } else {
+                        compare_value[i][0+:PRIORITY_WIDTH] = i_priority[i];
+                    }
+                }
+            }
+        }
+
+        // The comparator tree selects an entry even if there is no request
+        always_comb {
+            arbiter_find_max::<REQUESTS, COMPARE_WIDTH>(compare_value, location, grant_index, max_value);
+            grant_location = location & i_request;
+        }
+    } else if SELECTOR_KIND == selector_kind::LOWEST_BIT {
+        const INDEX_MASK: bit<INDEX_WIDTH, REQUESTS> = init_index_mask();
+
+        always_comb {
+            grant_location = i_request & (~i_request + (1 as REQUESTS));
+            for i in 0..INDEX_WIDTH {
+                grant_index[i] = (grant_location & INDEX_MASK[i]) != '0;
+            }
+        }
+    } else {
+        const COUNT_WIDTH: u32 = lzc_common_pkg::result_width(REQUESTS);
+
+        var lzc_count: logic<COUNT_WIDTH>;
+
+        always_comb {
+            lzc_count = lzc::<REQUESTS>(i_request, false);
+            if !lzc_count[msb] {
+                grant_index    = lzc_count as INDEX_WIDTH;
+                grant_location = (1 as REQUESTS) << grant_index;
+            } else {
+                grant_index    = '0;
+                grant_location = '0;
+            }
+        }
+    }
+
+    function init_index_mask () -> bit<INDEX_WIDTH, REQUESTS> {
+        var mask: bit<INDEX_WIDTH, REQUESTS>;
+
+        for i in 0..INDEX_WIDTH {
+            for j in 0..REQUESTS {
+                mask[i][j] = ((j >> i) % 2) == 1;
+            }
+        }
+
+        return mask;
+    }
+}

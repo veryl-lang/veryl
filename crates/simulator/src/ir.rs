@@ -17,6 +17,7 @@ pub(crate) mod opt;
 pub(crate) mod partial_index;
 pub(crate) mod site_table;
 mod statement;
+pub(crate) mod string_type_utils;
 pub(crate) mod variable;
 pub(crate) mod write_log;
 
@@ -41,12 +42,13 @@ pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
     ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
-    ProtoStatement, ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck,
-    RuntimeForBound, RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind,
-    format_assert_message, format_output, parse_hex_content, patch_stmt_log_buf,
-    veryl_aot_sysfn_print,
+    ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,
+    ProtoSystemFunctionCall, RetWidthCheck, RuntimeArgOp, RuntimeForBound, RuntimeForRange,
+    Statement, SystemFunctionCall, TbMethodKind, format_assert_message, format_output,
+    parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
 };
 pub(crate) use statement::{extend_to_i64, for_bound_reached};
+pub use string_type_utils::{ProtoText, Text};
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
     create_variable_meta, native_bytes, read_native_value, read_payload, strided_span, value_size,
@@ -58,6 +60,7 @@ pub use write_log::{WriteLogBuffer, ff_commit_from_log, ff_commit_from_log_marki
 
 use crate::backend::CompiledWhole;
 use crate::residency;
+use crate::sim_status::SimStatus;
 use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
@@ -183,6 +186,9 @@ pub struct Ir {
     /// reads resolve against it; relative writes go to a per-test output
     /// directory beneath it. `None` leaves paths process-CWD relative.
     pub component_file_base: Option<PathBuf>,
+    /// Runtime arguments (`veryl test --runtime-arg`), read by
+    /// `$tb::runtime_args` and components.
+    pub runtime_args: crate::runtime_arg::RuntimeArgs,
     /// See `Module::rtl_driven`.
     pub rtl_driven: HashSet<VarOffset>,
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
@@ -307,6 +313,7 @@ impl Ir {
             seed: config.seed,
             component_libraries: config.component_libraries.clone(),
             component_file_base: config.component_file_base.clone(),
+            runtime_args: config.runtime_args.clone(),
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
             comb_touched_offsets: module.comb_touched_offsets,
@@ -598,17 +605,22 @@ impl Ir {
     /// (error: `combinational_loop`), so neither path tests for convergence:
     /// the cells run once in topological order, the chunked settle runs its
     /// precomputed pass count.
-    pub fn settle_comb(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
+    pub fn settle_comb(
+        &self,
+        mask_cache: &mut MaskCache,
+        status: &mut SimStatus,
+        profile: &mut SimProfile,
+    ) {
         #[cfg(feature = "profile")]
         {
             profile.settle_comb_count += 1;
         }
         #[cfg(not(target_family = "wasm"))]
-        let settled = self.settle_dataflow();
+        let settled = self.settle_dataflow(status);
         #[cfg(target_family = "wasm")]
         let settled = false;
         if !settled {
-            self.run_chunked_settle(mask_cache, profile);
+            self.run_chunked_settle(mask_cache, status, profile);
         }
         if settle_converge_check() {
             self.check_settled(mask_cache, settled);
@@ -628,8 +640,10 @@ impl Ir {
         let narrow_before = self.write_log_buffer.narrow_count();
         let wide_before = self.write_log_buffer.wide_count();
         let out_mark = crate::output_buffer::mark();
+        // Nor can the extra pass stop or fail the run.
+        let mut status = SimStatus::default();
         for x in &self.comb_statements {
-            dispatch_stmt_fast(x, mask_cache);
+            dispatch_stmt_fast(x, mask_cache, &mut status);
         }
         let after = self.comb_values.clone();
         // Restore before reporting, so a run under the check that survives the
@@ -685,7 +699,7 @@ impl Ir {
     /// Run the dirty cells through the dataflow module.  `false` when there is
     /// none or it has not landed yet; the caller then settles everything.
     #[cfg(not(target_family = "wasm"))]
-    fn settle_dataflow(&self) -> bool {
+    fn settle_dataflow(&self, status: &mut SimStatus) -> bool {
         let Some(df) = self.dataflow.as_ref() else {
             return false;
         };
@@ -861,7 +875,7 @@ impl Ir {
                         }
                         match j.funcs[k] {
                             Some(f) => f(ff_ptr, comb_ptr, log_ptr, bits as isize),
-                            None => self.interpret_cell(df, k, bits),
+                            None => self.interpret_cell(df, k, bits, status),
                         }
                     }
                 }
@@ -904,6 +918,7 @@ impl Ir {
         df: &crate::ir::opt::dataflow::DataflowRt,
         k: usize,
         bits: *mut u64,
+        status: &mut SimStatus,
     ) {
         let watch = &df.plan.boundary[k];
         let before: Vec<u8> = watch
@@ -912,7 +927,7 @@ impl Ir {
             .collect();
         let mut mc = MaskCache::default();
         for x in &self.dataflow_interp[&k] {
-            dispatch_stmt_fast(x, &mut mc);
+            dispatch_stmt_fast(x, &mut mc, status);
         }
         let mut pos = 0usize;
         let changed = df.plan.mark_always[k]
@@ -959,8 +974,9 @@ impl Ir {
         // The settle already ran the effect cells; the rerun is for values.
         let mute = crate::output_buffer::Mute::begin();
         let mut mc = MaskCache::default();
+        let mut status = SimStatus::default();
         for x in &self.comb_statements {
-            dispatch_stmt_fast(x, &mut mc);
+            dispatch_stmt_fast(x, &mut mc, &mut status);
         }
         drop(mute);
         let mut pos = 0usize;
@@ -1143,7 +1159,12 @@ impl Ir {
     }
 
     /// The per-chunk settle: every comb statement, once per required pass.
-    fn run_chunked_settle(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
+    fn run_chunked_settle(
+        &self,
+        mask_cache: &mut MaskCache,
+        status: &mut SimStatus,
+        profile: &mut SimProfile,
+    ) {
         let _ = profile;
 
         // `VERYL_MIN_PASSES_OVERRIDE` is a debug knob of this path only.
@@ -1155,7 +1176,7 @@ impl Ir {
         });
         let passes = min_override.unwrap_or(self.required_comb_passes);
         for _ in 0..passes {
-            self.eval_comb_full(mask_cache, profile);
+            self.eval_comb_full(mask_cache, status, profile);
             #[cfg(feature = "profile")]
             {
                 profile.comb_eval_count += 1;
@@ -1164,13 +1185,18 @@ impl Ir {
     }
 
     /// Evaluate unified comb once: one pass of the per-chunk settle.
-    pub fn eval_comb_full(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
+    pub fn eval_comb_full(
+        &self,
+        mask_cache: &mut MaskCache,
+        status: &mut SimStatus,
+        profile: &mut SimProfile,
+    ) {
         let _ = profile;
         #[cfg(feature = "profile")]
         let start = std::time::Instant::now();
 
         for x in &self.comb_statements {
-            dispatch_stmt_fast(x, mask_cache);
+            dispatch_stmt_fast(x, mask_cache, status);
         }
 
         #[cfg(feature = "profile")]
@@ -1279,7 +1305,7 @@ impl Ir {
 }
 
 #[inline(always)]
-pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
+pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache, status: &mut SimStatus) {
     match s {
         Statement::Compiled(c) => unsafe {
             (c.artifact.func)(c.ff, c.comb, c.log_buf, c.ff_delta);
@@ -1291,7 +1317,7 @@ pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
             }
         },
         _ => {
-            s.eval_step(mask_cache);
+            s.eval_step(mask_cache, status);
         }
     }
 }
@@ -1425,6 +1451,8 @@ pub struct Config {
     pub component_libraries: std::collections::HashMap<String, ComponentLibrary>,
     /// See `Ir::component_file_base`.
     pub component_file_base: Option<PathBuf>,
+    /// See `Ir::runtime_args`.
+    pub runtime_args: crate::runtime_arg::RuntimeArgs,
 }
 
 impl Config {

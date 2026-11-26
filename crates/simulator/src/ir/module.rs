@@ -305,6 +305,7 @@ fn create_variables_recursive(
                 native_bytes: meta.native_bytes,
                 current_values,
                 next_values,
+                string_width: meta.string_width,
             },
         );
     }
@@ -1300,6 +1301,7 @@ fn collect_event_written_comb(
                     | ProtoTbMethodKind::RandomGetRange { ret: Some(_), .. }
                     | ProtoTbMethodKind::RandomGetSeed { ret: Some(_) }
                     | ProtoTbMethodKind::Queue { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RuntimeArg { ret: Some(_), .. }
             ),
             // No comb writes.
             ProtoStatement::Break => true,
@@ -1391,8 +1393,10 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                     | K::RandomGet { ret, .. }
                     | K::RandomGetRange { ret, .. }
                     | K::RandomGetSeed { ret }
-                    | K::Queue { ret, .. } => ret.is_none(),
+                    | K::Queue { ret, .. }
+                    | K::RuntimeArg { ret, .. } => ret.is_none(),
                     K::ClockNext { .. }
+                    | K::ClockStart { .. }
                     | K::ResetAssert { .. }
                     | K::FileOpen { .. }
                     | K::FileWrite { .. }
@@ -4272,6 +4276,14 @@ fn gather_bit_aware_expr_reads(expr: &ProtoExpression, out: &mut Vec<(VarOffset,
         ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             gather_bit_aware_expr_reads(x, out)
         }
+        ProtoExpression::StringBytes {
+            x, dynamic_select, ..
+        } => {
+            gather_bit_aware_expr_reads(x, out);
+            if let Some(d) = dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             gather_bit_aware_expr_reads(x, out);
             gather_bit_aware_expr_reads(y, out);
@@ -5925,7 +5937,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         let (mut variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
-            &collect_string_widths(&src.variables, declarations)?,
+            &collect_string_widths(&src.variables, &analyzer_context.functions, declarations)?,
             &ff_table,
             &multi_rmw_set,
             &dyn_indexed,
@@ -8098,6 +8110,14 @@ fn collect_dynamic_bases(stmt: &ProtoStatement, out: &mut HashSet<VarOffset>) {
             }
             ProtoExpression::Variable { .. } | ProtoExpression::HierVariable(_) => {}
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                expr(x, out);
+                if let Some(d) = dynamic_select {
+                    expr(&d.index_expr, out);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 expr(x, out);
                 expr(y, out);
@@ -8298,7 +8318,7 @@ mod event_written_comb_tests {
     fn registers_readmemh_element_offsets() {
         let stmts = vec![ProtoStatement::SystemFunctionCall(
             ProtoSystemFunctionCall::Readmemh {
-                filename: "x.hex".into(),
+                filename: crate::ir::ProtoText::constant("x.hex"),
                 elements: vec![
                     ReadmemhElement {
                         current: VarOffset::Comb(0x30),
@@ -8378,7 +8398,7 @@ mod event_written_comb_tests {
         assert_eq!(
             event_comb_write_offsets(&[ProtoStatement::SystemFunctionCall(
                 ProtoSystemFunctionCall::Readmemh {
-                    filename: "x.hex".into(),
+                    filename: crate::ir::ProtoText::constant("x.hex"),
                     elements: vec![ReadmemhElement {
                         current: VarOffset::Ff(0x8),
                         next_offset: None,

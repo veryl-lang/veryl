@@ -243,6 +243,14 @@ fn check_output_arg_aggregate(
         && dst.path.0.len() == 1
         && dst.select.is_empty()
     {
+        if crate::conv::utils::check_string_assignment(
+            context,
+            &dst.comptime.r#type,
+            formal,
+            &dst.token,
+        ) {
+            return;
+        }
         check_function_arg_aggregate(context, &dst.comptime.r#type, formal, &dst.token);
     }
 }
@@ -755,7 +763,19 @@ impl Arguments {
                         let expr_comptime = expr.eval_comptime(context, arg_type.total_width());
                         let expr_token = expr_comptime.token;
                         let expr_type = expr_comptime.r#type.clone();
-                        check_function_arg_aggregate(context, arg_type, &expr_type, &expr_token);
+                        if !crate::conv::utils::check_string_assignment(
+                            context,
+                            arg_type,
+                            &expr_type,
+                            &expr_token,
+                        ) {
+                            check_function_arg_aggregate(
+                                context,
+                                arg_type,
+                                &expr_type,
+                                &expr_token,
+                            );
+                        }
                         if arg_type.include_clock_reset() {
                             let expr_comptime = expr.eval_comptime(context, None);
                             let expr_token = expr_comptime.token;

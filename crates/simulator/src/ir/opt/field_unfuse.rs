@@ -223,6 +223,14 @@ fn census_expr(e: &ProtoExpression, c: &mut Census, poison: bool) {
         ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             census_expr(x, c, poison)
         }
+        ProtoExpression::StringBytes {
+            x, dynamic_select, ..
+        } => {
+            census_expr(x, c, poison);
+            if let Some(d) = dynamic_select {
+                census_expr(&d.index_expr, c, poison);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             census_expr(x, c, poison);
             census_expr(y, c, poison);
@@ -365,7 +373,10 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     census_expr(a, c, poison);
                 }
             }
-            ProtoSystemFunctionCall::Readmemh { elements, .. } => {
+            ProtoSystemFunctionCall::Readmemh {
+                filename, elements, ..
+            } => {
+                census_expr(&filename.0, c, poison);
                 for e in elements {
                     if let VarOffset::Comb(o) = e.current {
                         c.disq(o);
@@ -390,7 +401,11 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
         ProtoStatement::TbMethodCall { method, .. } => {
             use crate::ir::statement::{ProtoComponentArg, ProtoTbMethodKind as K};
             match method {
-                K::ClockNext { count, period } => {
+                K::ClockNext { count, period }
+                | K::ClockStart {
+                    max_cycles: count,
+                    period,
+                } => {
                     for e in count.iter().chain(period.iter()) {
                         census_expr(e, c, poison);
                     }
@@ -407,9 +422,9 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                 }
                 K::Component { args, .. } => {
                     for a in args {
-                        if let ProtoComponentArg::Expr(e) = a {
-                            census_expr(e, c, poison);
-                        }
+                        let (ProtoComponentArg::Expr(e)
+                        | ProtoComponentArg::Text(crate::ir::ProtoText(e))) = a;
+                        census_expr(e, c, poison);
                     }
                 }
                 K::RandomSeed { value } => census_expr(value, c, poison),
@@ -422,11 +437,16 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     census_expr(min, c, poison);
                     census_expr(max, c, poison);
                 }
-                K::FileOpen { .. }
-                | K::FileClose
-                | K::FileFlush
-                | K::RandomGet { .. }
-                | K::RandomGetSeed { .. } => {}
+                K::FileOpen { path, .. } => {
+                    census_expr(&path.0, c, poison);
+                }
+                K::RuntimeArg { name, op, .. } => {
+                    census_expr(&name.0, c, poison);
+                    if let Some(e) = op.default_expr() {
+                        census_expr(e, c, poison);
+                    }
+                }
+                K::FileClose | K::FileFlush | K::RandomGet { .. } | K::RandomGetSeed { .. } => {}
             }
             if !poison {
                 c.bail = true;
@@ -583,6 +603,14 @@ impl Rewriter<'_> {
             }
             ProtoExpression::Value { .. } => {}
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => self.expr(x),
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                self.expr(x);
+                if let Some(d) = dynamic_select {
+                    self.expr(&mut d.index_expr);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 self.expr(x);
                 self.expr(y);
@@ -708,7 +736,8 @@ impl Rewriter<'_> {
                         self.expr(a);
                     }
                 }
-                ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Readmemh { filename, .. } => self.expr(&mut filename.0),
+                ProtoSystemFunctionCall::Finish => {}
             },
             ProtoStatement::CompiledBlock(_)
             | ProtoStatement::TbMethodCall { .. }

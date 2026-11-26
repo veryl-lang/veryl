@@ -14,9 +14,9 @@ use crate::conv::unit_cache::{self, ChildReach, UnitEvent, UnitRecord};
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
 use crate::ir::{
-    self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, QueueOp, Shape,
-    ShapeRef, Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex,
-    VarKind, VarPath, VarPathSelect, VarSelect, Variable,
+    self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, QueueOp,
+    RuntimeArgOp, Shape, ShapeRef, Signature, SystemFunctionInput, TbMethod, TbMethodCall,
+    ValueVariant, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, GenericMap, ProtoBound,
@@ -4826,6 +4826,15 @@ pub fn get_port_connects(
         )?;
 
         check_compatibility(context, port_type, &comptime, &token);
+        if matches!(context.inst_port_kind, Some(VarKind::Input))
+            && port_type.is_string()
+            && !port_type.array.is_empty()
+            && let ir::Expression::ArrayLiteral(items, _) = &expr
+        {
+            let mut element_type = port_type.clone();
+            element_type.array.clear();
+            check_string_array_items(context, &element_type, items);
+        }
 
         let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
 
@@ -5294,12 +5303,66 @@ pub fn function_call(
     ret
 }
 
+/// Report a value of another type stored into a `string`. Like an enum, a
+/// `string` reads as bits but takes only a string. Returns whether it was
+/// reported.
+pub fn check_string_assignment(
+    context: &mut Context,
+    dst: &ir::Type,
+    src: &ir::Type,
+    token: &TokenRange,
+) -> bool {
+    if dst.is_string() && !src.is_string() && !src.is_unknown() && !src.is_systemverilog() {
+        context.insert_error(AnalyzerError::mismatch_type(
+            MismatchTypeKind::Assignment {
+                src: src.to_string(),
+                dst: dst.to_string(),
+            },
+            token,
+        ));
+        return true;
+    }
+    false
+}
+
+fn check_string_array_items(
+    context: &mut Context,
+    element_type: &ir::Type,
+    items: &[ir::ArrayLiteralItem],
+) {
+    for item in items {
+        let expr = match item {
+            ir::ArrayLiteralItem::Value(expr, _) | ir::ArrayLiteralItem::Defaul(expr) => expr,
+        };
+        if let ir::Expression::ArrayLiteral(items, _) = expr.as_ref() {
+            check_string_array_items(context, element_type, items);
+        } else {
+            check_string_assignment(
+                context,
+                element_type,
+                &expr.comptime().r#type,
+                &expr.token_range(),
+            );
+        }
+    }
+}
+
 pub fn check_compatibility(
     context: &mut Context,
     dst: &ir::Type,
     src: &ir::Comptime,
     token: &TokenRange,
 ) {
+    // An output port's value flows from the port into the connected
+    // variable, the reverse of `dst`/`src` here.
+    let reported = if matches!(context.inst_port_kind, Some(VarKind::Output)) {
+        check_string_assignment(context, &src.r#type, dst, token)
+    } else {
+        check_string_assignment(context, dst, &src.r#type, token)
+    };
+    if reported {
+        return;
+    }
     if dst.is_positive
         && let Ok(value) = src.get_value()
         && !(src.r#type.is_positive && value.is_xz())
@@ -5731,8 +5794,9 @@ pub fn tb_method_call(
     let mut ret_width = None;
     let mut ret_signed = false;
     let mut ret_4state = false;
+    let mut ret_string = false;
     let method = match (tb_kind, method_name) {
-        (TbComponentKind::ClockGen, "next") => {
+        (TbComponentKind::ClockGen, "next" | "start") => {
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && !positional.is_empty()
             {
@@ -5745,7 +5809,14 @@ pub fn tb_method_call(
                 .get(&inst_name)
                 .cloned()
                 .map(Box::new);
-            TbMethod::ClockNext { count, period }
+            if method_name == "next" {
+                TbMethod::ClockNext { count, period }
+            } else {
+                TbMethod::ClockStart {
+                    max_cycles: count,
+                    period,
+                }
+            }
         }
         (TbComponentKind::ResetGen, "assert") => {
             let clock = context
@@ -5852,6 +5923,47 @@ pub fn tb_method_call(
                 capacity,
             }
         }
+        (TbComponentKind::RuntimeArgs, "exists" | "get_int" | "get_string") => {
+            // Runtime arguments are read as the testbench runs, so the calls
+            // belong to `initial`/`final`; elsewhere (e.g. `always_ff`) they
+            // would be silently skipped.
+            if !context.in_tb_block {
+                context.insert_error(AnalyzerError::invalid_tb_usage(&token));
+                return Err(ir_error!(token));
+            }
+            let arity = if method_name == "exists" { 1 } else { 2 };
+            let name = random_arg(context, &args, 0, method_name, arity, &token)?;
+            let op = match method_name {
+                "exists" => {
+                    ret_width = Some(1);
+                    RuntimeArgOp::Exists
+                }
+                "get_int" => {
+                    // The width is the destination's in the assignment form;
+                    // the expression-position temporary is an `i64`.
+                    ret_signed = true;
+                    let default = random_arg(context, &args, 1, method_name, arity, &token)?;
+                    RuntimeArgOp::GetInt { default }
+                }
+                _ => {
+                    ret_string = true;
+                    let default = random_arg(context, &args, 1, method_name, arity, &token)?;
+                    RuntimeArgOp::GetString { default }
+                }
+            };
+            if let Some(ir::Arguments::Positional(positional)) = &args
+                && positional.len() > arity
+            {
+                context.insert_error(AnalyzerError::mismatch_function_arity(
+                    method_name,
+                    arity,
+                    positional.len(),
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            }
+            TbMethod::RuntimeArg { name, op }
+        }
         // Any method name is accepted on a user-defined component; the
         // component validates it at run time. With a manifest present the
         // name and arity are also diagnosed here.
@@ -5873,6 +5985,7 @@ pub fn tb_method_call(
         ret_width,
         ret_signed,
         ret_4state,
+        ret_string,
     })))
 }
 
@@ -5969,6 +6082,7 @@ fn hierarchical_component_method_call(
                     ret_width,
                     ret_signed: false,
                     ret_4state: false,
+                    ret_string: false,
                 })));
             }
             _ => return Ok(None),
@@ -6129,14 +6243,21 @@ pub fn hoist_component_method_call(
     let name = format!("__tb_method_ret_{}", context.tb_hoist_count);
     context.tb_hoist_count += 1;
     let path = VarPath::new(resource_table::insert_str(&name));
-    let kind = if method_call.ret_4state {
-        ir::TypeKind::Logic
+    let r#type = if method_call.ret_string {
+        // A string temporary; the simulator keeps its text in the
+        // testbench string table, so it has no fixed width.
+        ir::Type::new(ir::TypeKind::String)
     } else {
-        ir::TypeKind::Bit
+        let kind = if method_call.ret_4state {
+            ir::TypeKind::Logic
+        } else {
+            ir::TypeKind::Bit
+        };
+        let mut r#type = ir::Type::new(kind);
+        r#type.set_concrete_width(Shape::new(vec![Some(width)]));
+        r#type.signed = signed;
+        r#type
     };
-    let mut r#type = ir::Type::new(kind);
-    r#type.set_concrete_width(Shape::new(vec![Some(width)]));
-    r#type.signed = signed;
 
     let comptime = Comptime::from_type(r#type.clone(), ClockDomain::None, token);
     let id = context.insert_var_path(path.clone(), comptime.clone());

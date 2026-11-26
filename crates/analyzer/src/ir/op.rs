@@ -503,6 +503,9 @@ impl Op {
             dst.r#type.kind = z.r#type.kind.clone();
         } else if z.r#type.is_unknown() | z.r#type.is_systemverilog() {
             dst.r#type.kind = y.r#type.kind.clone();
+        } else if y.r#type.is_string() && z.r#type.is_string() {
+            // A choice between strings is a string, as in SystemVerilog.
+            dst.r#type.kind = TypeKind::String;
         } else if y.r#type.is_2state() && z.r#type.is_2state() {
             dst.r#type.kind = TypeKind::Bit;
         } else {

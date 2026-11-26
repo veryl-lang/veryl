@@ -180,6 +180,14 @@ fn expr_reads(e: &ProtoExpression, out: &mut Vec<Range>) {
         }
         ProtoExpression::Value { .. } => {}
         ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr_reads(x, out),
+        ProtoExpression::StringBytes {
+            x, dynamic_select, ..
+        } => {
+            expr_reads(x, out);
+            if let Some(d) = dynamic_select {
+                expr_reads(&d.index_expr, out);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             expr_reads(x, out);
             expr_reads(y, out);

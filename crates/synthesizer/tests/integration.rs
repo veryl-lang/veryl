@@ -948,6 +948,46 @@ fn unsigned_divide_4bit() {
 }
 
 #[test]
+fn division_and_remainder_preserve_operands_for_narrow_outputs() {
+    let code = r#"
+        module Top(
+            a: input logic<3>, b: input logic<3>,
+            quotient: output logic<2>, remainder: output logic<2>,
+        ) {
+            assign quotient = a / b;
+            assign remainder = a % b;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let ports: std::collections::HashMap<_, _> = gate
+        .ports
+        .iter()
+        .map(|p| (p.name.to_string(), &p.nets))
+        .collect();
+    for a in 0..8u32 {
+        for b in 1..8u32 {
+            let mut inputs = std::collections::HashMap::new();
+            for (name, value) in [("a", a), ("b", b)] {
+                for (bit, &net) in ports[name].iter().enumerate() {
+                    inputs.insert(net, value & (1 << bit) != 0);
+                }
+            }
+            let mut memo = std::collections::HashMap::new();
+            for (name, expected) in [("quotient", a / b), ("remainder", a % b)] {
+                let actual = ports[name]
+                    .iter()
+                    .enumerate()
+                    .fold(0u32, |word, (bit, &net)| {
+                        word | (u32::from(eval_net(&gate, net, &inputs, &mut memo)) << bit)
+                    });
+                assert_eq!(actual, expected & 3, "{name}: a={a} b={b}");
+            }
+        }
+    }
+}
+
+#[test]
 fn unsigned_modulo_4bit() {
     let code = r#"
         module Top (
@@ -1631,6 +1671,55 @@ fn variable_shift_right_amount_saturates() {
         "expected 9-12 select-like cells (Mux2+And2+And3), got {}",
         select_cells
     );
+}
+
+#[test]
+fn right_shifts_preserve_the_left_operand_for_narrow_outputs() {
+    let code = r#"
+        module Top(
+            x: input logic<3>, sx: input signed logic<3>, amount: input logic<3>,
+            logical: output logic<2>, logical_one: output logic<2>,
+            arithmetic: output logic<2>, arithmetic_one: output logic<2>,
+        ) {
+            assign logical = x >> amount;
+            assign logical_one = x >> 3'd1;
+            assign arithmetic = sx >>> amount;
+            assign arithmetic_one = sx >>> 3'd1;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let ports: std::collections::HashMap<_, _> = gate
+        .ports
+        .iter()
+        .map(|p| (p.name.to_string(), &p.nets))
+        .collect();
+    for x in 0..8i32 {
+        let signed = if x < 4 { x } else { x - 8 };
+        for amount in 0..8 {
+            let mut inputs = std::collections::HashMap::new();
+            for (name, value) in [("x", x), ("sx", x), ("amount", amount)] {
+                for (bit, &net) in ports[name].iter().enumerate() {
+                    inputs.insert(net, value & (1 << bit) != 0);
+                }
+            }
+            let mut memo = std::collections::HashMap::new();
+            for (name, expected) in [
+                ("logical", x >> amount),
+                ("logical_one", x >> 1),
+                ("arithmetic", signed >> amount),
+                ("arithmetic_one", signed >> 1),
+            ] {
+                let actual = ports[name]
+                    .iter()
+                    .enumerate()
+                    .fold(0i32, |word, (bit, &net)| {
+                        word | (i32::from(eval_net(&gate, net, &inputs, &mut memo)) << bit)
+                    });
+                assert_eq!(actual, expected & 3, "{name}: x={x} amount={amount}");
+            }
+        }
+    }
 }
 
 #[test]

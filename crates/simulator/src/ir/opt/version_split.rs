@@ -190,6 +190,14 @@ fn expr_nodes_capped(root: &ProtoExpression, cap: usize) -> usize {
                 ..
             } => stack.push(&d.index_expr),
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => stack.push(x),
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                stack.push(x);
+                if let Some(d) = dynamic_select {
+                    stack.push(&d.index_expr);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 stack.push(x);
                 stack.push(y);
@@ -1364,7 +1372,7 @@ fn sel_width(e: &ProtoExpression) -> Option<usize> {
         | PE::Concatenation { width, .. }
         | PE::Ternary { width, .. }
         | PE::DynamicVariable { width, .. } => *width,
-        PE::HierVariable(_) => return None,
+        PE::HierVariable(_) | PE::StringBytes { .. } => return None,
     })
 }
 
@@ -1694,6 +1702,15 @@ fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &IMap) -> Option<(
         }
         PE::Value { .. } | PE::HierVariable(_) => Some(()),
         PE::Unary { x, .. } | PE::Resize { x, .. } => replace_dst_reads(x, dst, base),
+        PE::StringBytes {
+            x, dynamic_select, ..
+        } => {
+            replace_dst_reads(x, dst, base)?;
+            if let Some(d) = dynamic_select {
+                replace_dst_reads(&mut d.index_expr, dst, base)?;
+            }
+            Some(())
+        }
         PE::Binary { x, y, .. } => {
             replace_dst_reads(x, dst, base)?;
             replace_dst_reads(y, dst, base)

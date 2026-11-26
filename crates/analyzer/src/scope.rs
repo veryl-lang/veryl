@@ -7,6 +7,7 @@ use crate::symbol_path::GenericSymbolPath;
 use std::cell::RefCell;
 use std::rc::Rc;
 use veryl_parser::resource_table::{self, PathId, StrId, TokenId};
+use veryl_parser::veryl_token::Token;
 
 /// Runtime-only handle into the [`ScopeArena`]. `ScopeId(0)` is always the root.
 ///
@@ -141,6 +142,7 @@ pub struct ScopeArena {
     /// delegation-aware lexical lookup descends into the base scope and the
     /// structural generic walk navigates members through it.
     generic_delegations: HashMap<ScopeId, ScopeId>,
+    path_tokens: HashMap<(StrId, PathId, ScopeId, DefineContext), Token>,
 }
 
 impl ScopeArena {
@@ -163,6 +165,7 @@ impl ScopeArena {
             token_scopes: HashMap::default(),
             root_project: None,
             generic_delegations: HashMap::default(),
+            path_tokens: HashMap::default(),
         }
     }
 
@@ -290,6 +293,7 @@ impl ScopeArena {
                 && scope.owner == Some(symbol.id)
             {
                 scope.owner = None;
+                self.generic_delegations.remove(&ScopeId(owned));
             }
         }
 
@@ -340,6 +344,17 @@ impl ScopeArena {
                 source_define_context,
                 package_path: Rc::new(package_path),
             });
+    }
+
+    fn remove_imports(&mut self, scope: ScopeId, tokens: &HashSet<TokenId>) {
+        let scope = &mut self.scopes[scope.0 as usize];
+        scope.imports.retain(|_, bindings| {
+            bindings.retain(|binding| !tokens.contains(&binding.package_path.range.beg.id));
+            !bindings.is_empty()
+        });
+        scope
+            .wildcards
+            .retain(|binding| !tokens.contains(&binding.package_path.range.beg.id));
     }
 
     fn add_mixin_source(
@@ -450,6 +465,8 @@ impl ScopeArena {
         for id in &drop_list {
             self.token_scopes.remove(id);
         }
+        self.path_tokens
+            .retain(|_, token| self.token_scopes.contains_key(&token.id));
     }
 
     fn export_tokens_by_path(&self, file_path: PathId) -> Vec<(TokenId, Namespace)> {
@@ -676,6 +693,15 @@ pub fn add_wildcard(
     })
 }
 
+pub(crate) fn remove_imports(by_scope: &HashMap<ScopeId, HashSet<TokenId>>) {
+    SCOPE_ARENA.with(|arena| {
+        let mut arena = arena.borrow_mut();
+        for (&scope, tokens) in by_scope {
+            arena.remove_imports(scope, tokens);
+        }
+    });
+}
+
 pub fn add_mixin_source(
     scope: ScopeId,
     source: ScopeId,
@@ -797,6 +823,26 @@ pub fn insert_token_scope(
     SCOPE_ARENA.with(|f| {
         f.borrow_mut()
             .insert_token_scope(token, file_path, scope, define_context)
+    })
+}
+
+/// Reuses synthetic path segments with the same spelling and resolution context.
+pub(crate) fn path_token(
+    name: StrId,
+    path: PathId,
+    scope: ScopeId,
+    define_context: &DefineContext,
+) -> Token {
+    SCOPE_ARENA.with(|arena| {
+        let mut arena = arena.borrow_mut();
+        let key = (name, path, scope, define_context.clone());
+        if let Some(token) = arena.path_tokens.get(&key) {
+            return *token;
+        }
+        let token = Token::generate(name, path);
+        arena.insert_token_scope(token.id, path, scope, define_context);
+        arena.path_tokens.insert(key, token);
+        token
     })
 }
 
@@ -1076,6 +1122,27 @@ mod tests {
         // Structural path is recoverable.
         assert_eq!(parent(a), Some(root));
         assert_eq!(name_path(a), vec![name("a")]);
+    }
+
+    #[test]
+    fn synthetic_path_tokens_are_reused_until_the_file_is_dropped() {
+        let path = resource_table::insert_path(std::path::Path::new("import.veryl"));
+        let scope = intern_child(ScopeId(0), name("project"), ScopeKind::Project);
+        let context = DefineContext::default();
+        let package = name("Pkg");
+
+        let token = path_token(package, path, scope, &context);
+        for _ in 0..100 {
+            assert_eq!(path_token(package, path, scope, &context), token);
+        }
+        assert_eq!(export_tokens_by_path(path).len(), 1);
+
+        let inner = intern_child(scope, name("Mod"), ScopeKind::Module);
+        assert_ne!(path_token(package, path, inner, &context), token);
+        drop_tokens(path, Some(name("project")));
+        assert_eq!(token_scope(token.id), None);
+        assert_ne!(path_token(package, path, scope, &context), token);
+        assert_eq!(export_tokens_by_path(path).len(), 1);
     }
 
     #[test]

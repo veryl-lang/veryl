@@ -441,6 +441,26 @@ fn clock_check() {
     assert!(matches!(errors[0], AnalyzerError::InvalidClock { .. }));
 
     let code = r#"
+    package PackageA {
+        struct Clocks {
+            clk_a: clock,
+            clk_b: clock,
+        }
+    }
+    module ModuleA (
+        clk: input PackageA::Clocks,
+    ) {
+        var a: logic;
+        always_ff (clk) {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidClock { .. }));
+
+    let code = r#"
     module ModuleA (
         i_clk_a: input 'a default clock,
         i_clk_b: input 'b default clock,
@@ -636,6 +656,29 @@ fn reset_check() {
         always_ff (clk_b, rst_b[POS]) {
             if_reset {
                 b = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidReset { .. }));
+
+    let code = r#"
+    package PackageA {
+        struct Resets {
+            rst_a: reset,
+            rst_b: reset,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        rst: input PackageA::Resets,
+    ) {
+        var a: logic;
+        always_ff (clk, rst) {
+            if_reset {
+                a = 0;
             }
         }
     }
@@ -6133,6 +6176,88 @@ fn incompat_proto() {
 
 #[test]
 fn mismatch_type() {
+    // Like an enum, a `string` takes only a string, while it reads as bits
+    // into a non-string.
+    let string_cases = [
+        ("assignment", "s = x;", true),
+        ("constant", "s = 8'h41;", true),
+        ("select", "s[7:0] = x;", true),
+        ("input port", "inst u: SubIn (i: x);", true),
+        (
+            "numeric string array element",
+            r#"inst u: SubArray (i: '{"a", 8'h41});"#,
+            true,
+        ),
+        (
+            "numeric string array default",
+            r#"inst u: SubArray (i: '{"a", default: x});"#,
+            true,
+        ),
+        (
+            "numeric nested string array element",
+            r#"inst u: SubNested (i: '{'{"a", "b"}, '{"c", 8'h41}});"#,
+            true,
+        ),
+        (
+            "string array elements",
+            r#"inst u: SubArray (i: '{"a", default: t});"#,
+            false,
+        ),
+        ("output port", "inst u: SubOut (o: s);", true),
+        ("function input", "f_in(x);", true),
+        ("function output", "f_out(s);", true),
+        ("string", "s = t;", false),
+        ("literal", "s = \"a\";", false),
+        (
+            "choice of strings",
+            "s = if x == 0 ? \"a\" : \"bb\";",
+            false,
+        ),
+        ("read as bits", "x = s;", false),
+        ("string output port", "inst u: SubStr (o: x);", false),
+        ("string function output", "f_str(x);", false),
+    ];
+    for (name, stmt, error) in string_cases {
+        let (decl, stmt) = if stmt.starts_with("inst") {
+            (stmt, "")
+        } else {
+            ("", stmt)
+        };
+        let code = format!(
+            r#"
+            module SubIn (i: input string) {{}}
+            module SubArray (i: input string [2]) {{}}
+            module SubNested (i: input string [2, 2]) {{}}
+            module SubOut (o: output logic<8>) {{ assign o = 0; }}
+            module SubStr (o: output string) {{ assign o = "a"; }}
+            function f_in (i: input string) {{}}
+            function f_out (o: output logic<8>) {{ o = 0; }}
+            function f_str (o: output string) {{ o = "a"; }}
+            module ModuleA {{
+                var s: string;
+                var t: string;
+                var x: logic<8>;
+                {decl}
+                initial {{
+                    t = "b";
+                    {stmt}
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        let found = errors.iter().any(|e| {
+            matches!(
+                e,
+                AnalyzerError::MismatchType {
+                    kind: crate::analyzer_error::MismatchTypeKind::Assignment { .. },
+                    ..
+                }
+            )
+        });
+        assert_eq!(found, error, "{name}: {errors:?}");
+    }
+
     let code = r#"
     module ModuleA {
         union UnionA {
@@ -24735,7 +24860,12 @@ fn tb_queue_arity() {
 #[test]
 fn tb_var_component_as_inst() {
     // `var`-form `$tb` components are rejected when declared with `inst`.
-    for ty in ["$tb::file", "$tb::random::<u32>", "$tb::queue::<u32>"] {
+    for ty in [
+        "$tb::file",
+        "$tb::random::<u32>",
+        "$tb::queue::<u32>",
+        "$tb::runtime_args",
+    ] {
         let code = format!(
             r#"
     #[test(t)]
@@ -24755,6 +24885,87 @@ fn tb_var_component_as_inst() {
             "`inst x: {ty}` should be rejected, got: {errors:?}"
         );
     }
+}
+
+#[test]
+fn tb_runtime_args_analyze() {
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        var args: $tb::runtime_args;
+        var name: string;
+        var rounds: u32;
+        var verbose: bbool;
+        initial {
+            verbose = args.exists("VERBOSE");
+            rounds = args.get_int("ROUNDS", 2) + 1;
+            name = args.get_string("TESTNAME", "basic_test");
+            $display("%s %d %d", name, rounds, verbose);
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Each method takes its fixed number of arguments.
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        var args: $tb::runtime_args;
+        var name: string;
+        var rounds: u32;
+        initial {
+            rounds = args.exists();
+            rounds = args.get_int("ROUNDS");
+            name = args.get_string("A", "b", "c");
+            $display("%s %d", name, rounds);
+            $finish();
+        }
+    }
+    "#;
+    let count = analyze(code)
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::MismatchFunctionArity { .. }))
+        .count();
+    assert_eq!(count, 3);
+
+    // Read only by the testbench, never by RTL processes.
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        inst clk: $tb::clock_gen;
+        var args: $tb::runtime_args;
+        var rounds: u32;
+        always_ff (clk) {
+            rounds = args.get_int("ROUNDS", 2);
+        }
+        initial {
+            clk.next();
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var _args: $tb::runtime_args;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]

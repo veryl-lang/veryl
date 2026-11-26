@@ -1,4 +1,3 @@
-pub mod assert_buffer;
 pub mod backend;
 pub mod component;
 pub mod file_table;
@@ -7,8 +6,11 @@ pub mod output_buffer;
 pub mod queue_table;
 pub mod random_table;
 pub mod residency;
+pub mod runtime_arg;
+pub mod sim_status;
 pub mod simulator;
 pub mod simulator_error;
+pub mod string_pool;
 pub(crate) mod tb_dirty;
 pub mod testbench;
 pub mod wave_dumper;

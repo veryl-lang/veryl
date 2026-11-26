@@ -1,4 +1,5 @@
 use super::*;
+use crate::output_buffer;
 
 #[test]
 fn testbench_counter_clock_next() {
@@ -1406,6 +1407,96 @@ fn testbench_array_input_port() {
 }
 
 #[test]
+fn testbench_dumps_string_text() {
+    // A `string` stores a handle of its text: VCD dumps the text as a string
+    // value, FST (without string values) the bytes of the text at the width
+    // of its longest text.
+    let code = r#"
+    #[test(test_str)]
+    module test_str {
+        inst clk: $tb::clock_gen;
+        var s: string;
+        initial {
+            s = "hi there";
+            clk.next();
+            s = "bye";
+            clk.next();
+            $finish();
+        }
+    }
+    "#;
+
+    let run = |config: &Config, dumper: crate::wave_dumper::WaveDumper| {
+        let ir = analyze_top(code, config, "test_str").unwrap();
+        let mut sim = Simulator::new(ir, Some(dumper));
+        let event_map = build_event_map(&sim.ir);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
+        let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+        assert_eq!(run_testbench(&mut sim, &tb_stmts), TestResult::Pass);
+    };
+
+    for config in Config::all() {
+        use crate::wave_dumper::{SharedVec, WaveDumper};
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        run(
+            &config,
+            WaveDumper::new_vcd(Box::new(SharedVec(dump_buf.clone()))),
+        );
+        let dump = std::sync::Arc::try_unwrap(dump_buf)
+            .unwrap()
+            .into_inner()
+            .unwrap();
+        let mut parser = vcd::Parser::new(dump.as_slice());
+        let header = parser.parse_header().unwrap();
+        let var = header
+            .find_var(&["test_str", "s"])
+            .expect("s not found in VCD");
+        assert_eq!(var.var_type, vcd::VarType::String);
+        let code = var.code;
+        let texts: Vec<String> = parser
+            .filter_map(|x| match x.unwrap() {
+                vcd::Command::ChangeString(id, text) if id == code => Some(text),
+                _ => None,
+            })
+            .filter(|x| !x.is_empty())
+            .collect();
+        assert_eq!(texts, ["hi\\x20there", "bye"], "config={config:?}");
+    }
+
+    let fst_path = format!(
+        "{}/fst_string_{}.fst",
+        std::env::temp_dir().display(),
+        std::process::id()
+    );
+    run(
+        &Config::default(),
+        crate::wave_dumper::WaveDumper::new_fst(&fst_path),
+    );
+    let mut wave = wellen::simple::read(&fst_path).expect("failed to read FST");
+    let sref = {
+        let hier = wave.hierarchy();
+        let var = hier
+            .all_vars()
+            .find(|v| hier[*v].name(hier) == "s")
+            .expect("s not found in FST");
+        hier[var].signal_ref()
+    };
+    wave.load_signals(&[sref]);
+    let signal = wave.get_signal(sref).unwrap();
+    let mut last = None;
+    for t in 0..wave.time_table().len() {
+        if let Some(offset) = signal.get_offset(t as u32)
+            && let wellen::SignalValueRef::BitVec(bv) = signal.get_value_at(&offset, 0)
+        {
+            last = bv.be_bytes().map(|x| x.to_vec());
+        }
+    }
+    assert_eq!(last, Some(b"\0\0\0\0\0bye".to_vec()));
+    std::fs::remove_file(&fst_path).ok();
+}
+
+#[test]
 fn testbench_vcd_comb_only_clock_reset() {
     let code = r#"
     module CombOnly (
@@ -2300,6 +2391,148 @@ fn tb_assert_fatal_stops_execution() {
     }
 }
 
+/// Runs every `initial` block of `top` as the native testbench does, and
+/// keeps the simulator to look at where the run stopped.
+#[track_caller]
+fn run_blocks_keeping_sim(
+    code: &str,
+    top: &str,
+    config: &Config,
+    dump: bool,
+) -> (TestResult, Simulator) {
+    let ir = analyze_top(code, config, top)
+        .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+    let dump = dump.then(|| {
+        use crate::wave_dumper::{SharedVec, WaveDumper};
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        WaveDumper::new_vcd(Box::new(SharedVec(buf)))
+    });
+    let mut sim = Simulator::new(ir, dump);
+    let event_map = build_event_map(&sim.ir);
+    let clock_periods = build_clock_periods(&sim.ir.event_statements);
+    let mut initials: Vec<(u32, Vec<crate::ir::Statement>)> = sim
+        .ir
+        .event_statements
+        .iter()
+        .filter_map(|(event, stmts)| event.initial_index().map(|i| (i, stmts.clone())))
+        .collect();
+    initials.sort_by_key(|(i, _)| *i);
+    let blocks: Vec<Vec<TestbenchStatement>> = initials
+        .iter()
+        .map(|(_, stmts)| convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3))
+        .collect();
+    let slices: Vec<&[TestbenchStatement]> = blocks.iter().map(Vec::as_slice).collect();
+    let result = crate::testbench::run_testbench_blocks(&mut sim, &slices);
+    (result, sim)
+}
+
+/// `$assert` and `$finish` in the design end the run at the end of the
+/// cycle they are evaluated in, whether the testbench is one process stepping
+/// the clock in place or several run by the scheduler, and whether the
+/// statement is in an `always_ff` with other writes, in one with none, or in
+/// an `always_comb`.  Dumping a waveform, which settles the comb after each
+/// edge, does not move the stop, nor does a clock run by `start` instead of
+/// `next`.
+#[test]
+fn design_assert_and_finish_stop_at_their_cycle() {
+    let template = r#"
+    module Counter (
+        i_clk: input  clock   ,
+        i_rst: input  reset   ,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+                FF_BODY
+            }
+        }
+        OTHER
+    }
+
+    #[test(test_stop)]
+    module test_stop {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            rst.assert();
+            DRIVE
+        }
+        EXTRA_INITIAL
+    }
+    "#;
+    // (body of the `always_ff`, another item of `Counter`, whether the run
+    // fails, `o_cnt` once it stopped)
+    let cases = [
+        ("$assert(o_cnt != 20);", "", true, 21),
+        ("if o_cnt == 20 { $finish(); }", "", false, 21),
+        ("", "always_ff { if o_cnt == 20 { $finish(); } }", false, 21),
+        // Guarded: before the reset `o_cnt` is X, which fails a bare
+        // `$assert(o_cnt != 20)` in four-state mode.
+        (
+            "",
+            "always_ff { if o_cnt == 20 { $assert(1 == 0); } }",
+            true,
+            21,
+        ),
+        // The comb settles lazily, at the start of the next step, so it sees
+        // `o_cnt == 20` only then, and the run stops after that edge.
+        (
+            "",
+            "always_comb { if o_cnt == 20 { $finish(); } }",
+            false,
+            21,
+        ),
+        // The run stops at the edge that finished it, and the comb's failure
+        // in the state it left is still reported, whether or not a dump
+        // settled the comb before the run ended.
+        (
+            "if o_cnt == 20 { $finish(); }",
+            "always_comb { if o_cnt == 21 { $assert(1 == 0); } }",
+            true,
+            21,
+        ),
+    ];
+    let drives = ["clk.next(100); $finish();", "clk.start();"];
+    let extras = ["", "initial { clk.next(200); }"];
+    for (ff_body, other, fails, cnt) in cases {
+        for (drive, extra) in drives
+            .iter()
+            .flat_map(|d| extras.iter().map(move |e| (d, e)))
+        {
+            let code = template
+                .replace("FF_BODY", ff_body)
+                .replace("OTHER", other)
+                .replace("DRIVE", drive)
+                .replace("EXTRA_INITIAL", extra);
+            for (config, dump) in Config::all()
+                .into_iter()
+                .flat_map(|c| [(c.clone(), false), (c, true)])
+            {
+                let (result, mut sim) = run_blocks_keeping_sim(&code, "test_stop", &config, dump);
+                let label = format!("{ff_body} {other} {drive} {extra} dump={dump} {config:?}");
+                match (&result, fails) {
+                    (TestResult::Fail(msg), true) => {
+                        assert_eq!(msg, "assertion failed", "{label}");
+                    }
+                    (TestResult::Pass, false) => {}
+                    _ => panic!("unexpected {result:?}: {label}"),
+                }
+                assert_eq!(
+                    sim.get_var("o_cnt").unwrap(),
+                    Value::new(cnt, 8, false),
+                    "{label}"
+                );
+            }
+        }
+    }
+}
+
 // Regression: a `for ... step <<<= 1` loop (un-unrolled in a test module,
 // JIT-compiled) was lowered with an `i + step` fallback for every step op
 // except Mul/LSL, so the JIT iterated 1,2,3,... instead of 1,2,4,8,16.
@@ -2480,8 +2713,10 @@ fn tb_file_native() {
     #[test(test_file)]
     module test_file {{
         var f: $tb::file;
+        var path: string;
         initial {{
-            f.open("{0}");
+            path = "{0}";
+            f.open(path);
             f.write("hex=%h dec=%d\n", 8'hAB, 8'd42);
             f.write("sum=%h\n", 8'h10 + 8'h1);
             f.write("plain\n");
@@ -2752,6 +2987,140 @@ fn tb_queue_native() {
             config.use_jit,
             config.use_4state
         );
+    }
+}
+
+fn runtime_args_config(config: &Config, args: &[&str]) -> Config {
+    let mut config = config.clone();
+    config.runtime_args = std::sync::Arc::new(
+        args.iter()
+            .map(|x| crate::runtime_arg::RuntimeArg::parse(x))
+            .collect(),
+    );
+    config
+}
+
+#[test]
+fn tb_runtime_args_native() {
+    let code = r#"
+    #[test(test_args)]
+    module test_args {
+        var args: $tb::runtime_args;
+        var name: string;
+        var mode: string;
+        var empty: string;
+        var rounds: u32;
+        var mask: logic<100>;
+        var sval: i8;
+        var neg: u8;
+        initial {
+            $assert(args.exists("VERBOSE") == 1);
+            $assert(args.exists("QUIET") == 0);
+
+            rounds = args.get_int("ROUNDS", 2);
+            $assert(rounds == 16);
+            rounds = args.get_int("MISSING", 2);
+            $assert(rounds == 2);
+            mask = args.get_int("MASK", 0);
+            $assert(mask == 100'hf_0000_0000_0000_0000_0000_0001);
+            sval = args.get_int("SMALL", 0);
+            $assert(sval == -3);
+            neg = args.get_int("SMALL", 0);
+            $assert(neg == 8'hfd);
+            $assert(args.get_int("ROUNDS", 0) + 1 == 17);
+
+            name = args.get_string("TESTNAME", "basic_test");
+            $assert(name == "random=test");
+            $assert(name != "basic_test");
+            mode = args.get_string("MODE", "basic_test");
+            $assert(mode == "basic_test");
+            $assert(args.get_string("TESTNAME", "") == "random=test");
+            mode = if name == "random=test" ? "matched" : "other";
+            $assert(mode == "matched");
+            mode = name;
+            $assert(mode == "random=test");
+            empty = args.get_string("EMPTY", "x");
+            $display("[%s][%12s][%-4s]", name, mode, empty);
+            $finish();
+        }
+    }
+    "#;
+    let args = [
+        "VERBOSE",
+        "ROUNDS=1",
+        "ROUNDS=0x10",
+        "MASK=0xf_0000_0000_0000_0000_0000_0001",
+        "SMALL=-3",
+        "TESTNAME=random=test",
+        "EMPTY=",
+    ];
+
+    for config in Config::all() {
+        let config = runtime_args_config(&config, &args);
+        output_buffer::enable();
+        let result = run_queue_tb(code, "test_args", &config);
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(
+            output, "[random=test][ random=test][    ]\n",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn tb_runtime_args_errors() {
+    let cases = [
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A"][..],
+            "was given as a flag",
+        ),
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A=abc"][..],
+            "is not an integer",
+        ),
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A=256"][..],
+            "does not fit 8 bits",
+        ),
+        (
+            "x = args.get_int(\"A\", 0);",
+            &["A=-129"][..],
+            "does not fit 8 bits",
+        ),
+        (
+            "s = args.get_string(\"A\", \"\");",
+            &["A"][..],
+            "was given as a flag",
+        ),
+    ];
+    for (stmt, args, expected) in cases {
+        let code = format!(
+            r#"
+            #[test(test_args)]
+            module test_args {{
+                var args: $tb::runtime_args;
+                var x: u8;
+                var s: string;
+                initial {{
+                    x = 0;
+                    s = "";
+                    {stmt}
+                    $display("%d %s", x, s);
+                    $finish();
+                }}
+            }}
+            "#
+        );
+        let config = runtime_args_config(&Config::default(), args);
+        let result = run_queue_tb(&code, "test_args", &config);
+        match result {
+            TestResult::Fail(msg) => assert!(msg.contains(expected), "{stmt}: {msg}"),
+            x => panic!("{stmt}: expected a failure, got {x:?}"),
+        }
     }
 }
 
@@ -3289,6 +3658,43 @@ fn tb_dirty_filter_skips_private_writes() {
             "tb_dirty_filter_skips_private_writes failed (jit={}, 4state={})",
             config.use_jit,
             config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn tb_dirty_filter_bounds_dynamic_write_to_last_element() {
+    // `lm_dump` is laid out right before `w_row`, which the comb writes. A
+    // dynamically indexed write reaches only up to the last element of
+    // `lm_dump`, so the copy must stay clean instead of settling every time.
+    let code = r#"
+    #[test(test_sample)]
+    module test_sample {
+        inst clk: $tb::clock_gen;
+        var r_line : logic<8>;
+        var lm_dump: logic<128> [4, 8];
+        var w_row  : logic<128> [4];
+        assign w_row = '{default: '0};
+        initial {
+            r_line = 0;
+            for k in 0..8 {
+                r_line = k as 8;
+                clk.next(1);
+                for pe in 0..4 {
+                    lm_dump[pe][k] = w_row[pe];
+                }
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let clean = tb_clean_count(code, &config, "test_sample").expect("analyzes");
+        assert_eq!(
+            clean, 3,
+            "the copy into the testbench array must be proved private (jit={}, 4state={})",
+            config.use_jit, config.use_4state,
         );
     }
 }
@@ -3935,5 +4341,211 @@ fn nested_test_module_reset_starts_deasserted() {
                 "{top}, config: {config:?}"
             );
         }
+    }
+}
+
+const START_COUNTER: &str = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+"#;
+
+#[track_caller]
+fn run_start_tb(code: &str, top: &str, config: &Config) -> TestResult {
+    let code = format!("{START_COUNTER}{code}");
+    let ir = analyze_top(&code, config, top)
+        .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+    let module_name = ir.name.to_string();
+    run_native_testbench(ir, None, module_name).unwrap()
+}
+
+/// `clk.start()` returns at once and the clock runs free: a later
+/// `clk.next(N)` waits for N of its edges, whether the process waiting is
+/// the one that started it or another one, and the edges are not doubled.
+/// Up to the limit given to `start`, the run passes.
+#[test]
+fn started_clock_is_waited_on_by_next() {
+    let single = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            clk.start(8);
+            rst.assert();
+            clk.next(5);
+            $assert(o_cnt == 8'd5, "eight edges, three of them in reset: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    let shared = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            rst.assert();
+            clk.start();
+        }
+
+        initial {
+            clk.next(8);
+            $assert(o_cnt == 8'd5, "eight shared edges, three of them in reset: %d", o_cnt);
+            clk.next(4);
+            $assert(o_cnt == 8'd9, "the clock kept running after its process ended: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    for code in [single, shared] {
+        for config in Config::all() {
+            assert_eq!(
+                run_start_tb(code, "test_start", &config),
+                TestResult::Pass,
+                "config: {config:?}\n{code}"
+            );
+        }
+    }
+}
+
+/// A started clock taking more edges than the limit given to `start` fails
+/// the test, whether a process waits on it, it runs free after every process
+/// has ended, or another process started it.
+#[test]
+fn started_clock_exceeding_its_limit_fails() {
+    let waiting = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            clk.start(8);
+            rst.assert();
+            clk.next(6);
+            $finish();
+        }
+    }
+    "#;
+    let free = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            rst.assert();
+            clk.start(8);
+        }
+    }
+    "#;
+    let other = r#"
+    #[test(test_start)]
+    module test_start {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            clk.start(8);
+        }
+
+        initial {
+            rst.assert();
+            clk.next(6);
+            $finish();
+        }
+    }
+    "#;
+    for code in [waiting, free, other] {
+        for config in Config::all() {
+            let result = run_start_tb(code, "test_start", &config);
+            let TestResult::Fail(msg) = &result else {
+                panic!("expected failure for {config:?}, got {result:?}\n{code}");
+            };
+            assert!(
+                msg.contains("clock `clk` exceeded the cycle limit of 8 set by `start`"),
+                "unexpected message for {config:?}: {msg}\n{code}"
+            );
+        }
+    }
+}
+
+/// A process that started one clock and then waits on another hands the
+/// started clock over to the scheduler, which keeps it running alongside.
+#[test]
+fn started_clock_runs_beside_a_clock_waited_on() {
+    let code = r#"
+    module DualCounter (
+        clk_a: input  'a clock    ,
+        rst_a: input  'a reset    ,
+        clk_b: input  'b clock    ,
+        rst_b: input  'b reset    ,
+        cnt_a: output 'a logic<8> ,
+        cnt_b: output 'b logic<8> ,
+    ) {
+        always_ff (clk_a, rst_a) {
+            if_reset { cnt_a = 0; }
+            else     { cnt_a += 1; }
+        }
+        always_ff (clk_b, rst_b) {
+            if_reset { cnt_b = 0; }
+            else     { cnt_b += 1; }
+        }
+    }
+
+    #[test(test_start)]
+    module test_start {
+        inst ga: $tb::clock_gen #(period: 10);
+        inst gb: $tb::clock_gen #(period: 2);
+        inst ra: $tb::reset_gen (clk: ga);
+        inst rb: $tb::reset_gen (clk: gb);
+        var cnt_a: logic<8>;
+        var cnt_b: logic<8>;
+        inst dut: DualCounter (
+            clk_a: ga, rst_a: ra, clk_b: gb, rst_b: rb, cnt_a, cnt_b,
+        );
+
+        initial {
+            ra.assert(1);
+            rb.assert(1);
+            // ga runs free from t=12: edges at 12 and 22 while gb takes its
+            // ten edges from 12 to 30.
+            ga.start();
+            gb.next(10);
+            $assert(cnt_a == 8'd2, "cnt_a: %d", cnt_a);
+            $assert(cnt_b == 8'd10, "cnt_b: %d", cnt_b);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        assert_eq!(
+            run_start_tb(code, "test_start", &config),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
     }
 }

@@ -1317,9 +1317,8 @@ fn struct_constructor_wide_member_offset() {
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
 
-        crate::assert_buffer::reset();
         sim.step(&Event::Initial);
-        assert!(!crate::assert_buffer::has_fatal(), "{config:?}");
+        assert!(!sim.status.has_fatal(), "{config:?}");
     }
 }
 
@@ -2804,9 +2803,8 @@ fn probe_r4_wide_src_rhs_select() {
     );
     let mut sim = Simulator::new(ir, None);
     // Distinctive payload: low word pattern + a set bit near the top window.
-    let mut src = Value::new(0, 472, false);
     // set bits so both windows carry data: bit 72.. and 176..
-    src = Value::from_u128((0x1234_5678u128) << 72, 0, 472, false);
+    let src = Value::from_u128((0x1234_5678u128) << 72, 0, 472, false);
     sim.set("src", src);
     sim.step(&Event::clock(VarId::SYNTHETIC));
     // narr = src[119:72] = 0x1234_5678 low 48 bits.
@@ -7104,6 +7102,42 @@ fn readmemh_basic() {
         assert!(dump.contains("mem[3] = 8'h28"));
     }
 
+    // The file name can also be a `string` variable, including one whose
+    // length is not known before the simulation starts (an input port).
+    let code = format!(
+        r#"
+    module Sub (path: input string) {{
+        #[allow(initial_assign)]
+        var mem: logic<8> [4];
+        initial {{
+            $readmemh(path, mem);
+            $display("%h %h", mem[0], mem[3]);
+        }}
+    }}
+    #[test(Top)]
+    module Top {{
+        var path: string;
+        #[allow(initial_assign)]
+        var mem: logic<8> [4];
+        inst u: Sub (path: "{hex_path_str}");
+        initial {{
+            path = "{hex_path_str}";
+            $readmemh(path, mem);
+            $display("%h %h", mem[0], mem[3]);
+        }}
+    }}
+    "#
+    );
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze_top(&code, &config, "Top").unwrap();
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(output, "0a 28\n0a 28\n", "config={config:?}");
+    }
+
     let _ = std::fs::remove_file(&hex_path);
 }
 
@@ -9718,10 +9752,9 @@ fn assert_fail() {
     let config = Config::default();
     let ir = analyze(code, &config);
     let mut sim = Simulator::new(ir, None);
-    crate::assert_buffer::reset();
     sim.step(&Event::Initial);
-    assert!(crate::assert_buffer::has_fatal());
-    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert!(sim.status.has_fatal());
+    let msg = sim.status.take_failure().unwrap();
     assert_eq!(msg, "assertion failed");
 }
 
@@ -9759,10 +9792,9 @@ fn assert_with_format_fail() {
     let config = Config::default();
     let ir = analyze(code, &config);
     let mut sim = Simulator::new(ir, None);
-    crate::assert_buffer::reset();
     sim.step(&Event::Initial);
-    assert!(crate::assert_buffer::has_fatal());
-    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert!(sim.status.has_fatal());
+    let msg = sim.status.take_failure().unwrap();
     assert_eq!(msg, "mismatch: a=5 b=9");
 }
 
@@ -9781,10 +9813,9 @@ fn assert_continue_accumulates_failures() {
     let config = Config::default();
     let ir = analyze(code, &config);
     let mut sim = Simulator::new(ir, None);
-    crate::assert_buffer::reset();
     sim.step(&Event::Initial);
-    assert!(!crate::assert_buffer::has_fatal());
-    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert!(!sim.status.has_fatal());
+    let msg = sim.status.take_failure().unwrap();
     assert_eq!(msg, "first\nsecond");
 }
 
@@ -25824,7 +25855,6 @@ fn runtime_stepped_for_stall_guard_terminates() {
     "#;
     for config in Config::all() {
         dbg!(&config);
-        crate::assert_buffer::reset();
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
         sim.set("i_n", Value::new(10, 8, false));
@@ -25836,10 +25866,9 @@ fn runtime_stepped_for_stall_guard_terminates() {
             "config={config:?}"
         );
         assert!(
-            crate::assert_buffer::has_fatal(),
+            sim.status.has_fatal(),
             "non-progressing loop should be reported: config={config:?}"
         );
-        crate::assert_buffer::reset();
     }
 }
 
@@ -35297,18 +35326,20 @@ fn display_string_argument_renders_text() {
 
 #[test]
 fn string_let_and_var_hold_their_text() {
-    // A `string` type's width is a nominal 1 bit, and a `let`/`var` of it was
-    // allocated that: `%s` printed the low bits of the text, and a bare
-    // `$display(a)` printed them in hex. The storage is now as wide as the
-    // longest text assigned, and a shorter text is zero-padded in it.
+    // A `string` `let`/`var` holds its text: `%s` prints it, a bare
+    // `$display(a)` prints it as text, and one variable's text copies into
+    // another, including from a `let` into a `var` the testbench writes.
     let code = r#"
     #[test(Top)]
     module Top {
         let a: string = "hi";
         var b: string;
         var c: string;
+        var d: string;
         var x: logic<8>;
         initial {
+            d = a;
+            $write("[%s]", d);
             b = "hello";
             c = b;
             b = "hi";
@@ -35331,7 +35362,202 @@ fn string_let_and_var_hold_their_text() {
         sim.step(&Event::Initial);
         let output = output_buffer::take();
         assert_eq!(
-            output, "[hi][hi][hello][   hi]hi ab hello[eq][longer text]",
+            output, "[hi][hi][hi][hello][   hi]hi ab hello[eq][longer text]",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn string_bits_read_and_write_as_its_bytes() {
+    // A `string` variable stores a handle of its text. Read as bits it is the
+    // bytes of its text, as wide as its longest text, so a select (also at a
+    // runtime position), a concatenation, an assignment to a non-string, a
+    // comparison with a non-string or by order, and `%h`/`%d` give what they
+    // did when the variable held those bytes. Such a statement runs on the
+    // interpreter, so every backend agrees.
+    let code = r#"
+    #[test(Top)]
+    module Top {
+        var s: string;
+        var t: string;
+        var x: logic<16>;
+        var b: logic;
+        let c: string = if x == 16'h4445 ? "yes" : "no";
+        let cb: logic<8> = c[7:0];
+        var u: string;
+        var i: u32;
+        initial {
+            u = "ABCD";
+            i = 8;
+            $display("%b %h %h", u[i], u[i+:8], u[i + 3-:4]);
+            s = "AB";
+            x = s;
+            $display("%h %h %h %h", x, s, s[7:0], {s, 8'h43});
+            b = s == 16'h4142;
+            $display("%b", b);
+            b = s <: "AC";
+            $display("%b", b);
+            s = "DE";
+            $display("[%s] %d", s, s);
+            case s {
+                "DE"   : $display("de");
+                default: $display("other");
+            }
+            t = s;
+            $display("[%s] %b %b", t, t == s, t != "DE");
+            x = 16'h4445;
+            $display("[%s] %h", c, cb);
+            $display(c);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(
+            output, "1 43 3\n4142 4142 42 414243\n1\n1\n[DE] 17477\nde\n[DE] 1 0\n[no] 6f\nno\n",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn string_input_array_port_from_literals_and_constants() {
+    let code = r#"
+    package Words {
+        const ITEMS: string [2] = '{"longer text", ""};
+    }
+    module Sub (a: input string [2], b: input string [2]) {
+        initial {
+            $display("[%s][%s][%s][%s]", a[0], a[1], b[0], b[1]);
+        }
+    }
+    #[test(Top)]
+    module Top {
+        inst u: Sub (a: '{"ab", default: "cd"}, b: Words::ITEMS);
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(output, "[ab][cd][longer text][]\n", "config={config:?}");
+    }
+}
+
+#[test]
+fn string_array_into_numeric_input_port() {
+    let code = r#"
+    module Sub (a: input logic<64> [2]) {
+        initial { $display("[%h][%h]", a[0], a[1]); }
+    }
+    #[test(Top)]
+    module Top {
+        let a: string [2] = '{"ab", "cd"};
+        inst u: Sub (a: a);
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(
+            output, "[0000000000006162][0000000000006364]\n",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn string_input_array_port_from_runtime_slice() {
+    let code = r#"
+    module Sub (a: input string [2], pair: output logic<3>) {
+        assign pair = {a[0] == "ab", a[1] == "cd", a[1] == ""};
+    }
+    module Top (index: input u32, pair: output logic<3>) {
+        let words: string [3] = '{"start", "ab", "cd"};
+        inst u: Sub (a: words[index+:2], pair: pair);
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (index, pair) in [(1, 0b110), (2, 0b001), (3, 0b001)] {
+            sim.set("index", Value::new(index, 32, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("pair").unwrap(),
+                Value::new(pair, 3, false),
+                "config={config:?}, index={index}"
+            );
+        }
+    }
+}
+
+#[test]
+fn string_crosses_ports_functions_and_hierarchy() {
+    // A `string` stores a fixed-width handle, so its text moves through an
+    // input or output port, a function's argument and return value, and a
+    // hierarchical read or write, where storage sized by the text could not
+    // follow it. A non-string connected to a `string` output reads it as the
+    // bytes of its text, as wide as the longest text the other side sets.
+    let code = r#"
+    function greet (name: input string, out: output string) -> string {
+        out = name;
+        return if name == "bob" ? "hi bob" : "hello";
+    }
+    function name_bits (out: output string) {
+        out = "AB";
+    }
+    module Word (o: output string) {
+        assign o = "CD";
+    }
+    module Sub (i: input string, o: output string) {
+        #[allow(initial_assign)]
+        var m: string;
+        assign o = if i == "ping" ? "pong" : "?";
+        initial {
+            m = "inner";
+        }
+    }
+    #[test(Top)]
+    module Top {
+        var r: string;
+        var g: string;
+        var n: string;
+        var w: logic<16>;
+        var b: logic<16>;
+        inst u: Sub (i: "ping", o: r);
+        inst v: Word (o: w);
+        initial {
+            g = greet("bob", n);
+            name_bits(b);
+            $display("[%s][%s][%s][%s] %h %h", r, g, n, u.m, w, b);
+            u.m = "changed";
+            $display("[%s][%b]", u.m, u.i == "ping");
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze_top(code, &config, "Top").unwrap();
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(
+            output, "[pong][hi bob][bob][inner] 4344 4142\n[changed][1]\n",
             "config={config:?}"
         );
     }
@@ -35608,6 +35834,43 @@ fn string_array_const_element_keeps_its_text() {
         assert_eq!(sim.get("o_pkg2").unwrap(), Value::new(1, 1, false));
         assert_eq!(sim.get("o_fn").unwrap(), Value::new(1, 1, false));
         assert_eq!(sim.get("o_local").unwrap(), Value::new(1, 1, false));
+    }
+}
+
+#[test]
+fn display_runtime_function_string_return_keeps_its_text() {
+    // The literal call is constant-folded, but the variable-argument call reads
+    // the function's runtime return slot and must preserve the whole string.
+    let code = r#"
+    module Top {
+        function ts(a: input bit) -> string {
+            case a {
+                0: return "huhu";
+                default: return "haha";
+            }
+        }
+
+        #[allow(initial_assign)]
+        var v1: bit;
+
+        initial {
+            $display("%s", ts(0));
+            v1 = 0;
+            $display("%s", ts(v1));
+            v1 = 1;
+            $display("%s", ts(v1));
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        output_buffer::enable();
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+
+        assert_eq!(output, "huhu\nhuhu\nhaha\n", "config={config:?}");
     }
 }
 
@@ -39424,6 +39687,105 @@ fn wide_shift_left_of_signed_narrow_operand_is_aot_native() {
             };
             assert_eq!(sim.get("o").unwrap(), expect(a as i128), "a={a} n={n}");
             assert_eq!(sim.get("p").unwrap(), expect(1), "n={n}");
+        }
+    }
+}
+
+#[test]
+fn imported_alias_package_with_gen_const_argument() {
+    let pkg = r#"
+    proto package ProtoP {
+        const IS_CSR: bit;
+        const W     : u32;
+    }
+
+    package ImplPkg::<ID: u32> for ProtoP {
+        const IS_CSR: bit = 1;
+        const W     : u32 = ID;
+    }
+
+    package UtilsPkg::<PKG: ProtoP> {
+        function is_bc (x: input logic<PKG::W>) -> logic {
+            return PKG::IS_CSR && x == 3;
+        }
+    }
+
+    interface BusIf::<PKG: ProtoP> {
+        var cmd: logic<PKG::W>;
+
+        function is_bc () -> logic {
+            return UtilsPkg::<PKG>::is_bc(cmd);
+        }
+    }
+
+    package CPkg {
+        gen ID: u32 = 4;
+        alias package BUS = ImplPkg::<ID>;
+    }
+    "#;
+    let top = r#"
+    import CPkg::BUS;
+
+    module Top (
+        o: output logic,
+    ) {
+        inst b: BusIf::<BUS>;
+        always_comb {
+            b.cmd = 3;
+            o     = b.is_bc();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_multi_file_prj(&[pkg, top], &config, "Top", &["prj"]).unwrap();
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
+    }
+}
+
+#[test]
+fn isunknown() {
+    let code = r#"
+    module Top (
+        i_a   : input  logic<4>,
+        i_b   : input  logic<3>,
+        o_var : output logic,
+        o_part: output logic,
+        o_bit : output logic,
+        o_lit : output logic,
+    ) {
+        assign o_var  = $isunknown(i_a);
+        assign o_part = $isunknown({i_b, 1'bx});
+        assign o_bit  = $isunknown(i_a[2]);
+        assign o_lit  = $isunknown(4'b01x0);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_a", Value::new_x(4, false));
+        sim.set("i_b", Value::new(0b101, 3, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        let expected = config.use_4state as u64;
+        for name in ["o_var", "o_part", "o_bit", "o_lit"] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(expected, 1, false),
+                "{name} {config:?}"
+            );
+        }
+
+        sim.set("i_a", Value::new(0b1001, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        for name in ["o_var", "o_bit"] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(0, 1, false),
+                "{name} {config:?}"
+            );
         }
     }
 }

@@ -842,15 +842,24 @@ fn synth_binary(
             Ok(resize(vec![result], result_width, false))
         }
         Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR => {
-            let xs = synthesize_expr(ctx, x, current, result_width)?;
+            // Right shifts can move bits above the assignment width into
+            // the result. IEEE 1800-2023 11.6.1 uses the left operand's width.
+            let left_width = if matches!(op, Op::LogicShiftR | Op::ArithShiftR) {
+                result_width.max(x.comptime().r#type.total_width().unwrap_or(result_width))
+            } else {
+                result_width
+            };
+            let xs = synthesize_expr(ctx, x, current, left_width)?;
             let signed_ext = matches!(op, Op::ArithShiftR);
-            if let Some(amount) = try_constant(y).map(|n| n as usize) {
-                Ok(arith::constant_shift(ctx, &xs, op, amount, signed_ext))
+            let mut result = if let Some(amount) = try_constant(y).map(|n| n as usize) {
+                arith::constant_shift(ctx, &xs, op, amount, signed_ext)
             } else {
                 let shift_width = y.comptime().r#type.total_width().unwrap_or(0).max(1);
                 let amount_nets = synthesize_expr(ctx, y, current, shift_width)?;
-                Ok(arith::barrel_shift(ctx, &xs, &amount_nets, op, signed_ext))
-            }
+                arith::barrel_shift(ctx, &xs, &amount_nets, op, signed_ext)
+            };
+            result.truncate(result_width);
+            Ok(result)
         }
         Op::Mul => {
             let xs = synthesize_expr(ctx, x, current, result_width)?;
@@ -858,14 +867,22 @@ fn synth_binary(
             arith::multiply(ctx, &xs, &ys, result_width, signed)
         }
         Op::Div | Op::Rem => {
-            let xs = synthesize_expr(ctx, x, current, result_width)?;
-            let ys = synthesize_expr(ctx, y, current, result_width)?;
+            // IEEE 1800-2023 11.6.1: a narrow destination truncates the
+            // result, while division still uses both full operand widths.
+            let operand_width = [x, y]
+                .into_iter()
+                .filter_map(|operand| operand.comptime().r#type.total_width())
+                .fold(result_width, usize::max);
+            let xs = synthesize_expr(ctx, x, current, operand_width)?;
+            let ys = synthesize_expr(ctx, y, current, operand_width)?;
             let (quo, rem) = if signed {
-                arith::divide_signed(ctx, &xs, &ys, result_width)?
+                arith::divide_signed(ctx, &xs, &ys, operand_width)?
             } else {
-                arith::divide_unsigned(ctx, &xs, &ys, result_width)?
+                arith::divide_unsigned(ctx, &xs, &ys, operand_width)?
             };
-            Ok(if matches!(op, Op::Div) { quo } else { rem })
+            let mut result = if matches!(op, Op::Div) { quo } else { rem };
+            result.truncate(result_width);
+            Ok(result)
         }
         Op::As => synthesize_expr(ctx, x, current, result_width),
         Op::EqWildcard | Op::NeWildcard => {
@@ -964,6 +981,8 @@ fn synth_system_function_call(
             let result = onehot_reduce(ctx, &bits);
             Ok(resize(vec![result], ret_width.max(1), false))
         }
+        // Synthesized logic has no x/z bits.
+        SystemFunctionKind::IsUnknown(_) => Ok(resize(vec![NET_CONST0], ret_width.max(1), false)),
         _ => Err(SynthesizerError::unsupported(
             UnsupportedKind::SystemFunctionCall,
             &call.comptime.token,

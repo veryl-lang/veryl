@@ -2290,6 +2290,121 @@ pub(crate) fn propagate_interface_initialization(
     Ok(())
 }
 
+fn input_port_array_elements(
+    context: &mut Context,
+    input: &air::Expression,
+    port: &VariableMeta,
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
+    let count = port.elements.len();
+    let target = &port.r#type;
+    let mut expressions = if let Some(elements) =
+        super::expression::array_slice_elements(context, input, Some(target))?
+    {
+        if elements.len() != count {
+            return Err(SimulatorError::unsupported_description(
+                &input.token_range(),
+            ));
+        }
+        elements
+    } else if let Some(elements) = const_array_element_exprs(context, input, Some(target), count)? {
+        return Ok(Some(elements));
+    } else if let Some(elements) = array_literal_element_exprs(context, input, target, count)? {
+        elements
+    } else {
+        return input_port_array_variable(context, input, port);
+    };
+
+    for expr in &mut expressions {
+        size_literal_rhs(expr, None, None, port.width);
+    }
+    Ok(Some(expressions))
+}
+
+fn input_port_array_variable(
+    context: &mut Context,
+    input: &air::Expression,
+    port: &VariableMeta,
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
+    // The shape also distinguishes a one-element array port from a scalar.
+    if port.r#type.array.is_empty() {
+        return Ok(None);
+    }
+    let air::Expression::Term(factor) = input else {
+        return Ok(None);
+    };
+    let air::Factor::Variable(id, index, select, _) = factor.as_ref() else {
+        return Ok(None);
+    };
+    if !select.is_empty() {
+        return Ok(None);
+    }
+
+    let scope = context.scope();
+    let Some(source) = scope.variable_meta.get(id) else {
+        return Ok(None);
+    };
+    let count = port.elements.len();
+    let base = if index.indices.is_empty() {
+        Some(0)
+    } else {
+        index
+            .eval_value(&mut scope.analyzer_context)
+            .and_then(|indices| {
+                partial_index_base(
+                    source.r#type.array.as_slice(),
+                    &indices,
+                    count,
+                    source.elements.len(),
+                )
+            })
+    };
+    let Some(base) = base else {
+        return Ok(None);
+    };
+    let token = input.token_range();
+    let elements = source
+        .elements
+        .get(base..base + count)
+        .ok_or_else(|| SimulatorError::unsupported_description(&token))?;
+    let mut expressions = Vec::with_capacity(count);
+    let source_is_string = source.r#type.is_string();
+    let width = if source_is_string {
+        source.width
+    } else {
+        port.width
+    };
+    for element in elements {
+        let read = ProtoExpression::Variable {
+            var_offset: element.current,
+            select: None,
+            dynamic_select: None,
+            width,
+            var_full_width: width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        };
+        let expr = if source_is_string {
+            super::string_type_utils::cast(
+                read,
+                source.string_width,
+                port.r#type.is_string(),
+                "a bit operation",
+                &token,
+                ExpressionContext {
+                    width: port.width,
+                    signed: false,
+                },
+            )?
+        } else {
+            read
+        };
+        expressions.push(expr);
+    }
+    Ok(Some(expressions))
+}
+
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
     fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
         let air::Component::Module(child_module) = src.component.as_ref() else {
@@ -2353,7 +2468,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
-            &collect_string_widths(&child_module.variables, child_decls)?,
+            &collect_string_widths(
+                &child_module.variables,
+                &child_analyzer_context.functions,
+                child_decls,
+            )?,
             &child_ff_table,
             &multi_rmw_set,
             &dyn_indexed,
@@ -2416,6 +2535,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if parent_meta.elements.len() != child_meta.elements.len()
                     || parent_meta.width != child_meta.width
                     || parent_meta.native_bytes != child_meta.native_bytes
+                    || parent_meta.r#type.is_string() != child_meta.r#type.is_string()
                 {
                     continue;
                 }
@@ -2472,6 +2592,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if parent_meta.elements.len() != child_meta.elements.len()
                     || parent_meta.width != child_meta.width
                     || parent_meta.native_bytes != child_meta.native_bytes
+                    || parent_meta.r#type.is_string() != child_meta.r#type.is_string()
                 {
                     continue;
                 }
@@ -2670,15 +2791,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             let child_meta = child_variable_meta.get(&input.id).unwrap();
 
             let input_expr = &input.expr;
-            if let Some(exprs) = super::expression::array_slice_elements(context, input_expr)? {
-                if exprs.len() != child_meta.elements.len() {
-                    return Err(SimulatorError::unsupported_description(&src.token));
-                }
+            if let Some(expressions) = input_port_array_elements(context, input_expr, child_meta)? {
                 all_comb_statements.append(&mut context.pending_statements);
-                for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
-                    size_literal_rhs(&mut expr, None, None, child_meta.width);
+                for (element, expr) in child_meta.elements.iter().zip(expressions) {
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                        dst: child_element.current,
+                        dst: element.current,
                         dst_width: child_meta.width,
                         select: None,
                         dynamic_select: None,
@@ -2692,112 +2809,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 continue;
             }
 
-            // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
-            if let Some(exprs) = const_array_element_exprs(input_expr, child_meta.elements.len()) {
-                for (child_element, expr) in child_meta.elements.iter().zip(exprs) {
-                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                        dst: child_element.current,
-                        dst_width: child_meta.width,
-                        select: None,
-                        dynamic_select: None,
-                        rhs_select: None,
-                        expr,
-                        dst_ff_current_offset: 0, // not FF
-                        comb_direct: false,
-                        token: TokenRange::default(),
-                    }));
-                }
-                continue;
-            }
-
-            // Array port fed by an array literal (`inst u: Sub (p: '{default: '0})`).
-            if let Some(exprs) = array_literal_element_exprs(
-                context,
-                input_expr,
-                &child_meta.r#type,
-                child_meta.elements.len(),
-            ) {
-                all_comb_statements.append(&mut context.pending_statements);
-                for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
-                    size_literal_rhs(&mut expr, None, None, child_meta.width);
-                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                        dst: child_element.current,
-                        dst_width: child_meta.width,
-                        select: None,
-                        dynamic_select: None,
-                        rhs_select: None,
-                        expr,
-                        dst_ff_current_offset: 0, // not FF
-                        comb_direct: false,
-                        token: TokenRange::default(),
-                    }));
-                }
-                continue;
-            }
-
-            // Array port fed by a bare or constant partial-index variable
-            // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.
-            // A one-element port is still an ARRAY, so gating on the element
-            // COUNT sent `logic<W> [1]` to the scalar path below, where
-            // `Conv::conv` meets an array-valued expression and raises
-            // `unsupported_description`.
-            if !child_meta.r#type.array.is_empty()
-                && let air::Expression::Term(factor) = input_expr
-                && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
-                && select.is_empty()
-            {
-                let parent_scope = context.scope();
-                if let Some(parent_meta) = parent_scope.variable_meta.get(parent_id).cloned() {
-                    let base_index = if index.indices.is_empty() {
-                        Some(0)
-                    } else if let Some(idx_vals) =
-                        index.eval_value(&mut parent_scope.analyzer_context)
-                    {
-                        partial_index_base(
-                            parent_meta.r#type.array.as_slice(),
-                            &idx_vals,
-                            child_meta.elements.len(),
-                            parent_meta.elements.len(),
-                        )
-                    } else {
-                        None
-                    };
-
-                    if let Some(base) = base_index {
-                        for i in 0..child_meta.elements.len() {
-                            let child_element = &child_meta.elements[i];
-                            let parent_element = &parent_meta.elements[base + i];
-                            let parent_expr = ProtoExpression::Variable {
-                                var_offset: parent_element.current,
-                                select: None,
-                                dynamic_select: None,
-                                width: child_meta.width,
-                                var_full_width: child_meta.width,
-                                expr_context: ExpressionContext {
-                                    width: child_meta.width,
-                                    signed: false,
-                                },
-                            };
-                            all_comb_statements.push(ProtoStatement::Assign(
-                                ProtoAssignStatement {
-                                    dst: child_element.current,
-                                    dst_width: child_meta.width,
-                                    select: None,
-                                    dynamic_select: None,
-                                    rhs_select: None,
-                                    expr: parent_expr,
-                                    dst_ff_current_offset: 0, // not FF
-                                    comb_direct: false,
-                                    token: TokenRange::default(),
-                                },
-                            ));
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            let mut proto_expr: ProtoExpression = Conv::conv(context, input_expr)?;
+            // A `string` port takes the handle of the text it is given.
+            let mut proto_expr: ProtoExpression =
+                ProtoExpression::conv_for(context, input_expr, &child_meta.r#type)?;
             // No assignment statement here to size the literal.
             size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
             let element = &child_meta.elements[0];
@@ -2834,7 +2848,27 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 continue;
             }
             let child_meta = child_variable_meta.get(&output.id).unwrap();
+            let child_is_string = child_meta.r#type.is_string();
             let multi_dst = output.dst.len() > 1;
+            let mut parent_is_string = Vec::with_capacity(output.dst.len());
+            for parent_dst in &output.dst {
+                let is_string = super::string_type_utils::is_var(context, &parent_dst.id);
+                super::string_type_utils::check_dst(
+                    &parent_dst.comptime.r#type,
+                    &parent_dst.select,
+                    "a bit operation",
+                    &parent_dst.token,
+                )?;
+                // Several non-string destinations slice the port's value,
+                // which for a `string` is its handle, not its text.
+                if child_is_string && !is_string && multi_dst {
+                    return Err(SimulatorError::unsupported_string_operation(
+                        "a bit operation",
+                        &parent_dst.token,
+                    ));
+                }
+                parent_is_string.push(is_string);
+            }
             // One dst per array element (`o: arr[2*n+:2]`) is element-wise
             // wiring, not a concat destructure of a single packed port value.
             let element_wise = multi_dst && child_meta.elements.len() == output.dst.len();
@@ -3007,7 +3041,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             },
                         }
                     } else {
-                        ProtoExpression::Variable {
+                        let read = ProtoExpression::Variable {
                             var_offset: child_element.current,
                             select: None,
                             dynamic_select: None,
@@ -3017,6 +3051,25 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 width: child_meta.width,
                                 signed: false,
                             },
+                        };
+                        // A `string` port's handle moves into a `string`; a
+                        // non-string reads the port as the bytes of its text,
+                        // at the width of the child's longest text.
+                        if child_is_string {
+                            super::string_type_utils::cast(
+                                read,
+                                child_meta.string_width,
+                                parent_is_string[dst_idx],
+                                "a bit operation",
+                                &parent_dst.token,
+                                // No context of its own: the bytes' width.
+                                ExpressionContext {
+                                    width: 0,
+                                    signed: false,
+                                },
+                            )?
+                        } else {
+                            read
                         }
                     };
 

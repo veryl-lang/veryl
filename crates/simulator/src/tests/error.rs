@@ -649,77 +649,13 @@ fn comb_logic_without_a_one_pass_order_is_rejected() {
 }
 
 #[test]
-fn string_storage_the_simulator_cannot_size() {
-    // A `string` variable is sized from the assignments in its own module.
-    // Text that reaches it any other way would be cut to the nominal 1-bit
-    // width of the `string` type, so these are rejected instead.
+fn string_operation_the_simulator_cannot_perform() {
+    // A `string` stores a handle of its text, read as bits at the width of
+    // its longest text. That width is not known for a text from outside the
+    // module (a port, a function argument, a hierarchical reference, a
+    // runtime argument), and a concatenation destination has no window for
+    // a text.
     let cases = [
-        (
-            "input port",
-            r#"
-            module Sub (s: input string) {
-                initial {
-                    $display("%s", s);
-                }
-            }
-            #[test(Top)]
-            module Top {
-                inst u: Sub (s: "hello");
-            }
-            "#,
-        ),
-        (
-            "function output argument",
-            r#"
-            function set (o: output string) {
-                o = "hello";
-            }
-            #[test(Top)]
-            module Top {
-                var s: string;
-                initial {
-                    set(s);
-                }
-            }
-            "#,
-        ),
-        (
-            "hierarchical read",
-            r#"
-            module Sub {
-                let m: string = "hello";
-                initial {
-                    $display("%s", m);
-                }
-            }
-            #[test(Top)]
-            module Top {
-                inst u: Sub;
-                initial {
-                    $display("%s", u.m);
-                }
-            }
-            "#,
-        ),
-        (
-            "hierarchical write",
-            r#"
-            module Sub {
-                var m: string;
-                assign m = "init";
-                initial {
-                    $display("%s", m);
-                }
-            }
-            #[test(Top)]
-            module Top {
-                inst u: Sub;
-                initial {
-                    u.m = "hello";
-                }
-            }
-            "#,
-        ),
         (
             "concatenation destination",
             r#"
@@ -732,15 +668,82 @@ fn string_storage_the_simulator_cannot_size() {
                 }
             }
             "#,
+            true,
+        ),
+        (
+            "bits of an input port",
+            r#"
+            module Sub (s: input string) {
+                var x: logic<8>;
+                initial {
+                    x = s[7:0];
+                    $display("%h", x);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub (s: "hello");
+            }
+            "#,
+            false,
+        ),
+        (
+            "bits of a runtime argument",
+            r#"
+            #[test(Top)]
+            module Top {
+                var args: $tb::runtime_args;
+                var s: string;
+                var x: logic<8>;
+                initial {
+                    s = args.get_string("NAME", "a");
+                    x = s[7:0];
+                    $display("%h", x);
+                }
+            }
+            "#,
+            false,
+        ),
+        (
+            "bits of a hierarchical reference",
+            r#"
+            module Sub {
+                var m: string;
+                initial {
+                    m = "hello";
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub;
+                var x: logic<8>;
+                initial {
+                    x = u.m[7:0];
+                    $display("%h", x);
+                }
+            }
+            "#,
+            false,
         ),
     ];
 
-    for (name, code) in cases {
+    for (name, code, storage) in cases {
         let result = analyze_top(code, &Config::default(), "Top");
-        assert!(
-            matches!(result, Err(SimulatorError::UnsupportedString { .. })),
-            "{name}: expected UnsupportedString, got {:?}",
-            result.err()
-        );
+        if storage {
+            assert!(
+                matches!(result, Err(SimulatorError::UnsupportedString { .. })),
+                "{name}: expected UnsupportedString, got {:?}",
+                result.err()
+            );
+        } else {
+            assert!(
+                matches!(
+                    result,
+                    Err(SimulatorError::UnsupportedStringOperation { .. })
+                ),
+                "{name}: expected UnsupportedStringOperation, got {:?}",
+                result.err()
+            );
+        }
     }
 }

@@ -149,11 +149,12 @@ fn resolve_stmt(
                 }
             }
             ProtoSystemFunctionCall::Readmemh {
+                filename,
                 elements,
                 width,
                 hier,
-                ..
             } => {
+                resolve_expr(&mut filename.0, context, children)?;
                 if let Some(target) = hier.take() {
                     let Some(meta) = find_target(children, &target.inst_path, &target.var_path)
                     else {
@@ -166,7 +167,11 @@ fn resolve_stmt(
             ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::TbMethodCall { method, .. } => match method {
-            crate::ir::statement::ProtoTbMethodKind::ClockNext { count, period } => {
+            crate::ir::statement::ProtoTbMethodKind::ClockNext { count, period }
+            | crate::ir::statement::ProtoTbMethodKind::ClockStart {
+                max_cycles: count,
+                period,
+            } => {
                 for expr in [count, period].into_iter().flatten() {
                     resolve_expr(expr, context, children)?;
                 }
@@ -183,9 +188,9 @@ fn resolve_stmt(
             }
             crate::ir::statement::ProtoTbMethodKind::Component { args, .. } => {
                 for arg in args {
-                    if let crate::ir::statement::ProtoComponentArg::Expr(e) = arg {
-                        resolve_expr(e, context, children)?;
-                    }
+                    let (crate::ir::statement::ProtoComponentArg::Expr(e)
+                    | crate::ir::statement::ProtoComponentArg::Text(crate::ir::ProtoText(e))) = arg;
+                    resolve_expr(e, context, children)?;
                 }
             }
             crate::ir::statement::ProtoTbMethodKind::RandomSeed { value } => {
@@ -200,8 +205,16 @@ fn resolve_stmt(
                 resolve_expr(min, context, children)?;
                 resolve_expr(max, context, children)?;
             }
-            crate::ir::statement::ProtoTbMethodKind::FileOpen { .. }
-            | crate::ir::statement::ProtoTbMethodKind::FileClose
+            crate::ir::statement::ProtoTbMethodKind::FileOpen { path, .. } => {
+                resolve_expr(&mut path.0, context, children)?;
+            }
+            crate::ir::statement::ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                resolve_expr(&mut name.0, context, children)?;
+                if let Some(e) = op.default_expr_mut() {
+                    resolve_expr(e, context, children)?;
+                }
+            }
+            crate::ir::statement::ProtoTbMethodKind::FileClose
             | crate::ir::statement::ProtoTbMethodKind::FileFlush
             | crate::ir::statement::ProtoTbMethodKind::RandomGet { .. }
             | crate::ir::statement::ProtoTbMethodKind::RandomGetSeed { .. } => {}
@@ -387,13 +400,18 @@ pub(crate) fn resolve_expr(
             };
 
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
-            let var_full_width = kind_width
-                * meta
-                    .r#type
-                    .width()
-                    .iter()
-                    .map(|d| d.unwrap_or(1))
-                    .product::<usize>();
+            // A `string` stores a handle, whose width its type does not tell.
+            let var_full_width = if meta.r#type.is_string() {
+                meta.width
+            } else {
+                kind_width
+                    * meta
+                        .r#type
+                        .width()
+                        .iter()
+                        .map(|d| d.unwrap_or(1))
+                        .product::<usize>()
+            };
 
             // Evaluating a runtime select eagerly resolves the unknown index
             // to 0, silently reading the wrong element.
@@ -516,6 +534,14 @@ pub(crate) fn resolve_expr(
         }
         ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             resolve_expr(x, context, children)?;
+        }
+        ProtoExpression::StringBytes {
+            x, dynamic_select, ..
+        } => {
+            resolve_expr(x, context, children)?;
+            if let Some(d) = dynamic_select {
+                resolve_expr(&mut d.index_expr, context, children)?;
+            }
         }
         ProtoExpression::Binary { x, y, .. } => {
             resolve_expr(x, context, children)?;

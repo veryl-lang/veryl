@@ -5,29 +5,40 @@ use async_channel::{Receiver, Sender};
 use dashmap::DashMap;
 use futures::executor::block_on;
 use ropey::Rope;
-use std::collections::{HashMap, VecDeque};
+use std::borrow::Cow;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tower_lsp_server::Client;
 use tower_lsp_server::ls_types::ClientCapabilities;
 use tower_lsp_server::ls_types::Uri as Url;
 use tower_lsp_server::ls_types::*;
 use veryl_analyzer::namespace::Namespace;
+use veryl_analyzer::reference_table::{self, ReferenceCandidate};
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
-use veryl_analyzer::symbol::{Symbol, TbComponentKind, TypeKind};
+use veryl_analyzer::symbol::{ParameterKind, Symbol, SymbolId, TbComponentKind, TypeKind};
 use veryl_analyzer::symbol_path::{SymbolPath, SymbolPathNamespace};
+use veryl_analyzer::symbol_table::{self, Import, PendingWatermark};
 use veryl_analyzer::{
-    Analyzer, AnalyzerError, Context, component_manifest_table, fragment_cache, scope, symbol_table,
+    Analyzer, AnalyzerError, Context, component_manifest_table, fragment_cache, scope,
 };
 use veryl_formatter::Formatter;
 use veryl_metadata::{ComponentManifest, Metadata, MetadataError};
-use veryl_parser::resource_table;
+use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::veryl_token::{Token, TokenSource};
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{Finder, Parser, ParserError};
 use veryl_path::PathSet;
 
+const REFERENCE_REFRESH_DELAY: Duration = Duration::from_millis(100);
+
 pub struct Capability {
     work_done_progress: bool,
+    semantic_tokens_refresh: bool,
 }
 
 impl From<ClientCapabilities> for Capability {
@@ -38,7 +49,16 @@ impl From<ClientCapabilities> for Capability {
             false
         };
 
-        Self { work_done_progress }
+        let semantic_tokens_refresh = value
+            .workspace
+            .and_then(|workspace| workspace.semantic_tokens)
+            .and_then(|tokens| tokens.refresh_support)
+            .unwrap_or(false);
+
+        Self {
+            work_done_progress,
+            semantic_tokens_refresh,
+        }
     }
 }
 
@@ -56,14 +76,11 @@ pub enum MsgToServer {
         text: String,
         version: i32,
     },
+    DidClose {
+        url: Url,
+    },
+    DiskSourcesChanged(Vec<Url>),
     DidChangeConfiguration(ServerConfigItem),
-    WillRenameFile {
-        old_url: Url,
-        // new_uri: String, // This is not used currently
-    },
-    DidRenameFile {
-        new_url: Url,
-    },
     WillDeleteFile {
         url: Url,
     },
@@ -135,6 +152,7 @@ impl ServerConfig {
 
 pub struct Server {
     client: Client,
+    runtime: tokio::runtime::Handle,
     rcv: Receiver<MsgToServer>,
     snd: Sender<MsgFromServer>,
     document_map: DashMap<PathBuf, Rope>,
@@ -143,17 +161,49 @@ pub struct Server {
     cache_dir: PathBuf,
     lsp_token: i32,
     background_tasks: VecDeque<BackgroundTask>,
-    background_done: bool,
+    loaded_projects: HashMap<PathBuf, Arc<Metadata>>,
     config: ServerConfig,
-    latest_change: Option<(Url, String, i32)>,
+    pending_diagnostics: BTreeMap<Url, i32>,
+    pending_disk_updates: BTreeSet<Url>,
+    reference_refresh_at: Option<Instant>,
     work_done_progress: bool,
+    semantic_tokens_refresh: bool,
+    document_inputs: BTreeMap<PathId, DocumentInputs>,
+    references: ReferenceIndex,
     incremental: LsIncrementalMap,
+}
+
+struct DocumentInputs {
+    imports: Vec<Import>,
+    candidates: Vec<ReferenceCandidate>,
+}
+
+impl DocumentInputs {
+    fn capture(imports: PendingWatermark, candidates: usize) -> Self {
+        Self {
+            imports: symbol_table::export_imports_since(imports),
+            candidates: reference_table::export_candidates_since(candidates),
+        }
+    }
+}
+
+struct DiskSource {
+    path: PathBuf,
+    metadata: Arc<Metadata>,
+    text: String,
+}
+
+#[derive(Default)]
+struct ReferenceIndex {
+    by_file: HashMap<PathId, Vec<(SymbolId, Token)>>,
+    by_symbol: HashMap<SymbolId, Vec<Token>>,
 }
 
 impl Server {
     pub fn new(client: Client, rcv: Receiver<MsgToServer>, snd: Sender<MsgFromServer>) -> Self {
         Server {
             client,
+            runtime: tokio::runtime::Handle::current(),
             rcv,
             snd,
             document_map: DashMap::new(),
@@ -162,150 +212,289 @@ impl Server {
             cache_dir: veryl_path::cache_path(),
             lsp_token: 0,
             background_tasks: VecDeque::new(),
-            background_done: true,
+            loaded_projects: HashMap::new(),
             config: ServerConfig::default(),
-            latest_change: None,
+            pending_diagnostics: BTreeMap::new(),
+            pending_disk_updates: BTreeSet::new(),
+            reference_refresh_at: None,
             work_done_progress: true,
+            semantic_tokens_refresh: false,
+            document_inputs: BTreeMap::new(),
+            references: ReferenceIndex::default(),
             incremental: LsIncrementalMap::default(),
         }
     }
 
     pub fn serve(&mut self) {
         loop {
-            if let Ok(msg) = self.rcv.recv_blocking() {
-                match msg {
-                    MsgToServer::Initialize { capability } => {
-                        self.work_done_progress = capability.work_done_progress;
+            let msg = match self.rcv.try_recv() {
+                Ok(msg) => Ok(msg),
+                Err(async_channel::TryRecvError::Closed) => break,
+                Err(async_channel::TryRecvError::Empty) => {
+                    if !self.background_tasks.is_empty() {
+                        self.run_background_step();
+                        continue;
                     }
-                    MsgToServer::DidOpen { url, text, version } => {
-                        self.did_open(&url, &text, version);
-                        self.latest_change = Some((url, text, version));
-                    }
-                    MsgToServer::DidChange { url, text, version } => {
-                        self.did_change(&url, &text, version);
-                        self.latest_change = Some((url, text, version));
-                    }
-                    MsgToServer::DidChangeConfiguration(x) => self.config.set(x),
-                    MsgToServer::WillRenameFile { old_url } => self.on_remove(old_url),
-                    MsgToServer::DidRenameFile { new_url } => self.did_rename_files(new_url),
-                    MsgToServer::WillDeleteFile { url } => self.on_remove(url),
-                    MsgToServer::Completion {
-                        url,
-                        line,
-                        column,
-                        context,
-                    } => self.completion(&url, line, column, &context),
-                    MsgToServer::GotoDefinition { url, line, column } => {
-                        self.goto_definition(&url, line, column)
-                    }
-                    MsgToServer::Symbol { query } => self.symbol(&query),
-                    MsgToServer::Hover { url, line, column } => self.hover(&url, line, column),
-                    MsgToServer::References { url, line, column } => {
-                        self.references(&url, line, column)
-                    }
-                    MsgToServer::SemanticTokens { url } => self.semantic_tokens(&url),
-                    MsgToServer::Formatting { url } => self.formatting(&url),
-                }
-            }
-
-            while self.rcv.is_empty() && !self.background_tasks.is_empty() {
-                if let Some(mut task) = self.background_tasks.pop_front() {
-                    if !task.progress {
-                        self.progress_start("background analyze");
-                        task.progress = true;
-                    }
-                    if let Some(path) = task.paths.pop() {
-                        self.background_analyze(&path, &task.metadata);
-                        let pcnt = (task.total - task.paths.len()) * 100 / task.total;
-                        self.progress_report(
-                            &format!("{}", path.src.file_name().unwrap().to_string_lossy()),
-                            pcnt as u32,
-                        );
-                    }
-                    if task.paths.is_empty() {
-                        Analyzer::analyze_post_pass1();
-                        if let Some(inc) = self.incremental.get(&task.metadata) {
-                            inc.save();
-                        }
-                        self.progress_done("background analyze done");
-                        if self.background_tasks.is_empty() {
-                            self.background_done = true;
-
-                            // call did_change after background_done to notify filtered errors
-                            if let Some((url, text, version)) = self.latest_change.take() {
-                                self.did_change(&url, &text, version);
+                    if let Some(deadline) = self.reference_refresh_at {
+                        match self.runtime.block_on(async {
+                            tokio::time::timeout_at(deadline.into(), self.rcv.recv()).await
+                        }) {
+                            Ok(msg) => msg,
+                            Err(_) => {
+                                self.finish_reference_refresh();
+                                continue;
                             }
                         }
                     } else {
-                        self.background_tasks.push_front(task);
+                        self.rcv.recv_blocking()
                     }
                 }
+            };
+            let Ok(msg) = msg else {
+                break;
+            };
+            match msg {
+                MsgToServer::Initialize { capability } => {
+                    self.work_done_progress = capability.work_done_progress;
+                    self.semantic_tokens_refresh = capability.semantic_tokens_refresh;
+                }
+                MsgToServer::DidOpen { url, text, version } => self.did_open(&url, &text, version),
+                MsgToServer::DidChange { url, text, version } => {
+                    self.on_change(&url, &text, version)
+                }
+                MsgToServer::DidClose { url } => self.did_close(&url),
+                MsgToServer::DiskSourcesChanged(urls) => self.update_disk_sources(urls),
+                MsgToServer::DidChangeConfiguration(x) => self.config.set(x),
+                MsgToServer::WillDeleteFile { url } => self.on_remove(url),
+                MsgToServer::Completion {
+                    url,
+                    line,
+                    column,
+                    context,
+                } => self.completion(&url, line, column, &context),
+                MsgToServer::GotoDefinition { url, line, column } => {
+                    self.goto_definition(&url, line, column)
+                }
+                MsgToServer::Symbol { query } => self.symbol(&query),
+                MsgToServer::Hover { url, line, column } => self.hover(&url, line, column),
+                MsgToServer::References { url, line, column } => {
+                    self.references(&url, line, column)
+                }
+                MsgToServer::SemanticTokens { url } => self.semantic_tokens(&url),
+                MsgToServer::Formatting { url } => self.formatting(&url),
             }
+        }
+    }
+
+    fn run_background_step(&mut self) {
+        let mut task = self.background_tasks.pop_front().unwrap();
+        if !task.progress {
+            self.progress_start("background analyze");
+            task.progress = true;
+        }
+        if let Some(path) = task.paths.pop() {
+            self.background_analyze(&path, &task.metadata);
+            let pcnt = (task.total - task.paths.len()) * 100 / task.total;
+            self.progress_report(
+                &format!("{}", path.src.file_name().unwrap().to_string_lossy()),
+                pcnt as u32,
+            );
+        }
+        if !task.paths.is_empty() {
+            self.background_tasks.push_front(task);
+            return;
+        }
+
+        self.apply_project_imports();
+        Analyzer::analyze_post_pass1();
+        let metadata = Arc::new(task.metadata);
+        self.loaded_projects
+            .insert(metadata.metadata_path.clone(), Arc::clone(&metadata));
+        if self.background_tasks.is_empty() {
+            let urls = std::mem::take(&mut self.pending_disk_updates);
+            if self.reload_closed_files(urls) {
+                self.apply_project_imports();
+                Analyzer::analyze_post_pass1();
+            }
+            for (url, version) in std::mem::take(&mut self.pending_diagnostics) {
+                let text = url.to_file_path().and_then(|path| {
+                    self.document_map
+                        .get(path.as_ref())
+                        .map(|rope| rope.to_string())
+                });
+                if let Some(text) = text {
+                    self.on_change(&url, &text, version);
+                }
+            }
+        }
+        if let Some(inc) = self.incremental.get(&metadata) {
+            inc.save();
+        }
+        self.progress_done("background analyze done");
+        if self.background_tasks.is_empty() {
+            self.finish_reference_refresh();
         }
     }
 }
 
 impl Server {
     fn did_open(&mut self, url: &Url, text: &str, version: i32) {
-        if let Ok(mut metadata) = self.get_metadata(url) {
-            self.background_done = false;
-            self.on_change(&metadata.project.name, url, text, version);
-
-            if let Some(path) = url.to_file_path() {
-                if !path.starts_with(&self.cache_dir) {
-                    if let Ok(paths) = metadata.paths::<&str>(&[], true, true) {
-                        let total = paths.len();
-                        let task = BackgroundTask {
-                            metadata,
-                            paths,
-                            total,
-                            progress: false,
-                        };
-                        self.background_tasks.push_back(task);
-                    } else {
-                        self.background_done = true;
-                    }
-                } else {
-                    self.background_done = true;
-                }
-            } else {
-                self.background_done = true;
-            }
-        } else {
-            self.on_change("", url, text, version);
+        if let Ok(metadata) = self.get_metadata(url)
+            && !self.loaded_projects.contains_key(&metadata.metadata_path)
+            && !self
+                .background_tasks
+                .iter()
+                .any(|task| task.metadata.metadata_path == metadata.metadata_path)
+            && url
+                .to_file_path()
+                .is_some_and(|path| !path.starts_with(&self.cache_dir))
+        {
+            self.queue_background_analysis(metadata, url);
         }
+        self.on_change(url, text, version);
     }
 
-    fn did_change(&mut self, url: &Url, text: &str, version: i32) {
-        if let Ok(metadata) = self.get_metadata(url) {
-            self.on_change(&metadata.project.name, url, text, version);
-        } else {
-            self.on_change("", url, text, version);
-        }
-    }
-
-    fn did_rename_files(&mut self, new_path: Url) {
-        // Do not dispatch if there's already a pending analysis
-        if !self.background_done {
+    fn did_close(&mut self, url: &Url) {
+        let Some(path) = url.to_file_path() else {
+            return;
+        };
+        if self.document_map.remove(path.as_ref()).is_none() {
             return;
         }
+        self.parser_map.remove(path.as_ref());
+        let path = path.into_owned();
+        self.pending_diagnostics.remove(url);
+        if !self.background_tasks.is_empty() {
+            self.drop_closed_file(&path);
+            self.pending_disk_updates.insert(url.clone());
+            return;
+        }
+        if self.reload_closed_files([url.clone()]) || self.drop_closed_file(&path) {
+            self.update_project_after_disk_change();
+        }
+    }
 
-        self.background_done = false;
-        if let Ok(mut metadata) = self.get_metadata(&new_path) {
-            if let Ok(paths) = metadata.paths::<&str>(&[], true, true) {
-                let total = paths.len();
-                let task = BackgroundTask {
-                    metadata,
-                    paths,
-                    total,
-                    progress: false,
-                };
-                self.background_tasks.push_back(task);
-            } else {
-                self.background_done = true;
+    fn update_disk_sources(&mut self, urls: impl IntoIterator<Item = Url>) {
+        if !self.background_tasks.is_empty() {
+            self.pending_disk_updates.extend(urls);
+            return;
+        }
+        if self.reload_closed_files(urls) {
+            self.update_project_after_disk_change();
+        }
+    }
+
+    fn reload_closed_files(&mut self, urls: impl IntoIterator<Item = Url>) -> bool {
+        let urls: BTreeSet<_> = urls.into_iter().collect();
+        let mut sources = Vec::new();
+        let mut changed = false;
+        // Drop the previous declarations for all changed paths before registering
+        // replacements. A rename can move declarations between those paths.
+        for url in urls {
+            changed |= self.prepare_closed_file(&url, &mut sources);
+        }
+        for DiskSource {
+            path,
+            metadata,
+            text,
+        } in sources
+        {
+            self.analyze_disk_source(&path, &metadata.project.name, &metadata, &text);
+        }
+        changed
+    }
+
+    fn prepare_closed_file(&mut self, url: &Url, sources: &mut Vec<DiskSource>) -> bool {
+        let Some(path) = url.to_file_path() else {
+            return false;
+        };
+        if path.extension().is_none_or(|ext| ext != "veryl")
+            || path.starts_with(&self.cache_dir)
+            || self.document_map.contains_key(path.as_ref())
+        {
+            return false;
+        }
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) if matches!(err.kind(), ErrorKind::NotFound | ErrorKind::InvalidData) => {
+                return self.drop_closed_file(&path.into_owned());
             }
+            Err(_) => return false,
+        };
+        let Ok(manifest) = Metadata::search_from(&path) else {
+            return false;
+        };
+        let Ok(canonical_manifest) = manifest.canonicalize() else {
+            return false;
+        };
+        let Some(metadata) = self.loaded_projects.get(&canonical_manifest).cloned() else {
+            return false;
+        };
+        let project_root = metadata.project_path();
+        let editor_root = manifest.parent().unwrap();
+        let source_path = if editor_root
+            .canonicalize()
+            .is_ok_and(|root| root == project_root)
+            && let Ok(relative) = path.strip_prefix(editor_root)
+        {
+            project_root.join(relative)
         } else {
-            self.background_done = true;
+            path.to_path_buf()
+        };
+        if !metadata.contains_source_path(&source_path) {
+            return false;
+        }
+        let path = path.into_owned();
+        let project = &metadata.project.name;
+        if let Some(id) = resource_table::get_path_id(&path) {
+            self.drop_document(id, Some(project));
+        }
+        sources.push(DiskSource {
+            path,
+            metadata,
+            text,
+        });
+        true
+    }
+
+    fn drop_closed_file(&mut self, path: &PathBuf) -> bool {
+        if let Some(id) = resource_table::get_path_id(path)
+            && self.document_inputs.contains_key(&id)
+        {
+            self.drop_document(id, None);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn queue_background_analysis(&mut self, mut metadata: Metadata, url: &Url) {
+        let manifest = url
+            .to_file_path()
+            .and_then(|path| Metadata::search_from(path).ok());
+        if let (Some(manifest), Ok(mut paths)) = (manifest, metadata.paths::<&str>(&[], true, true))
+        {
+            let editor_root = manifest.parent().unwrap();
+            let project_root = metadata.project_path();
+            // Use the editor's path spelling for both disk sources and open buffers.
+            if editor_root
+                .canonicalize()
+                .is_ok_and(|root| root == project_root)
+            {
+                for path in &mut paths {
+                    if path.prj == metadata.project.name
+                        && let Ok(relative) = path.src.strip_prefix(&project_root)
+                    {
+                        path.src = editor_root.join(relative);
+                    }
+                }
+            }
+            self.background_tasks.push_back(BackgroundTask {
+                total: paths.len(),
+                metadata,
+                paths,
+                progress: false,
+            });
         }
     }
 
@@ -380,41 +569,44 @@ impl Server {
             .unwrap();
     }
 
-    fn goto_definition(&mut self, url: &Url, line: usize, column: usize) {
-        let mut sources = HashMap::new();
-        let column = self.source_column(url, line, column);
-        if let Some(path) = url.to_file_path()
-            && let Some(parser) = self.parser_map.get(path.as_ref())
-        {
-            let mut finder = Finder::new();
-            finder.line = line as u32;
-            finder.column = column as u32;
-            finder.veryl(&parser.veryl);
+    fn symbol_at(&self, url: &Url, line: usize, column: usize) -> Option<Rc<Symbol>> {
+        let path = url.to_file_path()?;
+        let parser = self.parser_map.get(path.as_ref())?;
+        let mut finder = Finder::new();
+        finder.line = line as u32;
+        finder.column = self.source_column(url, line, column) as u32;
+        finder.veryl(&parser.veryl);
+        let token = finder.token?;
 
-            if let Some(token) = finder.token
-                && let Some((scope, define_context)) = scope::token_scope(token.id)
+        if let Some((scope, define_context)) = scope::token_scope(token.id) {
+            let path = if finder.token_group.is_empty() {
+                SymbolPath::new(&[token.text])
+            } else {
+                SymbolPath::from(finder.token_group.as_slice())
+            };
+            if let Ok(symbol) =
+                symbol_table::resolve(SymbolPathNamespace::from_scope(path, scope, define_context))
             {
-                let path = if finder.token_group.is_empty() {
-                    SymbolPath::new(&[token.text])
-                } else {
-                    SymbolPath::from(finder.token_group.as_slice())
-                };
-                if let Ok(symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
-                    path,
-                    scope,
-                    define_context,
-                )) {
-                    let location = to_location(&symbol.found.token, &mut sources);
-                    self.snd
-                        .send_blocking(MsgFromServer::GotoDefinition(location))
-                        .unwrap();
-                    return;
-                }
+                return Some(Rc::clone(&symbol.found));
             }
         }
 
+        // The reference analysis has the full generic syntax, which the token
+        // group's name-only path cannot always represent.
+        let path = resource_table::get_path_id(path.to_path_buf())?;
+        let references = self.file_references(path)?;
+        references
+            .iter()
+            .find(|(_, reference)| reference.id == token.id)
+            .and_then(|(id, _)| symbol_table::get_shared(*id))
+    }
+
+    fn goto_definition(&mut self, url: &Url, line: usize, column: usize) {
+        let location = self
+            .symbol_at(url, line, column)
+            .and_then(|symbol| to_location(&symbol.token, &mut HashMap::new()));
         self.snd
-            .send_blocking(MsgFromServer::GotoDefinition(None))
+            .send_blocking(MsgFromServer::GotoDefinition(location))
             .unwrap();
     }
 
@@ -480,152 +672,72 @@ impl Server {
     }
 
     fn hover(&mut self, url: &Url, line: usize, column: usize) {
-        let column = self.source_column(url, line, column);
-        if let Some(path) = url.to_file_path()
-            && let Some(parser) = self.parser_map.get(path.as_ref())
-        {
-            let mut finder = Finder::new();
-            finder.line = line as u32;
-            finder.column = column as u32;
-            finder.veryl(&parser.veryl);
-            if let Some(token) = finder.token
-                && let Some((scope, define_context)) = scope::token_scope(token.id)
-            {
-                let path = if finder.token_group.is_empty() {
-                    SymbolPath::new(&[token.text])
-                } else {
-                    SymbolPath::from(finder.token_group.as_slice())
-                };
-                if let Ok(symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
-                    path,
-                    scope,
-                    define_context,
-                )) {
-                    let text = symbol.found.kind.to_string();
-                    let hover = Hover {
-                        contents: HoverContents::Scalar(MarkedString::String(text)),
-                        range: None,
-                    };
-                    self.snd
-                        .send_blocking(MsgFromServer::Hover(Some(hover)))
-                        .unwrap();
-                    return;
-                }
-            }
-        }
-        self.snd.send_blocking(MsgFromServer::Hover(None)).unwrap();
+        let hover = self.symbol_at(url, line, column).map(|symbol| Hover {
+            contents: HoverContents::Scalar(MarkedString::String(symbol.kind.to_string())),
+            range: None,
+        });
+        self.snd.send_blocking(MsgFromServer::Hover(hover)).unwrap();
     }
 
     fn references(&mut self, url: &Url, line: usize, column: usize) {
+        if self.background_tasks.is_empty() && self.reference_refresh_at.is_some() {
+            self.finish_reference_refresh();
+        }
         let mut sources = HashMap::new();
-        let column = self.source_column(url, line, column);
-        let mut ret = Vec::new();
-        if let Some(path) = url.to_file_path()
-            && let Some(parser) = self.parser_map.get(path.as_ref())
+        let mut locations = Vec::new();
+        if let Some(symbol) = self.symbol_at(url, line, column)
+            && let Some(references) = self.references.by_symbol.get(&symbol.id)
         {
-            let mut finder = Finder::new();
-            finder.line = line as u32;
-            finder.column = column as u32;
-            finder.veryl(&parser.veryl);
-            if let Some(token) = finder.token
-                && let Some((scope, define_context)) = scope::token_scope(token.id)
-            {
-                let path = if finder.token_group.is_empty() {
-                    SymbolPath::new(&[token.text])
-                } else {
-                    SymbolPath::from(finder.token_group.as_slice())
-                };
-                if let Ok(symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
-                    path,
-                    scope,
-                    define_context,
-                )) {
-                    let refs = symbol_table::get_references(symbol.found.id).unwrap_or_default();
-                    for reference in &refs {
-                        if let Some(location) = to_location(reference, &mut sources) {
-                            ret.push(location);
-                        }
-                    }
-                }
-            }
+            locations.extend(
+                references
+                    .iter()
+                    .filter_map(|token| to_location(token, &mut sources)),
+            );
         }
         self.snd
-            .send_blocking(MsgFromServer::References(ret))
+            .send_blocking(MsgFromServer::References(locations))
             .unwrap();
     }
 
     fn semantic_tokens(&mut self, url: &Url) {
-        let mut ret = None;
-
-        if let Some(path) = url.to_file_path()
-            && let Some(path) = resource_table::get_path_id(path.to_path_buf())
-        {
-            let mut tokens = Vec::new();
-            for symbol in &symbol_table::get_all() {
-                if symbol.token.source == path
-                    && let VerylSymbolKind::Port(_) = symbol.kind
-                {
-                    let token_type = semantic_legend::PROPERTY;
-                    tokens.push((symbol.token, token_type));
-                    if let Some(refs) = symbol_table::get_references(symbol.id) {
-                        for reference in &refs {
-                            if reference.source == path && !is_keyword_token(*reference) {
-                                tokens.push((*reference, token_type));
-                            }
-                        }
-                    }
-                }
-            }
-
-            tokens.sort_by(|a, b| {
-                a.0.line
-                    .partial_cmp(&b.0.line)
-                    .unwrap()
-                    .then(a.0.column.partial_cmp(&b.0.column).unwrap())
+        let ret = url
+            .to_file_path()
+            .and_then(|path| resource_table::get_path_id(path.to_path_buf()))
+            .map(|path| {
+                let references = self.file_references(path);
+                SemanticTokensResult::Tokens(SemanticTokens {
+                    result_id: None,
+                    data: collect_semantic_tokens(path, references.as_deref()),
+                })
             });
-
-            let mut line = 0;
-            let mut column = 0;
-            let mut data = Vec::new();
-            let mut sources = HashMap::new();
-            for (token, token_type) in tokens {
-                let text = sources
-                    .entry(token.source)
-                    .or_insert_with(|| Rope::from_str(&token.source.get_text()));
-                let range = byte_range(text, token.pos as usize, token.length as usize);
-                let token_line = range.start.line;
-                let token_column = range.start.character;
-
-                let delta_line = token_line - line;
-                let delta_start = if delta_line == 0 {
-                    token_column - column
-                } else {
-                    token_column
-                };
-
-                let semantic_token = SemanticToken {
-                    delta_line,
-                    delta_start,
-                    length: range.end.character - token_column,
-                    token_type,
-                    token_modifiers_bitset: 0,
-                };
-                data.push(semantic_token);
-
-                line = token_line;
-                column = token_column;
-            }
-
-            let tokens = SemanticTokens {
-                result_id: None,
-                data,
-            };
-            ret = Some(SemanticTokensResult::Tokens(tokens))
-        }
 
         self.snd
             .send_blocking(MsgFromServer::SemanticTokens(ret))
             .unwrap();
+    }
+
+    fn file_references(&self, path: PathId) -> Option<Cow<'_, [(SymbolId, Token)]>> {
+        if self.reference_refresh_at.is_some() || !self.background_tasks.is_empty() {
+            self.document_inputs.get(&path).map(|document| {
+                Cow::Owned(reference_table::collect_references(
+                    document.candidates.iter(),
+                ))
+            })
+        } else {
+            self.references
+                .by_file
+                .get(&path)
+                .map(|references| Cow::Borrowed(references.as_slice()))
+        }
+    }
+
+    fn refresh_semantic_tokens(&self) {
+        if self.semantic_tokens_refresh {
+            let client = self.client.clone();
+            self.runtime.spawn(async move {
+                let _ = client.semantic_tokens_refresh().await;
+            });
+        }
     }
 
     fn formatting(&mut self, url: &Url) {
@@ -738,13 +850,27 @@ impl Server {
         let Ok(text) = std::fs::read_to_string(&src) else {
             return;
         };
+        let track_references = path.prj == metadata.project.name;
+        if track_references
+            && let Some(id) = resource_table::get_path_id(&src)
+            && let Some(document) = self.document_inputs.remove(&id)
+        {
+            symbol_table::remove_imports(&document.imports);
+        }
 
         // A cache hit restores this file's pass1 state, skipping parse.
+        let imports = symbol_table::pending_watermark();
+        let candidates = reference_table::candidates_len();
         let restored = self
             .incremental
             .get(metadata)
             .is_some_and(|inc| inc.try_restore(path, &text));
         if restored {
+            if track_references {
+                let id = resource_table::get_path_id(&src).unwrap();
+                self.document_inputs
+                    .insert(id, DocumentInputs::capture(imports, candidates));
+            }
             return;
         }
 
@@ -758,11 +884,9 @@ impl Server {
             .incremental
             .get(metadata)
             .map(|_| fragment_cache::watermark());
-        if let Ok(x) = Parser::parse(&text, &src) {
-            let analyzer = Analyzer::new(metadata);
-            let errors = analyzer.analyze_pass1(&path.prj, &x.veryl);
+        if let Some(cacheable) = self.analyze_disk_source(&src, &path.prj, metadata, &text) {
             if let (Some(inc), Some(wm)) = (self.incremental.get(metadata), watermark.as_ref()) {
-                inc.capture(path, &text, wm, errors.is_empty());
+                inc.capture(path, &text, wm, cacheable);
             }
 
             block_on(self.client.log_message(
@@ -770,6 +894,84 @@ impl Server {
                 format!("background_analyze: {}", src.to_string_lossy()),
             ));
         }
+    }
+
+    fn analyze_disk_source(
+        &mut self,
+        path: &PathBuf,
+        project: &str,
+        metadata: &Metadata,
+        text: &str,
+    ) -> Option<bool> {
+        let parser = Parser::parse(text, path).ok()?;
+        let analyzer = Analyzer::new(metadata);
+        let imports = symbol_table::pending_watermark();
+        let candidates = reference_table::candidates_len();
+        let errors = analyzer.analyze_pass1(project, &parser.veryl);
+        if project == metadata.project.name {
+            let id = resource_table::get_path_id(path).unwrap();
+            self.document_inputs
+                .insert(id, DocumentInputs::capture(imports, candidates));
+        }
+        Some(errors.is_empty())
+    }
+
+    fn apply_project_imports(&self) {
+        symbol_table::apply_import();
+        let imports = self
+            .document_inputs
+            .values()
+            .flat_map(|document| &document.imports)
+            .collect();
+        symbol_table::reapply_imports(imports);
+    }
+
+    fn update_project_after_disk_change(&mut self) {
+        self.apply_project_imports();
+        Analyzer::analyze_post_pass1();
+        self.reference_refresh_at = Some(Instant::now() + REFERENCE_REFRESH_DELAY);
+    }
+
+    fn finish_reference_refresh(&mut self) {
+        self.reference_refresh_at = None;
+        let candidates = self
+            .document_inputs
+            .values()
+            .flat_map(|document| &document.candidates);
+        let references = reference_table::collect_references(candidates);
+        self.publish_references(references);
+        self.refresh_semantic_tokens();
+    }
+
+    fn publish_references(&mut self, references: Vec<(SymbolId, Token)>) {
+        let mut index = ReferenceIndex::default();
+        for &path in self.document_inputs.keys() {
+            index.by_file.insert(path, Vec::new());
+        }
+        for (symbol, token) in references {
+            if let TokenSource::File { path, .. } = token.source
+                && let Some(file_references) = index.by_file.get_mut(&path)
+            {
+                file_references.push((symbol, token));
+                index.by_symbol.entry(symbol).or_default().push(token);
+            }
+        }
+        symbol_table::for_each_symbol_with_references(|symbol, references| {
+            for &token in references {
+                if let TokenSource::File { path, .. } = token.source
+                    // Implicit references such as the default clock at always_ff
+                    // come from IR conversion rather than name resolution.
+                    && (!index.by_file.contains_key(&path) || is_keyword_token(token))
+                {
+                    index.by_symbol.entry(symbol.id).or_default().push(token);
+                }
+            }
+        });
+        for references in index.by_symbol.values_mut() {
+            references.sort_unstable_by_key(|token| (token.source, token.pos, token.length));
+            references.dedup_by_key(|token| (token.source, token.pos, token.length));
+        }
+        self.references = index;
     }
 
     fn get_metadata(&mut self, url: &Url) -> Result<Metadata, MetadataError> {
@@ -786,7 +988,7 @@ impl Server {
         Ok(metadata)
     }
 
-    fn on_change(&mut self, prj: &str, url: &Url, text: &str, version: i32) {
+    fn on_change(&mut self, url: &Url, text: &str, version: i32) {
         if let Some(path) = url.to_file_path() {
             let rope = Rope::from_str(text);
 
@@ -796,10 +998,11 @@ impl Server {
 
             match self.get_metadata(url) {
                 Ok(metadata) => {
+                    let prj = &metadata.project.name;
                     // Drop before parse: parse re-registers the text, so
                     // dropping after would erase the just-registered entry.
                     if let Some(path_id) = resource_table::get_path_id(path.to_path_buf()) {
-                        Analyzer::drop_file(path_id, Some(prj.into()));
+                        self.drop_document(path_id, Some(prj));
                     }
                     let diag = match Parser::parse(text, &path) {
                         Ok(x) => {
@@ -808,7 +1011,14 @@ impl Server {
                             let analyzer = Analyzer::new(&metadata);
                             let mut context = Context::default();
                             let mut ir = veryl_analyzer::ir::Ir::default();
+                            let imports = symbol_table::pending_watermark();
+                            let candidates = reference_table::candidates_len();
                             let mut errors = analyzer.analyze_pass1(prj, &x.veryl);
+                            if let Some(path_id) = path_id {
+                                self.document_inputs
+                                    .insert(path_id, DocumentInputs::capture(imports, candidates));
+                            }
+                            self.apply_project_imports();
                             errors.append(&mut Analyzer::analyze_post_pass1());
                             errors.append(&mut analyzer.analyze_pass2(
                                 &x.veryl,
@@ -820,7 +1030,7 @@ impl Server {
                                 .drain(0..)
                                 .filter(|x| {
                                     // Filter errors caused by unresolve error until background completion
-                                    if self.background_done {
+                                    if self.background_tasks.is_empty() {
                                         true
                                     } else {
                                         !matches!(
@@ -849,6 +1059,8 @@ impl Server {
                         }
                         Err(x) => {
                             self.parser_map.remove(path.as_ref());
+                            self.apply_project_imports();
+                            Analyzer::analyze_post_pass1();
                             vec![to_diag(x.into(), &rope)]
                         }
                     };
@@ -857,6 +1069,11 @@ impl Server {
                         self.client
                             .publish_diagnostics(url.clone(), diag, Some(version)),
                     );
+                    if self.background_tasks.is_empty() {
+                        self.reference_refresh_at = Some(Instant::now() + REFERENCE_REFRESH_DELAY);
+                    } else {
+                        self.pending_diagnostics.insert(url.clone(), version);
+                    }
                 }
                 Err(err) => {
                     block_on(self.client.log_message(
@@ -878,8 +1095,19 @@ impl Server {
         if let Some(path) = url.to_file_path()
             && let Some(path_id) = resource_table::get_path_id(path.to_path_buf())
         {
-            Analyzer::drop_file(path_id, None);
+            self.drop_document(path_id, None);
+            if self.background_tasks.is_empty() {
+                self.update_project_after_disk_change();
+            }
         }
+    }
+
+    fn drop_document(&mut self, path: PathId, project: Option<&str>) {
+        self.references.by_file.remove(&path);
+        if let Some(document) = self.document_inputs.remove(&path) {
+            symbol_table::remove_imports(&document.imports);
+        }
+        Analyzer::drop_file(path, project.map(Into::into));
     }
 }
 
@@ -1618,17 +1846,143 @@ fn is_keyword_token(token: Token) -> bool {
     KEYWORDS.contains(&token_text.as_str())
 }
 
+fn semantic_kind(kind: &VerylSymbolKind) -> Option<(semantic_legend::TokenType, u32)> {
+    use semantic_legend::{READONLY, TokenType};
+
+    Some(match kind {
+        VerylSymbolKind::Port(_) => (TokenType::Property, 0),
+        VerylSymbolKind::Function(_) => (TokenType::Function, 0),
+        VerylSymbolKind::Struct(_) => (TokenType::Struct, 0),
+        VerylSymbolKind::Union(_) | VerylSymbolKind::TypeDef(_) => (TokenType::Type, 0),
+        VerylSymbolKind::Enum(_) => (TokenType::Enum, 0),
+        VerylSymbolKind::EnumMember(_) => (TokenType::EnumMember, 0),
+        VerylSymbolKind::GenericConst(_) => (TokenType::Variable, READONLY),
+        VerylSymbolKind::Parameter(x) if matches!(x.kind, ParameterKind::Const) => {
+            (TokenType::Variable, READONLY)
+        }
+        _ => return None,
+    })
+}
+
+fn collect_semantic_tokens(
+    path: PathId,
+    refreshed_references: Option<&[(SymbolId, Token)]>,
+) -> Vec<SemanticToken> {
+    use semantic_legend::DECLARATION;
+
+    let in_document = |token: Token| {
+        matches!(token.source, TokenSource::File { path: source, .. } if source == path)
+            && token.length != 0
+    };
+    let mut tokens = Vec::new();
+    symbol_table::for_each_symbol_with_references(|symbol, references| {
+        let Some((kind, modifiers)) = semantic_kind(&symbol.kind) else {
+            return;
+        };
+        if in_document(symbol.token) {
+            tokens.push((symbol.token, kind, modifiers | DECLARATION));
+        }
+        if refreshed_references.is_none() {
+            for &reference in references {
+                if in_document(reference) && !is_keyword_token(reference) {
+                    tokens.push((reference, kind, modifiers));
+                }
+            }
+        }
+    });
+    for &(id, reference) in refreshed_references.unwrap_or_default() {
+        if in_document(reference)
+            && !is_keyword_token(reference)
+            && let Some(symbol) = symbol_table::get_shared(id)
+            && let Some((kind, modifiers)) = semantic_kind(&symbol.kind)
+        {
+            tokens.push((reference, kind, modifiers));
+        }
+    }
+
+    // Resolution can record the same span more than once. LSP tokens must not overlap.
+    tokens.sort_unstable_by_key(|(token, kind, modifiers)| {
+        (
+            token.pos,
+            Reverse(token.length),
+            modifiers & DECLARATION == 0,
+            *kind,
+        )
+    });
+
+    let mut data = Vec::new();
+    let mut sources = HashMap::new();
+    let mut previous = Position::default();
+    let mut previous_end = 0;
+    for (token, kind, modifiers) in tokens {
+        if token.pos < previous_end {
+            continue;
+        }
+        let text = sources
+            .entry(token.source)
+            .or_insert_with(|| Rope::from_str(&token.source.get_text()));
+        let end = token.pos + token.length;
+        if end as usize > text.len_bytes() {
+            continue;
+        }
+        let range = byte_range(text, token.pos as usize, token.length as usize);
+        let start = range.start;
+        if start.line != range.end.line || start.character >= range.end.character {
+            continue;
+        }
+
+        let delta_line = start.line - previous.line;
+        data.push(SemanticToken {
+            delta_line,
+            delta_start: if delta_line == 0 {
+                start.character - previous.character
+            } else {
+                start.character
+            },
+            length: range.end.character - start.character,
+            token_type: kind as u32,
+            token_modifiers_bitset: modifiers,
+        });
+        previous = start;
+        previous_end = end;
+    }
+    data
+}
+
 pub mod semantic_legend {
     use super::*;
 
-    pub const PROPERTY: u32 = 0;
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub(super) enum TokenType {
+        Property,
+        Function,
+        Struct,
+        Type,
+        Enum,
+        EnumMember,
+        Variable,
+    }
+
+    pub(super) const DECLARATION: u32 = 1 << 0;
+    pub(super) const READONLY: u32 = 1 << 1;
 
     pub fn get_token_types() -> Vec<SemanticTokenType> {
-        vec![SemanticTokenType::PROPERTY]
+        vec![
+            SemanticTokenType::PROPERTY,
+            SemanticTokenType::FUNCTION,
+            SemanticTokenType::STRUCT,
+            SemanticTokenType::TYPE,
+            SemanticTokenType::ENUM,
+            SemanticTokenType::ENUM_MEMBER,
+            SemanticTokenType::VARIABLE,
+        ]
     }
 
     pub fn get_token_modifiers() -> Vec<SemanticTokenModifier> {
-        vec![]
+        vec![
+            SemanticTokenModifier::DECLARATION,
+            SemanticTokenModifier::READONLY,
+        ]
     }
 }
 
@@ -1638,6 +1992,101 @@ mod tests {
     use veryl_metadata::component_manifest::{
         ManifestGroup, ManifestMember, ManifestMethod, ManifestParam, ManifestPort,
     };
+
+    #[test]
+    fn semantic_tokens_include_declarations_and_cross_file_references() {
+        use semantic_legend::{DECLARATION, READONLY, TokenType};
+
+        let definitions = "package Types {
+    enum State { Idle, Busy, }
+    struct Frame { state: State, }
+    type Word = logic<8>;
+    const WIDTH: u32 = 8;
+    function idle() -> State { return State::Idle; }
+}
+";
+        let uses = "module Top (out: output logic) {
+    /* 🦀 */ let _state: Types::State = Types::State::Idle;
+    var _frame: Types::Frame;
+    var _word: Types::Word;
+    let _call: Types::State = Types::idle();
+    let _width: u32 = Types::WIDTH;
+    assign out = 0;
+}
+";
+        let metadata = Metadata::create_default("semantic_test").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        for (path, text) in [("types.veryl", definitions), ("top.veryl", uses)] {
+            let parser = Parser::parse(text, &path).unwrap();
+            let errors = analyzer.analyze_pass1("semantic_test", &parser.veryl);
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+        let errors = Analyzer::analyze_post_pass1();
+        assert!(errors.is_empty(), "{errors:?}");
+
+        fn decode(path: &str, source: &str) -> Vec<(String, u32, u32)> {
+            let lines: Vec<Vec<u16>> = source
+                .lines()
+                .map(|line| line.encode_utf16().collect())
+                .collect();
+            let tokens = collect_semantic_tokens(
+                resource_table::get_path_id(PathBuf::from(path)).unwrap(),
+                None,
+            );
+            let mut line = 0;
+            let mut column = 0;
+            let mut previous_end = 0;
+            tokens
+                .into_iter()
+                .map(|token| {
+                    line += token.delta_line;
+                    if token.delta_line == 0 {
+                        column += token.delta_start;
+                    } else {
+                        column = token.delta_start;
+                        previous_end = 0;
+                    }
+                    assert!(column >= previous_end && token.length != 0);
+                    previous_end = column + token.length;
+                    let name = String::from_utf16(
+                        &lines[line as usize][column as usize..previous_end as usize],
+                    )
+                    .unwrap();
+                    (name, token.token_type, token.token_modifiers_bitset)
+                })
+                .collect()
+        }
+
+        let tokens = decode("types.veryl", definitions);
+        for (name, kind, modifiers) in [
+            ("State", TokenType::Enum, DECLARATION),
+            ("Idle", TokenType::EnumMember, DECLARATION),
+            ("Frame", TokenType::Struct, DECLARATION),
+            ("Word", TokenType::Type, DECLARATION),
+            ("WIDTH", TokenType::Variable, DECLARATION | READONLY),
+            ("idle", TokenType::Function, DECLARATION),
+        ] {
+            assert!(
+                tokens.contains(&(name.into(), kind as u32, modifiers)),
+                "{tokens:?}"
+            );
+        }
+
+        let expected = [
+            ("out", TokenType::Property, DECLARATION),
+            ("State", TokenType::Enum, 0),
+            ("State", TokenType::Enum, 0),
+            ("Idle", TokenType::EnumMember, 0),
+            ("Frame", TokenType::Struct, 0),
+            ("Word", TokenType::Type, 0),
+            ("State", TokenType::Enum, 0),
+            ("idle", TokenType::Function, 0),
+            ("WIDTH", TokenType::Variable, READONLY),
+            ("out", TokenType::Property, 0),
+        ]
+        .map(|(name, kind, modifiers)| (name.into(), kind as u32, modifiers));
+        assert_eq!(decode("top.veryl", uses), expected);
+    }
 
     fn manifest() -> ComponentManifest {
         ComponentManifest {

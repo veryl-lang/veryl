@@ -436,6 +436,7 @@ impl<'a> Builder<'a> {
         let mut discarded = HashSet::default();
         match kind {
             SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::IsUnknown(input)
             | SystemFunctionKind::Signed(input)
             | SystemFunctionKind::Unsigned(input) => self.expression(&input.0, reads, controls),
             SystemFunctionKind::Readmemh(input, output) => {

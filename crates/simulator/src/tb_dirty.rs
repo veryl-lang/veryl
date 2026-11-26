@@ -429,10 +429,13 @@ fn is_clean_stmt(stmt: &Statement, spans: &SpanTable) -> bool {
     match stmt {
         Statement::Assign(a) => !spans.write_may_reach_comb(a.dst, a.dst_native_bytes),
         Statement::AssignDynamic(a) => {
-            // The index is dynamic, so every element is a possible write.
-            let len =
-                (a.dst_stride.unsigned_abs()) * a.dst_num_elements.max(1) + a.dst_native_bytes;
-            !spans.write_may_reach_comb(a.dst_base_ptr, len)
+            // The index is dynamic, so every element is a possible write. An
+            // out-of-range index writes nothing, so the range ends with the
+            // last element: a byte further would reach the next variable.
+            let last = a.dst_stride * (a.dst_num_elements.max(1) as isize - 1);
+            let first = a.dst_base_ptr.wrapping_offset(last.min(0));
+            let len = last.unsigned_abs() + a.dst_native_bytes;
+            !spans.write_may_reach_comb(first, len)
         }
         Statement::If(x) => {
             x.true_side.iter().all(|s| is_clean_stmt(s, spans))

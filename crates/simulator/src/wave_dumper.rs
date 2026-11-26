@@ -358,6 +358,29 @@ impl WaveDumper {
         }
     }
 
+    /// How a runtime `string` (a `string_pool` handle) is dumped: VCD writes
+    /// its text as a string value; FST, which has no string values, writes
+    /// the bytes of its text at their known width and leaves out one whose
+    /// length is not known before the simulation starts.
+    fn add_string(&mut self, bytes: Option<usize>, name: &str) -> Option<(VarHandle, DumpForm)> {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
+                let code = v
+                    .writer
+                    .add_var(vcd::VarType::String, 1, name, None)
+                    .unwrap();
+                Some((VarHandle::Vcd(VcdId::new(code)), DumpForm::Text))
+            }
+            WaveDumperKind::Fst(_) => {
+                let bytes = bytes?;
+                Some((
+                    self.add_wire(bytes as u32, name),
+                    DumpForm::StringBytes(bytes),
+                ))
+            }
+        }
+    }
+
     pub fn upscope(&mut self) {
         match &mut self.kind {
             WaveDumperKind::Vcd(v) => {
@@ -445,12 +468,20 @@ impl WaveDumper {
                 } else {
                     name.clone()
                 };
-                let handle = self.add_wire(width, &elem_name);
+                let (handle, form) = if x.r#type.is_string() {
+                    match self.add_string(x.string_width, &elem_name) {
+                        Some(x) => x,
+                        None => continue,
+                    }
+                } else {
+                    (self.add_wire(width, &elem_name), DumpForm::Bits)
+                };
                 dump_vars.push(DumpVar {
                     handle,
                     ptr,
                     native_bytes: x.native_bytes,
                     width: x.width,
+                    form,
                 });
             }
         }
@@ -694,6 +725,30 @@ fn emit_if_moved(
     if !force && held(&old[lo..lo + span], cur) {
         return;
     }
+    if entry.form != DumpForm::Bits {
+        // SAFETY: as above.
+        let handle =
+            unsafe { read_native_value(entry.ptr, nb, use_4state, entry.width as u32, false) }
+                .payload_u64();
+        match (kind, entry.form) {
+            (WaveDumperKind::Vcd(v), DumpForm::Text) => {
+                let VarHandle::Vcd(id) = &entry.handle else {
+                    panic!("VCD dumper received non-VCD handle");
+                };
+                v.line.push(b's');
+                escape_vcd_string(&crate::string_pool::bytes(handle), &mut v.line);
+                v.line.push(b' ');
+                v.line.extend_from_slice(id.as_bytes());
+                v.line.push(b'\n');
+            }
+            (fst, DumpForm::StringBytes(bytes)) => {
+                let value = crate::string_pool::to_value(handle, bytes);
+                fst.change_vector(entry.handle, &value);
+            }
+            _ => unreachable!("string dump form does not match the dumper"),
+        }
+        return;
+    }
     match kind {
         WaveDumperKind::Vcd(v) => {
             let VarHandle::Vcd(id) = &entry.handle else {
@@ -850,6 +905,31 @@ pub struct DumpVar {
     pub ptr: *const u8,
     pub native_bytes: usize,
     pub width: usize,
+    pub form: DumpForm,
+}
+
+/// What a dumped variable's storage holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DumpForm {
+    /// Its bits.
+    Bits,
+    /// A `string_pool` handle, dumped as a VCD string value.
+    Text,
+    /// A `string_pool` handle, dumped as the bytes of its text at this width.
+    StringBytes(usize),
+}
+
+/// A VCD string value is one whitespace-free token, so whitespace, `\` and
+/// other unprintable bytes are written as `\xHH`. An empty text is written
+/// as nothing.
+fn escape_vcd_string(bytes: &[u8], out: &mut Vec<u8>) {
+    for &b in bytes {
+        if b.is_ascii_graphic() && b != b'\\' {
+            out.push(b);
+        } else {
+            out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
+        }
+    }
 }
 
 // SAFETY: Same as Statement — see statement.rs.

@@ -248,6 +248,11 @@ pub struct Variable {
     pub native_bytes: usize,
     pub current_values: Vec<*mut u8>,
     pub next_values: Vec<*mut u8>,
+    /// For a runtime `string` (which stores a `string_pool` handle), the
+    /// width of the bytes of its text, `None` when not known before the
+    /// simulation starts. Only the wave dumper reads it, to declare the
+    /// variable as its text.
+    pub string_width: Option<usize>,
 }
 
 impl fmt::Display for Variable {
@@ -298,6 +303,11 @@ pub struct VariableMeta {
     /// All elements share one buffer kind, giving the array a single stride for
     /// runtime indexing; false for a genuinely mixed comb/FF array.
     pub uniform_buffer: bool,
+    /// For a `string` variable, which holds a `string_pool` handle of its
+    /// text (see `collect_string_widths`), the width of the bytes of its text
+    /// that an operation on its bits sees; `None` when the length of its text
+    /// is not known before the simulation starts.
+    pub string_width: Option<usize>,
 }
 
 impl VariableMeta {
@@ -349,72 +359,124 @@ fn report_subject(v: &air::Variable) -> String {
     }
 }
 
-/// Storage width of each runtime `string` variable: the widest text any
-/// assignment can store into it.  A `string` type's own width is a nominal
-/// 1 bit -- the text lives in the byte-packed value -- so a slot sized from
-/// the type keeps one bit of it.  A string read from another string variable
-/// takes that variable's width, hence the fixed point.
+/// The runtime `string` variables of a module. Every one stores a 64-bit
+/// `string_pool` handle; `widths` gives the width at which a read of its bits
+/// (a select, a concatenation, an assignment to a non-string, an ordering
+/// comparison, ...) sees the bytes of its text.
+#[derive(Default)]
+pub struct StringLayout {
+    /// Width of the bytes of each runtime `string` variable's text: the
+    /// widest text any assignment can store into it, or `None` when its text
+    /// comes from outside what this module's scan sees (a port, a function
+    /// argument, a hierarchical reference, a runtime argument), so its length
+    /// is not known before the simulation starts.
+    pub widths: HashMap<VarId, Option<usize>>,
+}
+
+/// The width of the bytes of each runtime `string` variable's text: the
+/// widest text any assignment can store into it. A string read from another
+/// string variable takes that variable's width, hence the fixed point; one
+/// whose text comes from outside the module has no known width.
 pub fn collect_string_widths(
     variables: &HashMap<VarId, air::Variable>,
+    functions: &HashMap<VarId, air::Function>,
     decls: &[air::Declaration],
-) -> Result<HashMap<VarId, usize>, SimulatorError> {
+) -> Result<StringLayout, SimulatorError> {
     let mut assigns: Vec<(VarId, &air::Expression)> = Vec::new();
+    let mut unknown: HashSet<VarId> = HashSet::default();
     for decl in decls {
         let stmts = match decl {
             air::Declaration::Comb(x) => &x.statements,
             air::Declaration::Ff(x) => &x.statements,
             air::Declaration::Initial(x) => &x.statements,
             air::Declaration::Final(x) => &x.statements,
+            air::Declaration::Inst(x) => {
+                // A child's output carries text the child module sized.
+                for output in &x.outputs {
+                    unknown.extend(output.dst.iter().map(|x| x.id));
+                }
+                continue;
+            }
             _ => continue,
         };
         for stmt in stmts {
-            collect_string_assigns(stmt, variables, &mut assigns);
+            collect_string_assigns(stmt, variables, &mut assigns, &mut unknown);
         }
     }
-
-    let mut widths: HashMap<VarId, usize> = HashMap::default();
+    for function in functions.values() {
+        for body in &function.functions {
+            for stmt in &body.statements {
+                collect_string_assigns(stmt, variables, &mut assigns, &mut unknown);
+            }
+        }
+    }
+    let mut widths: HashMap<VarId, Option<usize>> = HashMap::default();
     for (id, v) in variables {
         if v.r#type.is_string() && !matches!(v.kind, air::VarKind::Param | air::VarKind::Const) {
-            // A port is driven from the other side of a connection or a
-            // call, which this scan cannot size.
-            if matches!(
-                v.kind,
-                air::VarKind::Input | air::VarKind::Output | air::VarKind::Inout
-            ) {
-                return Err(SimulatorError::unsupported_string(
-                    &format!("port \"{}\"", v.path),
-                    &v.token,
-                ));
-            }
-            let init = v.value.iter().map(|x| x.width()).max().unwrap_or(0);
-            widths.insert(*id, init);
+            // A module's input port or a function's argument takes its text
+            // from the other side of the connection or the call.
+            let from_outside =
+                matches!(v.kind, air::VarKind::Input | air::VarKind::Inout) || unknown.contains(id);
+            let width = if from_outside {
+                None
+            } else {
+                Some(v.value.iter().map(|x| x.width()).max().unwrap_or(0))
+            };
+            widths.insert(*id, width);
         }
     }
 
     loop {
         let mut changed = false;
         for (id, expr) in &assigns {
-            let width = string_expr_width(expr, &widths);
+            let width = string_expr_width(expr, &widths, functions);
             if let Some(x) = widths.get_mut(id)
-                && width > *x
+                && let Some(current) = *x
             {
-                *x = width;
-                changed = true;
+                match width {
+                    None => {
+                        *x = None;
+                        changed = true;
+                    }
+                    Some(width) if width > current => {
+                        *x = Some(width);
+                        changed = true;
+                    }
+                    _ => {}
+                }
             }
         }
         if !changed {
             break;
         }
     }
-    Ok(widths)
+    Ok(StringLayout { widths })
 }
 
 fn collect_string_assigns<'a>(
     stmt: &'a air::Statement,
     variables: &HashMap<VarId, air::Variable>,
     out: &mut Vec<(VarId, &'a air::Expression)>,
+    unknown: &mut HashSet<VarId>,
 ) {
     match stmt {
+        // A function's output argument carries text the call sets.
+        air::Statement::FunctionCall(x) => {
+            for dsts in x.outputs.values() {
+                unknown.extend(dsts.iter().map(|x| x.id));
+            }
+        }
+        // A runtime argument's text is known only once the simulation runs.
+        air::Statement::TbMethodCall(x) => {
+            if let air::TbMethod::RuntimeArg {
+                op: air::RuntimeArgOp::GetString { .. },
+                ..
+            } = &x.method
+                && let Some(dst) = &x.ret
+            {
+                unknown.insert(dst.id);
+            }
+        }
         air::Statement::Assign(x) => {
             for dst in &x.dst {
                 if variables.get(&dst.id).is_some_and(|v| v.r#type.is_string()) {
@@ -424,47 +486,61 @@ fn collect_string_assigns<'a>(
         }
         air::Statement::If(x) => {
             for s in x.true_side.iter().chain(&x.false_side) {
-                collect_string_assigns(s, variables, out);
+                collect_string_assigns(s, variables, out, unknown);
             }
         }
         air::Statement::IfReset(x) => {
             for s in x.true_side.iter().chain(&x.false_side) {
-                collect_string_assigns(s, variables, out);
+                collect_string_assigns(s, variables, out, unknown);
             }
         }
         air::Statement::Case(x) => {
             for arm in &x.arms {
                 for s in &arm.body {
-                    collect_string_assigns(s, variables, out);
+                    collect_string_assigns(s, variables, out, unknown);
                 }
             }
             for s in &x.default {
-                collect_string_assigns(s, variables, out);
+                collect_string_assigns(s, variables, out, unknown);
             }
         }
         air::Statement::For(x) => {
             for s in &x.body {
-                collect_string_assigns(s, variables, out);
+                collect_string_assigns(s, variables, out, unknown);
             }
         }
         _ => {}
     }
 }
 
-fn string_expr_width(expr: &air::Expression, widths: &HashMap<VarId, usize>) -> usize {
+fn string_expr_width(
+    expr: &air::Expression,
+    widths: &HashMap<VarId, Option<usize>>,
+    functions: &HashMap<VarId, air::Function>,
+) -> Option<usize> {
     match expr {
-        air::Expression::Term(factor) => {
-            if let air::Factor::Variable(id, _, _, _) = factor.as_ref()
-                && let Some(x) = widths.get(id)
-            {
-                return *x;
+        air::Expression::Term(factor) => match factor.as_ref() {
+            air::Factor::Variable(id, _, _, _) if widths.contains_key(id) => {
+                *widths.get(id).unwrap()
             }
-            comptime_string_width(factor.comptime())
-        }
+            air::Factor::HierVariable(x) if x.comptime.r#type.is_string() => None,
+            air::Factor::FunctionCall(call)
+                if let Some(body) = functions
+                    .get(&call.id)
+                    .and_then(|f| f.get_function(call.index.as_deref().unwrap_or(&[])))
+                    && let Some(ret) = body.ret
+                    && let Some(width) = widths.get(&ret) =>
+            {
+                width.map(|x| x.max(comptime_string_width(factor.comptime())))
+            }
+            _ => Some(comptime_string_width(factor.comptime())),
+        },
         air::Expression::Ternary(_, x, y, _) => {
-            string_expr_width(x, widths).max(string_expr_width(y, widths))
+            let x = string_expr_width(x, widths, functions)?;
+            let y = string_expr_width(y, widths, functions)?;
+            Some(x.max(y))
         }
-        _ => comptime_string_width(expr.comptime()),
+        _ => Some(comptime_string_width(expr.comptime())),
     }
 }
 
@@ -480,7 +556,7 @@ fn comptime_string_width(comptime: &air::Comptime) -> usize {
 #[allow(clippy::too_many_arguments)]
 pub fn create_variable_meta(
     src: &HashMap<VarId, air::Variable>,
-    string_widths: &HashMap<VarId, usize>,
+    string_widths: &StringLayout,
     ff_table: &air::FfTable,
     multi_rmw_set: &HashSet<(VarId, usize)>,
     dyn_indexed: &HashSet<VarId>,
@@ -516,8 +592,11 @@ pub fn create_variable_meta(
         // In practice a `$sv::` constant, whose value lives in external
         // SystemVerilog. Reported here because only this loop knows which
         // variable carries the width.
-        let width = if let Some(x) = string_widths.get(k) {
-            (*x).max(1)
+        let string_width = string_widths.widths.get(k).copied();
+        let is_string = string_width.is_some();
+        let string_width = string_width.flatten();
+        let width = if is_string {
+            crate::string_pool::HANDLE_WIDTH
         } else {
             v.r#type
                 .total_width()
@@ -618,7 +697,18 @@ pub fn create_variable_meta(
             } else {
                 Value::new_x(width, v.r#type.signed)
             };
-            let mut val = raw;
+            let mut val = if is_string {
+                // The text of a string initial value; X (no value) is the
+                // empty text.
+                let handle = if raw.is_xz() {
+                    0
+                } else {
+                    crate::string_pool::from_value(&raw, raw.width())
+                };
+                Value::new(handle, width, false)
+            } else {
+                raw
+            };
             if !use_4state {
                 val.clear_xz();
             }
@@ -633,6 +723,7 @@ pub fn create_variable_meta(
             elements,
             initial_values,
             uniform_buffer,
+            string_width,
         };
         variables.insert(*k, meta);
     }

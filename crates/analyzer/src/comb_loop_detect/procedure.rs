@@ -13,8 +13,8 @@ use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
     Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain,
-    Module, Op, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex,
-    VarPath, VarSelect, VarSelectOp,
+    Module, Op, RuntimeArgOp, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod,
+    Type, VarIndex, VarPath, VarSelect, VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -705,7 +705,11 @@ fn collect_summary_statement_variables(
                     collect_summary_destination_variables(module, destination, ids);
                 }
                 match &call.method {
-                    TbMethod::ClockNext { count, period } => {
+                    TbMethod::ClockNext { count, period }
+                    | TbMethod::ClockStart {
+                        max_cycles: count,
+                        period,
+                    } => {
                         if let Some(count) = count {
                             collect_summary_expression_variables(module, count, ids);
                         }
@@ -736,6 +740,14 @@ fn collect_summary_statement_variables(
                     TbMethod::Queue { value, .. } => {
                         if let Some(value) = value {
                             collect_summary_expression_variables(module, value, ids);
+                        }
+                    }
+                    TbMethod::RuntimeArg { name, op } => {
+                        collect_summary_expression_variables(module, name, ids);
+                        if let RuntimeArgOp::GetInt { default }
+                        | RuntimeArgOp::GetString { default } = op
+                        {
+                            collect_summary_expression_variables(module, default, ids);
                         }
                     }
                     TbMethod::FileClose
@@ -846,6 +858,7 @@ fn collect_summary_system_call_variables(
         | SystemFunctionKind::Size(input, _)
         | SystemFunctionKind::Clog2(input)
         | SystemFunctionKind::Onehot(input)
+        | SystemFunctionKind::IsUnknown(input)
         | SystemFunctionKind::Signed(input)
         | SystemFunctionKind::Unsigned(input) => {
             collect_summary_expression_variables(module, &input.0, ids);
@@ -1947,6 +1960,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             | SystemFunctionKind::Size(input, _)
             | SystemFunctionKind::Clog2(input)
             | SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::IsUnknown(input)
             | SystemFunctionKind::Signed(input)
             | SystemFunctionKind::Unsigned(input) => {
                 self.collect_expression_write_footprint(&input.0, keys, visited);
@@ -5245,6 +5259,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 | SystemFunctionKind::Size(..)
                 | SystemFunctionKind::Clog2(_)
                 | SystemFunctionKind::Onehot(_)
+                | SystemFunctionKind::IsUnknown(_)
                 | SystemFunctionKind::Signed(_)
                 | SystemFunctionKind::Unsigned(_)
         ) {
@@ -5256,6 +5271,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             | SystemFunctionKind::Clog2(_)
             | SystemFunctionKind::Finish => Vec::new(),
             SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::IsUnknown(input)
             | SystemFunctionKind::Signed(input)
             | SystemFunctionKind::Unsigned(input) => self.eval_expr(&input.0),
             SystemFunctionKind::Readmemh(input, output) => {
