@@ -249,6 +249,18 @@ pub struct VrlHostApi {
     /// lifetime, so the guest caches them at `create` time and then reads or
     /// writes the buffers without a per-access host call.
     pub port_direct: unsafe extern "C" fn(*mut VrlCtx, idx: u32, out: *mut VrlPortDirect) -> u32,
+    // Runtime arguments (`veryl test --runtime-arg`), in the order given.
+    /// Number of runtime arguments, overridden ones included.
+    pub runtime_arg_count: unsafe extern "C" fn(*mut VrlCtx) -> u32,
+    /// Copies the UTF-8 name of argument `idx` into `buf` and returns its
+    /// length in bytes, or -1 if `idx` is out of range. Nothing is written
+    /// when the length exceeds `cap`; the caller retries with a larger buffer.
+    pub runtime_arg_name:
+        unsafe extern "C" fn(*mut VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64,
+    /// Like [`VrlHostApi::runtime_arg_name`] for the value of argument `idx`.
+    /// Returns -1 if `idx` is out of range or the argument is a flag.
+    pub runtime_arg_value:
+        unsafe extern "C" fn(*mut VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64,
 }
 
 /// Least [`VrlHostApi::size`] that includes the trace entries. Derived from
@@ -262,6 +274,135 @@ pub const VRL_HOST_API_TRACE_SIZE: usize = std::mem::offset_of!(VrlHostApi, trac
 /// so a host that omits the entry falls back to the copy path.
 pub const VRL_HOST_API_DIRECT_SIZE: usize = std::mem::offset_of!(VrlHostApi, port_direct)
     + size_of::<unsafe extern "C" fn(*mut VrlCtx, u32, *mut VrlPortDirect) -> u32>();
+
+/// Least [`VrlHostApi::size`] that includes the runtime argument entries.
+pub const VRL_HOST_API_RUNTIME_ARG_SIZE: usize =
+    std::mem::offset_of!(VrlHostApi, runtime_arg_value)
+        + size_of::<unsafe extern "C" fn(*mut VrlCtx, u32, *mut u8, usize) -> i64>();
+
+/// An integer read from a runtime argument's text: a sign and the
+/// magnitude as LSB-first 64-bit words (no trailing zero words).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeArgInt {
+    pub negative: bool,
+    pub magnitude: Vec<u64>,
+}
+
+impl RuntimeArgInt {
+    /// Whether the value is representable in `width` bits, as unsigned
+    /// (`signed == false`) or two's complement (`signed == true`). A
+    /// negative value never fits an unsigned width.
+    pub fn fits(&self, width: usize, signed: bool) -> bool {
+        let bits = self.magnitude_bits();
+        if self.is_zero() {
+            return true;
+        }
+        if !signed {
+            return !self.negative && bits <= width;
+        }
+        if width == 0 {
+            return false;
+        }
+        if self.negative {
+            // -(2^(width-1)) is the least value.
+            bits < width || (bits == width && self.is_power_of_two())
+        } else {
+            bits < width
+        }
+    }
+
+    /// The value as LSB-first words of `width` bits in two's complement.
+    /// The caller checks [`RuntimeArgInt::fits`] first.
+    pub fn to_words(&self, width: usize) -> Vec<u64> {
+        let len = width.div_ceil(64).max(1);
+        let mut words = self.magnitude.clone();
+        words.resize(len, 0);
+        if self.negative {
+            let mut carry = 1u64;
+            for w in &mut words {
+                let (v, c) = (!*w).overflowing_add(carry);
+                *w = v;
+                carry = c as u64;
+            }
+        }
+        let rem = width % 64;
+        if rem != 0 {
+            words[len - 1] &= (1u64 << rem) - 1;
+        }
+        words
+    }
+
+    fn is_zero(&self) -> bool {
+        self.magnitude.is_empty()
+    }
+
+    fn magnitude_bits(&self) -> usize {
+        match self.magnitude.last() {
+            Some(top) => (self.magnitude.len() - 1) * 64 + (64 - top.leading_zeros() as usize),
+            None => 0,
+        }
+    }
+
+    fn is_power_of_two(&self) -> bool {
+        self.magnitude.iter().map(|w| w.count_ones()).sum::<u32>() == 1
+    }
+}
+
+/// Reads a runtime argument's text as an integer: decimal, or hexadecimal /
+/// binary with a `0x` / `0b` prefix, optionally preceded by `-`, with `_`
+/// allowed between digits (`4`, `-3`, `0x1f`, `0xdead_beef`). Returns
+/// `None` for any other text. Shared by the simulator and the component
+/// SDK so both read numbers alike.
+pub fn parse_runtime_arg_int(text: &str) -> Option<RuntimeArgInt> {
+    let (negative, body) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let (radix, digits) = if let Some(rest) = body.strip_prefix("0x") {
+        (16u32, rest)
+    } else if let Some(rest) = body.strip_prefix("0b") {
+        (2u32, rest)
+    } else {
+        (10u32, body)
+    };
+
+    let bytes = digits.as_bytes();
+    if bytes.is_empty() || bytes[0] == b'_' || bytes[bytes.len() - 1] == b'_' {
+        return None;
+    }
+
+    let mut magnitude: Vec<u64> = Vec::new();
+    let mut prev_underscore = false;
+    for &b in bytes {
+        if b == b'_' {
+            if prev_underscore {
+                return None;
+            }
+            prev_underscore = true;
+            continue;
+        }
+        prev_underscore = false;
+        let digit = (b as char).to_digit(radix)? as u64;
+        // magnitude = magnitude * radix + digit
+        let mut carry = digit;
+        for w in &mut magnitude {
+            let v = (*w as u128) * (radix as u128) + carry as u128;
+            *w = v as u64;
+            carry = (v >> 64) as u64;
+        }
+        if carry != 0 {
+            magnitude.push(carry);
+        }
+    }
+    while magnitude.last() == Some(&0) {
+        magnitude.pop();
+    }
+
+    Some(RuntimeArgInt {
+        negative: negative && !magnitude.is_empty(),
+        magnitude,
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -285,8 +426,74 @@ mod tests {
 
     #[test]
     fn direct_size_covers_port_direct() {
-        assert_eq!(VRL_HOST_API_DIRECT_SIZE, size_of::<VrlHostApi>());
+        assert!(VRL_HOST_API_DIRECT_SIZE <= size_of::<VrlHostApi>());
         assert!(VRL_HOST_API_DIRECT_SIZE > std::mem::offset_of!(VrlHostApi, port_direct));
+    }
+
+    #[test]
+    fn runtime_arg_size_covers_runtime_arg_entries() {
+        assert_eq!(VRL_HOST_API_RUNTIME_ARG_SIZE, size_of::<VrlHostApi>());
+        const { assert!(VRL_HOST_API_RUNTIME_ARG_SIZE > VRL_HOST_API_DIRECT_SIZE) };
+    }
+
+    fn int(negative: bool, magnitude: &[u64]) -> Option<RuntimeArgInt> {
+        Some(RuntimeArgInt {
+            negative,
+            magnitude: magnitude.to_vec(),
+        })
+    }
+
+    #[test]
+    fn parse_runtime_arg_int_forms() {
+        assert_eq!(parse_runtime_arg_int("0"), int(false, &[]));
+        assert_eq!(parse_runtime_arg_int("-0"), int(false, &[]));
+        assert_eq!(parse_runtime_arg_int("4"), int(false, &[4]));
+        assert_eq!(parse_runtime_arg_int("-3"), int(true, &[3]));
+        assert_eq!(parse_runtime_arg_int("1_000"), int(false, &[1000]));
+        assert_eq!(parse_runtime_arg_int("0x1f"), int(false, &[0x1f]));
+        assert_eq!(
+            parse_runtime_arg_int("0xDEAD_beef"),
+            int(false, &[0xdead_beef])
+        );
+        assert_eq!(parse_runtime_arg_int("0b1010"), int(false, &[0b1010]));
+        assert_eq!(parse_runtime_arg_int("-0x10"), int(true, &[0x10]));
+        assert_eq!(
+            parse_runtime_arg_int("0x1_0000_0000_0000_0000"),
+            int(false, &[0, 1])
+        );
+        assert_eq!(
+            parse_runtime_arg_int("18446744073709551616"),
+            int(false, &[0, 1])
+        );
+
+        for bad in [
+            "", "-", "abc", "0x", "0b", "0b12", "_1", "1_", "1__0", "0x_1", "+1", "1.0", "'h1f",
+            " 1", "0X1f", "--1",
+        ] {
+            assert_eq!(parse_runtime_arg_int(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn runtime_arg_int_fits_and_words() {
+        let v = |s: &str| parse_runtime_arg_int(s).unwrap();
+
+        assert!(v("255").fits(8, false));
+        assert!(!v("256").fits(8, false));
+        assert!(!v("-1").fits(8, false));
+        assert!(v("127").fits(8, true));
+        assert!(!v("128").fits(8, true));
+        assert!(v("-128").fits(8, true));
+        assert!(!v("-129").fits(8, true));
+        assert!(v("0").fits(1, false));
+        assert!(v("-1").fits(1, true));
+        assert!(!v("1").fits(1, true));
+
+        assert_eq!(v("-1").to_words(8), vec![0xff]);
+        assert_eq!(v("-128").to_words(8), vec![0x80]);
+        assert_eq!(v("-1").to_words(64), vec![!0]);
+        assert_eq!(v("-1").to_words(70), vec![!0, 0x3f]);
+        assert_eq!(v("0x1f").to_words(32), vec![0x1f]);
     }
 }
 

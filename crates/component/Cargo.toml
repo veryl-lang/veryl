@@ -16,6 +16,7 @@ pre-release-hook = ["cargo", "semver-checks", "check-release", "--package", "ver
 
 [dependencies]
 anyhow                 = {workspace = true}
+num-bigint             = {workspace = true}
 smallvec               = {workspace = true}
 veryl-component-macros = {version = "0.1.2", path = "macros"}
 veryl-component-sys    = {version = "0.1.2", path = "sys"}

@@ -208,6 +208,12 @@ fn resolve_stmt(
             crate::ir::statement::ProtoTbMethodKind::FileOpen { path, .. } => {
                 resolve_expr(&mut path.0, context, children)?;
             }
+            crate::ir::statement::ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                resolve_expr(&mut name.0, context, children)?;
+                if let Some(e) = op.default_expr_mut() {
+                    resolve_expr(e, context, children)?;
+                }
+            }
             crate::ir::statement::ProtoTbMethodKind::FileClose
             | crate::ir::statement::ProtoTbMethodKind::FileFlush
             | crate::ir::statement::ProtoTbMethodKind::RandomGet { .. }

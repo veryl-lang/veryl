@@ -360,6 +360,12 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             ProtoTbMethodKind::FileOpen { path, .. } => {
                 walk_expr_reads(&path.0, c);
             }
+            ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                walk_expr_reads(&name.0, c);
+                if let Some(e) = op.default_expr() {
+                    walk_expr_reads(e, c);
+                }
+            }
             ProtoTbMethodKind::FileClose
             | ProtoTbMethodKind::FileFlush
             | ProtoTbMethodKind::RandomGet { .. }

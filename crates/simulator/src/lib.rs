@@ -6,6 +6,7 @@ pub mod output_buffer;
 pub mod queue_table;
 pub mod random_table;
 pub mod residency;
+pub mod runtime_arg;
 pub mod sim_status;
 pub mod simulator;
 pub mod simulator_error;

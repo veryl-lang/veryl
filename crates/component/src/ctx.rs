@@ -1,6 +1,8 @@
+use crate::runtime_arg::{self, ArgError, ArgValue, RuntimeArg};
 use crate::value::words_for;
 use crate::{Result, Value, bail, sys};
 use smallvec::SmallVec;
+use std::cell::OnceCell;
 
 /// Handle to a component input port, resolved once in [`BuildCtx::input`].
 /// Its identity is the port index; the cached pointer is an implementation
@@ -143,9 +145,79 @@ impl TraceVar {
 struct RawCtx {
     ctx: *mut sys::VrlCtx,
     api: *const sys::VrlHostApi,
+    /// Runtime arguments, fetched from the host on first use.
+    runtime_args: OnceCell<Vec<RuntimeArg>>,
 }
 
 impl RawCtx {
+    fn new(ctx: *mut sys::VrlCtx, api: *const sys::VrlHostApi) -> Self {
+        Self {
+            ctx,
+            api,
+            runtime_args: OnceCell::new(),
+        }
+    }
+
+    fn runtime_args(&self) -> &[RuntimeArg] {
+        self.runtime_args.get_or_init(|| {
+            // A host that predates runtime arguments has none to give.
+            if self.api().size < sys::VRL_HOST_API_RUNTIME_ARG_SIZE {
+                return Vec::new();
+            }
+            let api = self.api();
+            let count = unsafe { (api.runtime_arg_count)(self.ctx) };
+            (0..count)
+                .filter_map(|idx| {
+                    let name = self.read_text(idx, api.runtime_arg_name)?;
+                    let value = match self.read_text(idx, api.runtime_arg_value) {
+                        Some(x) => ArgValue::Text(x),
+                        None => ArgValue::Flag,
+                    };
+                    Some(RuntimeArg { name, value })
+                })
+                .collect()
+        })
+    }
+
+    /// Reads a text through a `runtime_arg_name`/`runtime_arg_value` style
+    /// entry, growing the buffer until the text fits.
+    fn read_text(
+        &self,
+        idx: u32,
+        f: unsafe extern "C" fn(*mut sys::VrlCtx, u32, *mut u8, usize) -> i64,
+    ) -> Option<String> {
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            let len = unsafe { f(self.ctx, idx, buf.as_mut_ptr(), buf.len()) };
+            if len < 0 {
+                return None;
+            }
+            let len = len as usize;
+            if len <= buf.len() {
+                buf.truncate(len);
+                return Some(String::from_utf8_lossy(&buf).into_owned());
+            }
+            buf.resize(len, 0);
+        }
+    }
+
+    fn runtime_arg(&self, name: &str) -> Option<&ArgValue> {
+        runtime_arg::find(self.runtime_args(), name)
+    }
+
+    fn runtime_arg_value<T>(&self, name: &str) -> Result<Option<T>>
+    where
+        T: for<'a> TryFrom<&'a ArgValue, Error = ArgError>,
+    {
+        match self.runtime_arg(name) {
+            Some(value) => match T::try_from(value) {
+                Ok(x) => Ok(Some(x)),
+                Err(e) => bail!("runtime argument `{name}`: {e}"),
+            },
+            None => Ok(None),
+        }
+    }
+
     fn api(&self) -> &sys::VrlHostApi {
         unsafe { &*self.api }
     }
@@ -214,7 +286,7 @@ impl BuildCtx {
     /// `create` call.
     pub(crate) unsafe fn new(ctx: *mut sys::VrlCtx, api: *const sys::VrlHostApi) -> Self {
         Self {
-            raw: RawCtx { ctx, api },
+            raw: RawCtx::new(ctx, api),
         }
     }
 
@@ -304,6 +376,44 @@ impl BuildCtx {
     }
 }
 
+/// Runtime argument accessors, shared by [`BuildCtx`] and [`SimCtx`].
+macro_rules! impl_runtime_args {
+    ($ctx:ty) => {
+        impl $ctx {
+            /// The value of the runtime argument `name` that wins (the last
+            /// one given), or `None` if it was not given.
+            pub fn runtime_arg(&self, name: &str) -> Option<&ArgValue> {
+                self.raw.runtime_arg(name)
+            }
+
+            /// Whether the runtime argument `name` was given, as a flag or
+            /// a value.
+            pub fn runtime_arg_exists(&self, name: &str) -> bool {
+                self.runtime_arg(name).is_some()
+            }
+
+            /// The value of the runtime argument `name` read as `T`, or
+            /// `None` if it was not given. An error if it was given as a
+            /// flag, or its value cannot be read as `T`.
+            pub fn runtime_arg_value<T>(&self, name: &str) -> Result<Option<T>>
+            where
+                T: for<'a> TryFrom<&'a ArgValue, Error = ArgError>,
+            {
+                self.raw.runtime_arg_value(name)
+            }
+
+            /// Every runtime argument as given, in order, overridden ones
+            /// included.
+            pub fn runtime_args(&self) -> &[RuntimeArg] {
+                self.raw.runtime_args()
+            }
+        }
+    };
+}
+
+impl_runtime_args!(BuildCtx);
+impl_runtime_args!(SimCtx);
+
 /// Context passed to every hook after construction.
 pub struct SimCtx {
     raw: RawCtx,
@@ -320,7 +430,7 @@ impl SimCtx {
         four_state: bool,
     ) -> Self {
         Self {
-            raw: RawCtx { ctx, api },
+            raw: RawCtx::new(ctx, api),
             four_state,
         }
     }

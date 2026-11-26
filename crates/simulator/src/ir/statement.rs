@@ -350,6 +350,44 @@ pub enum ProtoTbMethodKind {
         capacity: u32,
         ret: Option<(VarId, RetWidthCheck)>,
     },
+    /// `$tb::runtime_args` methods.
+    RuntimeArg {
+        name: ProtoText,
+        op: ProtoRuntimeArgOp,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+}
+
+#[derive(Clone, Debug, Hash)]
+pub enum ProtoRuntimeArgOp {
+    Exists,
+    GetInt(ProtoExpression),
+    GetString(ProtoText),
+}
+
+/// Pointer-bound form of [`ProtoRuntimeArgOp`].
+#[derive(Clone)]
+pub enum RuntimeArgOp {
+    Exists,
+    GetInt(Expression),
+    GetString(Text),
+}
+
+impl ProtoRuntimeArgOp {
+    /// The expression of the default value, if any.
+    pub fn default_expr(&self) -> Option<&ProtoExpression> {
+        match self {
+            ProtoRuntimeArgOp::Exists => None,
+            ProtoRuntimeArgOp::GetInt(x) | ProtoRuntimeArgOp::GetString(ProtoText(x)) => Some(x),
+        }
+    }
+
+    pub fn default_expr_mut(&mut self) -> Option<&mut ProtoExpression> {
+        match self {
+            ProtoRuntimeArgOp::Exists => None,
+            ProtoRuntimeArgOp::GetInt(x) | ProtoRuntimeArgOp::GetString(ProtoText(x)) => Some(x),
+        }
+    }
 }
 
 /// How a component method's returned width is validated before it lands
@@ -426,6 +464,11 @@ pub enum TbMethodKind {
         signed: bool,
         four_state: bool,
         capacity: u32,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    RuntimeArg {
+        name: Text,
+        op: RuntimeArgOp,
         ret: Option<(VarId, RetWidthCheck)>,
     },
 }
@@ -1725,6 +1768,12 @@ impl ProtoStatement {
                 ProtoTbMethodKind::FileOpen { path, .. } => {
                     path.0.adjust_offsets(ff_delta, comb_delta);
                 }
+                ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                    name.0.adjust_offsets(ff_delta, comb_delta);
+                    if let Some(e) = op.default_expr_mut() {
+                        e.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
                 ProtoTbMethodKind::FileClose
                 | ProtoTbMethodKind::FileFlush
                 | ProtoTbMethodKind::RandomGet { .. }
@@ -1933,6 +1982,12 @@ impl ProtoStatement {
                 }
                 ProtoTbMethodKind::FileOpen { path, .. } => {
                     path.0.remap_offsets_with(f);
+                }
+                ProtoTbMethodKind::RuntimeArg { name, op, .. } => {
+                    name.0.remap_offsets_with(f);
+                    if let Some(e) = op.default_expr_mut() {
+                        e.remap_offsets_with(f);
+                    }
                 }
                 ProtoTbMethodKind::FileClose
                 | ProtoTbMethodKind::FileFlush
@@ -3068,6 +3123,28 @@ impl ProtoStatement {
                             ),
                             append: *append,
                         },
+                        ProtoTbMethodKind::RuntimeArg { name, op, ret } => {
+                            let bind = |x: &ProtoExpression| {
+                                x.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            };
+                            TbMethodKind::RuntimeArg {
+                                name: Text(bind(&name.0)),
+                                op: match op {
+                                    ProtoRuntimeArgOp::Exists => RuntimeArgOp::Exists,
+                                    ProtoRuntimeArgOp::GetInt(x) => RuntimeArgOp::GetInt(bind(x)),
+                                    ProtoRuntimeArgOp::GetString(x) => {
+                                        RuntimeArgOp::GetString(Text(bind(&x.0)))
+                                    }
+                                },
+                                ret: *ret,
+                            }
+                        }
                         ProtoTbMethodKind::FileWrite { format_str, args } => {
                             let args = args
                                 .iter()
@@ -4296,6 +4373,39 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                             signed: *signed,
                             four_state: *four_state,
                             capacity: *capacity,
+                            ret: tb_ret,
+                        }
+                    }
+                    air::TbMethod::RuntimeArg { name, op } => {
+                        let text = |context: &mut Context, x: &air::Expression| {
+                            string_type_utils::conv_text(context, x)?.ok_or_else(|| {
+                                SimulatorError::unsupported_description(&x.token_range())
+                            })
+                        };
+                        let name = text(context, name)?;
+                        let op = match op {
+                            air::RuntimeArgOp::Exists => ProtoRuntimeArgOp::Exists,
+                            air::RuntimeArgOp::GetInt { default } => {
+                                ProtoRuntimeArgOp::GetInt(Conv::conv(context, default)?)
+                            }
+                            air::RuntimeArgOp::GetString { default } => {
+                                // The text, whose length is known only at run
+                                // time, lands in a `string` as its handle;
+                                // bits of it would need that length.
+                                if let Some(dst) = &x.ret
+                                    && !string_type_utils::is_var(context, &dst.id)
+                                {
+                                    return Err(SimulatorError::unsupported_string_operation(
+                                        "a bit operation",
+                                        &dst.token,
+                                    ));
+                                }
+                                ProtoRuntimeArgOp::GetString(text(context, default)?)
+                            }
+                        };
+                        ProtoTbMethodKind::RuntimeArg {
+                            name,
+                            op,
                             ret: tb_ret,
                         }
                     }
