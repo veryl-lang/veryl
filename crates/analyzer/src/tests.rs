@@ -6183,6 +6183,26 @@ fn mismatch_type() {
         ("constant", "s = 8'h41;", true),
         ("select", "s[7:0] = x;", true),
         ("input port", "inst u: SubIn (i: x);", true),
+        (
+            "numeric string array element",
+            r#"inst u: SubArray (i: '{"a", 8'h41});"#,
+            true,
+        ),
+        (
+            "numeric string array default",
+            r#"inst u: SubArray (i: '{"a", default: x});"#,
+            true,
+        ),
+        (
+            "numeric nested string array element",
+            r#"inst u: SubNested (i: '{'{"a", "b"}, '{"c", 8'h41}});"#,
+            true,
+        ),
+        (
+            "string array elements",
+            r#"inst u: SubArray (i: '{"a", default: t});"#,
+            false,
+        ),
         ("output port", "inst u: SubOut (o: s);", true),
         ("function input", "f_in(x);", true),
         ("function output", "f_out(s);", true),
@@ -6206,6 +6226,8 @@ fn mismatch_type() {
         let code = format!(
             r#"
             module SubIn (i: input string) {{}}
+            module SubArray (i: input string [2]) {{}}
+            module SubNested (i: input string [2, 2]) {{}}
             module SubOut (o: output logic<8>) {{ assign o = 0; }}
             module SubStr (o: output string) {{ assign o = "a"; }}
             function f_in (i: input string) {{}}

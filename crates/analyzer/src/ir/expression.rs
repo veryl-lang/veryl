@@ -1420,11 +1420,17 @@ impl Factor {
             });
         }
         let width = self.comptime().r#type.total_width().unwrap_or(1);
+        let is_string = self.comptime().r#type.is_string();
         let invalid = if self.comptime().r#type.is_2state() {
             Value::new(0, width, self.comptime().r#type.signed)
         } else {
             Value::new_x(width, self.comptime().r#type.signed)
         };
+        let mut invalid = Expression::create_value(invalid, self.comptime().token);
+        if is_string {
+            // Keep a string slice's bounds check typed as a string expression.
+            invalid.comptime_mut().r#type.kind = TypeKind::String;
+        }
         if let Some(valid) = &mut valid {
             valid.eval_comptime(context, None);
             // Do not flatten invalid coordinates: a negative outer index could
@@ -1434,7 +1440,7 @@ impl Factor {
                     .eval_value(context)
                     .is_none_or(|v| v.to_usize_saturating() != Some(1))
             {
-                return Some(Expression::create_value(invalid, self.comptime().token));
+                return Some(invalid);
             }
         }
         let mut source = self.clone();
@@ -1460,7 +1466,7 @@ impl Factor {
             let mut ret = Expression::Ternary(
                 Box::new(valid),
                 Box::new(expression),
-                Box::new(Expression::create_value(invalid, self.comptime().token)),
+                Box::new(invalid),
                 Box::new(comptime),
             );
             ret.eval_comptime(context, None);

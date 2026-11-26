@@ -71,26 +71,47 @@ fn remaining_array_shape(
 
 /// `None` on a shape mismatch, leaving the caller's generic path to report it.
 pub(crate) fn const_array_element_exprs(
+    context: &mut Context,
     expr: &air::Expression,
+    target: Option<&air::Type>,
     elements: usize,
-) -> Option<Vec<ProtoExpression>> {
-    let (comptime, values) = const_array_operand(expr)?;
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
+    let Some((comptime, values)) = const_array_operand(expr) else {
+        return Ok(None);
+    };
     if values.len() != elements {
-        return None;
+        return Ok(None);
     }
-    let width = comptime.r#type.total_width()?;
-    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+    let Some(width) = comptime.r#type.total_width() else {
+        return Ok(None);
+    };
+    if let Some(target) = target
+        && comptime.r#type.is_string()
+    {
+        let mut element = comptime.clone();
+        element.r#type.array.clear();
+        element.value = ValueVariant::Unknown;
 
-    Some(
-        values
-            .iter()
-            .map(|value| ProtoExpression::Value {
-                value: value.clone(),
-                width,
-                expr_context,
-            })
-            .collect(),
-    )
+        let mut expressions = Vec::with_capacity(elements);
+        for value in values {
+            let mut comptime = element.clone();
+            comptime.value = ValueVariant::Numeric(value.clone());
+            let expr = air::Expression::Term(Box::new(air::Factor::Value(comptime)));
+            expressions.push(ProtoExpression::conv_for(context, &expr, target)?);
+        }
+        return Ok(Some(expressions));
+    }
+
+    let expr_context = (&comptime.expr_context).into();
+    let expressions = values
+        .iter()
+        .map(|value| ProtoExpression::Value {
+            value: value.clone(),
+            width,
+            expr_context,
+        })
+        .collect();
+    Ok(Some(expressions))
 }
 
 /// An array literal wired straight to an unpacked-array port, e.g.
@@ -102,38 +123,43 @@ pub(crate) fn array_literal_element_exprs(
     expr: &air::Expression,
     r#type: &air::Type,
     elements: usize,
-) -> Option<Vec<ProtoExpression>> {
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
     if !matches!(expr, air::Expression::ArrayLiteral(..)) {
-        return None;
+        return Ok(None);
     }
     let mut expr = expr.clone();
-    let array_exprs = eval_array_literal(
+    let Ok(Some(array_exprs)) = eval_array_literal(
         &mut context.scope().analyzer_context,
         Some(&r#type.array),
         Some(r#type.width()),
         &mut expr,
-    )
-    .ok()??;
+    ) else {
+        return Ok(None);
+    };
 
     // The expansion emits one entry per element in flattened order, so the
     // k-th entry belongs to the k-th element.  A non-empty `select` means the
     // literal filled a packed vector rather than the array; that is not this
     // wiring.
     if array_exprs.iter().any(|x| !x.select.is_empty()) {
-        return None;
+        return Ok(None);
     }
 
     let mut out = Vec::with_capacity(elements);
     for array_expr in &array_exprs {
         if let Some(values) =
-            super::expression::array_slice_elements(context, &array_expr.expr).ok()?
+            super::expression::array_slice_elements(context, &array_expr.expr, Some(r#type))?
         {
             out.extend(values);
         } else {
-            out.push(Conv::conv(context, &array_expr.expr).ok()?);
+            out.push(ProtoExpression::conv_for(
+                context,
+                &array_expr.expr,
+                r#type,
+            )?);
         }
     }
-    (out.len() == elements).then_some(out)
+    Ok((out.len() == elements).then_some(out))
 }
 
 #[derive(Clone)]
@@ -4539,7 +4565,8 @@ fn conv_assign_statements_inner(
             let dst0 = &src.dst[0];
             if let Some(dst_shape) = remaining_array_shape(context, &dst0.id, &dst0.index) {
                 let total: usize = dst_shape.iter().map(|d| d.unwrap_or(1)).product();
-                if let Some(elements) = super::expression::array_slice_elements(context, &src.expr)?
+                if let Some(elements) =
+                    super::expression::array_slice_elements(context, &src.expr, None)?
                 {
                     if elements.len() != total {
                         return Err(SimulatorError::unsupported_description(&src.token));
@@ -5794,7 +5821,8 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             }
 
             if let Some(arg_meta) = arg_meta_clone.as_ref()
-                && let Some(elements) = super::expression::array_slice_elements(context, expr)?
+                && let Some(elements) =
+                    super::expression::array_slice_elements(context, expr, None)?
             {
                 if elements.len() != arg_meta.elements.len() {
                     return Err(SimulatorError::unsupported_description(&src.comptime.token));
@@ -5819,7 +5847,8 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
 
             // Array argument fed by a const array (`f(pk::TBL)`).
             if let Some(arg_meta) = arg_meta_clone.as_ref()
-                && let Some(exprs) = const_array_element_exprs(expr, arg_meta.elements.len())
+                && let Some(exprs) =
+                    const_array_element_exprs(context, expr, None, arg_meta.elements.len())?
             {
                 for (arg_element, expr) in arg_meta.elements.iter().zip(exprs) {
                     result.push(ProtoStatement::Assign(ProtoAssignStatement {
