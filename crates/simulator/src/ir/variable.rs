@@ -771,15 +771,21 @@ pub struct ModuleVariableMeta {
     /// `air::InstDeclaration::hierarchy`; empty for a plain instance or the top.
     pub hierarchy: Vec<StrId>,
     pub variable_meta: HashMap<VarId, VariableMeta>,
-    pub children: Vec<ModuleVariableMeta>,
+    /// Shared: tests reusing a subtree share its metadata too.
+    pub children: std::sync::Arc<Vec<ModuleVariableMeta>>,
 }
 
 /// Hierarchical variable tree with resolved pointers into the flat buffers.
+/// A module's own variables are resolved; its children are resolved from the
+/// shared metadata when asked for, since a large design holds far more
+/// variables below its top than any caller looks at.
 #[derive(Clone, Debug)]
 pub struct ModuleVariables {
     pub name: StrId,
     pub variables: HashMap<VarId, Variable>,
-    pub children: Vec<ModuleVariables>,
+    children: std::sync::Arc<Vec<ModuleVariableMeta>>,
+    ff_base: *mut u8,
+    comb_base: *mut u8,
 }
 
 impl fmt::Display for ModuleVariables {
@@ -789,6 +795,91 @@ impl fmt::Display for ModuleVariables {
 }
 
 impl ModuleVariables {
+    pub(crate) fn new(meta: &ModuleVariableMeta, ff_base: *mut u8, comb_base: *mut u8) -> Self {
+        let mut variables = HashMap::default();
+        for (id, meta) in &meta.variable_meta {
+            let mut current_values: Vec<*mut u8> = vec![];
+            let mut next_values: Vec<*mut u8> = vec![];
+            for element in &meta.elements {
+                let current = unsafe {
+                    let base = if element.is_ff() { ff_base } else { comb_base };
+                    base.add(element.current_offset() as usize)
+                };
+                current_values.push(current);
+                if element.is_ff() {
+                    next_values.push(unsafe { ff_base.add(element.next_offset as usize) });
+                }
+            }
+            variables.insert(
+                *id,
+                Variable {
+                    path: meta.path.clone(),
+                    r#type: meta.r#type.clone(),
+                    width: meta.width,
+                    native_bytes: meta.native_bytes,
+                    current_values,
+                    next_values,
+                    string_width: meta.string_width,
+                },
+            );
+        }
+        Self {
+            name: meta.name,
+            variables,
+            children: std::sync::Arc::clone(&meta.children),
+            ff_base,
+            comb_base,
+        }
+    }
+
+    /// Every variable here and in the descendants, as its type, native byte
+    /// width and the addresses of its current then next elements, without
+    /// building the descendants' tables: those clone each variable's path and
+    /// type.
+    pub(crate) fn for_each_storage(&self, mut f: impl FnMut(&Type, usize, &[*mut u8])) {
+        fn walk(
+            metas: &[ModuleVariableMeta],
+            ff_base: *mut u8,
+            comb_base: *mut u8,
+            buf: &mut Vec<*mut u8>,
+            f: &mut impl FnMut(&Type, usize, &[*mut u8]),
+        ) {
+            for m in metas {
+                for meta in m.variable_meta.values() {
+                    buf.clear();
+                    for element in &meta.elements {
+                        let base = if element.is_ff() { ff_base } else { comb_base };
+                        buf.push(unsafe { base.add(element.current_offset() as usize) });
+                    }
+                    for element in meta.elements.iter().filter(|e| e.is_ff()) {
+                        buf.push(unsafe { ff_base.add(element.next_offset as usize) });
+                    }
+                    f(&meta.r#type, meta.native_bytes, buf);
+                }
+                walk(&m.children, ff_base, comb_base, buf, f);
+            }
+        }
+        let mut buf = Vec::new();
+        for var in self.variables.values() {
+            buf.clear();
+            buf.extend(var.current_values.iter().chain(&var.next_values).copied());
+            f(&var.r#type, var.native_bytes, &buf);
+        }
+        walk(
+            &self.children,
+            self.ff_base,
+            self.comb_base,
+            &mut buf,
+            &mut f,
+        );
+    }
+
+    pub fn children(&self) -> impl Iterator<Item = ModuleVariables> + '_ {
+        self.children
+            .iter()
+            .map(|m| ModuleVariables::new(m, self.ff_base, self.comb_base))
+    }
+
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         let prefix = "  ".repeat(indent);
         writeln!(f, "{}module {}:", prefix, self.name)?;
@@ -799,7 +890,7 @@ impl ModuleVariables {
                 writeln!(f, "{}  {}", prefix, line)?;
             }
         }
-        for child in &self.children {
+        for child in self.children() {
             child.fmt_with_indent(f, indent + 1)?;
         }
         Ok(())

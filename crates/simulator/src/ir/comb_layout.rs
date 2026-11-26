@@ -160,7 +160,7 @@ pub fn collect_meta_units_tree(
     out: &mut Vec<(isize, isize)>,
 ) {
     collect_meta_units_map(&node.variable_meta, use_4state, out);
-    for child in &node.children {
+    for child in node.children.iter() {
         collect_meta_units_tree(child, use_4state, out);
     }
 }
@@ -739,12 +739,42 @@ pub fn translate_meta_map(metas: &mut HashMap<VarId, VariableMeta>, sched: &Comb
     }
 }
 
-/// `translate_meta_map` over a whole child-module tree.
-pub fn translate_meta_tree(node: &mut ModuleVariableMeta, sched: &CombLayoutSchedule) {
+type MetaList = std::sync::Arc<Vec<ModuleVariableMeta>>;
+
+/// Translated child lists by the address of their source, which each entry
+/// keeps alive so the address cannot be reused.
+pub type MetaMemo = HashMap<usize, (MetaList, MetaList)>;
+
+/// `translate_meta_map` over a whole child-module tree.  A child list held
+/// elsewhere too, as a reused subtree's is, is translated once per `memo`.
+pub fn translate_meta_shared(
+    node: &mut ModuleVariableMeta,
+    sched: &CombLayoutSchedule,
+    memo: &mut MetaMemo,
+) {
     translate_meta_map(&mut node.variable_meta, sched);
-    for child in &mut node.children {
-        translate_meta_tree(child, sched);
+    let src = &node.children;
+    let key = std::sync::Arc::as_ptr(src) as usize;
+    if let Some((_, done)) = memo.get(&key) {
+        node.children = std::sync::Arc::clone(done);
+        return;
     }
+    let done: MetaList = std::sync::Arc::new(
+        src.iter()
+            .map(|c| {
+                let mut c = c.clone();
+                translate_meta_shared(&mut c, sched, memo);
+                c
+            })
+            .collect(),
+    );
+    if std::sync::Arc::strong_count(src) > 1 {
+        memo.insert(
+            key,
+            (std::sync::Arc::clone(src), std::sync::Arc::clone(&done)),
+        );
+    }
+    node.children = done;
 }
 
 #[cfg(test)]

@@ -127,6 +127,8 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
+    /// See `Module::master_cone`.
+    pub master_cone: Option<Vec<Statement>>,
     /// See `Module::dataflow`.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// See `Module::dataflow_interp`, by cell.
@@ -277,6 +279,7 @@ impl Ir {
             disable_ff_opt: config.disable_ff_opt,
             derived_clock_schedule: module.derived_clock_schedule,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
+            master_cone: module.master_cone,
             dataflow_dirty: std::cell::RefCell::new(vec![
                 0;
                 module
@@ -371,26 +374,23 @@ impl Ir {
     fn declared_reset_polarity(&self, var: &Variable) -> Option<bool> {
         let &ptr = var.current_values.first()?;
         let mut found: Option<bool> = None;
-        let mut stack = vec![&self.module_variables];
-        while let Some(vars) = stack.pop() {
-            for other in vars.variables.values() {
-                if other.current_values.first() != Some(&ptr) {
-                    continue;
-                }
-                let active_low = match other.r#type.kind {
-                    air::TypeKind::ResetAsyncHigh | air::TypeKind::ResetSyncHigh => false,
-                    air::TypeKind::ResetAsyncLow | air::TypeKind::ResetSyncLow => true,
-                    _ => continue,
-                };
-                match found {
-                    None => found = Some(active_low),
-                    Some(prev) if prev != active_low => return None,
-                    Some(_) => {}
-                }
+        let mut disagree = false;
+        self.module_variables.for_each_storage(|r#type, _, ptrs| {
+            if ptrs.first() != Some(&ptr) {
+                return;
             }
-            for child in &vars.children {
-                stack.push(child);
+            let active_low = match r#type.kind {
+                air::TypeKind::ResetAsyncHigh | air::TypeKind::ResetSyncHigh => false,
+                air::TypeKind::ResetAsyncLow | air::TypeKind::ResetSyncLow => true,
+                _ => return,
+            };
+            match found {
+                None => found = Some(active_low),
+                Some(prev) => disagree |= prev != active_low,
             }
+        });
+        if disagree {
+            return None;
         }
         found
     }
@@ -425,7 +425,7 @@ impl Ir {
         let comb_end = comb_base + self.comb_values.len();
         let ff_base = self.ff_values.as_ptr() as usize;
         let ff_end = ff_base + self.ff_values.len();
-        let mut stack = vec![(String::new(), &self.module_variables)];
+        let mut stack = vec![(String::new(), self.module_variables.clone())];
         while let Some((prefix, m)) = stack.pop() {
             let here = if prefix.is_empty() {
                 m.name.to_string()
@@ -449,7 +449,7 @@ impl Ir {
                     );
                 }
             }
-            stack.extend(m.children.iter().map(|c| (here.clone(), c)));
+            stack.extend(m.children().map(|c| (here.clone(), c)));
         }
     }
 
@@ -595,6 +595,26 @@ impl Ir {
         for s in &mut self.comb_statements {
             patch_stmt_log_buf(s, log_buf);
         }
+        for s in self.master_cone.iter_mut().flatten() {
+            patch_stmt_log_buf(s, log_buf);
+        }
+    }
+
+    /// Run the master clocks' cone on a settled comb; `false` when there is
+    /// none, and the caller must settle in full.
+    pub fn settle_master_cone(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> bool {
+        let Some(cone) = &self.master_cone else {
+            return false;
+        };
+        // A dataflow settle leaves chunk-local bytes stale in storage.
+        #[cfg(not(target_family = "wasm"))]
+        if self.dataflow.is_some() {
+            return false;
+        }
+        for x in cone {
+            dispatch_stmt_fast(x, mask_cache, status);
+        }
+        true
     }
 
     /// Settle the comb: through the dataflow cells when the module has a
@@ -1126,6 +1146,39 @@ impl Ir {
         self.dataflow_live.set(false);
     }
 
+    /// The marks `dataflow_mark_ptr` would set for `len` bytes at `ptr`,
+    /// resolved ahead for a write that repeats.
+    pub(crate) fn dataflow_output_marks(
+        &self,
+        ptr: *const u8,
+        len: usize,
+    ) -> crate::component::runtime::OutputMarks {
+        use crate::component::runtime::OutputMarks;
+        let Some(df) = self.dataflow.as_ref() else {
+            return OutputMarks::None;
+        };
+        let p = ptr as usize;
+        let comb = self.comb_values.as_ptr() as usize;
+        let ff = self.ff_values.as_ptr() as usize;
+        let (table, a) = if (comb..comb + self.comb_values.len()).contains(&p) {
+            (&df.plan.comb_marked, p - comb)
+        } else if (ff..ff + self.ff_values.len()).contains(&p) {
+            (&df.plan.ff_marked, p - ff)
+        } else {
+            return OutputMarks::All;
+        };
+        let mut dirty = vec![0u64; self.dataflow_dirty.borrow().len()];
+        mark_readers(table, &mut dirty, a, a + len);
+        OutputMarks::Words(
+            dirty
+                .iter()
+                .enumerate()
+                .filter(|(_, bits)| **bits != 0)
+                .map(|(w, bits)| (w as u32, *bits))
+                .collect(),
+        )
+    }
+
     /// Mark the readers of `len` bytes stored at `ptr`, in whichever buffer
     /// holds them; anywhere else marks everything.
     pub(crate) fn dataflow_mark_ptr(&self, ptr: *const u8, len: usize) {
@@ -1227,8 +1280,8 @@ impl Ir {
                     }
                 }
             }
-            for child in &module.children {
-                if let Some(n) = find(child, addr, &format!("{prefix}{}.", child.name)) {
+            for child in module.children() {
+                if let Some(n) = find(&child, addr, &format!("{prefix}{}.", child.name)) {
                     return Some(n);
                 }
             }

@@ -307,14 +307,14 @@ fn find_var_at_offset(
             }
         }
     }
-    for child in &module.children {
+    for child in module.children() {
         let child_prefix = if prefix.is_empty() {
             format!("{}", child.name)
         } else {
             format!("{}.{}", prefix, child.name)
         };
         if let Some(name) =
-            find_var_at_offset(child, buf_base, buf_len, target_offset, &child_prefix)
+            find_var_at_offset(&child, buf_base, buf_len, target_offset, &child_prefix)
         {
             return Some(name);
         }
@@ -463,8 +463,8 @@ impl DualSimulator {
             "variable sets differ between the arms",
         );
         assert_eq!(
-            jit.children.len(),
-            interp.children.len(),
+            jit.children().count(),
+            interp.children().count(),
             "child module counts differ between the arms",
         );
         // Storage the fusion pass retired is never written again, and the two
@@ -520,8 +520,8 @@ impl DualSimulator {
                 }
             }
         }
-        for (jc, ic) in jit.children.iter().zip(interp.children.iter()) {
-            self.compare_vars_recursive(jc, ic);
+        for (jc, ic) in jit.children().zip(interp.children()) {
+            self.compare_vars_recursive(&jc, &ic);
         }
     }
 

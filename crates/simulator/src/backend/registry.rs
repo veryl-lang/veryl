@@ -77,7 +77,7 @@ fn chunk_fingerprint(
 /// the comb list). Token- and pointer-agnostic like `chunk_fingerprint`.
 pub(crate) fn comb_list_fingerprint(
     use_4state: bool,
-    stmts: &[ProtoStatement],
+    stmts: &(impl Hash + ?Sized),
     extra: u128,
 ) -> u128 {
     let mut h = Fp128::new();

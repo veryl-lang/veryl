@@ -89,6 +89,20 @@ struct OutputBinding {
     // (moves with `ports` Vec growth), so it stays an index lookup.
     src_words: *const u64,
     src_mask: *const u64,
+    /// The dataflow cells reading `dest`, resolved once the design is built.
+    marks: OutputMarks,
+}
+
+/// What an output's change marks for the dataflow settle.
+#[derive(Default)]
+pub(crate) enum OutputMarks {
+    /// No dataflow settle, or not resolved yet.
+    #[default]
+    None,
+    /// The destination lies outside the design's storage: mark every cell.
+    All,
+    /// The dirty words of its readers and their bits.
+    Words(Box<[(u32, u64)]>),
 }
 
 impl OutputBinding {
@@ -102,6 +116,7 @@ impl OutputBinding {
             width: target.width,
             src_words: std::ptr::null(),
             src_mask: std::ptr::null(),
+            marks: OutputMarks::None,
         }
     }
 }
@@ -880,6 +895,31 @@ impl RuntimeComponent {
     /// the same edge's RTL saw pre-edge values (NBA semantics). Returns
     /// true when a stored value changed (the caller marks comb dirty).
     pub fn apply_outputs(&mut self, use_4state: bool) -> bool {
+        let mut all = false;
+        self.apply_outputs_marking(use_4state, &mut [], &mut all)
+    }
+
+    /// Resolve each output's `OutputMarks` through `resolve`, given its
+    /// storage and length.
+    pub(crate) fn resolve_output_marks(
+        &mut self,
+        use_4state: bool,
+        resolve: impl Fn(*const u8, usize) -> OutputMarks,
+    ) {
+        for out in &mut self.outputs {
+            let len = out.native_bytes * if use_4state { 2 } else { 1 };
+            out.marks = resolve(out.dest, len);
+        }
+    }
+
+    /// `apply_outputs`, setting in `dirty` the readers of each output whose
+    /// value changed; `all` when one asks to mark every cell.
+    pub fn apply_outputs_marking(
+        &mut self,
+        use_4state: bool,
+        dirty: &mut [u64],
+        all: &mut bool,
+    ) -> bool {
         let mut wrote = false;
         for out in &mut self.outputs {
             if !self.host.output_dirty_idx(out.idx) {
@@ -913,6 +953,19 @@ impl RuntimeComponent {
                 }
                 changed
             };
+            if changed {
+                match &out.marks {
+                    OutputMarks::None => {}
+                    OutputMarks::All => *all = true,
+                    OutputMarks::Words(words) => {
+                        for &(w, bits) in words.iter() {
+                            if let Some(d) = dirty.get_mut(w as usize) {
+                                *d |= bits;
+                            }
+                        }
+                    }
+                }
+            }
             wrote |= changed;
         }
         self.host.clear_output_dirty();

@@ -85,6 +85,9 @@ pub struct Module {
     /// value here is a duplication artifact in the simulator IR assembly.
     /// Exposed for regression tests.
     pub nontrivial_comb_scc: usize,
+    /// See `derived_clock::master_cone`; run instead of a full settle when
+    /// only the master clocks changed.
+    pub master_cone: Option<Vec<Statement>>,
     /// Dataflow settle (off under `VERYL_DATAFLOW=0`); see `opt::dataflow`.
     /// `None` keeps `settle_comb` on the per-chunk Cranelift loop.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
@@ -160,6 +163,8 @@ pub struct ProtoModule {
     pub derived_clock_schedule: DerivedClockSchedule,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
+    /// See `Module::master_cone`.
+    pub master_cone: Option<ProtoStatements>,
     /// See `Module::dataflow`.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// See `Module::whole_events`.  Built in `conv()`, shared
@@ -267,59 +272,8 @@ fn fill_buffers_recursive(
         }
     }
 
-    for child in &module_meta.children {
+    for child in module_meta.children.iter() {
         fill_buffers_recursive(child, ff_values, comb_values, use_4state);
-    }
-}
-
-fn create_variables_recursive(
-    module_meta: &ModuleVariableMeta,
-    ff_base: *mut u8,
-    comb_base: *mut u8,
-) -> ModuleVariables {
-    let mut variables = HashMap::default();
-
-    for (id, meta) in &module_meta.variable_meta {
-        let mut current_values: Vec<*mut u8> = vec![];
-        let mut next_values: Vec<*mut u8> = vec![];
-
-        for element in &meta.elements {
-            let current = unsafe {
-                let base = if element.is_ff() { ff_base } else { comb_base };
-                base.add(element.current_offset() as usize)
-            };
-            current_values.push(current);
-
-            if element.is_ff() {
-                let next = unsafe { ff_base.add(element.next_offset as usize) };
-                next_values.push(next);
-            }
-        }
-
-        variables.insert(
-            *id,
-            Variable {
-                path: meta.path.clone(),
-                r#type: meta.r#type.clone(),
-                width: meta.width,
-                native_bytes: meta.native_bytes,
-                current_values,
-                next_values,
-                string_width: meta.string_width,
-            },
-        );
-    }
-
-    let children = module_meta
-        .children
-        .iter()
-        .map(|child| create_variables_recursive(child, ff_base, comb_base))
-        .collect();
-
-    ModuleVariables {
-        name: module_meta.name,
-        variables,
-        children,
     }
 }
 
@@ -341,8 +295,7 @@ impl ProtoModule {
         let ff_base = ff_values.as_mut_ptr();
         let comb_base = comb_values.as_mut_ptr();
 
-        let module_variables =
-            create_variables_recursive(&self.module_variable_meta, ff_base, comb_base);
+        let module_variables = ModuleVariables::new(&self.module_variable_meta, ff_base, comb_base);
 
         let ff_ptr = ff_values.as_mut_ptr();
         let comb_ptr = comb_values.as_mut_ptr();
@@ -471,6 +424,15 @@ impl ProtoModule {
             inst_layout: self.inst_layout.clone(),
             derived_clock_schedule: self.derived_clock_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
+            master_cone: self.master_cone.as_ref().map(|c| {
+                batch_compiled_statements(c.to_statements(
+                    ff_ptr,
+                    ff_len,
+                    comb_ptr,
+                    comb_len,
+                    self.use_4state,
+                ))
+            }),
             dataflow: self.dataflow.clone(),
             #[cfg(not(target_family = "wasm"))]
             dataflow_interp: self
@@ -508,12 +470,12 @@ impl ProtoModule {
                     x.instantiate(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state)
                 })
                 .collect(),
-            tb_variables: create_variables_recursive(
+            tb_variables: ModuleVariables::new(
                 &ModuleVariableMeta {
                     name: self.name,
                     hierarchy: vec![],
                     variable_meta: self.tb_variables.clone(),
-                    children: vec![],
+                    children: Default::default(),
                 },
                 ff_base,
                 comb_base,
@@ -626,7 +588,7 @@ fn validate_meta_offsets(
             }
         }
     }
-    for child in &meta.children {
+    for child in meta.children.iter() {
         validate_meta_offsets(child, ff_bytes, comb_bytes, use_4state);
     }
 }
@@ -1581,6 +1543,7 @@ fn run_comb_pipeline(
 
     stage.mark("required_passes");
     let unified_sorted = dce_aggressive(unified_sorted);
+    stage.mark("dce");
 
     // Dead Variable DCE: drop full-width `Assign`s whose dst has zero
     // consumers anywhere in this module's pre-JIT comb stmts and every
@@ -1652,6 +1615,7 @@ fn run_comb_pipeline(
     let cone_reorder = crate::ir::opt::dataflow::enabled()
         && crate::ir::opt::dataflow::decline_reason(&context.config, required_comb_passes)
             .is_none();
+    stage.mark("dead_var_dce");
     let mut fusion_alt: Option<(Vec<ProtoStatement>, Vec<isize>)> = None;
     let (mut unified_sorted, mut fused_offsets) = if comb_fusion::enabled(context.config.use_4state)
     {
@@ -1660,20 +1624,40 @@ fn run_comb_pipeline(
             externals.extend(extra.iter().copied());
         }
         let sel = comb_fusion::sel_enabled();
-        if sel && cone_reorder && cone_inputs.is_some() {
+        let events: &HashMap<Event, Vec<ProtoStatement>> = all_event_statements;
+        if sel && cone_reorder && cone_inputs.is_some() && cfg!(test) {
+            // Test knobs live in this thread's locals.
             fusion_alt = Some(comb_fusion::inline_single_readers(
                 unified_sorted.clone(),
-                all_event_statements,
+                events,
                 &externals,
                 false,
             ));
+            comb_fusion::inline_single_readers(unified_sorted, events, &externals, sel)
+        } else if sel && cone_reorder && cone_inputs.is_some() {
+            // The two candidates are independent; the slower one sets the pace.
+            let base = unified_sorted.clone();
+            let (alt, main) = std::thread::scope(|sc| {
+                let alt = std::thread::Builder::new()
+                    .stack_size(crate::IR_WALK_STACK_BYTES)
+                    .spawn_scoped(sc, || {
+                        comb_fusion::inline_single_readers(base, events, &externals, false)
+                    })
+                    .expect("spawn fusion");
+                let main =
+                    comb_fusion::inline_single_readers(unified_sorted, events, &externals, sel);
+                (alt.join().expect("fusion thread"), main)
+            });
+            fusion_alt = Some(alt);
+            main
+        } else {
+            comb_fusion::inline_single_readers(unified_sorted, events, &externals, sel)
         }
-        comb_fusion::inline_single_readers(unified_sorted, all_event_statements, &externals, sel)
     } else {
         (unified_sorted, Vec::new())
     };
 
-    stage.mark("dce+fusion");
+    stage.mark("fusion");
 
     // Cone reorder: cluster each qualifying module subtree into few
     // contiguous runs.  A dataflow node takes in whatever a sequential chain
@@ -1695,8 +1679,14 @@ fn run_comb_pipeline(
     let mut chosen_plan: Option<Option<cone_order::ConeOrder>> = None;
     if let (Some(ci), Some((base_stmts, base_off))) = (cone_inputs, fusion_alt.take()) {
         let segs = |p: &Option<cone_order::ConeOrder>| p.as_ref().map(|o| o.segments);
-        let p_sel = cone_order::cone_order(&unified_sorted, ci);
-        let p_base = cone_order::cone_order(&base_stmts, ci);
+        let (p_sel, p_base) = std::thread::scope(|sc| {
+            let base = std::thread::Builder::new()
+                .stack_size(crate::IR_WALK_STACK_BYTES)
+                .spawn_scoped(sc, || cone_order::cone_order(&base_stmts, ci))
+                .expect("spawn cone order");
+            let sel = cone_order::cone_order(&unified_sorted, ci);
+            (sel, base.join().expect("cone order thread"))
+        });
         let retired = base_stmts.len().saturating_sub(unified_sorted.len());
         let retired_frac = retired as f64 / base_stmts.len().max(1) as f64;
         let keep_sel = comb_fusion::adopt_field_defs(segs(&p_sel), segs(&p_base), retired_frac);
@@ -1828,6 +1818,9 @@ fn run_comb_pipeline(
         layout,
         nontrivial_comb_scc,
         vsplit_temp_bytes,
+        gate_comb: Default::default(),
+        master_cone: Default::default(),
+        layout_meta: Default::default(),
     })
 }
 
@@ -4667,7 +4660,7 @@ fn build_offset_path_map(meta: &ModuleVariableMeta) -> HashMap<VarOffset, String
                 out.insert(element.current, display);
             }
         }
-        for child in &meta.children {
+        for child in meta.children.iter() {
             walk(child, &mod_prefix, out);
         }
     }
@@ -5959,7 +5952,7 @@ impl Conv<&air::Module> for ProtoModule {
         context.scope_contexts.push(scope);
 
         let mut all_event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
-        let mut all_comb_statements: Vec<ProtoStatement> = vec![];
+        let mut all_comb_statements = super::declaration::CombList::default();
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut nested_derived_clock_candidates: Vec<crate::ir::EdgeCandidate> = vec![];
@@ -6030,15 +6023,18 @@ impl Conv<&air::Module> for ProtoModule {
         // expanded on demand by `analyze_dependency` Phase 2 when fine-grained
         // ordering is needed.  This eliminates the false SCC artifact from
         // keeping both CB and its originals in the parent's `unified` list.
-        let mut unified: Vec<ProtoStatement> = all_comb_statements
-            .into_iter()
-            .chain(all_post_comb_fns)
-            .collect();
+        // Kept as its parts, which a reused subtree shares with the cache,
+        // until the miss path needs to own it.
+        let mut unified_parts = all_comb_statements;
+        unified_parts.extend(all_post_comb_fns);
 
         // Before the expansion below splices a reused child's tree in; see
         // `comb_pipeline_key` for why this still pins the pipeline's input.
-        let unified_fp =
-            crate::backend::registry::comb_list_fingerprint(context.config.use_4state, &unified, 0);
+        let unified_fp = crate::backend::registry::comb_list_fingerprint(
+            context.config.use_4state,
+            &unified_parts,
+            0,
+        );
 
         // Baked inst-chunk artifacts would freeze their spans into rigid
         // units (see `expand_compiled_blocks`) — expand them BEFORE the key
@@ -6193,6 +6189,9 @@ impl Conv<&air::Module> for ProtoModule {
                         &mut meta_units,
                     );
                 }
+                // The maps iterate in their insertion order, which differs
+                // between tests sharing a DUT; the key must not.
+                meta_units.sort_unstable();
                 Some(meta_units)
             } else {
                 None
@@ -6293,6 +6292,7 @@ impl Conv<&air::Module> for ProtoModule {
             // unfuse the comb list, run the pipeline once (it DCEs the events
             // in place) and publish.
             other => {
+                let mut unified = unified_parts.into_vec();
                 if comb_layout::enabled(context.config.use_4state) {
                     comb_layout::expand_compiled_blocks(&mut unified);
                 }
@@ -6384,8 +6384,9 @@ impl Conv<&air::Module> for ProtoModule {
                 comb_layout::apply_to_stmts(stmts, &sched);
             }
             comb_layout::translate_meta_map(&mut variable_meta, &sched);
+            let mut memo = cached.layout_meta.lock().unwrap();
             for child in &mut all_child_modules {
-                comb_layout::translate_meta_tree(child, &sched);
+                comb_layout::translate_meta_shared(child, &sched, &mut memo);
             }
             for (_, off, _, _, _) in &mut nested_derived_clock_candidates {
                 *off = sched.translate_off(*off);
@@ -6603,6 +6604,9 @@ impl Conv<&air::Module> for ProtoModule {
             let (mut block_vo, mut ranges) =
                 crate::ir::opt::dead_var_dce::collect_localize_info(&event_slices);
             ranges.extend(cached.localize_comb_ranges.iter().copied());
+            // The events come in map order, which differs between tests
+            // sharing a DUT; the dataflow cache key hashes this list.
+            ranges.sort_unstable();
             // Protect externally-visible comb offsets (mirrors the
             // dead_var_dce protect set): a parent module's comb or a
             // testbench reads these from comb_values, bypassing any local.
@@ -6941,7 +6945,7 @@ impl Conv<&air::Module> for ProtoModule {
             name: src.name,
             hierarchy: vec![],
             variable_meta,
-            children: all_child_modules,
+            children: Arc::new(all_child_modules),
         };
 
         let inst_layout = InstLayout::build_from_top(&module_variable_meta);
@@ -6982,6 +6986,38 @@ impl Conv<&air::Module> for ProtoModule {
                 &negedge_inputs,
             )
         };
+        let master_cone = {
+            let mut masters: Vec<isize> = input_clock_offsets
+                .iter()
+                .filter(|(_, v)| derived_clock_schedule.master_input_clocks.contains(v))
+                .map(|(o, _)| o.raw())
+                .collect();
+            masters.sort_unstable();
+            let mut slot = match cached.master_cone.lock() {
+                Ok(slot) => slot,
+                // A test that panicked while holding it may have left it half
+                // built; start over rather than fail every later test.
+                Err(poisoned) => {
+                    let mut slot = poisoned.into_inner();
+                    *slot = None;
+                    slot
+                }
+            };
+            let cone = match slot.as_ref() {
+                Some((key, cone)) if *key == masters => cone.clone(),
+                _ => {
+                    let cone = crate::ir::derived_clock::master_cone(
+                        &derived_clock_schedule,
+                        &pre_jit_stmts,
+                        &input_clock_offsets,
+                    );
+                    *slot = Some((masters, cone.clone()));
+                    cone
+                }
+            };
+            drop(slot);
+            cone.map(|stmts| try_jit(context, stmts))
+        };
         for &(copy, source) in &derived_clock_schedule.aliases {
             if let Some(stmts) = all_event_statements.remove(&Event::clock(copy)) {
                 event_comb_writes.remove(&Event::clock(copy));
@@ -6997,18 +7033,26 @@ impl Conv<&air::Module> for ProtoModule {
         let mut event_gates: HashMap<Event, Vec<crate::ir::opt::event_gate::EventGate>> =
             HashMap::default();
         let mut event_gate_flags: Vec<u32> = Vec::new();
-        if let Some(ci) = cached.cone_inputs.as_deref()
+        if let Some(ci) = cached.cone_inputs.as_ref()
             && crate::ir::opt::event_gate::enabled()
         {
-            // The comb walk dwarfs planning one event, so share it.
-            let mut comb_context = None;
+            let mut comb_context = match cached.gate_comb.lock() {
+                Ok(slot) => slot,
+                // A test that panicked while holding it may have left it half
+                // built; start over rather than fail every later test.
+                Err(poisoned) => {
+                    let mut slot = poisoned.into_inner();
+                    *slot = None;
+                    slot
+                }
+            };
             for (event, stmts) in all_event_statements.iter() {
                 if !matches!(event, Event::Clock(..)) {
                     continue;
                 }
                 let comb_context = comb_context.get_or_insert_with(|| {
                     crate::ir::opt::event_gate::CombContext::new(
-                        ci,
+                        Arc::clone(ci),
                         &pre_jit_stmts[..],
                         &comb_touched_offsets,
                     )
@@ -7089,11 +7133,16 @@ impl Conv<&air::Module> for ProtoModule {
         #[cfg(not(target_family = "wasm"))]
         let dataflow_key =
             crate::ir::opt::dataflow::cache_key(key, &context.config, localize_info.as_ref());
+        // The claim lives to the end of the build, past `cache_put`, so a
+        // test building the same DUT meanwhile waits for this settle.
         #[cfg(not(target_family = "wasm"))]
-        let dataflow_cached = if dataflow_wanted {
-            crate::ir::opt::dataflow::cache_get(dataflow_key)
+        let (dataflow_cached, _dataflow_claim) = if dataflow_wanted {
+            match crate::ir::opt::dataflow::cache_get(dataflow_key) {
+                Ok(rt) => (Some(rt), None),
+                Err(claim) => (None, claim),
+            }
         } else {
-            None
+            (None, None)
         };
         #[cfg(not(target_family = "wasm"))]
         let dataflow_plan: Option<crate::ir::opt::dataflow::DataflowPlan> =
@@ -7130,6 +7179,8 @@ impl Conv<&air::Module> for ProtoModule {
         let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !size_ok {
             HashMap::default()
         } else {
+            #[cfg(not(target_family = "wasm"))]
+            crate::backend::aot_c::emit::begin_event_batch();
             let ctx = CompileCtx {
                 config: &context.config,
                 use_4state: context.config.use_4state,
@@ -7147,6 +7198,8 @@ impl Conv<&air::Module> for ProtoModule {
                     map.insert(event.clone(), whole);
                 }
             }
+            #[cfg(not(target_family = "wasm"))]
+            crate::backend::aot_c::emit::finish_event_batch(context.config.aot_c_async);
             map
         };
         #[cfg(not(target_family = "wasm"))]
@@ -7249,6 +7302,15 @@ impl Conv<&air::Module> for ProtoModule {
                 // The general event chunker below can recombine that write
                 // with a following guard, which then polls stale comb state.
                 if event.is_initial() || tb_ff_store {
+                    let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
+                    return (event, stmts);
+                }
+                // A whole-event function that already loaded runs every fire,
+                // so per-statement code for it would never run.
+                if !context.config.aot_c_validate
+                    && whole_events.get(&event).is_some_and(|w| w.ready())
+                {
+                    event_gates.remove(&event);
                     let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
                     return (event, stmts);
                 }
@@ -7423,6 +7485,7 @@ impl Conv<&air::Module> for ProtoModule {
             inst_layout,
             derived_clock_schedule,
             nontrivial_comb_scc,
+            master_cone,
             dataflow,
             whole_events,
             external_components: all_external_components,
@@ -7641,7 +7704,7 @@ fn collect_reset_offsets(
 
 fn collect_reset_offsets_recursive(m: &ModuleVariableMeta, out: &mut crate::HashSet<VarOffset>) {
     collect_reset_offsets(&m.variable_meta, out);
-    for child in &m.children {
+    for child in m.children.iter() {
         collect_reset_offsets_recursive(child, out);
     }
 }

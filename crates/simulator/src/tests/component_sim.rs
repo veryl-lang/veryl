@@ -1352,6 +1352,46 @@ fn component_reads_dut_internal_signal() {
 }
 
 #[test]
+fn a_component_write_reaches_its_dataflow_readers() {
+    // The settle wakes only the readers of what a component wrote, so a
+    // reader the marks miss would keep a stale value.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+
+        var d: logic<8>;
+        var q: logic<8>;
+        var o: logic<8>;
+        var other: logic<8>;
+
+        inst m: $comp::mirror ( clk, d, q );
+        assign o = q + 1;
+        assign other = d + 2;
+
+        initial {
+            d = 1;
+            clk.next();
+            $assert(o == 2, "first write");
+            d = 5;
+            clk.next();
+            $assert(o == 6, "second write");
+            $assert(other == 7, "untouched reader");
+            $finish();
+        }
+    }
+    "#;
+    let results = run_component_test_configured(code, "comp_test", |config| {
+        config.aot_c_min_stmts = 0;
+        config.aot_c_async = false;
+    });
+    assert_all_pass(&results);
+}
+
+#[test]
 fn unchanged_component_output_is_not_a_write() {
     // A component writing the same output value again leaves the design
     // settled; a changed value, including an X/Z-only change, is a write.

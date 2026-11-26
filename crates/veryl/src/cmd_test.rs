@@ -163,6 +163,45 @@ fn save_test_timings(
 
 pub struct CmdTest {
     opt: OptTest,
+    /// The process exits right after the command: the IR and the builds are
+    /// left to the OS instead of freed one node at a time.
+    leave_builds_to_os: bool,
+}
+
+/// `value`, freed on the way out unless the run leaves it to the OS.
+struct Teardown<T> {
+    value: Option<T>,
+    leave: bool,
+}
+
+impl<T> Teardown<T> {
+    fn new(value: T, leave: bool) -> Self {
+        Self {
+            value: Some(value),
+            leave,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for Teardown<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.value.as_ref().unwrap()
+    }
+}
+
+impl<T> std::ops::DerefMut for Teardown<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.value.as_mut().unwrap()
+    }
+}
+
+impl<T> Drop for Teardown<T> {
+    fn drop(&mut self) {
+        if self.leave {
+            std::mem::forget(self.value.take());
+        }
+    }
 }
 
 struct NativeTestJob {
@@ -236,7 +275,16 @@ impl Drop for DetachPendingCompiles {
 
 impl CmdTest {
     pub fn new(opt: OptTest) -> Self {
-        Self { opt }
+        Self {
+            opt,
+            leave_builds_to_os: false,
+        }
+    }
+
+    /// For a process that exits once the command returns.
+    pub fn leave_builds_to_os(mut self) -> Self {
+        self.leave_builds_to_os = true;
+        self
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
@@ -299,12 +347,15 @@ impl CmdTest {
                 None
             };
 
-        let mut ir = veryl_analyzer::ir::Ir::default();
+        // Freeing the design's IR and the simulation builds one node at a
+        // time takes seconds on a large design.
+        let leave = self.leave_builds_to_os;
+        let mut ir = Teardown::new(veryl_analyzer::ir::Ir::default(), leave);
         build.exec(
             metadata,
             true,
             false,
-            Some(&mut ir),
+            Some(&mut *ir),
             self.opt.test.as_deref(),
             &combined_defines,
             EmitPolicy::SkipIfNativeOnly,
@@ -502,6 +553,16 @@ impl CmdTest {
                 })
                 .collect();
             let session = BuildSession::new(&ir, &config, &tops);
+            // Tests left to build per top: a worker keeps a converted top only
+            // while another test still needs it, so a run's memory follows the
+            // tests in flight rather than every top it has seen.
+            let mut tops_left: std::collections::HashMap<
+                resource_table::StrId,
+                std::sync::atomic::AtomicUsize,
+            > = Default::default();
+            for &top in &tops {
+                *tops_left.entry(top).or_default().get_mut() += 1;
+            }
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let resource_snapshot = resource_table::export_tables();
             // `SimulatorError` snapshots source text from `text_table` eagerly
@@ -521,6 +582,7 @@ impl CmdTest {
                 let text_snap = &text_snapshot;
                 let print_lock = &print_lock;
                 let reports = &reports;
+                let tops_left = &tops_left;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
                         // Workers conv and emit user designs (see
@@ -559,6 +621,17 @@ impl CmdTest {
                                         metadata_ref,
                                         &mut thread_cache,
                                     );
+                                    let top = pending.top.or_else(|| {
+                                        resource_table::get_str_id(pending.test_name.clone())
+                                    });
+                                    if let Some(top) = top
+                                        && tops_left.get(&top).is_some_and(|n| {
+                                            n.fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
+                                                == 1
+                                        })
+                                    {
+                                        thread_cache.release(top);
+                                    }
                                     #[cfg(feature = "profile")]
                                     let build_el = t_build.elapsed();
                                     #[cfg(feature = "profile")]
@@ -679,6 +752,9 @@ impl CmdTest {
                                     use std::io::Write;
                                     let _ = std::io::stdout().flush();
                                 }
+                                if leave {
+                                    std::mem::forget(thread_cache);
+                                }
                                 (tally_pass, tally_fail, tally_waves, tally_timings)
                             })
                             .expect("spawn test worker")
@@ -687,6 +763,9 @@ impl CmdTest {
                 handles.into_iter().map(|h| h.join().unwrap()).collect()
             });
 
+            if leave {
+                std::mem::forget(session);
+            }
             // Workers already printed each result as it finished; fold their
             // tallies and register generated waveforms (needs `&mut metadata`).
             let mut fresh_timings: Vec<(String, f64)> = Vec::new();

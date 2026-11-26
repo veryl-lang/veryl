@@ -61,6 +61,8 @@ pub struct Simulator {
     /// The end requests and assertion failures raised so far.
     pub status: SimStatus,
     comb_dirty: bool,
+    /// Rising edges settled through the master clocks' cone alone.
+    pub(crate) master_cone_settles: u64,
     pub profile: SimProfile,
     /// Which testbench statements are known not to invalidate the comb.
     /// Empty (the default) settles after every testbench statement.
@@ -164,7 +166,7 @@ fn comb_element_cover(ir: &Ir) -> Vec<(usize, usize, usize)> {
     let comb_base = ir.comb_values.as_ptr() as usize;
     let comb_end = comb_base + ir.comb_values.len();
     let mut v: Vec<(usize, usize, usize)> = Vec::new();
-    let mut stack = vec![&ir.module_variables];
+    let mut stack = vec![ir.module_variables.clone()];
     while let Some(vars) = stack.pop() {
         for var in vars.variables.values() {
             // A 4-state element stores its mask bytes after the payload.
@@ -183,9 +185,7 @@ fn comb_element_cover(ir: &Ir) -> Vec<(usize, usize, usize)> {
                 }
             }
         }
-        for child in &vars.children {
-            stack.push(child);
-        }
+        stack.extend(vars.children());
     }
     v.sort_unstable();
     let mut out: Vec<(usize, usize, usize)> = Vec::with_capacity(v.len());
@@ -496,6 +496,14 @@ fn run_gate(
     }
 }
 
+/// `VERYL_MASTER_CONE_CHECK=1`: follow every cone settle with a full settle
+/// and fail on any difference.
+fn master_cone_check() -> bool {
+    static ON: std::sync::LazyLock<bool> =
+        std::sync::LazyLock::new(|| env::var("VERYL_MASTER_CONE_CHECK").is_ok());
+    *ON
+}
+
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let n_derived = ir.derived_clock_schedule.clocks.len();
@@ -510,6 +518,7 @@ impl Simulator {
             mask_cache: MaskCache::default(),
             status: SimStatus::default(),
             comb_dirty: true,
+            master_cone_settles: 0,
             profile: Default::default(),
             tb_dirty: Default::default(),
             last_event: None,
@@ -626,9 +635,9 @@ impl Simulator {
                         return Some(format!("{prefix}{}", v.path));
                     }
                 }
-                for child in &module.children {
+                for child in module.children() {
                     if let Some(n) =
-                        find_var_by_ptr(child, ptr, &format!("{prefix}{}.", child.name))
+                        find_var_by_ptr(&child, ptr, &format!("{prefix}{}.", child.name))
                     {
                         return Some(n);
                     }
@@ -664,8 +673,8 @@ impl Simulator {
                 for var in module.variables.values() {
                     eprintln!("[step_watch_list] {prefix}{}", var.path);
                 }
-                for child in &module.children {
-                    dump_tree(child, &format!("{prefix}{}.", child.name));
+                for child in module.children() {
+                    dump_tree(&child, &format!("{prefix}{}.", child.name));
                 }
             }
             dump_tree(&ret.ir.module_variables, "");
@@ -1072,10 +1081,10 @@ impl Simulator {
     ) -> Option<Value> {
         // If target has multiple segments, try matching child module by name first
         if target.0.len() > 1 {
-            for child in &module.children {
+            for child in module.children() {
                 if child.name == target.0[0] {
                     let sub = VarPath::from_slice(&target.0[1..]);
-                    if let Some(v) = Self::find_var_in_module(child, &sub, use_4state) {
+                    if let Some(v) = Self::find_var_in_module(&child, &sub, use_4state) {
                         return Some(v);
                     }
                 }
@@ -1110,9 +1119,9 @@ impl Simulator {
         out: &mut Vec<(*const u8, usize, u32)>,
     ) {
         if let Some((head, rest)) = target.split_once('.') {
-            for child in &module.children {
+            for child in module.children() {
                 if child.name.to_string() == head {
-                    Self::collect_var_meta_in_module(child, rest, elem, out);
+                    Self::collect_var_meta_in_module(&child, rest, elem, out);
                 }
             }
         }
@@ -1369,6 +1378,9 @@ impl Simulator {
         }
         let mut components = build_components(&self.ir, seed_base, test_name)?;
         for c in &mut components {
+            c.resolve_output_marks(self.ir.use_4state, |ptr, len| {
+                self.ir.dataflow_output_marks(ptr, len)
+            });
             c.on_init();
             c.drain_logs();
             if c.apply_outputs(self.ir.use_4state) && self.dump.is_some() {
@@ -1416,20 +1428,28 @@ impl Simulator {
         }
         let mut components = std::mem::take(&mut self.components);
         let mut wrote = false;
+        let ir = &self.ir;
+        let mut all = false;
         for c in &mut components {
             if c.listens_to(event) {
                 c.fire(event, self.time);
                 c.drain_logs();
-                wrote |= c.apply_outputs(self.ir.use_4state);
+                wrote |= c.apply_outputs_marking(
+                    ir.use_4state,
+                    &mut ir.dataflow_dirty.borrow_mut(),
+                    &mut all,
+                );
                 if c.host.failed() || c.host.finish_requested() {
                     self.status.request_stop();
                 }
             }
         }
         self.components = components;
+        if all {
+            self.ir.dataflow_mark_all();
+        }
         if wrote {
             self.comb_dirty = true;
-            self.ir.dataflow_mark_all();
             // A waveform's gate hears about writes only through the log.  The
             // test is what keeps a run without one off this path entirely.
             if self.dump.is_some() {
@@ -1861,10 +1881,36 @@ impl Simulator {
 
         // Masters high → gated-clock exprs see the rising edge.  One settle
         // covers both this and whatever the previous step left stale.
+        // Raising a master marks the comb dirty; what matters is whether
+        // anything else changed since the last settle.
+        let settled_before = !self.comb_dirty;
         for &id in &masters {
             self.set_input_clock_bit(id, 1);
         }
-        self.do_settle_comb();
+        let coned = settled_before
+            && !masters.is_empty()
+            && self
+                .ir
+                .settle_master_cone(&mut self.mask_cache, &mut self.status);
+        if !coned {
+            self.do_settle_comb();
+        } else {
+            self.master_cone_settles += 1;
+            if master_cone_check() {
+                let after_cone = self.ir.comb_values.to_vec();
+                self.do_settle_comb();
+                if let Some(i) = after_cone
+                    .iter()
+                    .zip(self.ir.comb_values.iter())
+                    .position(|(a, b)| a != b)
+                {
+                    panic!(
+                        "master cone diverges from the full settle at comb byte {i} ({:?})",
+                        self.ir.var_name_at(crate::ir::VarOffset::Comb(i as isize))
+                    );
+                }
+            }
+        }
         if watch_enabled {
             self.dump_watch("after_settle");
         }
@@ -1956,11 +2002,29 @@ impl Simulator {
                 .clocks
                 .iter()
                 .any(|c| c.current_offset.is_ff() || !c.master_gated);
+        // When only derived resets can gain an edge from the commit and none
+        // reads the master, the master=0 settle below serves both.
+        let low_first = !masters.is_empty()
+            && !self.ir.derived_clock_schedule.resets_read_master
+            && self
+                .ir
+                .derived_clock_schedule
+                .clocks
+                .iter()
+                .all(|c| !c.current_offset.is_ff() && c.master_gated);
+        if low_first {
+            for &id in &masters {
+                self.set_input_clock_bit(id, 0);
+            }
+        }
+        // Whether comb reflects every event fired so far.
+        let mut settled = false;
         loop {
             if !post_commit_sources {
                 break;
             }
             self.do_settle_comb();
+            settled = true;
             for (i, v) in new_values.iter_mut().enumerate().take(n) {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
                 *v = self.read_derived_clock_bit(clk);
@@ -2011,12 +2075,23 @@ impl Simulator {
             // seen once, and a level that fell back re-arms.  This is also
             // what makes the loop terminate.
             self.snapshot_derived_reset_levels();
+            settled = false;
 
             iters += 1;
             debug_assert!(
                 iters <= max_iters,
                 "derived clock fixpoint exceeded n+n_rst+1 iterations (n={n}, n_rst={n_rst})",
             );
+            // `low_first` lowered the masters for the detection only: the
+            // reset fires at their high phase, where the components it stages
+            // may read comb that follows them.
+            let raised = low_first && !rst_batch.is_empty();
+            if raised {
+                for &id in &masters {
+                    self.set_input_clock_bit(id, 1);
+                }
+                self.do_settle_comb();
+            }
 
             // One event region for the whole batch: stage, evaluate every
             // domain against the pre-edge state, then commit once.
@@ -2061,15 +2136,23 @@ impl Simulator {
                 }
                 fired_mask[i] = true;
             }
+            if raised {
+                for &id in &masters {
+                    self.set_input_clock_bit(id, 0);
+                }
+            }
         }
 
         // master=0 + resettle so the prev snapshot matches the next
         // step's starting baseline.
         if !masters.is_empty() {
-            for &id in &masters {
-                self.set_input_clock_bit(id, 0);
+            if !(low_first && settled) {
+                for &id in &masters {
+                    self.set_input_clock_bit(id, 0);
+                }
+                self.do_settle_comb();
+                settled = true;
             }
-            self.do_settle_comb();
             // A clock the master inverts -- `~clk`, or a `clock_negedge`
             // whose active level `read_derived_clock_bit` inverts -- reaches
             // its active level HERE.  The pre-commit phase fires on the
@@ -2091,6 +2174,7 @@ impl Simulator {
             }
             if !fall.is_empty() {
                 self.fire_derived_clock_batch(&fall, &mut fired_mask);
+                settled = false;
             }
         }
 
@@ -2104,7 +2188,7 @@ impl Simulator {
         self.snapshot_derived_reset_levels();
 
         clear_event_write_log();
-        self.comb_dirty = true;
+        self.comb_dirty = !settled;
         if self.state_digest.is_some() {
             self.fold_state_digest();
         }

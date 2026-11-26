@@ -486,8 +486,8 @@ impl WaveDumper {
             }
         }
 
-        for child in &module_vars.children {
-            self.setup_module(child, dump_vars);
+        for child in module_vars.children() {
+            self.setup_module(&child, dump_vars);
         }
 
         self.upscope();

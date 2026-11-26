@@ -110,6 +110,11 @@ impl<'a> ProtoModuleCache<'a> {
         }
     }
 
+    /// Drop the cached conversion of `top`, once no later build needs it.
+    pub fn release(&mut self, top: StrId) {
+        self.entries.remove(&top);
+    }
+
     pub fn build_ir(&mut self, top: StrId) -> Result<Ir, SimulatorError> {
         let entry = match self.entries.entry(top) {
             Entry::Occupied(entry) => entry.into_mut(),

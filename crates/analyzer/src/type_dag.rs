@@ -255,12 +255,12 @@ impl TypeDag {
                             } else {
                                 Context::Package
                             };
-                            (Rc::new(symbol), context)
+                            (symbol, context)
                         } else {
                             (parent_symbol, parent_context)
                         };
                     let base_symbol = if let Some(symbol) = base_symbol.get_parent_component() {
-                        Rc::new(symbol)
+                        symbol
                     } else {
                         base_symbol
                     };

@@ -91,6 +91,16 @@ pub struct CombPipeline {
     /// in the FINAL storage space; the dataflow plan and the event gates
     /// attribute statements to subtrees with it.
     pub cone_inputs: Option<Arc<crate::ir::opt::owners::OwnerInputs>>,
+    /// The event gates' comb walk over `pre_jit_stmts` and `cone_inputs`,
+    /// built by the first test to plan its gates.
+    pub gate_comb: Mutex<Option<crate::ir::opt::event_gate::CombContext>>,
+    /// `derived_clock::master_cone` over `pre_jit_stmts`, keyed by the sorted
+    /// master input clock offsets it starts from.
+    #[allow(clippy::type_complexity)]
+    pub master_cone: Mutex<Option<(Vec<isize>, Option<Vec<ProtoStatement>>)>>,
+    /// Child-module meta lists translated through `layout`, shared by the
+    /// tests whose reused subtrees hand in the same lists.
+    pub layout_meta: Mutex<crate::ir::comb_layout::MetaMemo>,
 }
 
 enum Slot {

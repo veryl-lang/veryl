@@ -106,6 +106,11 @@ pub trait CompiledWhole: Send + Sync {
     fn dataflow_ff_marked(&self) -> bool {
         false
     }
+
+    /// Whether the function already runs: no dispatch will fall back.
+    fn ready(&self) -> bool {
+        false
+    }
 }
 
 #[must_use]

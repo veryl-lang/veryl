@@ -172,7 +172,9 @@ struct CachedStatements {
     ff_size: usize,
     comb_size: usize,
     event_statements: HashMap<Event, Vec<ProtoStatement>>,
-    comb_statements: Vec<ProtoStatement>,
+    /// Shared with the conversion that stored it and with every hit that
+    /// lands at the same offsets.
+    comb_statements: Arc<Vec<ProtoStatement>>,
     post_comb_fns: Vec<ProtoStatement>,
     child_modules: Vec<ModuleVariableMeta>,
     derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
@@ -194,7 +196,7 @@ enum Slot {
 /// (grandchild) internal ids; the caller re-keys them to fresh ids.
 pub struct ReusedStatements {
     pub event_statements: HashMap<Event, Vec<ProtoStatement>>,
-    pub comb_statements: Vec<ProtoStatement>,
+    pub comb_statements: crate::ir::declaration::CombList,
     pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
     pub derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
@@ -290,11 +292,16 @@ fn reloc_module_meta(
             .iter()
             .map(|(k, v)| (*k, reloc_var_meta(v, ff_delta, comb_delta)))
             .collect(),
-        children: mm
-            .children
-            .iter()
-            .map(|c| reloc_module_meta(c, ff_delta, comb_delta))
-            .collect(),
+        children: if ff_delta == 0 && comb_delta == 0 {
+            Arc::clone(&mm.children)
+        } else {
+            Arc::new(
+                mm.children
+                    .iter()
+                    .map(|c| reloc_module_meta(c, ff_delta, comb_delta))
+                    .collect(),
+            )
+        },
     }
 }
 
@@ -338,7 +345,11 @@ fn relocate_entry(
         .collect();
     ReusedStatements {
         event_statements,
-        comb_statements: reloc(&entry.comb_statements),
+        comb_statements: if zero {
+            crate::ir::declaration::CombList::shared(Arc::clone(&entry.comb_statements))
+        } else {
+            reloc_stmts(&entry.comb_statements, ff_delta, comb_delta).into()
+        },
         post_comb_fns: reloc(&entry.post_comb_fns),
         child_modules,
         derived_clock_candidates,
@@ -378,7 +389,7 @@ impl ClaimGuard {
         ff_size: usize,
         comb_size: usize,
         event_statements: &HashMap<Event, Vec<ProtoStatement>>,
-        comb_statements: &[ProtoStatement],
+        comb_statements: Arc<Vec<ProtoStatement>>,
         post_comb_fns: &[ProtoStatement],
         child_modules: &[ModuleVariableMeta],
         derived_clock_candidates: &[crate::ir::EdgeCandidate],
@@ -390,7 +401,7 @@ impl ClaimGuard {
             ff_size,
             comb_size,
             event_statements: event_statements.clone(),
-            comb_statements: comb_statements.to_vec(),
+            comb_statements,
             post_comb_fns: post_comb_fns.to_vec(),
             child_modules: child_modules.to_vec(),
             derived_clock_candidates: derived_clock_candidates.to_vec(),

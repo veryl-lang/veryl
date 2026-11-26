@@ -74,6 +74,9 @@ pub struct DerivedClockSchedule {
     /// `(copy, source)` for a derived clock that only copies another clock:
     /// its flops fire on the source's event, sampling the same values.
     pub aliases: Vec<(VarId, VarId)>,
+    /// A derived reset's comb reads a master input clock, so its level
+    /// differs between the master's two phases.
+    pub resets_read_master: bool,
 }
 
 impl DerivedClockSchedule {
@@ -201,37 +204,168 @@ pub fn build_schedule(
         source.is_none()
     });
 
-    let mut master_set: HashSet<VarId> = HashSet::default();
-    for clk in &mut clocks {
-        if clk.current_offset.is_ff() {
-            continue;
-        }
-        // Per-clock closure walk so each clock learns whether ITS
-        // expression reaches a master input (→ ICG semantics).
-        let mut local_dep: HashSet<usize> = HashSet::default();
-        let mut local_master: HashSet<VarId> = HashSet::default();
-        collect_comb_closure(
-            clk.current_offset,
-            pre_jit_stmts,
-            &output_to_writer,
-            input_clock_offsets,
-            &mut local_dep,
-            &mut local_master,
-        );
-        clk.master_gated = !local_master.is_empty();
-        master_set.extend(local_master);
-    }
-    let mut master_input_clocks: SmallVec<[VarId; 4]> = SmallVec::new();
-    for vid in master_set {
-        master_input_clocks.push(vid);
-    }
+    let master_input_clocks = mark_master_gated(
+        &mut clocks,
+        pre_jit_stmts,
+        &output_to_writer,
+        input_clock_offsets,
+    );
+    let resets_read_master = reads_master(
+        resets.iter().map(|r| r.current_offset),
+        &master_input_clocks,
+        pre_jit_stmts,
+        &output_to_writer,
+        input_clock_offsets,
+    );
 
     DerivedClockSchedule {
         clocks,
         resets,
         master_input_clocks,
         aliases,
+        resets_read_master,
     }
+}
+
+/// Whether the comb closure of any of `offsets` reads one of `masters`.
+fn reads_master(
+    offsets: impl Iterator<Item = VarOffset>,
+    masters: &[VarId],
+    pre_jit_stmts: &[ProtoStatement],
+    output_to_writer: &HashMap<VarOffset, Writers>,
+    input_clock_offsets: &HashMap<VarOffset, VarId>,
+) -> bool {
+    let mut probes: Vec<DerivedClock> = offsets
+        .filter(|o| !o.is_ff())
+        .map(|current_offset| DerivedClock {
+            var_id: VarId::default(),
+            current_offset,
+            native_bytes: 1,
+            master_gated: false,
+            negedge: false,
+        })
+        .collect();
+    if probes.is_empty() || masters.is_empty() {
+        return false;
+    }
+    // A reset that copies a master resolves to the master's own offset.
+    if probes.iter().any(|p| {
+        input_clock_offsets
+            .get(&p.current_offset)
+            .is_some_and(|v| masters.contains(v))
+    }) {
+        return true;
+    }
+    mark_master_gated(
+        &mut probes,
+        pre_jit_stmts,
+        output_to_writer,
+        input_clock_offsets,
+    )
+    .iter()
+    .any(|m| masters.contains(m))
+}
+
+/// The comb statements the master input clocks reach: running just these, in
+/// order, with the masters raised brings a settled comb to the full settle's
+/// state.  `None` when the cone depends on statement order beyond that (an
+/// offset with several writers) or is not much smaller than the comb.
+pub fn master_cone(
+    schedule: &DerivedClockSchedule,
+    pre_jit_stmts: &[ProtoStatement],
+    input_clock_offsets: &HashMap<VarOffset, VarId>,
+) -> Option<Vec<ProtoStatement>> {
+    fn leaves<'a>(s: &'a ProtoStatement, out: &mut Vec<&'a ProtoStatement>) {
+        match s {
+            ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                for x in cb.original_stmts.iter() {
+                    leaves(x, out);
+                }
+            }
+            _ => out.push(s),
+        }
+    }
+    let diag = std::env::var("VERYL_MASTER_CONE_DIAG").is_ok();
+    let decline = |why: &str| {
+        if diag {
+            eprintln!("[master_cone] declined: {why}");
+        }
+        None
+    };
+    if schedule.master_input_clocks.is_empty() {
+        return decline("no master clock");
+    }
+    let mut flat: Vec<&ProtoStatement> = Vec::new();
+    for s in pre_jit_stmts {
+        if let ProtoStatement::CompiledBlock(cb) = s
+            && cb.original_stmts.is_empty()
+        {
+            return decline("a compiled block without its statements");
+        }
+        leaves(s, &mut flat);
+    }
+    let fold = crate::ir::big_array::BigArrayFold::default();
+    let mut io: Vec<(Vec<VarOffset>, Vec<VarOffset>)> = Vec::with_capacity(flat.len());
+    let mut writers: HashMap<VarOffset, SmallVec<[u32; 1]>> = HashMap::default();
+    for (i, s) in flat.iter().enumerate() {
+        let mut ins = Vec::new();
+        let mut outs = Vec::new();
+        s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
+        ins.retain(|o| !o.is_ff());
+        outs.retain(|o| !o.is_ff());
+        for o in &outs {
+            writers.entry(*o).or_default().push(i as u32);
+        }
+        io.push((ins, outs));
+    }
+    let mut tainted: HashSet<VarOffset> = input_clock_offsets
+        .iter()
+        .filter(|(_, v)| schedule.master_input_clocks.contains(v))
+        .map(|(o, _)| *o)
+        .collect();
+    let mut cone: Vec<usize> = Vec::new();
+    let mut in_cone = vec![false; flat.len()];
+    for (i, (ins, outs)) in io.iter().enumerate() {
+        if ins.iter().any(|o| tainted.contains(o)) {
+            cone.push(i);
+            in_cone[i] = true;
+            tainted.extend(outs.iter().copied());
+        }
+    }
+    // Run alone, a cone statement reads the settled (last) value of each
+    // offset, and its writes stand unless a later writer reruns too.
+    let later = |o: &VarOffset, i: usize| -> &[u32] {
+        let w = writers.get(o).map_or(&[][..], |w| w.as_slice());
+        &w[w.partition_point(|&j| j as usize <= i)..]
+    };
+    for &i in &cone {
+        let (ins, outs) = &io[i];
+        if ins.iter().any(|o| !later(o, i).is_empty()) {
+            return decline("a cone statement reads an offset written again later");
+        }
+        if outs
+            .iter()
+            .any(|o| later(o, i).iter().any(|&j| !in_cone[j as usize]))
+        {
+            return decline("a later statement outside the cone rewrites a cone write");
+        }
+    }
+    // Taint flows forward, so a statement outside the cone reading a cone
+    // write sits before its writer: the comb needs another pass to see it.
+    if io
+        .iter()
+        .enumerate()
+        .any(|(i, (ins, _))| !in_cone[i] && ins.iter().any(|o| tainted.contains(o)))
+    {
+        return decline("a statement before the cone reads a cone write");
+    }
+    if diag {
+        eprintln!("[master_cone] {} of {} statements", cone.len(), flat.len());
+    }
+    if cone.is_empty() || cone.len() * 8 > flat.len() {
+        return decline("the cone is not much smaller than the comb");
+    }
+    Some(cone.into_iter().map(|i| flat[i].clone()).collect())
 }
 
 /// The master input clock the copy chain from `offset` reaches, else the
@@ -340,54 +474,108 @@ fn one_bit_variable(e: &ProtoExpression) -> Option<VarOffset> {
     }
 }
 
-/// Walks back from `target_offset` through `output_to_writer`.  FF inputs
-/// are leaves; boundary clock-typed inputs (top-module ports or testbench
-/// inst outputs) are recorded as masters.
-fn collect_comb_closure(
-    target_offset: VarOffset,
+/// Sets `master_gated` on each comb clock whose comb closure reads a master
+/// input clock, and returns the masters some gated clock's closure reads.  A
+/// master is an input clock offset no statement writes; FF reads end the
+/// closure.  The clocks' closures overlap heavily, so each walk visits a
+/// statement once for all of them.
+fn mark_master_gated(
+    clocks: &mut [DerivedClock],
     pre_jit_stmts: &[ProtoStatement],
     output_to_writer: &HashMap<VarOffset, Writers>,
     input_clock_offsets: &HashMap<VarOffset, VarId>,
-    dep_set: &mut HashSet<usize>,
-    master_set: &mut HashSet<VarId>,
-) {
-    let mut scratch_in: Vec<VarOffset> = Vec::new();
-    let mut scratch_out: Vec<VarOffset> = Vec::new();
-    let mut stack: Vec<usize> = match output_to_writer.get(&target_offset) {
-        Some(writers) => writers.to_vec(),
-        None => return,
+) -> SmallVec<[VarId; 4]> {
+    let comb_writers = |clk: &DerivedClock| -> &[usize] {
+        if clk.current_offset.is_ff() {
+            return &[];
+        }
+        output_to_writer
+            .get(&clk.current_offset)
+            .map_or(&[][..], |w| w.as_slice())
     };
-    while let Some(idx) = stack.pop() {
-        if !dep_set.insert(idx) {
+
+    // The union of the closures, with each member's comb reads.
+    let mut reads: HashMap<usize, Vec<VarOffset>> = HashMap::default();
+    let mut stack: Vec<usize> = clocks.iter().flat_map(comb_writers).copied().collect();
+    let mut scratch_out: Vec<VarOffset> = Vec::new();
+    while let Some(i) = stack.pop() {
+        if reads.contains_key(&i) {
             continue;
         }
-        let stmt = match pre_jit_stmts.get(idx) {
-            Some(s) => s,
-            None => continue,
+        let Some(stmt) = pre_jit_stmts.get(i) else {
+            continue;
         };
-        scratch_in.clear();
+        let mut ins: Vec<VarOffset> = Vec::new();
         scratch_out.clear();
-        stmt.gather_variable_offsets(&mut scratch_in, &mut scratch_out);
-        for off in &scratch_in {
-            if off.is_ff() {
-                continue;
+        stmt.gather_variable_offsets(&mut ins, &mut scratch_out);
+        ins.retain(|o| !o.is_ff());
+        ins.sort_unstable_by_key(|o| o.raw());
+        ins.dedup();
+        for off in &ins {
+            if let Some(writers) = output_to_writer.get(off) {
+                stack.extend(writers.iter().filter(|w| !reads.contains_key(w)));
             }
+        }
+        reads.insert(i, ins);
+    }
+
+    // Forward from the members reading a master, along the closure's edges.
+    let mut readers: HashMap<usize, Vec<usize>> = HashMap::default();
+    let mut reached: HashSet<usize> = HashSet::default();
+    let mut work: Vec<usize> = Vec::new();
+    for (&i, ins) in &reads {
+        for off in ins {
             match output_to_writer.get(off) {
                 Some(writers) => {
-                    for &writer in writers {
-                        if !dep_set.contains(&writer) {
-                            stack.push(writer);
-                        }
+                    for &w in writers {
+                        readers.entry(w).or_default().push(i);
                     }
                 }
                 None => {
-                    if let Some(&vid) = input_clock_offsets.get(off) {
-                        master_set.insert(vid);
+                    if input_clock_offsets.contains_key(off) && reached.insert(i) {
+                        work.push(i);
                     }
                 }
             }
         }
     }
+    while let Some(w) = work.pop() {
+        for &r in readers.get(&w).map_or(&[][..], |r| r.as_slice()) {
+            if reached.insert(r) {
+                work.push(r);
+            }
+        }
+    }
+
+    let mut stack: Vec<usize> = Vec::new();
+    for clk in clocks.iter_mut() {
+        let writers = comb_writers(clk);
+        if writers.iter().any(|w| reached.contains(w)) {
+            clk.master_gated = true;
+            stack.extend_from_slice(writers);
+        }
+    }
+    // The masters the gated clocks' closures read.
+    let mut seen: HashSet<usize> = HashSet::default();
+    let mut found: SmallVec<[VarId; 4]> = SmallVec::new();
+    while let Some(i) = stack.pop() {
+        if !seen.insert(i) {
+            continue;
+        }
+        for off in reads.get(&i).map_or(&[][..], |r| r.as_slice()) {
+            match output_to_writer.get(off) {
+                Some(writers) => stack.extend(writers.iter().filter(|w| !seen.contains(w))),
+                None => {
+                    if let Some(&vid) = input_clock_offsets.get(off)
+                        && !found.contains(&vid)
+                    {
+                        found.push(vid);
+                    }
+                }
+            }
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -430,6 +618,118 @@ mod tests {
             width: 1,
             expr_context: ctx(),
         }
+    }
+
+    fn assign(dst: isize, expr: ProtoExpression) -> ProtoStatement {
+        ProtoStatement::Assign(crate::ir::ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: 1,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: -1,
+            comb_direct: false,
+            token: veryl_parser::token_range::TokenRange::default(),
+        })
+    }
+
+    fn comb_clock(id: u32, offset: isize) -> DerivedClock {
+        DerivedClock {
+            var_id: VarId::from_raw(id),
+            current_offset: VarOffset::Comb(offset),
+            native_bytes: 1,
+            master_gated: false,
+            negedge: false,
+        }
+    }
+
+    #[test]
+    fn a_clock_is_master_gated_when_its_closure_reads_an_undriven_input_clock() {
+        // Input clocks at 0 and 8, but 8 is driven, so only 0 is a master.
+        // 40 reaches it through 32, 56 through 40, and 48 not at all.
+        let stmts = vec![
+            assign(8, bit(16)),
+            assign(32, and(bit(0), bit(16))),
+            assign(40, and(bit(32), bit(16))),
+            assign(48, bit(16)),
+            assign(56, and(bit(40), bit(8))),
+        ];
+        let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
+        for (i, s) in stmts.iter().enumerate() {
+            let ProtoStatement::Assign(a) = s else {
+                unreachable!()
+            };
+            output_to_writer.entry(a.dst).or_default().push(i);
+        }
+        let input_clock_offsets: HashMap<VarOffset, VarId> = [
+            (VarOffset::Comb(0), VarId::from_raw(1)),
+            (VarOffset::Comb(8), VarId::from_raw(2)),
+        ]
+        .into_iter()
+        .collect();
+        let mut clocks = vec![comb_clock(10, 40), comb_clock(11, 48), comb_clock(12, 56)];
+        let masters =
+            mark_master_gated(&mut clocks, &stmts, &output_to_writer, &input_clock_offsets);
+        let gated: Vec<bool> = clocks.iter().map(|c| c.master_gated).collect();
+        assert_eq!(gated, [true, false, true]);
+        assert_eq!(masters.as_slice(), [VarId::from_raw(1)]);
+    }
+
+    #[test]
+    fn the_master_cone_declines_when_an_earlier_statement_reads_a_cone_write() {
+        // 24 is gated from the master at 0; 16 reads 24 before it is written,
+        // so a full settle needs a second pass the cone alone would skip.
+        let schedule = DerivedClockSchedule {
+            master_input_clocks: [VarId::from_raw(1)].into_iter().collect(),
+            ..Default::default()
+        };
+        let input_clock_offsets: HashMap<VarOffset, VarId> =
+            [(VarOffset::Comb(0), VarId::from_raw(1))]
+                .into_iter()
+                .collect();
+        let gate = assign(24, and(bit(0), bit(8)));
+        let filler: Vec<ProtoStatement> = (0..16).map(|k| assign(100 + 8 * k, bit(400))).collect();
+        let mut alone = vec![gate.clone()];
+        alone.extend(filler.iter().cloned());
+        let cone = master_cone(&schedule, &alone, &input_clock_offsets).expect("a cone");
+        assert_eq!(cone.len(), 1);
+        let mut late = vec![assign(16, bit(24)), gate];
+        late.extend(filler);
+        assert!(master_cone(&schedule, &late, &input_clock_offsets).is_none());
+    }
+
+    #[test]
+    fn a_reset_reads_the_master_through_its_comb() {
+        // The net at 24 qualifies a reset with the master at 0; 32 does not.
+        let stmts = vec![assign(24, and(bit(0), bit(16))), assign(32, bit(16))];
+        let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
+        output_to_writer
+            .entry(VarOffset::Comb(24))
+            .or_default()
+            .push(0);
+        output_to_writer
+            .entry(VarOffset::Comb(32))
+            .or_default()
+            .push(1);
+        let input_clock_offsets: HashMap<VarOffset, VarId> =
+            [(VarOffset::Comb(0), VarId::from_raw(1))]
+                .into_iter()
+                .collect();
+        let masters = [VarId::from_raw(1)];
+        let reads = |o: isize| {
+            reads_master(
+                std::iter::once(VarOffset::Comb(o)),
+                &masters,
+                &stmts,
+                &output_to_writer,
+                &input_clock_offsets,
+            )
+        };
+        assert!(reads(24));
+        assert!(!reads(32));
+        // A reset copied from the master is the master itself.
+        assert!(reads(0));
     }
 
     #[test]

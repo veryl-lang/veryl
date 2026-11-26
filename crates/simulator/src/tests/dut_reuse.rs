@@ -78,7 +78,8 @@ fn dut_reuse_sessions_keep_distinct_top_sets() {
     for (session, aliased) in [(&shared, false), (&single, true), (&shared, false)] {
         let built = session.build_ir(tops[0]).unwrap();
         assert_eq!(
-            input_slot(&built.module_variables) == input_slot(&built.module_variables.children[0]),
+            input_slot(&built.module_variables)
+                == input_slot(&built.module_variables.children().next().unwrap()),
             aliased
         );
         assert_output(built, 7);

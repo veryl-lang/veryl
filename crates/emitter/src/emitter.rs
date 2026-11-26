@@ -3148,7 +3148,10 @@ impl Emitter {
         }
 
         let map = self.get_current_interface_map(&caller);
-        let found = map.id.and_then(symbol_table::get).unwrap_or(caller);
+        let found = map
+            .id
+            .and_then(symbol_table::get)
+            .unwrap_or_else(|| (*caller).clone());
         Self::get_mixin_source_map(&found, map, interface)
     }
 

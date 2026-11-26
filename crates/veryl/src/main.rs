@@ -158,7 +158,9 @@ fn main() -> Result<ExitCode> {
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&mut metadata),
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata),
         Commands::Test(x) => {
-            let ret = cmd_test::CmdTest::new(x).exec(&mut metadata);
+            let ret = cmd_test::CmdTest::new(x)
+                .leave_builds_to_os()
+                .exec(&mut metadata);
             metadata.save_build_info()?;
             ret
         }
@@ -174,9 +176,12 @@ fn main() -> Result<ExitCode> {
     debug!("Elapsed time ({} milliseconds)", stopwatch.lap());
 
     let exit_success = std::env::var("VERYL_FORCE_SUCCESS").is_ok();
-    if exit_success || ret? {
-        Ok(ExitCode::SUCCESS)
-    } else {
-        Ok(ExitCode::FAILURE)
-    }
+    let success = exit_success || ret?;
+    // Every command ends the process here, so the analyzer's thread-local
+    // tables and the IR are left to the OS: tearing them down takes seconds
+    // on a large design.
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(if success { 0 } else { 1 });
 }
