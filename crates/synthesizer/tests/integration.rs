@@ -1674,6 +1674,55 @@ fn variable_shift_right_amount_saturates() {
 }
 
 #[test]
+fn right_shifts_preserve_the_left_operand_for_narrow_outputs() {
+    let code = r#"
+        module Top(
+            x: input logic<3>, sx: input signed logic<3>, amount: input logic<3>,
+            logical: output logic<2>, logical_one: output logic<2>,
+            arithmetic: output logic<2>, arithmetic_one: output logic<2>,
+        ) {
+            assign logical = x >> amount;
+            assign logical_one = x >> 3'd1;
+            assign arithmetic = sx >>> amount;
+            assign arithmetic_one = sx >>> 3'd1;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let ports: std::collections::HashMap<_, _> = gate
+        .ports
+        .iter()
+        .map(|p| (p.name.to_string(), &p.nets))
+        .collect();
+    for x in 0..8i32 {
+        let signed = if x < 4 { x } else { x - 8 };
+        for amount in 0..8 {
+            let mut inputs = std::collections::HashMap::new();
+            for (name, value) in [("x", x), ("sx", x), ("amount", amount)] {
+                for (bit, &net) in ports[name].iter().enumerate() {
+                    inputs.insert(net, value & (1 << bit) != 0);
+                }
+            }
+            let mut memo = std::collections::HashMap::new();
+            for (name, expected) in [
+                ("logical", x >> amount),
+                ("logical_one", x >> 1),
+                ("arithmetic", signed >> amount),
+                ("arithmetic_one", signed >> 1),
+            ] {
+                let actual = ports[name]
+                    .iter()
+                    .enumerate()
+                    .fold(0i32, |word, (bit, &net)| {
+                        word | (i32::from(eval_net(&gate, net, &inputs, &mut memo)) << bit)
+                    });
+                assert_eq!(actual, expected & 3, "{name}: x={x} amount={amount}");
+            }
+        }
+    }
+}
+
+#[test]
 fn variable_arith_shift_right_fills_sign() {
     // signed 4-bit ASR: fill must be the sign bit (x[3]). After const-prop
     // folds Mux(s, x, x) = x for the sign-fill mux stages, y[3] should be a
