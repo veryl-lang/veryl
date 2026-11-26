@@ -139,7 +139,8 @@ pub fn remap_returns(
                     | ProtoTbMethodKind::RandomGet { ret, .. }
                     | ProtoTbMethodKind::RandomGetRange { ret, .. }
                     | ProtoTbMethodKind::RandomGetSeed { ret }
-                    | ProtoTbMethodKind::Queue { ret, .. } => ret,
+                    | ProtoTbMethodKind::Queue { ret, .. }
+                    | ProtoTbMethodKind::RuntimeArg { ret, .. } => ret,
                     _ => return,
                 };
                 if let Some((id, _)) = ret {

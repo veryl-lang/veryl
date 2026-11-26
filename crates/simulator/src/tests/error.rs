@@ -652,8 +652,9 @@ fn comb_logic_without_a_one_pass_order_is_rejected() {
 fn string_operation_the_simulator_cannot_perform() {
     // A `string` stores a handle of its text, read as bits at the width of
     // its longest text. That width is not known for a text from outside the
-    // module (a port, a function argument, a hierarchical reference), and a
-    // concatenation destination has no window for a text.
+    // module (a port, a function argument, a hierarchical reference, a
+    // runtime argument), and a concatenation destination has no window for
+    // a text.
     let cases = [
         (
             "concatenation destination",
@@ -682,6 +683,23 @@ fn string_operation_the_simulator_cannot_perform() {
             #[test(Top)]
             module Top {
                 inst u: Sub (s: "hello");
+            }
+            "#,
+            false,
+        ),
+        (
+            "bits of a runtime argument",
+            r#"
+            #[test(Top)]
+            module Top {
+                var args: $tb::runtime_args;
+                var s: string;
+                var x: logic<8>;
+                initial {
+                    s = args.get_string("NAME", "a");
+                    x = s[7:0];
+                    $display("%h", x);
+                }
             }
             "#,
             false,

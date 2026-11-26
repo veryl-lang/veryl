@@ -42,10 +42,10 @@ pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
     ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
-    ProtoStatement, ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck,
-    RuntimeForBound, RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind,
-    format_assert_message, format_output, parse_hex_content, patch_stmt_log_buf,
-    veryl_aot_sysfn_print,
+    ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,
+    ProtoSystemFunctionCall, RetWidthCheck, RuntimeArgOp, RuntimeForBound, RuntimeForRange,
+    Statement, SystemFunctionCall, TbMethodKind, format_assert_message, format_output,
+    parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
 };
 pub(crate) use statement::{extend_to_i64, for_bound_reached};
 pub use string_type_utils::{ProtoText, Text};
@@ -186,6 +186,9 @@ pub struct Ir {
     /// reads resolve against it; relative writes go to a per-test output
     /// directory beneath it. `None` leaves paths process-CWD relative.
     pub component_file_base: Option<PathBuf>,
+    /// Runtime arguments (`veryl test --runtime-arg`), read by
+    /// `$tb::runtime_args` and components.
+    pub runtime_args: crate::runtime_arg::RuntimeArgs,
     /// See `Module::rtl_driven`.
     pub rtl_driven: HashSet<VarOffset>,
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
@@ -310,6 +313,7 @@ impl Ir {
             seed: config.seed,
             component_libraries: config.component_libraries.clone(),
             component_file_base: config.component_file_base.clone(),
+            runtime_args: config.runtime_args.clone(),
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
             comb_touched_offsets: module.comb_touched_offsets,
@@ -1447,6 +1451,8 @@ pub struct Config {
     pub component_libraries: std::collections::HashMap<String, ComponentLibrary>,
     /// See `Ir::component_file_base`.
     pub component_file_base: Option<PathBuf>,
+    /// See `Ir::runtime_args`.
+    pub runtime_args: crate::runtime_arg::RuntimeArgs,
 }
 
 impl Config {

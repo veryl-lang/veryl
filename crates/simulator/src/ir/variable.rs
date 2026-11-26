@@ -368,8 +368,8 @@ pub struct StringLayout {
     /// Width of the bytes of each runtime `string` variable's text: the
     /// widest text any assignment can store into it, or `None` when its text
     /// comes from outside what this module's scan sees (a port, a function
-    /// argument, a hierarchical reference), so its length is not known before
-    /// the simulation starts.
+    /// argument, a hierarchical reference, a runtime argument), so its length
+    /// is not known before the simulation starts.
     pub widths: HashMap<VarId, Option<usize>>,
 }
 
@@ -464,6 +464,17 @@ fn collect_string_assigns<'a>(
         air::Statement::FunctionCall(x) => {
             for dsts in x.outputs.values() {
                 unknown.extend(dsts.iter().map(|x| x.id));
+            }
+        }
+        // A runtime argument's text is known only once the simulation runs.
+        air::Statement::TbMethodCall(x) => {
+            if let air::TbMethod::RuntimeArg {
+                op: air::RuntimeArgOp::GetString { .. },
+                ..
+            } = &x.method
+                && let Some(dst) = &x.ret
+            {
+                unknown.insert(dst.id);
             }
         }
         air::Statement::Assign(x) => {
