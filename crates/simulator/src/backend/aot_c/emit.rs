@@ -12770,10 +12770,7 @@ mod tests {
     }
 
     fn cc_available() -> bool {
-        Command::new(std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string()))
-            .arg("--version")
-            .output()
-            .is_ok()
+        crate::backend::aot_c::cc_available()
     }
 
     fn read_u128(comb: &[u8], off: usize) -> u128 {

@@ -1535,23 +1535,23 @@ impl Config {
             }
         }
 
-        // `cc` backend variants: 2-state only, Cranelift fallback for uncovered
+        // `cc` backend variant: 2-state only, Cranelift fallback for uncovered
         // stmts (use_jit stays true).  Sync compile — async's swap point varies
         // with timing, but tests must dual-check cc deterministically vs the
         // golden output.  Gated on cc_available so cc-less hosts still run.
+        // Only the default FF optimization: every cc variant pays a C compile,
+        // which dominates the suite, and `disable_ff_opt` is already covered
+        // on the interpreter and Cranelift.
         #[cfg(not(target_family = "wasm"))]
         if crate::backend::aot_c::cc_available() {
-            for disable_ff_opt in [false, true] {
-                ret.push(Config {
-                    use_4state: false,
-                    use_jit: true,
-                    disable_ff_opt,
-                    aot_c: true,
-                    aot_c_event: true,
-                    aot_c_async: false,
-                    ..Default::default()
-                });
-            }
+            ret.push(Config {
+                use_4state: false,
+                use_jit: true,
+                aot_c: true,
+                aot_c_event: true,
+                aot_c_async: false,
+                ..Default::default()
+            });
         }
 
         ret
