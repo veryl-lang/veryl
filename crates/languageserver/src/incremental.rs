@@ -198,7 +198,16 @@ incremental = true
                 let mut metadata = Metadata::load(root.join("Veryl.toml")).unwrap();
                 let paths = metadata.paths::<&str>(&[], false, false).unwrap();
                 let analyzer = Analyzer::new(&metadata);
-                let mut inc = LsIncremental::open(&metadata).expect("store opens");
+                // On macOS the previous run's lock can still be visible right
+                // after it was closed, so a non-blocking open may transiently fail.
+                let mut inc = (0..100)
+                    .find_map(|_| {
+                        LsIncremental::open(&metadata).or_else(|| {
+                            thread::sleep(std::time::Duration::from_millis(10));
+                            None
+                        })
+                    })
+                    .expect("store opens");
 
                 for path in &paths {
                     let text = fs::read_to_string(&path.src).unwrap();
