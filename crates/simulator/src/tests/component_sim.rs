@@ -1265,14 +1265,33 @@ fn component_finish_stops_clock_loop() {
 
         initial {
             rst.assert();
-            clk.next(1000);
-            $finish();
+            WAIT
         }
     }
     "#;
-    for (config, result, mut sim) in run_component_test(code, "comp_test") {
-        assert_eq!(result, TestResult::Pass, "failed for {config:?}");
-        assert_eq!(sim.get_var("cnt").unwrap(), Value::new(5, 16, false));
+    // A started clock runs until the component asks to finish; its fifth
+    // edge is still within a limit of 5.
+    for wait in [
+        "clk.next(1000); $finish();",
+        "clk.start();",
+        "clk.start(5);",
+    ] {
+        let code = code.replace("WAIT", wait);
+        for (config, result, mut sim) in run_component_test(&code, "comp_test") {
+            assert_eq!(result, TestResult::Pass, "failed for {config:?}: {wait}");
+            assert_eq!(sim.get_var("cnt").unwrap(), Value::new(5, 16, false));
+        }
+    }
+    // One edge short of the finish request, the limit fails the test.
+    let code = code.replace("WAIT", "clk.start(4);");
+    for (config, result, _) in run_component_test(&code, "comp_test") {
+        let TestResult::Fail(msg) = &result else {
+            panic!("expected failure for {config:?}, got {result:?}");
+        };
+        assert!(
+            msg.contains("clock `clk` exceeded the cycle limit of 4 set by `start`"),
+            "unexpected message for {config:?}: {msg}"
+        );
     }
 }
 

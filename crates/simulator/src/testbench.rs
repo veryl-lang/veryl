@@ -22,6 +22,15 @@ pub enum TestbenchStatement {
         high_time: u64,
         low_time: u64,
     },
+    /// clk.start(N)
+    ClockStart {
+        /// The clock's instance name, for the cycle-limit failure message.
+        inst: StrId,
+        clock: Event,
+        max_cycles: Option<Expression>,
+        high_time: u64,
+        low_time: u64,
+    },
     /// rst.assert(N)
     ResetAssert {
         reset: Event,
@@ -165,7 +174,8 @@ fn collect_clock_periods(stmts: &[Statement], periods: &mut HashMap<StrId, u64>)
     for stmt in stmts {
         match stmt {
             Statement::TbMethodCall { inst, method } => {
-                if let TbMethodKind::ClockNext { period, .. } = method
+                if let TbMethodKind::ClockNext { period, .. }
+                | TbMethodKind::ClockStart { period, .. } = method
                     && let Some(expr) = period
                 {
                     let val = expr.eval(&mut MaskCache::default());
@@ -231,7 +241,11 @@ fn convert_stmt(
 ) -> TestbenchStatement {
     match stmt {
         Statement::TbMethodCall { inst, method } => match method {
-            TbMethodKind::ClockNext { count, period } => {
+            TbMethodKind::ClockNext { count, period }
+            | TbMethodKind::ClockStart {
+                max_cycles: count,
+                period,
+            } => {
                 let clock = event_map.get(inst).cloned().unwrap_or(Event::Initial);
                 let p = if let Some(expr) = period {
                     let val = expr.eval(&mut MaskCache::default());
@@ -240,11 +254,21 @@ fn convert_stmt(
                     2
                 };
                 let (high_time, low_time) = compute_half_periods(p);
-                TestbenchStatement::ClockNext {
-                    clock,
-                    count: count.clone(),
-                    high_time,
-                    low_time,
+                if matches!(method, TbMethodKind::ClockNext { .. }) {
+                    TestbenchStatement::ClockNext {
+                        clock,
+                        count: count.clone(),
+                        high_time,
+                        low_time,
+                    }
+                } else {
+                    TestbenchStatement::ClockStart {
+                        inst: *inst,
+                        clock,
+                        max_cycles: count.clone(),
+                        high_time,
+                        low_time,
+                    }
                 }
             }
             TbMethodKind::ResetAssert { clock, duration } => {
@@ -657,6 +681,9 @@ enum Repeat<'a> {
 enum ProcStep<'a> {
     /// Blocked on a clock: resume once the edges have been taken.
     Wait(Wait<'a>),
+    /// `clk.start()`: the clock is to run free from now on.  The process
+    /// does not block; it carries on once the clock is registered.
+    Start(Start<'a>),
     /// Ran off the end of its block (or broke out of it).
     Done,
     /// `$finish`, or a component asked to finish.
@@ -678,6 +705,53 @@ enum Wait<'a> {
         high_time: u64,
         low_time: u64,
     },
+}
+
+impl<'a> Wait<'a> {
+    fn clock(&self) -> &'a Event {
+        match self {
+            Wait::Clock { clock, .. } | Wait::Reset { clock, .. } => clock,
+        }
+    }
+}
+
+struct Start<'a> {
+    clock: &'a Event,
+    high_time: u64,
+    low_time: u64,
+    free: FreeRun,
+}
+
+/// The free-running state of a started clock.
+#[derive(Clone, Copy)]
+struct FreeRun {
+    inst: StrId,
+    /// The limit given to `start`, if any.
+    max_cycles: Option<u64>,
+    /// Edges the clock may still take before the test fails.
+    left: Option<u64>,
+}
+
+impl FreeRun {
+    /// Account for one edge about to be taken; `Err` once the limit has
+    /// been used up.
+    fn take_edge(&mut self) -> Result<(), String> {
+        match &mut self.left {
+            Some(0) => {
+                let name =
+                    veryl_parser::resource_table::get_str_value(self.inst).unwrap_or_default();
+                Err(format!(
+                    "clock `{name}` exceeded the cycle limit of {} set by `start`",
+                    self.max_cycles.unwrap_or_default()
+                ))
+            }
+            Some(left) => {
+                *left -= 1;
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
 }
 
 impl LoopVariable {
@@ -904,6 +978,28 @@ impl<'a> Process<'a> {
                         low_time: *low_time,
                     });
                 }
+                TestbenchStatement::ClockStart {
+                    inst,
+                    clock,
+                    max_cycles,
+                    high_time,
+                    low_time,
+                } => {
+                    let max_cycles = max_cycles.as_ref().map(|expr| {
+                        sim.ensure_comb_updated();
+                        expr.eval(&mut sim.mask_cache).payload_u64()
+                    });
+                    return ProcStep::Start(Start {
+                        clock,
+                        high_time: *high_time,
+                        low_time: *low_time,
+                        free: FreeRun {
+                            inst: *inst,
+                            max_cycles,
+                            left: max_cycles,
+                        },
+                    });
+                }
                 TestbenchStatement::ResetAssert {
                     reset,
                     clock,
@@ -931,7 +1027,7 @@ impl<'a> Process<'a> {
     }
 }
 
-/// A `$tb::clock_gen` some process has waited on.
+/// A `$tb::clock_gen` some process has waited on or started.
 struct TbClock<'a> {
     event: &'a Event,
     high_time: u64,
@@ -940,6 +1036,9 @@ struct TbClock<'a> {
     /// not advance, so this may lie in the past; the edge is then taken at
     /// the current time.
     next_edge: u64,
+    /// `Some` once `start` was called: the clock then advances whether or
+    /// not a process waits on it.
+    free: Option<FreeRun>,
 }
 
 /// A `rst.assert` in progress: the level is held while its process waits
@@ -1001,10 +1100,9 @@ impl Due {
 /// time then advances to the earliest posedge being waited on, and every
 /// clock due at that instant fires in one step so domains that rise together
 /// read each other's pre-edge values.  A `$finish` anywhere ends the run.
+/// A started clock keeps advancing after every process has ended, until
+/// the run is stopped.
 fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecResult {
-    if let [block] = blocks {
-        return run_single_process(sim, Process::new(block));
-    }
     let mut tasks: Vec<Task> = blocks
         .iter()
         .map(|block| Task {
@@ -1020,18 +1118,55 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
         // the scheduler: at its next run point it is handed to the
         // single-process loop, which steps the clock in place at a fraction
         // of the cost per edge.  Only while at most one clock has been waited
-        // on, so every later edge lands at the time the scheduler would have
-        // given it.
-        if negedges.is_empty() && clocks.len() <= 1 {
-            let mut live = tasks
-                .iter_mut()
-                .filter(|task| !matches!(task.state, TaskState::Done));
-            if let (Some(task), None) = (live.next(), live.next())
-                && let TaskState::Runnable { at } = task.state
-            {
-                sim.time = at;
-                let process = std::mem::replace(&mut task.process, Process::new(&[]));
-                break run_single_process(sim, process);
+        // on or started, so every later edge lands at the time the scheduler
+        // would have given it.  With no process left, a started clock runs
+        // free in that loop too.
+        if negedges.is_empty()
+            && clocks.len() <= 1
+            && let Some((task, at)) = single_handoff(&tasks, &clocks, sim.time)
+        {
+            sim.time = at;
+            let process = match task {
+                Some(i) => std::mem::replace(&mut tasks[i].process, Process::new(&[])),
+                None => Process::new(&[]),
+            };
+            let mut running = clocks.first().and_then(|clock| {
+                clock.free.map(|free| Running {
+                    clock: clock.event,
+                    high_time: clock.high_time,
+                    low_time: clock.low_time,
+                    free,
+                })
+            });
+            match run_single_process(sim, process, &mut running) {
+                Single::End(result) => break result,
+                // A second clock comes into play: back to the scheduler.
+                // Only a process can bring one in, so `task` is `Some`.
+                Single::Handoff(process, step) => {
+                    if let Some(running) = running {
+                        let i = clock_index(
+                            &mut clocks,
+                            running.clock,
+                            running.high_time,
+                            running.low_time,
+                        );
+                        clocks[i].free = Some(running.free);
+                    }
+                    let Some(i) = task else {
+                        unreachable!("an empty process hands nothing back")
+                    };
+                    let task = &mut tasks[i];
+                    task.process = process;
+                    task.state = TaskState::Runnable { at: sim.time };
+                    let result = match apply_step(sim, task, &mut clocks, step) {
+                        Some(result) => result,
+                        None => run_task(sim, task, &mut clocks),
+                    };
+                    if result.should_stop() {
+                        break result;
+                    }
+                    continue;
+                }
             }
         }
         let now = sim.time;
@@ -1051,6 +1186,11 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
                     consider(Due::Edge(clocks[clock].next_edge.max(now)));
                 }
                 TaskState::Done => {}
+            }
+        }
+        for clock in &clocks {
+            if clock.free.is_some() {
+                consider(Due::Edge(clock.next_edge.max(now)));
             }
         }
         let Some(due) = due else {
@@ -1087,11 +1227,18 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
                 let fired: SmallVec<[usize; 4]> = (0..clocks.len())
                     .filter(|&i| {
                         clocks[i].next_edge.max(now) == t
-                            && tasks
-                                .iter()
-                                .any(|task| matches!(task.state, TaskState::Waiting { clock, .. } if clock == i))
+                            && (clocks[i].free.is_some()
+                                || tasks.iter().any(|task| {
+                                    matches!(task.state, TaskState::Waiting { clock, .. } if clock == i)
+                                }))
                     })
                     .collect();
+                if let Some(msg) = fired
+                    .iter()
+                    .find_map(|&i| clocks[i].free.as_mut()?.take_edge().err())
+                {
+                    break ExecResult::Fail(msg);
+                }
                 let result = take_edges(sim, &mut tasks, &mut clocks, &fired, &mut negedges);
                 if result.should_stop() {
                     break result;
@@ -1111,27 +1258,107 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
     result
 }
 
+/// Which process, if any, the single-process loop can take over at the top
+/// of a scheduler round, and the time it starts at: the only live process
+/// once it is runnable, or no process at all while a started clock runs.
+fn single_handoff(tasks: &[Task], clocks: &[TbClock], now: u64) -> Option<(Option<usize>, u64)> {
+    let mut live = tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, task)| !matches!(task.state, TaskState::Done));
+    match (live.next(), live.next()) {
+        (Some((i, task)), None) => match task.state {
+            TaskState::Runnable { at } => Some((Some(i), at)),
+            _ => None,
+        },
+        (None, _) => clocks
+            .iter()
+            .find(|clock| clock.free.is_some())
+            .map(|clock| (None, clock.next_edge.max(now))),
+        _ => None,
+    }
+}
+
+/// The started clock the single-process loop steps in place.
+struct Running<'a> {
+    clock: &'a Event,
+    high_time: u64,
+    low_time: u64,
+    free: FreeRun,
+}
+
+enum Single<'a> {
+    End(ExecResult),
+    /// A step involving a second clock, which the scheduler has to take.
+    Handoff(Process<'a>, ProcStep<'a>),
+}
+
 /// The one-process case needs no scheduler: its clocks are stepped in place
 /// as each wait is reached, which is also the cheapest path for the
-/// `clk.next(1)` per cycle testbenches that dominate.
-fn run_single_process(sim: &mut Simulator, mut process: Process<'_>) -> ExecResult {
+/// `clk.next(1)` per cycle testbenches that dominate.  At most one started
+/// clock (`running`) can be kept in place; it runs free once the process has
+/// ended.
+fn run_single_process<'a>(
+    sim: &mut Simulator,
+    mut process: Process<'a>,
+    running: &mut Option<Running<'a>>,
+) -> Single<'a> {
     loop {
         match process.run(sim) {
             ProcStep::Wait(wait) => {
-                let result = take_edges_alone(sim, wait);
+                let free = match running {
+                    Some(r) if r.clock != wait.clock() => {
+                        return Single::Handoff(process, ProcStep::Wait(wait));
+                    }
+                    Some(r) => Some(&mut r.free),
+                    None => None,
+                };
+                let result = take_edges_alone(sim, wait, free);
                 if result.should_stop() {
-                    return result;
+                    return Single::End(result);
                 }
             }
-            ProcStep::Done => return ExecResult::Continue,
-            ProcStep::Finished => return ExecResult::Finished,
-            ProcStep::Fail(msg) => return ExecResult::Fail(msg),
+            ProcStep::Start(start) => match running {
+                Some(r) if r.clock != start.clock => {
+                    return Single::Handoff(process, ProcStep::Start(start));
+                }
+                // Starting a started clock again changes nothing.
+                Some(_) => {}
+                None => {
+                    *running = Some(Running {
+                        clock: start.clock,
+                        high_time: start.high_time,
+                        low_time: start.low_time,
+                        free: start.free,
+                    });
+                }
+            },
+            ProcStep::Done => {
+                let Some(r) = running else {
+                    return Single::End(ExecResult::Continue);
+                };
+                let wait = Wait::Clock {
+                    clock: r.clock,
+                    count: u64::MAX,
+                    high_time: r.high_time,
+                    low_time: r.low_time,
+                };
+                return Single::End(take_edges_alone(sim, wait, Some(&mut r.free)));
+            }
+            ProcStep::Finished => return Single::End(ExecResult::Finished),
+            ProcStep::Fail(msg) => return Single::End(ExecResult::Fail(msg)),
         }
     }
 }
 
-/// Take the edges the only process is waiting for, one step each.
-fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
+/// Take the edges the only process is waiting for, one step each.  `free`
+/// is the clock's free-running state when it has been started, which counts
+/// the edges against its limit.
+fn take_edges_alone(
+    sim: &mut Simulator,
+    wait: Wait<'_>,
+    mut free: Option<&mut FreeRun>,
+) -> ExecResult {
     let has_dump = sim.dump.is_some();
     let (clock, count, high_time, low_time, reset) = match wait {
         Wait::Clock {
@@ -1156,6 +1383,13 @@ fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
         sim.set_reset_level(&id, true);
     }
     for i in 0..count {
+        // Like a stop request, leave a held reset as it is, so the final
+        // settle observes the state the run ended in.
+        if let Some(free) = free.as_deref_mut()
+            && let Err(msg) = free.take_edge()
+        {
+            return ExecResult::Fail(msg);
+        }
         if has_dump && let Some(id) = clock.var_id() {
             sim.set_wave_clock(id, true);
         }
@@ -1202,60 +1436,79 @@ fn run_task<'a>(
     clocks: &mut Vec<TbClock<'a>>,
 ) -> ExecResult {
     loop {
-        match task.process.run(sim) {
-            ProcStep::Wait(Wait::Clock {
-                clock,
-                count,
-                high_time,
-                low_time,
-            }) => {
-                // count 0 advances 0 cycles (SV `repeat(0)`): the process
-                // just carries on.
-                if count == 0 {
-                    continue;
-                }
-                task.state = TaskState::Waiting {
-                    clock: clock_index(clocks, clock, high_time, low_time),
-                    remaining: count,
-                    reset: None,
-                };
-                return ExecResult::Continue;
-            }
-            ProcStep::Wait(Wait::Reset {
-                reset,
-                clock,
-                duration,
-                high_time,
-                low_time,
-            }) => {
-                // The window holds the net asserted while ordinary clock
-                // edges are taken; see `take_edges_alone`.
-                if let Some(id) = reset.var_id() {
-                    sim.set_reset_level(&id, true);
-                }
-                if duration == 0 {
-                    if let Some(id) = reset.var_id() {
-                        sim.set_reset_level(&id, false);
-                    }
-                    continue;
-                }
-                task.state = TaskState::Waiting {
-                    clock: clock_index(clocks, clock, high_time, low_time),
-                    remaining: duration,
-                    reset: Some(ResetActive {
-                        reset,
-                        assertion_pending: true,
-                    }),
-                };
-                return ExecResult::Continue;
-            }
-            ProcStep::Done => {
-                task.state = TaskState::Done;
-                return ExecResult::Continue;
-            }
-            ProcStep::Finished => return ExecResult::Finished,
-            ProcStep::Fail(msg) => return ExecResult::Fail(msg),
+        let step = task.process.run(sim);
+        if let Some(result) = apply_step(sim, task, clocks, step) {
+            return result;
         }
+    }
+}
+
+/// Act on why a process stopped running: `None` when it just carries on.
+fn apply_step<'a>(
+    sim: &mut Simulator,
+    task: &mut Task<'a>,
+    clocks: &mut Vec<TbClock<'a>>,
+    step: ProcStep<'a>,
+) -> Option<ExecResult> {
+    match step {
+        ProcStep::Wait(Wait::Clock {
+            clock,
+            count,
+            high_time,
+            low_time,
+        }) => {
+            // count 0 advances 0 cycles (SV `repeat(0)`): the process just
+            // carries on.
+            if count == 0 {
+                return None;
+            }
+            task.state = TaskState::Waiting {
+                clock: clock_index(clocks, clock, high_time, low_time),
+                remaining: count,
+                reset: None,
+            };
+            Some(ExecResult::Continue)
+        }
+        ProcStep::Start(start) => {
+            let i = clock_index(clocks, start.clock, start.high_time, start.low_time);
+            // Starting a started clock again changes nothing.
+            clocks[i].free.get_or_insert(start.free);
+            None
+        }
+        ProcStep::Wait(Wait::Reset {
+            reset,
+            clock,
+            duration,
+            high_time,
+            low_time,
+        }) => {
+            // The window holds the net asserted while ordinary clock edges
+            // are taken; see `take_edges_alone`.
+            if let Some(id) = reset.var_id() {
+                sim.set_reset_level(&id, true);
+            }
+            if duration == 0 {
+                if let Some(id) = reset.var_id() {
+                    sim.set_reset_level(&id, false);
+                }
+                return None;
+            }
+            task.state = TaskState::Waiting {
+                clock: clock_index(clocks, clock, high_time, low_time),
+                remaining: duration,
+                reset: Some(ResetActive {
+                    reset,
+                    assertion_pending: true,
+                }),
+            };
+            Some(ExecResult::Continue)
+        }
+        ProcStep::Done => {
+            task.state = TaskState::Done;
+            Some(ExecResult::Continue)
+        }
+        ProcStep::Finished => Some(ExecResult::Finished),
+        ProcStep::Fail(msg) => Some(ExecResult::Fail(msg)),
     }
 }
 
@@ -1273,6 +1526,7 @@ fn clock_index<'a>(
         high_time,
         low_time,
         next_edge: 0,
+        free: None,
     });
     clocks.len() - 1
 }
@@ -1542,6 +1796,7 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             ExecResult::Continue
         }
         TestbenchStatement::ClockNext { .. }
+        | TestbenchStatement::ClockStart { .. }
         | TestbenchStatement::ResetAssert { .. }
         | TestbenchStatement::If { .. }
         | TestbenchStatement::For { .. }
