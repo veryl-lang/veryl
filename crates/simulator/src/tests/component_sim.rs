@@ -87,6 +87,19 @@ impl Component for Init {
     }
 }
 
+struct InitFinisher;
+
+impl Component for InitFinisher {
+    fn new(_ctx: &mut BuildCtx) -> CompResult<Self> {
+        Ok(Self)
+    }
+
+    fn on_init(&mut self, ctx: &mut SimCtx) -> CompResult<()> {
+        ctx.finish();
+        Ok(())
+    }
+}
+
 /// Fails the test when its trigger input is high on a clock edge.
 struct Failer {
     trigger: InputPort,
@@ -663,6 +676,7 @@ impl Component for NoClock {
 static MIRROR: sys::VrlComponentVTable = export::vtable::<Mirror>();
 static WIDE_MIRROR: sys::VrlComponentVTable = export::vtable::<WideMirror>();
 static INIT: sys::VrlComponentVTable = export::vtable::<Init>();
+static INIT_FINISHER: sys::VrlComponentVTable = export::vtable::<InitFinisher>();
 static FAILER: sys::VrlComponentVTable = export::vtable::<Failer>();
 static FINISHER: sys::VrlComponentVTable = export::vtable::<Finisher>();
 static HIER_CHECKER: sys::VrlComponentVTable = export::vtable::<HierChecker>();
@@ -688,6 +702,7 @@ const COMPONENTS: &[&str] = &[
     "mirror",
     "wide_mirror",
     "init",
+    "init_finisher",
     "failer",
     "finisher",
     "hier_checker",
@@ -732,6 +747,7 @@ static REGISTER: LazyLock<()> = LazyLock::new(|| {
     register_static_component("mirror", &MIRROR);
     register_static_component("wide_mirror", &WIDE_MIRROR);
     register_static_component("init", &INIT);
+    register_static_component("init_finisher", &INIT_FINISHER);
     register_static_component("failer", &FAILER);
     register_static_component("finisher", &FINISHER);
     register_static_component("hier_checker", &HIER_CHECKER);
@@ -1039,6 +1055,23 @@ fn component_on_init_visible_before_initial() {
 }
 
 #[test]
+fn component_on_init_finish_stops_clock_loop() {
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst stopper: $comp::init_finisher;
+
+        initial {
+            clk.next(10);
+            $assert(1 == 0, "continued after on_init requested finish");
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
 fn component_fail_stops_clock_loop() {
     let code = r#"
     module Counter (
@@ -1083,6 +1116,126 @@ fn component_fail_stops_clock_loop() {
         );
         // The 100-cycle loop stopped at the failing edge.
         assert_eq!(sim.get_var("cnt").unwrap(), Value::new(2, 16, false));
+    }
+}
+
+#[test]
+fn component_and_comb_failures_are_reported_with_or_without_dump() {
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<16>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+        always_comb {
+            if cnt == 2 { ASSERT(1 == 0, "comb failed"); }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+        var trigger: logic;
+        var cnt: logic<16>;
+
+        inst dut: Counter (clk, rst, cnt);
+        inst f: $comp::failer (clk, trigger);
+
+        initial {
+            rst.assert();
+            trigger = 0;
+            clk.next();
+            trigger = 1;
+            clk.next(100);
+        }
+        EXTRA_INITIAL
+    }
+    "#;
+
+    LazyLock::force(&REGISTER);
+    for extra in ["", "initial { clk.next(200); }"] {
+        for assert in ["$assert", "$assert_continue"] {
+            let code = code
+                .replace("EXTRA_INITIAL", extra)
+                .replace("ASSERT", assert);
+            for config in Config::all() {
+                for dump in [false, true] {
+                    assert_eq!(
+                        run_with_optional_vcd(&code, &config, dump),
+                        TestResult::Fail(
+                            "comb failed\n[f] cycle 2: triggered\n(seed: 0)".to_string()
+                        ),
+                        "{assert} {extra} {config:?} dump={dump}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn run_with_optional_vcd(code: &str, config: &Config, dump: bool) -> TestResult {
+    let ir = analyze_component_top(code, config, "comp_test").unwrap();
+    let dumper = dump.then(|| {
+        use crate::wave_dumper::{SharedVec, WaveDumper};
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        WaveDumper::new_vcd(Box::new(SharedVec(buf)))
+    });
+    run_native_testbench(ir, dumper, "comp_test".to_string()).unwrap()
+}
+
+#[test]
+fn init_finish_during_reset_checks_the_final_state_with_or_without_dump() {
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset_async_low,
+        cnt: output logic<16>,
+    ) {
+        always_ff {
+            if_reset { cnt = 1; }
+            else { cnt += 1; }
+        }
+        always_comb {
+            if (clk as u32) == 1 {
+                $assert(1 == 0, "waveform clock reached the design");
+            }
+            if (rst as u32) == 0 && cnt == 1 {
+                $assert(1 == 0, "comb failed under reset");
+            }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+        inst stopper: $comp::init_finisher;
+        var cnt: logic<16>;
+        inst dut: Counter (clk, rst, cnt);
+
+        initial {
+            rst.assert();
+        }
+        EXTRA_INITIAL
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for extra in ["", "initial { clk.next(200); }"] {
+        let code = code.replace("EXTRA_INITIAL", extra);
+        for config in Config::all() {
+            for dump in [false, true] {
+                assert_eq!(
+                    run_with_optional_vcd(&code, &config, dump),
+                    TestResult::Fail("comb failed under reset\n(seed: 0)".to_string()),
+                    "{extra} {config:?} dump={dump}"
+                );
+            }
+        }
     }
 }
 

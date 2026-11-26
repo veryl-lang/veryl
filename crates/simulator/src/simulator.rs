@@ -56,6 +56,7 @@ pub struct Simulator {
     pub time: u64,
     pub dump: Option<WaveDumper>,
     dump_vars: Vec<DumpVar>,
+    wave_clock_levels: SmallVec<[(VarId, bool); 4]>,
     pub mask_cache: MaskCache,
     /// The end requests and assertion failures raised so far.
     pub status: SimStatus,
@@ -505,6 +506,7 @@ impl Simulator {
             time: 0,
             dump: None,
             dump_vars: Vec::new(),
+            wave_clock_levels: SmallVec::new(),
             mask_cache: MaskCache::default(),
             status: SimStatus::default(),
             comb_dirty: true,
@@ -1316,7 +1318,6 @@ impl Simulator {
         if self.state_digest.is_some() {
             self.fold_state_digest();
         }
-        // What the edge raised, before the dump settles the comb.
         self.status.latch();
         self.dump_variables();
     }
@@ -2107,7 +2108,6 @@ impl Simulator {
         if self.state_digest.is_some() {
             self.fold_state_digest();
         }
-        // What the edge raised, before the dump settles the comb.
         self.status.latch();
         self.dump_variables();
     }
@@ -2423,15 +2423,62 @@ impl Simulator {
         }
     }
 
+    pub(crate) fn set_wave_clock(&mut self, id: VarId, high: bool) {
+        if let Some((_, level)) = self
+            .wave_clock_levels
+            .iter_mut()
+            .find(|(clock, _)| *clock == id)
+        {
+            *level = high;
+        } else {
+            self.wave_clock_levels.push((id, high));
+        }
+    }
+
     pub fn dump_variables(&mut self) {
-        if self.dump.is_some() {
-            if self.comb_dirty {
-                self.do_settle_comb();
+        if self.dump.is_none() {
+            return;
+        }
+
+        // The testbench supplies clock levels for the trace. Restore the
+        // simulator's clock inputs so waveform sampling cannot drive the design.
+        let mut saved_clocks = SmallVec::<[(VarId, Value); 4]>::new();
+        for i in 0..self.wave_clock_levels.len() {
+            let (id, high) = self.wave_clock_levels[i];
+            let Some(var) = self.ir.variable(&id) else {
+                continue;
+            };
+            let saved = unsafe {
+                read_native_value(
+                    var.current_values[0],
+                    var.native_bytes,
+                    self.ir.use_4state,
+                    var.width as u32,
+                    false,
+                )
+            };
+            let level = Value::new(u64::from(high), 1, false);
+            if saved != level {
+                saved_clocks.push((id, saved));
+                self.set_var_by_id(&id, level);
             }
-            let dump = self.dump.as_mut().unwrap();
-            dump.timestamp(self.time);
-            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state, false);
-            Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
+        }
+
+        if self.comb_dirty {
+            // Sampling can refresh the values, but a normal settle
+            // still has to run the combinational effects.
+            let _mute = crate::output_buffer::Mute::begin();
+            let mut sample_status = SimStatus::default();
+            self.ir
+                .settle_comb(&mut self.mask_cache, &mut sample_status, &mut self.profile);
+        }
+        let dump = self.dump.as_mut().unwrap();
+        dump.timestamp(self.time);
+        dump.dump_all_vars(&self.dump_vars, self.ir.use_4state, false);
+        Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
+
+        for (id, value) in saved_clocks.into_iter().rev() {
+            self.set_var_by_id(&id, value);
         }
     }
 

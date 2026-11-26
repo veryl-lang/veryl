@@ -956,6 +956,9 @@ pub unsafe extern "C" fn veryl_aot_sysfn_print(
 
 impl SystemFunctionCall {
     pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) {
+        if output_buffer::muted() {
+            return;
+        }
         match self {
             SystemFunctionCall::Display { format_str, args } => {
                 let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
