@@ -1,5 +1,4 @@
 use crate::HashMap;
-use crate::assert_buffer;
 use crate::ir::{
     ComponentArg, Event, Expression, Ir, RuntimeForRange, Statement, SystemFunctionCall,
     TbMethodKind, Value, VarId, extend_to_i64, for_bound_reached, format_assert_message,
@@ -432,11 +431,14 @@ pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestR
 
 /// Run a test module's `initial` blocks, one process each.
 pub fn run_testbench_blocks(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> TestResult {
-    assert_buffer::reset();
+    sim.status.reset();
     crate::file_table::reset();
     crate::random_table::reset(sim.ir.seed);
     crate::queue_table::reset();
     let result: TestResult = run_processes(sim, blocks).into();
+    // The comb's failures in the final state are reported whether or not a
+    // dump or a read settled it after the last edge.
+    sim.ensure_comb_updated();
     // End-of-test component hooks may still record failures.
     sim.finish_components();
     let component_failures = sim.take_component_failures();
@@ -448,7 +450,7 @@ pub fn run_testbench_blocks(sim: &mut Simulator, blocks: &[&[TestbenchStatement]
     }
     // Component failures (typically from `on_finish`) are appended to an
     // already-failing result rather than dropped.
-    let failure = match (result, assert_buffer::take_failure()) {
+    let failure = match (result, sim.status.take_failure()) {
         (TestResult::Fail(msg), _) => Some(msg),
         (TestResult::Pass, assert_failure) => assert_failure,
     };
@@ -920,9 +922,6 @@ impl<'a> Process<'a> {
                     ExecResult::Fail(msg) => return ProcStep::Fail(msg),
                 },
             }
-            if assert_buffer::has_fatal() {
-                return ProcStep::Fail(assert_buffer::take_failure().unwrap_or_default());
-            }
         }
     }
 }
@@ -1118,9 +1117,6 @@ fn run_single_process(sim: &mut Simulator, mut process: Process<'_>) -> ExecResu
                 if result.should_stop() {
                     return result;
                 }
-                if assert_buffer::has_fatal() {
-                    return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
-                }
             }
             ProcStep::Done => return ExecResult::Continue,
             ProcStep::Finished => return ExecResult::Finished,
@@ -1132,7 +1128,6 @@ fn run_single_process(sim: &mut Simulator, mut process: Process<'_>) -> ExecResu
 /// Take the edges the only process is waiting for, one step each.
 fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
     let has_dump = sim.dump.is_some();
-    let has_components = !sim.components.is_empty();
     let (clock, count, high_time, low_time, reset) = match wait {
         Wait::Clock {
             clock,
@@ -1172,17 +1167,11 @@ fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
             sim.dump_variables();
         }
         sim.time += low_time;
-        // Component-requested termination, checked at cycle end (after
-        // commit and dump).
-        if has_components {
-            if sim.components_failed() {
-                result = ExecResult::Fail(sim.take_component_failures().join("\n"));
-                break;
-            }
-            if sim.component_finish_requested() {
-                result = ExecResult::Finished;
-                break;
-            }
+        // Requested termination, as latched by the edge; acted on at cycle
+        // end (after commit and dump).
+        if sim.status.stop_requested() {
+            result = stop_result(sim);
+            break;
         }
         // Stop once the optional clock-cycle cap is reached.
         if let Some(limit) = sim.cycle_limit {
@@ -1197,6 +1186,18 @@ fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
         sim.set_reset_level(&id, false);
     }
     result
+}
+
+/// How a run ends once something asked it to stop: a fatal assertion, then
+/// a component's failure, fail it; otherwise it finishes.
+fn stop_result(sim: &mut Simulator) -> ExecResult {
+    if sim.status.has_fatal() {
+        return ExecResult::Fail(sim.status.take_failure().unwrap_or_default());
+    }
+    if sim.components_failed() {
+        return ExecResult::Fail(sim.take_component_failures().join("\n"));
+    }
+    ExecResult::Finished
 }
 
 /// Run one process until it waits on a clock, ends, or stops the run.
@@ -1351,18 +1352,9 @@ fn take_edges<'a>(
             at: clocks[*clock].next_edge,
         };
     }
-    if assert_buffer::has_fatal() {
-        return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
-    }
-    // Component-requested termination, checked at cycle end (after commit
-    // and dump).
-    if !sim.components.is_empty() {
-        if sim.components_failed() {
-            return ExecResult::Fail(sim.take_component_failures().join("\n"));
-        }
-        if sim.component_finish_requested() {
-            return ExecResult::Finished;
-        }
+    // Requested termination, as latched by the edge.
+    if sim.status.stop_requested() {
+        return stop_result(sim);
     }
     // Stop once the optional clock-cycle cap is reached.
     if let Some(limit) = sim.cycle_limit {
@@ -1389,15 +1381,26 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             if val.payload_u64() == 0 {
                 let msg = format_assert_message(format_str, args, &mut sim.mask_cache);
                 match kind {
-                    AssertKind::Fatal => assert_buffer::record_fatal(msg),
-                    AssertKind::Continue => assert_buffer::record_continue(msg),
+                    // The testbench's own assertion stops its process at once.
+                    AssertKind::Fatal => {
+                        sim.status.record_fatal(msg);
+                        return ExecResult::Fail(sim.status.take_failure().unwrap_or_default());
+                    }
+                    AssertKind::Continue => sim.status.record_continue(msg),
                 }
             }
             ExecResult::Continue
         }
         TestbenchStatement::Stmt(s) => {
             sim.ensure_comb_updated();
-            let flow = s.eval_step(&mut sim.mask_cache);
+            // Only a failure the statement itself raises (a stuck `for`)
+            // stops the process at once; one the settle above raised in the
+            // design waits for the next edge, as it would without the read.
+            let had_fatal = sim.status.has_fatal();
+            let flow = s.eval_step(&mut sim.mask_cache, &mut sim.status);
+            if !had_fatal && sim.status.has_fatal() {
+                return ExecResult::Fail(sim.status.take_failure().unwrap_or_default());
+            }
             // A statement that writes only testbench-private variables cannot
             // change a comb input, so the next read does not need a settle.
             if sim.tb_dirty.writes_ff(s) {

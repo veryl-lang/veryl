@@ -8,7 +8,7 @@ thread_local! {
     static MUTED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// While alive, drops `$display` / `$write` output and assertion records: a
+/// While alive, drops `$display` / `$write` output and `SimStatus` records: a
 /// reference rerun of statements whose effects already happened once.
 pub struct Mute(bool);
 

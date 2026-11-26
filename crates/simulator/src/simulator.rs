@@ -11,6 +11,7 @@ use crate::ir::{
     read_native_value, write_native_value,
 };
 use crate::residency;
+use crate::sim_status::SimStatus;
 use crate::wave_dumper::{DumpVar, WaveDumper};
 use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap};
@@ -56,6 +57,8 @@ pub struct Simulator {
     pub dump: Option<WaveDumper>,
     dump_vars: Vec<DumpVar>,
     pub mask_cache: MaskCache,
+    /// The end requests and assertion failures raised so far.
+    pub status: SimStatus,
     comb_dirty: bool,
     pub profile: SimProfile,
     /// Which testbench statements are known not to invalidate the comb.
@@ -385,12 +388,14 @@ impl WriteLogDiag {
 fn run_event_gated(
     ir: &Ir,
     mask_cache: &mut MaskCache,
+    status: &mut SimStatus,
     statements: &[Statement],
     gates: &RtEventGates,
 ) {
     run_gate_children(
         ir,
         mask_cache,
+        status,
         statements,
         gates,
         &gates.roots,
@@ -400,9 +405,11 @@ fn run_event_gated(
 }
 
 /// `[lo, hi)` of the statements, with each of the `children` gates in place.
+#[allow(clippy::too_many_arguments)]
 fn run_gate_children(
     ir: &Ir,
     mask_cache: &mut MaskCache,
+    status: &mut SimStatus,
     statements: &[Statement],
     gates: &RtEventGates,
     children: &[usize],
@@ -413,19 +420,20 @@ fn run_gate_children(
     for &gi in children {
         let g = &gates.gates[gi];
         for s in &statements[pos..g.lo] {
-            dispatch_stmt_fast(s, mask_cache);
+            dispatch_stmt_fast(s, mask_cache, status);
         }
-        run_gate(ir, mask_cache, statements, gates, gi);
+        run_gate(ir, mask_cache, status, statements, gates, gi);
         pos = g.hi;
     }
     for s in &statements[pos..hi] {
-        dispatch_stmt_fast(s, mask_cache);
+        dispatch_stmt_fast(s, mask_cache, status);
     }
 }
 
 fn run_gate(
     ir: &Ir,
     mask_cache: &mut MaskCache,
+    status: &mut SimStatus,
     statements: &[Statement],
     gates: &RtEventGates,
     gi: usize,
@@ -439,7 +447,16 @@ fn run_gate(
     let entry = unsafe { g.enter(ff, comb, &ir.write_log_buffer) };
     match entry {
         GateEntry::Plain => {
-            run_gate_children(ir, mask_cache, statements, gates, &g.children, g.lo, g.hi);
+            run_gate_children(
+                ir,
+                mask_cache,
+                status,
+                statements,
+                gates,
+                &g.children,
+                g.lo,
+                g.hi,
+            );
         }
         GateEntry::Skip => {
             ir.event_gate_skips.set(ir.event_gate_skips.get() + 1);
@@ -449,12 +466,30 @@ fn run_gate(
                     ir.write_log_buffer.wide_count,
                 );
                 unsafe { g.snapshot_out_comb(comb) };
-                run_gate_children(ir, mask_cache, statements, gates, &g.children, g.lo, g.hi);
+                run_gate_children(
+                    ir,
+                    mask_cache,
+                    status,
+                    statements,
+                    gates,
+                    &g.children,
+                    g.lo,
+                    g.hi,
+                );
                 unsafe { g.check_skip(ff, comb, &ir.write_log_buffer, n0, w0) };
             }
         }
         GateEntry::Run { n0, w0, matched } => {
-            run_gate_children(ir, mask_cache, statements, gates, &g.children, g.lo, g.hi);
+            run_gate_children(
+                ir,
+                mask_cache,
+                status,
+                statements,
+                gates,
+                &g.children,
+                g.lo,
+                g.hi,
+            );
             unsafe { g.exit(ff, comb, &ir.write_log_buffer, n0, w0, matched) };
         }
     }
@@ -471,6 +506,7 @@ impl Simulator {
             dump: None,
             dump_vars: Vec::new(),
             mask_cache: MaskCache::default(),
+            status: SimStatus::default(),
             comb_dirty: true,
             profile: Default::default(),
             tb_dirty: Default::default(),
@@ -915,7 +951,8 @@ impl Simulator {
     /// Settle the comb list with whichever engine is configured.
     #[inline]
     fn do_settle_comb(&mut self) {
-        self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
+        self.ir
+            .settle_comb(&mut self.mask_cache, &mut self.status, &mut self.profile);
         self.comb_dirty = false;
     }
 
@@ -1279,6 +1316,8 @@ impl Simulator {
         if self.state_digest.is_some() {
             self.fold_state_digest();
         }
+        // What the edge raised, before the dump settles the comb.
+        self.status.latch();
         self.dump_variables();
     }
 
@@ -1381,6 +1420,9 @@ impl Simulator {
                 c.fire(event, self.time);
                 c.drain_logs();
                 wrote |= c.apply_outputs(self.ir.use_4state);
+                if c.host.failed() || c.host.finish_requested() {
+                    self.status.request_stop();
+                }
             }
         }
         self.components = components;
@@ -1393,10 +1435,6 @@ impl Simulator {
                 crate::wave_dumper::note_direct_write();
             }
         }
-    }
-
-    pub fn component_finish_requested(&self) -> bool {
-        self.components.iter().any(|c| c.host.finish_requested())
     }
 
     pub fn components_failed(&self) -> bool {
@@ -1431,6 +1469,10 @@ impl Simulator {
         let result = c.instance.call_method(&mut c.host, &method_name, args);
         c.drain_logs();
         let failures = c.host.take_failures();
+        // A finish asked for in the call ends the run at the end of the cycle.
+        if c.host.finish_requested() {
+            self.status.request_stop();
+        }
         self.components = components;
         match result {
             Some(value) if failures.is_empty() => Ok(value),
@@ -1602,13 +1644,19 @@ impl Simulator {
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
             if self.last_event_gates.is_null() {
                 for x in statements {
-                    dispatch_stmt_fast(x, &mut self.mask_cache);
+                    dispatch_stmt_fast(x, &mut self.mask_cache, &mut self.status);
                 }
             } else {
                 // SAFETY: as `stmts_ptr`; `event_gates` is never mutated after
                 // `Ir` construction.
                 let gates: &RtEventGates = unsafe { &*self.last_event_gates };
-                run_event_gated(&self.ir, &mut self.mask_cache, statements, gates);
+                run_event_gated(
+                    &self.ir,
+                    &mut self.mask_cache,
+                    &mut self.status,
+                    statements,
+                    gates,
+                );
             }
         }
 
@@ -2059,6 +2107,8 @@ impl Simulator {
         if self.state_digest.is_some() {
             self.fold_state_digest();
         }
+        // What the edge raised, before the dump settles the comb.
+        self.status.latch();
         self.dump_variables();
     }
 
@@ -2203,7 +2253,7 @@ impl Simulator {
         if !stmts_ptr.is_null() {
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
             for x in statements {
-                dispatch_stmt_fast(x, &mut self.mask_cache);
+                dispatch_stmt_fast(x, &mut self.mask_cache, &mut self.status);
             }
         }
         let cr_count = self.ir.write_log_buffer.narrow_count as usize;

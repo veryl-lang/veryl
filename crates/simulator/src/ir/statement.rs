@@ -1,6 +1,5 @@
 use crate::HashMap;
 use crate::HashSet;
-use crate::assert_buffer;
 use crate::backend::ChunkArtifact;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
@@ -20,6 +19,7 @@ use crate::ir::write_log::{
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
+use crate::sim_status::SimStatus;
 use crate::simulator_error::SimulatorError;
 use num_bigint::BigUint;
 use std::sync::Arc;
@@ -552,7 +552,7 @@ impl Statement {
         matches!(self, Statement::Compiled(_) | Statement::CompiledBatch(_))
     }
 
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> ControlFlow {
         match self {
             Statement::Assign(x) => {
                 x.eval_step(mask_cache);
@@ -562,8 +562,8 @@ impl Statement {
                 x.eval_step(mask_cache);
                 ControlFlow::Continue
             }
-            Statement::If(x) => x.eval_step(mask_cache),
-            Statement::Case(x) => x.eval_step(mask_cache),
+            Statement::If(x) => x.eval_step(mask_cache, status),
+            Statement::Case(x) => x.eval_step(mask_cache, status),
             Statement::For(x) => {
                 let r = &x.range;
                 let (start, start_shape) = r.start.eval(mask_cache);
@@ -579,7 +579,7 @@ impl Statement {
                         write_native_value(x.var_ptr, x.var_native_bytes, x.var_use_4state, &val);
                     }
                     for s in &x.body {
-                        if s.eval_step(mask_cache) == ControlFlow::Break {
+                        if s.eval_step(mask_cache, status) == ControlFlow::Break {
                             return ControlFlow::Break;
                         }
                     }
@@ -619,7 +619,7 @@ impl Statement {
                                 i = n
                             }
                             _ => {
-                                assert_buffer::record_fatal(format!(
+                                status.record_fatal(format!(
                                     "for-loop step does not advance the loop variable (stuck at {i}) at {}:{}:{}",
                                     x.token.beg.source, x.token.beg.line, x.token.beg.column
                                 ));
@@ -652,14 +652,14 @@ impl Statement {
             },
             Statement::SequentialBlock(body) => {
                 for s in body {
-                    if s.eval_step(mask_cache) == ControlFlow::Break {
+                    if s.eval_step(mask_cache, status) == ControlFlow::Break {
                         return ControlFlow::Break;
                     }
                 }
                 ControlFlow::Continue
             }
             Statement::SystemFunctionCall(x) => {
-                x.eval_step(mask_cache);
+                x.eval_step(mask_cache, status);
                 ControlFlow::Continue
             }
             Statement::TbMethodCall { .. } => ControlFlow::Continue,
@@ -955,7 +955,7 @@ pub unsafe extern "C" fn veryl_aot_sysfn_print(
 }
 
 impl SystemFunctionCall {
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) {
         match self {
             SystemFunctionCall::Display { format_str, args } => {
                 let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
@@ -1021,14 +1021,14 @@ impl SystemFunctionCall {
                 if val.payload_u64() == 0 {
                     let msg = format_assert_message(format_str, args, mask_cache);
                     match kind {
-                        AssertKind::Fatal => assert_buffer::record_fatal(msg),
-                        AssertKind::Continue => assert_buffer::record_continue(msg),
+                        AssertKind::Fatal => status.record_fatal(msg),
+                        AssertKind::Continue => status.record_continue(msg),
                     }
                 }
             }
-            SystemFunctionCall::Finish => {
-                // Handled by testbench driver
-            }
+            // `$finish` in an `initial` block is a testbench statement; here
+            // it is in the design, and ends the run at the end of the cycle.
+            SystemFunctionCall::Finish => status.record_finish(),
         }
     }
 
@@ -3538,7 +3538,7 @@ pub struct IfStatement {
 }
 
 impl IfStatement {
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> ControlFlow {
         let cond = self
             .cond
             .as_ref()
@@ -3546,13 +3546,13 @@ impl IfStatement {
 
         if cond {
             for x in &self.true_side {
-                if x.eval_step(mask_cache) == ControlFlow::Break {
+                if x.eval_step(mask_cache, status) == ControlFlow::Break {
                     return ControlFlow::Break;
                 }
             }
         } else {
             for x in &self.false_side {
-                if x.eval_step(mask_cache) == ControlFlow::Break {
+                if x.eval_step(mask_cache, status) == ControlFlow::Break {
                     return ControlFlow::Break;
                 }
             }
@@ -3604,11 +3604,11 @@ pub struct CaseArm {
 }
 
 impl CaseStatement {
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache, status: &mut SimStatus) -> ControlFlow {
         for arm in &self.arms {
             if value_is_true(&arm.cond.eval(mask_cache)) {
                 for x in &arm.body {
-                    if x.eval_step(mask_cache) == ControlFlow::Break {
+                    if x.eval_step(mask_cache, status) == ControlFlow::Break {
                         return ControlFlow::Break;
                     }
                 }
@@ -3616,7 +3616,7 @@ impl CaseStatement {
             }
         }
         for x in &self.default {
-            if x.eval_step(mask_cache) == ControlFlow::Break {
+            if x.eval_step(mask_cache, status) == ControlFlow::Break {
                 return ControlFlow::Break;
             }
         }

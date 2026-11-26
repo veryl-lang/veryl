@@ -1,6 +1,6 @@
 //! Thread-local file handle table backing the `$tb::file` testbench handles.
 //!
-//! Like `output_buffer`/`assert_buffer`, a thread-local keeps the open-file
+//! Like `output_buffer`, a thread-local keeps the open-file
 //! state reachable from the testbench driver (which has no `Simulator` handle)
 //! and isolates parallel tests. Handles are keyed by the declaring variable's
 //! name (`StrId`): `f.open(...)` is a statement with no return value, so there
