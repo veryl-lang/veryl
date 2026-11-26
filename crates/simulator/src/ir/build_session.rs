@@ -51,6 +51,13 @@ impl<'ir> BuildSession<'ir> {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    #[cfg(test)]
+    pub(crate) fn hier_matched(&self) -> usize {
+        self.dut_reuse
+            .hier_matched
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub fn new(ir: &'ir air::Ir, config: &Config, tops: &[StrId]) -> Self {
         Self {
             ir,

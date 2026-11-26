@@ -1259,7 +1259,7 @@ impl std::hash::Hash for ProtoReadmemhHier {
     }
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone, Debug)]
 pub struct ProtoAssignDynamicStatement {
     pub dst_base: VarOffset,
     pub dst_stride: isize,
@@ -1276,6 +1276,38 @@ pub struct ProtoAssignDynamicStatement {
     /// `force_ff`, which puts every element of a runtime-indexed array in FF
     /// storage so the stride is uniform, comb-driven elements included.
     pub comb_direct: bool,
+}
+
+impl std::hash::Hash for ProtoAssignDynamicStatement {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoAssignDynamicStatement {
+            dst_base,
+            dst_stride,
+            dst_num_elements,
+            dst_index_expr,
+            dst_width,
+            select,
+            dynamic_select,
+            rhs_select,
+            expr,
+            dst_ff_current_base_offset,
+            comb_direct,
+        } = self;
+        dst_base.hash(state);
+        dst_stride.hash(state);
+        dst_num_elements.hash(state);
+        dst_index_expr.hash(state);
+        dst_width.hash(state);
+        select.hash(state);
+        dynamic_select.hash(state);
+        rhs_select.hash(state);
+        expr.hash(state);
+        // See `ProtoAssignStatement`'s hash.
+        if dst_base.is_ff() {
+            dst_ff_current_base_offset.hash(state);
+        }
+        comb_direct.hash(state);
+    }
 }
 
 /// Reused compiled block from a cached module instance.  Byte deltas
@@ -3913,7 +3945,11 @@ impl std::hash::Hash for ProtoAssignStatement {
         dynamic_select.hash(state);
         rhs_select.hash(state);
         expr.hash(state);
-        dst_ff_current_offset.hash(state);
+        // Only an FF destination has a current slot; a comb one keeps a stale
+        // value through relocation.
+        if dst.is_ff() {
+            dst_ff_current_offset.hash(state);
+        }
     }
 }
 

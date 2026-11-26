@@ -3977,10 +3977,17 @@ impl Conv<&air::Expression> for ProtoExpression {
                     // would grow the code for nothing.  The storage stays
                     // allocated -- hierarchical references and waveform dumps
                     // still resolve the parameter by name.
+                    // A parameter whose value differs between the
+                    // specializations a template runs for stays a read, the
+                    // one place the instances differ.
                     if select.is_empty() && index.dimension() == 0 {
+                        let lifted = context.hier_lifted.clone();
                         let scope = context.scope();
                         if let Some(var) = scope.analyzer_context.variables.get(id)
                             && var.kind == air::VarKind::Param
+                            && !lifted
+                                .as_ref()
+                                .is_some_and(|l| var.path.0.last().is_some_and(|p| l.contains(p)))
                             && let [value @ Value::U64(v)] = var.value.as_slice()
                             && v.width as usize == width
                         {

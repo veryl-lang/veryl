@@ -782,6 +782,145 @@ fn a_named_module_becomes_a_template() {
     assert_eq!(sim.get("p").unwrap(), Value::new(3, 8, false));
 }
 
+/// Builds `code` without templates and with `named` shared, steps both
+/// through `inputs` on `a`, and returns the second build's session counters
+/// `(conversions, matched)` once every port in `ports` agreed.
+fn compare_named(
+    code: &str,
+    flat: Config,
+    named: &[&str],
+    ports: &[&str],
+    inputs: &[u64],
+) -> (usize, usize) {
+    let top: veryl_parser::resource_table::StrId = "Top".into();
+    let air_ir = analyze_air(code);
+    let shared = Config {
+        shared_modules: named.iter().map(|s| s.to_string()).collect(),
+        ..flat.clone()
+    };
+    let session = crate::ir::BuildSession::new(&air_ir, &shared, &[top]);
+    let mut sims = [
+        Simulator::new(
+            crate::ir::BuildSession::new(&air_ir, &flat, &[top])
+                .build_ir(top)
+                .unwrap(),
+            None,
+        ),
+        Simulator::new(session.build_ir(top).unwrap(), None),
+    ];
+    for sim in sims.iter_mut() {
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+    }
+    for (step, &a) in inputs.iter().enumerate() {
+        let mut got = Vec::new();
+        for sim in sims.iter_mut() {
+            sim.set("a", Value::new(a, 8, false));
+            let clk = sim.get_clock("clk").unwrap();
+            sim.step(&clk);
+            got.push(
+                ports
+                    .iter()
+                    .map(|p| sim.get(p).unwrap())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert_eq!(got[0], got[1], "step {step}");
+    }
+    (session.hier_conversions(), session.hier_matched())
+}
+
+/// Specializations of a named module that differ only in a parameter read as
+/// a value, here through a child of their own, run one template.
+#[test]
+fn specializations_differing_in_a_value_parameter_share_a_template() {
+    let code = r#"
+    module Hit #(param P: u32 = 0) (a: input logic<8>, x: output logic) {
+        assign x = a[1:0] == P;
+    }
+    module Port #(param P: u32 = 0) (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        q  : output logic<8>,
+    ) {
+        var hit: logic;
+        var r  : logic<8>;
+        inst u_hit: Hit #(P) (a, x: hit);
+        always_ff {
+            if_reset { r = 0; } else if hit { r = r + a; }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk: input  clock     ,
+        rst: input  reset     ,
+        a  : input  logic<8>  ,
+        q  : output logic<8>[4],
+    ) {
+        for i in 0..4 :g {
+            inst u: Port #(P: i) (clk, rst, a, q: q[i]);
+        }
+    }
+    "#;
+    let inputs = [0, 1, 2, 3, 5, 6, 7, 9];
+    let jit = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    assert_eq!(compare_named(code, jit, &["Port"], &["q"], &inputs), (1, 3));
+    if crate::tests::aot_c_loads() {
+        let aot = Config {
+            use_jit: true,
+            aot_c: true,
+            aot_c_event: true,
+            aot_c_async: false,
+            aot_c_min_stmts: 0,
+            ..Default::default()
+        };
+        assert_eq!(compare_named(code, aot, &["Port"], &["q"], &inputs), (1, 3));
+    }
+}
+
+/// A parameter that shapes the code keeps each specialization to itself,
+/// with the same results.
+#[test]
+fn specializations_differing_in_shape_convert_flat() {
+    let code = r#"
+    module Port #(param P: u32 = 0) (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        q  : output logic<8>,
+    ) {
+        var r: logic<8>;
+        if P == 0 :g {
+            always_ff { if_reset { r = 0; } else { r = r + a; } }
+        } else {
+            always_ff { if_reset { r = 0; } else { r = r ^ a; } }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk: input  clock     ,
+        rst: input  reset     ,
+        a  : input  logic<8>  ,
+        q  : output logic<8>[4],
+    ) {
+        for i in 0..4 :g {
+            inst u: Port #(P: i % 2) (clk, rst, a, q: q[i]);
+        }
+    }
+    "#;
+    let jit = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    let (_, matched) = compare_named(code, jit, &["Port"], &["q"], &[1, 2, 3, 4]);
+    assert_eq!(matched, 0);
+}
+
 /// Two templates each have an instance at the same relative offset: their
 /// class runs and partitions must not be taken for each other.
 #[test]
@@ -882,4 +1021,27 @@ fn a_named_template_under_generate_and_a_param_override() {
         .build_ir(top)
         .unwrap();
     assert!(ir.hier_shared_blocks > 0, "not a template");
+}
+
+/// One specialization several tops instantiate is not a group of them.
+#[test]
+fn a_specialization_reached_from_several_tops_is_one() {
+    let code = r#"
+    module Sub (a: input logic<8>, x: output logic<8>) { assign x = a + 8'd1; }
+    module TopA (i: input logic<8>, o: output logic<8>) {
+        var w: logic<8>;
+        inst s0: Sub (a: i, x: w);
+        inst s1: Sub (a: w, x: o);
+    }
+    module TopB (i: input logic<8>, o: output logic<8>) {
+        var w: logic<8>;
+        inst s0: Sub (a: i, x: w);
+        inst s1: Sub (a: w, x: o);
+    }
+    "#;
+    let air_ir = analyze_air(code);
+    let tops: Vec<veryl_parser::resource_table::StrId> = vec!["TopA".into(), "TopB".into()];
+    let set = crate::ir::hier::template_set(&air_ir, &tops, None, &["Sub".to_string()]);
+    assert_eq!(set.templates.len(), 1);
+    assert!(set.groups.is_empty() && set.lifted.is_empty());
 }

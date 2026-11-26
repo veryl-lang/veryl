@@ -1417,6 +1417,45 @@ impl CombList {
     }
 }
 
+/// The fingerprint of a template subtree's statements before the template
+/// is built, relative to its start, and of the storage it takes.
+fn hier_raw_fingerprint(
+    context: &Context,
+    ff_start: isize,
+    comb_start: isize,
+    comb: &CombList,
+    post_comb_fns: &[ProtoStatement],
+    events: &HashMap<Event, Vec<ProtoStatement>>,
+) -> u128 {
+    use std::hash::{Hash, Hasher};
+    let relative = |stmts: &mut dyn Iterator<Item = &ProtoStatement>| -> u128 {
+        let mut h = crate::backend::registry::Fp128::new();
+        for s in stmts {
+            let mut s = s.clone();
+            s.adjust_offsets(-ff_start, -comb_start);
+            s.hash(&mut h);
+        }
+        h.finish_128()
+    };
+    let mut per_event: Vec<u128> = events
+        .iter()
+        .map(|(event, stmts)| {
+            let mut h = crate::backend::registry::Fp128::new();
+            event.hash(&mut h);
+            h.write_u128(relative(&mut stmts.iter()));
+            h.finish_128()
+        })
+        .collect();
+    per_event.sort_unstable();
+    let mut h = crate::backend::registry::Fp128::new();
+    h.write_usize(context.ff_total_bytes - ff_start as usize);
+    h.write_usize(context.comb_total_bytes - comb_start as usize);
+    h.write_u128(relative(&mut comb.iter()));
+    h.write_u128(relative(&mut post_comb_fns.iter()));
+    per_event.hash(&mut h);
+    h.finish_128()
+}
+
 impl std::hash::Hash for CombList {
     /// Hashes as the concatenated slice would.
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -2775,6 +2814,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // offsets, skipping IR assembly AND codegen.  `child_variable_meta` and
         // the port copies / event remap below are still rebuilt fresh.
         let mut _hier_claim = None;
+        let mut hier_verify = None;
         let (reuse_hit, claim_guard) = if hier_template {
             match context
                 .dut_reuse
@@ -2786,6 +2826,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
                 HierOutcome::Compute(claim) => {
                     _hier_claim = claim;
+                    (None, None)
+                }
+                HierOutcome::Verify(entry) => {
+                    hier_verify = Some(entry);
                     (None, None)
                 }
             }
@@ -2872,6 +2916,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.in_reuse_dut = prev_in_reuse_dut || !alias_enabled;
             let prev_in_hier_template = context.in_hier_template;
             context.in_hier_template = prev_in_hier_template || hier_template;
+            let lifted = if hier_template {
+                context.dut_reuse.hier_lifted(component_key)
+            } else {
+                context.hier_lifted.clone()
+            };
+            let prev_hier_lifted = std::mem::replace(&mut context.hier_lifted, lifted);
 
             for decl in child_decls {
                 let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -2908,9 +2958,49 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
             context.in_reuse_dut = prev_in_reuse_dut;
             context.in_hier_template = prev_in_hier_template;
+            let lifted = std::mem::replace(&mut context.hier_lifted, prev_hier_lifted);
             context.scope_contexts.pop();
 
-            if hier_template {
+            let raw_fingerprint = (hier_template && lifted.is_some()).then(|| {
+                hier_raw_fingerprint(
+                    context,
+                    ff_start,
+                    comb_start,
+                    &all_comb_statements,
+                    &all_post_comb_fns,
+                    &all_event_statements,
+                )
+            });
+            let verifying = hier_verify.is_some();
+            let verified = hier_verify.filter(|entry| {
+                let same =
+                    entry.raw_fingerprint().is_some() && entry.raw_fingerprint() == raw_fingerprint;
+                if crate::ir::hier::diag() {
+                    eprintln!(
+                        "[hier] specialization {} {}",
+                        child_module.name,
+                        if same {
+                            "matches its template"
+                        } else {
+                            "differs, converted flat"
+                        }
+                    );
+                }
+                same
+            });
+            if let Some(entry) = verified {
+                #[cfg(test)]
+                context
+                    .dut_reuse
+                    .hier_matched
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let (reused, inst) =
+                    crate::backend::inst::hier_relocate(&entry, ff_start, comb_start);
+                all_event_statements = reused.event_statements;
+                all_comb_statements = reused.comb_statements;
+                all_post_comb_fns = reused.post_comb_fns;
+                hier_instance = inst;
+            } else if hier_template && !verifying {
                 let mut stmts = std::mem::take(&mut all_comb_statements).into_vec();
                 stmts.append(&mut all_post_comb_fns);
                 let template = match crate::ir::hier::HierTemplate::build(
@@ -2957,6 +3047,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     &all_derived_clock_candidates,
                     &context.comb_reloc[comb_reloc_start..],
                     template,
+                    raw_fingerprint,
                 );
                 if let Some(nodes) = nodes {
                     all_event_statements = nodes;

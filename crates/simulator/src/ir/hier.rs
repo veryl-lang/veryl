@@ -295,17 +295,33 @@ pub(crate) fn diag() -> bool {
     std::env::var("VERYL_HIER_DIAG").is_ok()
 }
 
+/// The templates `template_set` chose.
+#[derive(Default)]
+pub(crate) struct TemplateSet {
+    pub(crate) templates: HashSet<usize>,
+    /// A `named` module's specializations that differ in parameters, each
+    /// mapped to the group's first one: an instance of any of them runs the
+    /// group's template once its statements match the template's.
+    pub(crate) groups: HashMap<usize, usize>,
+    /// Per group of several specializations, the parameters whose values
+    /// differ between the specializations of one module in their subtrees:
+    /// read from storage there, so the statements match.
+    pub(crate) lifted: HashMap<usize, Arc<HashSet<StrId>>>,
+    /// The `named` modules no top instantiates twice.
+    pub(crate) unmatched: Vec<String>,
+}
+
 /// Components instantiated at least twice under one top that are `named`, or
 /// have at least `min_decls` declarations of their own and their
-/// descendants'.  Only the topmost such component on a path is chosen; its
-/// descendants are converted inside it.  Also the `named` modules no top
-/// instantiates twice.
+/// descendants'.  A `named` module counts the instances of all its
+/// specializations.  Only the topmost such component on a path is chosen;
+/// its descendants are converted inside it.
 pub(crate) fn template_set(
     ir: &air::Ir,
     tops: &[StrId],
     min_decls: Option<usize>,
     named: &[String],
-) -> (HashSet<usize>, Vec<String>) {
+) -> TemplateSet {
     fn children(m: &air::Module) -> impl Iterator<Item = (usize, &air::Module)> {
         m.declarations.iter().filter_map(|d| match d {
             air::Declaration::Inst(inst) => match inst.component.as_ref() {
@@ -339,29 +355,55 @@ pub(crate) fn template_set(
             count(child, counts, names);
         }
     }
+    /// Every parameter value of each module in `m`'s subtree, `m` included.
+    fn params(
+        m: &air::Module,
+        seen: &mut HashSet<usize>,
+        key: usize,
+        out: &mut HashMap<(StrId, StrId), HashSet<air::ValueVariant>>,
+    ) {
+        if !seen.insert(key) {
+            return;
+        }
+        for (name, value) in &m.signature.parameters {
+            out.entry((m.name, *name))
+                .or_default()
+                .insert(value.clone());
+        }
+        for (k, child) in children(m) {
+            params(child, seen, k, out);
+        }
+    }
     struct Rule<'a> {
         counts: &'a HashMap<usize, usize>,
         names: &'a HashMap<usize, String>,
+        named_counts: &'a HashMap<String, usize>,
         min_decls: Option<usize>,
         named: &'a [String],
     }
-    fn pick(
-        m: &air::Module,
+    struct Picked<'a> {
+        out: HashSet<usize>,
+        /// Each `named` module's chosen specializations, in visiting order.
+        named: HashMap<String, Vec<(usize, &'a air::Module)>>,
+    }
+    fn pick<'a>(
+        m: &'a air::Module,
         rule: &Rule,
         weights: &mut HashMap<usize, usize>,
         visited: &mut HashSet<usize>,
-        out: &mut HashSet<usize>,
+        picked: &mut Picked<'a>,
     ) {
         for (k, child) in children(m) {
             if !visited.insert(k) {
                 continue;
             }
-            let chosen = rule.counts.get(&k).copied().unwrap_or(0) >= 2
-                && (rule.named.contains(&rule.names[&k])
-                    || rule
-                        .min_decls
-                        .is_some_and(|min| weight(k, child, weights) >= min));
-            if chosen {
+            let name = &rule.names[&k];
+            let by_name = rule.named.contains(name) && rule.named_counts[name] >= 2;
+            let by_weight = rule.counts.get(&k).copied().unwrap_or(0) >= 2
+                && rule
+                    .min_decls
+                    .is_some_and(|min| weight(k, child, weights) >= min);
+            if by_name || by_weight {
                 if diag() {
                     eprintln!(
                         "[hier] pick {}: {} instances, weight {}",
@@ -370,14 +412,24 @@ pub(crate) fn template_set(
                         weight(k, child, weights)
                     );
                 }
-                out.insert(k);
+                // Several tops reach the same specialization: it is one.
+                if picked.out.insert(k) && by_name {
+                    picked
+                        .named
+                        .entry(name.clone())
+                        .or_default()
+                        .push((k, child));
+                }
             } else {
-                pick(child, rule, weights, visited, out);
+                pick(child, rule, weights, visited, picked);
             }
         }
     }
 
-    let mut out = HashSet::default();
+    let mut picked = Picked {
+        out: HashSet::default(),
+        named: HashMap::default(),
+    };
     let mut weights = HashMap::default();
     let mut repeated: HashSet<String> = HashSet::default();
     for &top in tops {
@@ -390,26 +442,60 @@ pub(crate) fn template_set(
         };
         let (mut counts, mut names) = (HashMap::default(), HashMap::default());
         count(m, &mut counts, &mut names);
+        let mut named_counts: HashMap<String, usize> = HashMap::default();
         for (k, &n) in &counts {
+            *named_counts.entry(names[k].clone()).or_default() += n;
+        }
+        for (name, &n) in &named_counts {
             if n >= 2 {
-                repeated.insert(names[k].clone());
+                repeated.insert(name.clone());
             }
         }
         let rule = Rule {
             counts: &counts,
             names: &names,
+            named_counts: &named_counts,
             min_decls,
             named,
         };
         let mut visited = HashSet::default();
-        pick(m, &rule, &mut weights, &mut visited, &mut out);
+        pick(m, &rule, &mut weights, &mut visited, &mut picked);
     }
-    let unmatched = named
+    let mut set = TemplateSet {
+        templates: picked.out,
+        ..Default::default()
+    };
+    for specs in picked.named.values() {
+        if specs.len() < 2 {
+            continue;
+        }
+        let group = specs[0].0;
+        let mut values = HashMap::default();
+        let mut seen = HashSet::default();
+        for &(k, m) in specs {
+            set.groups.insert(k, group);
+            params(m, &mut seen, k, &mut values);
+        }
+        let lifted: HashSet<StrId> = values
+            .into_iter()
+            .filter(|(_, v)| v.len() > 1)
+            .map(|((_, p), _)| p)
+            .collect();
+        if diag() {
+            eprintln!(
+                "[hier] group of {} specializations lifts {:?}",
+                specs.len(),
+                lifted.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+            );
+        }
+        set.lifted.insert(group, Arc::new(lifted));
+    }
+    set.unmatched = named
         .iter()
         .filter(|n| !repeated.contains(*n))
         .cloned()
         .collect();
-    (out, unmatched)
+    set
 }
 
 /// One compiled run of a class, in the reference instance's coordinates.

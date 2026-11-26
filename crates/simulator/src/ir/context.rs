@@ -114,6 +114,9 @@ pub struct Context {
     /// True while converting a hierarchy template's subtree, so templates
     /// do not nest.
     pub in_hier_template: bool,
+    /// The parameters read from storage instead of folded while converting
+    /// a template of several specializations (`TemplateSet::lifted`).
+    pub hier_lifted: Option<Arc<HashSet<veryl_parser::resource_table::StrId>>>,
     /// Why the hierarchy templates fell back to flat statements: the
     /// conversion then differs from one without templates, so the caller
     /// converts again with them off.

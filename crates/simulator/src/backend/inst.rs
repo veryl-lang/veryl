@@ -49,12 +49,18 @@ pub(crate) struct DutReuseCache {
     ready: Condvar,
     /// Hierarchy templates (see `ir::hier`) and their first conversion.
     hier_templates: HashSet<usize>,
+    /// See `TemplateSet::groups` and `TemplateSet::lifted`.
+    hier_groups: HashMap<usize, usize>,
+    hier_lifted: HashMap<usize, Arc<HashSet<veryl_parser::resource_table::StrId>>>,
     /// `Config::shared_modules` entries no top instantiates twice.
     pub(crate) unmatched_shared_modules: Vec<String>,
     hier_entries: Mutex<HashMap<usize, HierSlot>>,
     hier_ready: Condvar,
     #[cfg(test)]
     pub(crate) hier_conversions: std::sync::atomic::AtomicUsize,
+    /// Specializations that run another's template.
+    #[cfg(test)]
+    pub(crate) hier_matched: std::sync::atomic::AtomicUsize,
 }
 
 #[cfg(test)]
@@ -72,11 +78,15 @@ impl Default for DutReuseCache {
             statements: Mutex::default(),
             ready: Condvar::new(),
             hier_templates: HashSet::default(),
+            hier_groups: HashMap::default(),
+            hier_lifted: HashMap::default(),
             unmatched_shared_modules: Vec::new(),
             hier_entries: Mutex::default(),
             hier_ready: Condvar::new(),
             #[cfg(test)]
             hier_conversions: Default::default(),
+            #[cfg(test)]
+            hier_matched: Default::default(),
         }
     }
 }
@@ -87,7 +97,7 @@ impl DutReuseCache {
         tops: &[veryl_parser::resource_table::StrId],
         config: &crate::ir::Config,
     ) -> Self {
-        let (hier_templates, unmatched_shared_modules) = if config.has_hier_templates() {
+        let set = if config.has_hier_templates() {
             crate::ir::hier::template_set(ir, tops, config.hier_templates, &config.shared_modules)
         } else {
             Default::default()
@@ -98,14 +108,32 @@ impl DutReuseCache {
             } else {
                 HashSet::default()
             },
-            hier_templates,
-            unmatched_shared_modules,
+            hier_templates: set.templates,
+            hier_groups: set.groups,
+            hier_lifted: set.lifted,
+            unmatched_shared_modules: set.unmatched,
             ..Self::default()
         }
     }
 
     pub(crate) fn is_hier_template(&self, component_key: *const air::Component) -> bool {
         self.hier_templates.contains(&(component_key as usize))
+    }
+
+    fn hier_group(&self, component_key: *const air::Component) -> usize {
+        let key = component_key as usize;
+        self.hier_groups.get(&key).copied().unwrap_or(key)
+    }
+
+    /// The parameters a template's conversion reads from storage, for a
+    /// template of several specializations.
+    pub(crate) fn hier_lifted(
+        &self,
+        component_key: *const air::Component,
+    ) -> Option<Arc<HashSet<veryl_parser::resource_table::StrId>>> {
+        self.hier_lifted
+            .get(&self.hier_group(component_key))
+            .cloned()
     }
 
     /// A template's earlier conversion relocated to this instance, with the
@@ -118,7 +146,7 @@ impl DutReuseCache {
         ff_start: isize,
         comb_start: isize,
     ) -> HierOutcome {
-        let key = component_key as usize;
+        let key = self.hier_group(component_key);
         let mut entries = self.hier_entries.lock().unwrap();
         let entry = loop {
             match entries.get(&key) {
@@ -140,15 +168,10 @@ impl DutReuseCache {
             }
         };
         drop(entries);
-        let inst = entry.template.as_ref().map(|t| HierInstance {
-            template: Arc::clone(t),
-            ff_delta: ff_start - entry.conv.ref_ff_start,
-            comb_delta: comb_start - entry.conv.ref_comb_start,
-        });
-        let mut reused = relocate_entry(&entry.conv, ff_start, comb_start, inst.is_none());
-        if let Some(inst) = &inst {
-            reused.event_statements = event_nodes(&entry.events, inst.ff_delta, inst.comb_delta);
+        if entry.rep != component_key as usize {
+            return HierOutcome::Verify(entry);
         }
+        let (reused, inst) = hier_relocate(&entry, ff_start, comb_start);
         HierOutcome::Hit(reused, inst)
     }
 
@@ -166,6 +189,7 @@ impl DutReuseCache {
         derived_clock_candidates: &[crate::ir::EdgeCandidate],
         comb_reloc: &[(isize, isize, usize)],
         template: Option<Arc<HierTemplate>>,
+        raw_fingerprint: Option<u128>,
     ) -> Option<HashMap<Event, Vec<ProtoStatement>>> {
         let events: HashMap<Event, Arc<Vec<ProtoStatement>>> = if template.is_some() {
             event_statements
@@ -198,13 +222,15 @@ impl DutReuseCache {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut entries = self.hier_entries.lock().unwrap();
         let slot = entries
-            .entry(component_key as usize)
+            .entry(self.hier_group(component_key))
             .or_insert(HierSlot::Computing);
         if !matches!(slot, HierSlot::Done(_)) {
             *slot = HierSlot::Done(Arc::new(HierEntry {
                 conv,
                 template,
                 events,
+                rep: component_key as usize,
+                raw_fingerprint,
             }));
         }
         self.hier_ready.notify_all();
@@ -328,12 +354,44 @@ struct CachedStatements {
     hier_instances: Vec<HierInstance>,
 }
 
-struct HierEntry {
+pub(crate) struct HierEntry {
     conv: CachedStatements,
     template: Option<Arc<HierTemplate>>,
     /// The template's events in the reference coordinates, shared by every
     /// instance's nodes; empty when the template fell back to flat.
     events: HashMap<Event, Arc<Vec<ProtoStatement>>>,
+    /// The specialization converted first.
+    rep: usize,
+    /// For a group of several specializations, the representative's
+    /// statements before the template was built, relative to its start:
+    /// another specialization converts and runs the template only when its
+    /// own match.
+    raw_fingerprint: Option<u128>,
+}
+
+impl HierEntry {
+    pub(crate) fn raw_fingerprint(&self) -> Option<u128> {
+        self.raw_fingerprint
+    }
+}
+
+/// `entry`'s conversion relocated to an instance at `ff_start`/`comb_start`,
+/// with the instance's handle on the template when it holds one.
+pub(crate) fn hier_relocate(
+    entry: &HierEntry,
+    ff_start: isize,
+    comb_start: isize,
+) -> (ReusedStatements, Option<HierInstance>) {
+    let inst = entry.template.as_ref().map(|t| HierInstance {
+        template: Arc::clone(t),
+        ff_delta: ff_start - entry.conv.ref_ff_start,
+        comb_delta: comb_start - entry.conv.ref_comb_start,
+    });
+    let mut reused = relocate_entry(&entry.conv, ff_start, comb_start, inst.is_none());
+    if let Some(inst) = &inst {
+        reused.event_statements = event_nodes(&entry.events, inst.ff_delta, inst.comb_delta);
+    }
+    (reused, inst)
 }
 
 /// A template instance's events: each clock and reset event as one node
@@ -372,6 +430,9 @@ enum HierSlot {
 pub(crate) enum HierOutcome {
     Hit(ReusedStatements, Option<HierInstance>),
     Compute(Option<HierClaim>),
+    /// Another specialization of the group: convert, then run the template
+    /// when the statements match its representative's.
+    Verify(Arc<HierEntry>),
 }
 
 /// Held across a template's conversion; dropping it before `hier_store`
