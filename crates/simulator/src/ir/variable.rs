@@ -832,6 +832,48 @@ impl ModuleVariables {
         }
     }
 
+    /// Every variable here and in the descendants, as its type, native byte
+    /// width and the addresses of its current then next elements, without
+    /// building the descendants' tables: those clone each variable's path and
+    /// type.
+    pub(crate) fn for_each_storage(&self, mut f: impl FnMut(&Type, usize, &[*mut u8])) {
+        fn walk(
+            metas: &[ModuleVariableMeta],
+            ff_base: *mut u8,
+            comb_base: *mut u8,
+            buf: &mut Vec<*mut u8>,
+            f: &mut impl FnMut(&Type, usize, &[*mut u8]),
+        ) {
+            for m in metas {
+                for meta in m.variable_meta.values() {
+                    buf.clear();
+                    for element in &meta.elements {
+                        let base = if element.is_ff() { ff_base } else { comb_base };
+                        buf.push(unsafe { base.add(element.current_offset() as usize) });
+                    }
+                    for element in meta.elements.iter().filter(|e| e.is_ff()) {
+                        buf.push(unsafe { ff_base.add(element.next_offset as usize) });
+                    }
+                    f(&meta.r#type, meta.native_bytes, buf);
+                }
+                walk(&m.children, ff_base, comb_base, buf, f);
+            }
+        }
+        let mut buf = Vec::new();
+        for var in self.variables.values() {
+            buf.clear();
+            buf.extend(var.current_values.iter().chain(&var.next_values).copied());
+            f(&var.r#type, var.native_bytes, &buf);
+        }
+        walk(
+            &self.children,
+            self.ff_base,
+            self.comb_base,
+            &mut buf,
+            &mut f,
+        );
+    }
+
     pub fn children(&self) -> impl Iterator<Item = ModuleVariables> + '_ {
         self.children
             .iter()

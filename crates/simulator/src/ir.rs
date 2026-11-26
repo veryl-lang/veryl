@@ -374,24 +374,23 @@ impl Ir {
     fn declared_reset_polarity(&self, var: &Variable) -> Option<bool> {
         let &ptr = var.current_values.first()?;
         let mut found: Option<bool> = None;
-        let mut stack = vec![self.module_variables.clone()];
-        while let Some(vars) = stack.pop() {
-            for other in vars.variables.values() {
-                if other.current_values.first() != Some(&ptr) {
-                    continue;
-                }
-                let active_low = match other.r#type.kind {
-                    air::TypeKind::ResetAsyncHigh | air::TypeKind::ResetSyncHigh => false,
-                    air::TypeKind::ResetAsyncLow | air::TypeKind::ResetSyncLow => true,
-                    _ => continue,
-                };
-                match found {
-                    None => found = Some(active_low),
-                    Some(prev) if prev != active_low => return None,
-                    Some(_) => {}
-                }
+        let mut disagree = false;
+        self.module_variables.for_each_storage(|r#type, _, ptrs| {
+            if ptrs.first() != Some(&ptr) {
+                return;
             }
-            stack.extend(vars.children());
+            let active_low = match r#type.kind {
+                air::TypeKind::ResetAsyncHigh | air::TypeKind::ResetSyncHigh => false,
+                air::TypeKind::ResetAsyncLow | air::TypeKind::ResetSyncLow => true,
+                _ => return,
+            };
+            match found {
+                None => found = Some(active_low),
+                Some(prev) => disagree |= prev != active_low,
+            }
+        });
+        if disagree {
+            return None;
         }
         found
     }

@@ -199,34 +199,25 @@ impl SpanTable {
         };
 
         // One span per element in the worst case: millions on an SoC memory.
-        let capacity: usize = {
-            let mut n = 0usize;
-            let mut stack = vec![ir.module_variables.clone()];
-            while let Some(vars) = stack.pop() {
-                for var in vars.variables.values() {
-                    n += var.current_values.len() + var.next_values.len();
-                }
-                stack.extend(vars.children());
-            }
-            n
-        };
+        let mut capacity = 0usize;
+        ir.module_variables
+            .for_each_storage(|_, _, ptrs| capacity += ptrs.len());
         let mut ff: Vec<Span> = Vec::with_capacity(capacity);
         let mut comb: Vec<Span> = Vec::new();
-        let mut stack = vec![ir.module_variables.clone()];
-        while let Some(vars) = stack.pop() {
-            for var in vars.variables.values() {
+        ir.module_variables
+            .for_each_storage(|_, native_bytes, ptrs| {
                 // An unpacked array lays its elements out consecutively and
                 // shares one `touched` verdict, so the elements are appended
                 // as one run rather than one span each.  Any break in the run
                 // (a gap, or a jump back) just starts a new one, which the
                 // sort below puts back in order.  Runs stop at the variable
                 // boundary; `disjoint_cover` rejoins them.
-                let len = stride(var.native_bytes);
+                let len = stride(native_bytes);
                 let (ff_from, comb_from) = (ff.len(), comb.len());
                 // The variable's extent per buffer, for the range query.
                 let (mut ff_lo, mut ff_hi) = (usize::MAX, 0usize);
                 let (mut comb_lo, mut comb_hi) = (usize::MAX, 0usize);
-                for &ptr in var.current_values.iter().chain(var.next_values.iter()) {
+                for &ptr in ptrs {
                     let p = ptr as usize;
                     let (spans, from, start, lo, hi) = if (ff_base..ff_end).contains(&p) {
                         (&mut ff, ff_from, p - ff_base, &mut ff_lo, &mut ff_hi)
@@ -266,9 +257,7 @@ impl SpanTable {
                         s.touched = true;
                     }
                 }
-            }
-            stack.extend(vars.children());
-        }
+            });
         SpanTable {
             ff: disjoint_cover(ff).into(),
             comb: disjoint_cover(comb).into(),
