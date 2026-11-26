@@ -319,7 +319,7 @@ impl Symbol {
         }
     }
 
-    pub fn get_parent(&self) -> Option<Symbol> {
+    pub fn get_parent(&self) -> Option<std::rc::Rc<Symbol>> {
         symbol_table::get_namespace_symbol(&self.namespace)
     }
 

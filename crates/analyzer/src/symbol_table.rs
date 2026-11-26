@@ -3649,14 +3649,14 @@ pub fn resolve_base_path(
 
 /// Resolve the symbol that `namespace` points to (its deepest segment resolved
 /// in the enclosing namespace).
-pub fn get_namespace_symbol(namespace: &Namespace) -> Option<Symbol> {
+pub fn get_namespace_symbol(namespace: &Namespace) -> Option<std::rc::Rc<Symbol>> {
     let mut namespace = namespace.clone();
     namespace.strip_anonymous_path();
 
     if let Some(path) = namespace.pop()
         && namespace.depth() >= 1
     {
-        resolve((path, &namespace)).map(|x| (*x.found).clone()).ok()
+        resolve((path, &namespace)).map(|x| x.found.clone()).ok()
     } else {
         None
     }

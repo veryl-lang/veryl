@@ -349,7 +349,7 @@ fn enclosing_interface(
         if let Some(symbol) = symbol_table::get_namespace_symbol(&namespace)
             && symbol.kind.has_mixin_sources()
         {
-            return Some(symbol);
+            return Some((*symbol).clone());
         }
         namespace.pop();
     }
@@ -773,7 +773,7 @@ fn is_single_return(arg: &FunctionDeclaration) -> bool {
 
 fn get_parent_interface(function: &Symbol) -> Option<Symbol> {
     let parent = function.get_parent()?;
-    matches!(parent.kind, SymbolKind::Interface(_)).then_some(parent)
+    matches!(parent.kind, SymbolKind::Interface(_)).then(|| (*parent).clone())
 }
 
 fn is_interface_local_item(symbol: &Symbol, interface_namespace: &Namespace) -> bool {

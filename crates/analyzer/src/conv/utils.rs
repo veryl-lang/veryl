@@ -3443,7 +3443,7 @@ pub fn eval_factor_symbol(
         }
         SymbolKind::EnumMember(x) => {
             let enum_symbol = symbol.found.get_parent().unwrap();
-            let SymbolKind::Enum(r#enum) = enum_symbol.kind else {
+            let SymbolKind::Enum(r#enum) = &enum_symbol.kind else {
                 unreachable!();
             };
 

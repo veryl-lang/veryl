@@ -819,7 +819,7 @@ impl ReferenceTable {
         fn get_parent_generic_component(namespace: &Namespace) -> Option<Symbol> {
             let target = symbol_table::get_namespace_symbol(namespace)?;
             if target.has_generic_paramters() || target.has_generic_consts() {
-                Some(target)
+                Some((*target).clone())
             } else {
                 get_parent_generic_component(&target.namespace)
             }
