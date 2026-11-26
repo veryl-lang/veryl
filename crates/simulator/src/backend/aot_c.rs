@@ -52,13 +52,18 @@ impl AotCBackend {
 
 /// Probe `cc --version` (honoring `VERYL_AOT_CC`).  Used by
 /// `Config::all()` to skip this backend on hosts without a compiler.
+/// Memoized: the test harness asks once per test, and spawning the
+/// compiler is slow on macOS and Windows.
 pub fn cc_available() -> bool {
-    let cc = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
-    std::process::Command::new(cc)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        let cc = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
+        std::process::Command::new(cc)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
 }
 
 impl Backend for AotCBackend {

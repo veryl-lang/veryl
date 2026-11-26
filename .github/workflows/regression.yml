@@ -90,6 +90,33 @@ jobs:
           path: ${{ github.workspace }}/.sccache
           key: sccache-${{ matrix.target }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.target }}-
+      # Simulator tests dual-check every design on the cc backend, and the C
+      # compiles dominate their run time. The objects are content addressed,
+      # so carrying them across runs skips every compile whose C is unchanged.
+      # A change to the C emitter or the compiler starts a fresh generation
+      # instead of piling up objects no run will hit again. Only `.so` files
+      # are kept: the `.c` copies are diagnostics, and the `.idx` files are
+      # keyed by the test binary, which differs every run.
+      - name: Locate the AOT-C cache
+        id: aot-c
+        shell: bash
+        run: |
+          dir="${DEV_DRIVE:-$GITHUB_WORKSPACE}/aot-c"
+          mkdir -p "$dir"
+          touch "$dir/.start"
+          echo "VERYL_AOT_CACHE_DIR=$dir" >> "$GITHUB_ENV"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          cc_version=$(cc --version 2>&1 || echo "no cc")
+          gen=$(printf '%s\n' "${cc_version%%$'\n'*}" \
+            "$(git rev-parse HEAD:crates/simulator/src/backend/aot_c HEAD:crates/simulator/src/backend/aot_c.rs)" \
+            | git hash-object --stdin)
+          echo "gen=$gen" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ${{ steps.aot-c.outputs.dir }}/*.so
+          key: aot-c-${{ matrix.target }}-${{ steps.aot-c.outputs.gen }}-${{ github.sha }}
+          restore-keys: aot-c-${{ matrix.target }}-${{ steps.aot-c.outputs.gen }}-
       # The heavy analyzer and simulator tests are compute bound; opt-level 1
       # cuts their run time far more than it adds to the build. The simulator's
       # hot paths sit in dependencies, so those are raised too.
@@ -112,6 +139,20 @@ jobs:
         with:
           path: ${{ github.workspace }}/.sccache
           key: sccache-${{ matrix.target }}-${{ github.sha }}
+      - name: Look for new AOT-C objects
+        id: aot-c-new
+        if: github.ref == 'refs/heads/master'
+        shell: bash
+        run: |
+          if [ -n "$(find "$VERYL_AOT_CACHE_DIR" -name '*.so' -newer "$VERYL_AOT_CACHE_DIR/.start" -print -quit)" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/cache/save@v4
+        if: steps.aot-c-new.outputs.found == 'true'
+        continue-on-error: true
+        with:
+          path: ${{ steps.aot-c.outputs.dir }}/*.so
+          key: aot-c-${{ matrix.target }}-${{ steps.aot-c.outputs.gen }}-${{ github.sha }}
 
   gen_sv:
     runs-on: ubuntu-latest

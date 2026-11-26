@@ -25,7 +25,8 @@ jobs:
         run: |
           # Group caches by their logical key, keep the newest by created_at in
           # each group, and delete the rest. rust-cache keys end in
-          # `-<rustc-hash>-<lockfile-hash>`; sccache keys end in a single
+          # `-<rustc-hash>-<lockfile-hash>` and aot-c keys in
+          # `-<generation>-<commit-sha>`; sccache keys end in a single
           # `-<commit-sha>` segment.
           gh api --paginate "repos/$REPO/actions/caches" \
             --jq '.actions_caches[] | [.key, .created_at, (.id|tostring)] | @tsv' \
