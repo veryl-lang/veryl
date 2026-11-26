@@ -5,10 +5,9 @@
 //! The simulator owns one [`SimStatus`] and hands it to the statements it
 //! evaluates, so every source lands in the same place.  A testbench learns
 //! that the run has to stop from what was latched when the last edge had been
-//! evaluated: a request from a comb settled later, by a waveform dump or a
-//! testbench read, stops the run at the next edge, as it does when the comb is
-//! settled only by that edge.  The failures recorded are all reported, the
-//! comb being settled once more when the run ends.
+//! evaluated: a request from a comb settled later by a testbench read stops
+//! the run at the next edge. The final combinational state is also checked
+//! for failures when the run ends.
 
 use crate::output_buffer;
 
