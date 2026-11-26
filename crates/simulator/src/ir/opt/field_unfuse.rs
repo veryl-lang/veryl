@@ -136,11 +136,17 @@ struct Census {
     dyn_spans: Vec<(isize, isize)>,
     /// A statement kind the census cannot bound was seen; the pass bails.
     bail: bool,
+    /// Added to every comb offset noted: a template class's statements are
+    /// walked at the template's offsets for one instance.
+    shift: isize,
 }
 
 impl Census {
     fn var(&mut self, off: isize) -> &mut VarInfo {
-        self.vars.entry(off).or_default()
+        self.vars.entry(off + self.shift).or_default()
+    }
+    fn dyn_span(&mut self, lo: isize, hi: isize) {
+        self.dyn_spans.push((lo + self.shift, hi + self.shift));
     }
     fn disq(&mut self, off: isize) {
         self.disq_why(off, "dynamic-or-unbounded access");
@@ -267,7 +273,7 @@ fn census_expr(e: &ProtoExpression, c: &mut Census, poison: bool) {
                 } else {
                     *o
                 };
-                c.dyn_spans.push((base, base + span as isize));
+                c.dyn_span(base, base + span as isize);
             }
             census_expr(index_expr, c, poison);
             if let Some(ds) = dynamic_select {
@@ -308,7 +314,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     + native_bytes(a.dst_width).max(1);
                 let base =
                     o.min(o + a.dst_stride * (a.dst_num_elements.saturating_sub(1) as isize));
-                c.dyn_spans.push((base, base + span as isize));
+                c.dyn_span(base, base + span as isize);
             }
             census_expr(&a.dst_index_expr, c, poison);
             census_expr(&a.expr, c, poison);
@@ -388,9 +394,12 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
         // Executes a pre-compiled artifact with baked offsets; the original
         // statements say what it touches, and none of that may move.
         ProtoStatement::CompiledBlock(x) => {
-            for s in x.originals().iter() {
+            let (stmts, _, comb_delta) = x.unshifted_originals();
+            c.shift += comb_delta;
+            for s in stmts {
                 census_stmt(s, c, true);
             }
+            c.shift -= comb_delta;
         }
         // The ARGUMENT expressions can carry hierarchically-resolved DUT
         // comb reads no blocklist covers, and the interpreter evaluates

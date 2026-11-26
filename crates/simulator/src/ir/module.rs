@@ -3091,12 +3091,54 @@ fn split_copies_by_source_writes(
     max_parts: usize,
     max_rounds: usize,
 ) {
+    type Bounds = HashMap<VarOffset, Option<Vec<usize>>>;
+    // Only a copy's sources are looked up, and only a top-level copy is split
+    // or lends parts, so the rest is gathered once, for those sources alone:
+    // a template instance's block writes its whole instance.
+    let mut sources = Vec::new();
+    let mut read: HashSet<VarOffset> = HashSet::default();
+    for stmt in stmts.iter() {
+        if let ProtoStatement::Assign(a) = stmt {
+            sources.clear();
+            if bit_parallel_sources(&a.expr, 0, &mut sources) {
+                read.extend(sources.iter().map(|s| s.var));
+            }
+        }
+    }
+    let add = |bounds: &mut Bounds, outs: &[(VarOffset, BitRange)]| {
+        for (off, range) in outs {
+            if !read.contains(off) {
+                continue;
+            }
+            let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
+            match range {
+                Some((hi, lo)) => {
+                    if let Some(cuts) = entry {
+                        cuts.push(*lo);
+                        cuts.push(hi + 1);
+                    }
+                }
+                None => *entry = None,
+            }
+        }
+    };
+    let mut fixed: Bounds = HashMap::default();
+    let mut outs = Vec::new();
+    for stmt in stmts.iter() {
+        if !matches!(stmt, ProtoStatement::Assign(_)) {
+            outs.clear();
+            gather_bit_aware_outputs(stmt, &mut outs);
+            add(&mut fixed, &outs);
+        }
+    }
     // The parts an ineligible copy would split into, aligned with `stmts`.
     let mut lent: Vec<Option<Vec<ProtoStatement>>> = vec![None; stmts.len()];
     for _ in 0..max_rounds {
-        let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
-        let mut outs = Vec::new();
+        let mut bounds = fixed.clone();
         for (stmt, lent) in stmts.iter().zip(&lent) {
+            if !matches!(stmt, ProtoStatement::Assign(_)) {
+                continue;
+            }
             outs.clear();
             match lent {
                 Some(parts) => parts
@@ -3104,18 +3146,7 @@ fn split_copies_by_source_writes(
                     .for_each(|p| gather_bit_aware_outputs(p, &mut outs)),
                 None => gather_bit_aware_outputs(stmt, &mut outs),
             }
-            for (off, range) in outs.iter() {
-                let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
-                match range {
-                    Some((hi, lo)) => {
-                        if let Some(cuts) = entry {
-                            cuts.push(*lo);
-                            cuts.push(hi + 1);
-                        }
-                    }
-                    None => *entry = None,
-                }
-            }
+            add(&mut bounds, &outs);
         }
 
         // Decided on borrowed statements: a round that splits nothing ends the
@@ -4259,11 +4290,17 @@ pub(crate) fn gather_bit_aware_outputs(
                 // compiled block are event-time state, and keeping them here
                 // would let `stable_topo_sort`'s RAW/WAR edges manufacture
                 // false comb cycles through registers.
+                let (stmts, ff_delta, comb_delta) = x.unshifted_originals();
                 let mut inner = vec![];
-                for s in x.originals().iter() {
+                for s in stmts {
                     gather_bit_aware_outputs(s, &mut inner);
                 }
-                out.extend(inner.into_iter().filter(|(off, _)| !off.is_ff()));
+                out.extend(
+                    inner
+                        .into_iter()
+                        .filter(|(off, _)| !off.is_ff())
+                        .map(|(off, range)| (off.adjust(ff_delta, comb_delta), range)),
+                );
             } else {
                 for &off in &x.output_offsets {
                     if !off.is_ff() {
@@ -8139,7 +8176,14 @@ fn walk_touched_offsets(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) 
                         acc.extend(dep_ins.iter().copied());
                         acc.extend(dep_outs.iter().copied());
                     }
-                    walk(&x.originals(), acc);
+                    let (stmts, ff_delta, comb_delta) = x.unshifted_originals();
+                    if ff_delta == 0 && comb_delta == 0 {
+                        walk(stmts, acc);
+                    } else {
+                        let mut inner = HashSet::default();
+                        walk(stmts, &mut inner);
+                        acc.extend(inner.into_iter().map(|o| o.adjust(ff_delta, comb_delta)));
+                    }
                 }
                 other => other.gather_variable_offsets(&mut ins, &mut outs),
             }

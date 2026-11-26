@@ -1389,6 +1389,16 @@ impl CompiledBlockStatement {
     pub fn has_originals(&self) -> bool {
         self.hier.is_some() || !self.original_stmts.is_empty()
     }
+
+    /// `originals()` before they are moved to this instance, with the
+    /// `(ff, comb)` delta that moves an offset they name: a walk that only
+    /// collects offsets moves those instead of a copy of a whole class.
+    pub fn unshifted_originals(&self) -> (&[ProtoStatement], isize, isize) {
+        match &self.hier {
+            Some(h) => (&h.class_stmts, self.ff_delta_bytes, self.comb_delta_bytes),
+            None => (&self.original_stmts, 0, 0),
+        }
+    }
 }
 
 // `stmt_deps` and `original_stmts` are excluded from `Debug` and `Hash`: both are

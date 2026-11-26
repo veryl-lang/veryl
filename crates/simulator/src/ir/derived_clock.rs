@@ -332,8 +332,13 @@ pub(crate) fn master_cone(
                 let Some(&partition) = partitions.get(&key) else {
                     return decline("a hierarchy class block outside the comb list");
                 };
-                for (i, x) in cb.originals().iter().enumerate() {
+                let (stmts, ff_delta, comb_delta) = cb.unshifted_originals();
+                for (i, x) in stmts.iter().enumerate() {
                     gather(x, &mut io);
+                    let (ins, outs) = io.last_mut().unwrap();
+                    for o in ins.iter_mut().chain(outs.iter_mut()) {
+                        *o = o.adjust(ff_delta, comb_delta);
+                    }
                     flat.push(Leaf::Class(cb, i));
                     origin.push(Some((partition, h.cells.cell_of(h.class, i))));
                 }
