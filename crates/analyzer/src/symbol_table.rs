@@ -1631,7 +1631,7 @@ impl SymbolTable {
                 vec![collect_generic_params(self, &x.generic_parameters)]
             }
             SymbolKind::GenericInstance(x) => {
-                let symbol = self.get(x.base).unwrap();
+                let symbol = self.get_rc(x.base).unwrap();
                 self.collect_generic_bounds(&symbol)
             }
             SymbolKind::Function(x) if !x.is_proto => {
@@ -2190,7 +2190,7 @@ impl SymbolTable {
                 }
             }
             SymbolKind::GenericInstance(x) => {
-                let symbol = self.get(x.base).unwrap();
+                let symbol = self.get_rc(x.base).unwrap();
                 return self.get_package(&symbol, false, false);
             }
             SymbolKind::GenericParameter(x) => {
@@ -2227,7 +2227,7 @@ impl SymbolTable {
 
         self.skip_generic_args = true;
         for id in interface_list {
-            let if_symbol = self.get(id).unwrap();
+            let if_symbol = self.get_rc(id).unwrap();
             self.resolve_interface(&if_symbol, &mut errors, &mut visited);
         }
         self.skip_generic_args = false;
@@ -2399,7 +2399,7 @@ impl SymbolTable {
     }
 
     fn link_modport_members(&mut self, modport: SymbolId, members: &HashMap<StrId, SymbolId>) {
-        let mp_symbol = self.get(modport).unwrap();
+        let mp_symbol = self.get_rc(modport).unwrap();
         let SymbolKind::Modport(mp) = &mp_symbol.kind else {
             unreachable!();
         };
@@ -2457,7 +2457,7 @@ impl SymbolTable {
                 // guarded one there would strand the previous member's comma.
                 // Same rule `last_item_with_define` applies to a written list.
                 if let Some(last) = mp_members.last()
-                    && let Some(last_symbol) = self.get(*last)
+                    && let Some(last_symbol) = self.get_rc(*last)
                     && matches!(last_symbol.token.source, TokenSource::Generated(_))
                     && let Some(source) = self.guard_source(&last_symbol)
                 {
@@ -2497,7 +2497,7 @@ impl SymbolTable {
             return;
         }
 
-        if let Some(mp_symbol) = self.get(mp_id)
+        if let Some(mp_symbol) = self.get_rc(mp_id)
             && let SymbolKind::Modport(mp) = &mp_symbol.kind
             && let Some(ModportDefault::Same(targets) | ModportDefault::Converse(targets)) =
                 &mp.default
@@ -2615,15 +2615,15 @@ impl SymbolTable {
                     let Some(mp_id) = members.get(&target.text) else {
                         continue;
                     };
-                    let Some(mp_symbol) = self.get(*mp_id) else {
+                    let Some(mp_symbol) = self.get_rc(*mp_id) else {
                         continue;
                     };
-                    let SymbolKind::Modport(mp) = mp_symbol.kind else {
+                    let SymbolKind::Modport(mp) = &mp_symbol.kind else {
                         continue;
                     };
 
                     for member in &mp.members {
-                        let Some(member_symbol) = self.get(*member) else {
+                        let Some(member_symbol) = self.get_rc(*member) else {
                             continue;
                         };
 

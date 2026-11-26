@@ -17,7 +17,7 @@ pub fn check_generic_bound_item(
     match bound {
         GenericBoundKind::Inst(path) => {
             if let Err(Some(id)) = bound.resolve_inst_bound(namespace) {
-                let symbol = symbol_table::get(id).unwrap();
+                let symbol = symbol_table::get_rc(id).unwrap();
                 context.insert_error(AnalyzerError::mismatch_type(
                     MismatchTypeKind::SymbolKind {
                         name: symbol.token.to_string(),
@@ -31,7 +31,7 @@ pub fn check_generic_bound_item(
         }
         GenericBoundKind::Proto(r#type) => {
             if let Err(Some(id)) = bound.resolve_proto_bound(namespace) {
-                let symbol = symbol_table::get(id).unwrap();
+                let symbol = symbol_table::get_rc(id).unwrap();
                 context.insert_error(AnalyzerError::mismatch_type(
                     MismatchTypeKind::SymbolKind {
                         name: symbol.token.to_string(),
@@ -111,7 +111,7 @@ fn check_referable_path(
             true
         } else {
             symbol.full_path.iter().any(|x| {
-                let symbol = symbol_table::get(*x).unwrap();
+                let symbol = symbol_table::get_rc(*x).unwrap();
                 is_referable_symbol(&symbol, base)
             })
         }
@@ -140,7 +140,7 @@ fn is_referable_symbol(symbol: &Symbol, base: Option<&Symbol>) -> bool {
             return true;
         }
         SymbolKind::GenericInstance(x) => {
-            return symbol_table::get(x.base)
+            return symbol_table::get_rc(x.base)
                 .map(|x| is_referable_symbol(&x, base))
                 .unwrap_or(false);
         }
@@ -202,7 +202,7 @@ fn check_generic_inst_arg(
     }
 
     let proto_symbol = if let Some(sig) = arg.r#type.kind.signature() {
-        let component = symbol_table::get(sig.symbol).unwrap();
+        let component = symbol_table::get_rc(sig.symbol).unwrap();
         let Some(proto) = component.proto() else {
             return Some(AnalyzerError::mismatch_type(
                 MismatchTypeKind::GenericArgument {
@@ -247,7 +247,7 @@ fn check_generic_proto_arg(
                 ir::TypeKind::Module(sig)
                 | ir::TypeKind::Interface(sig)
                 | ir::TypeKind::Package(sig) => {
-                    let component = symbol_table::get(sig.symbol).unwrap();
+                    let component = symbol_table::get_rc(sig.symbol).unwrap();
                     component.proto()
                 }
                 _ => None,

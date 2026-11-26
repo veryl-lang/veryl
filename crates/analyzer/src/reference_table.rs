@@ -725,15 +725,17 @@ impl ReferenceTable {
             } else {
                 symbol.get_generic_instance(
                     target,
-                    affiliation_symbol.get_parent_component().as_ref(),
+                    affiliation_symbol.get_parent_component().as_deref(),
                 )
             }
         } else if let Some(namespace_symbol) = symbol_table::get_namespace_symbol(namespace) {
             if namespace_symbol.is_component(true) {
                 symbol.get_generic_instance(target, Some(&namespace_symbol))
             } else {
-                symbol
-                    .get_generic_instance(target, namespace_symbol.get_parent_component().as_ref())
+                symbol.get_generic_instance(
+                    target,
+                    namespace_symbol.get_parent_component().as_deref(),
+                )
             }
         } else {
             symbol.get_generic_instance(target, None)

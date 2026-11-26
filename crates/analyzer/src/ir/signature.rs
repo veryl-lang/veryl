@@ -48,7 +48,7 @@ impl Signature {
 
     /// A value with no plain rendering is left out rather than shown as bits.
     pub fn to_overridden_string(&self) -> String {
-        let symbol = symbol_table::get(self.symbol).unwrap();
+        let symbol = symbol_table::get_rc(self.symbol).unwrap();
         let mut ret = symbol.token.text.to_string();
 
         if !self.generic_parameters.is_empty() {
@@ -177,9 +177,9 @@ impl Signature {
 
             for (i, id) in symbol.full_path.iter().enumerate() {
                 let path_symbol = if (i + 1) == symbol.full_path.len() {
-                    symbol_table::get(sig.symbol).unwrap()
+                    symbol_table::get_rc(sig.symbol).unwrap()
                 } else {
-                    symbol_table::get(*id).unwrap()
+                    symbol_table::get_rc(*id).unwrap()
                 };
 
                 // Apply default value
@@ -217,12 +217,12 @@ impl Signature {
                 {
                     let current_namespace = context.current_namespace();
                     for id in &full_path {
-                        let symbol = symbol_table::get(*id).unwrap();
+                        let symbol = symbol_table::get_rc(*id).unwrap();
                         let SymbolKind::GenericInstance(inst) = &symbol.kind else {
                             continue;
                         };
 
-                        let base = symbol_table::get(inst.base).unwrap();
+                        let base = symbol_table::get_rc(inst.base).unwrap();
                         let params = base.generic_parameters();
                         // A global function instance is shared by every caller
                         // passing the same argument text, so its arguments name
@@ -301,7 +301,7 @@ impl Signature {
             ret.map.insert(*key, val.clone());
         }
 
-        let symbol = symbol_table::get(self.symbol).unwrap();
+        let symbol = symbol_table::get_rc(self.symbol).unwrap();
         symbol.eval_generic_consts(&mut ret);
 
         vec![ret]
@@ -309,7 +309,7 @@ impl Signature {
 
     pub fn namespace(&self) -> Namespace {
         if self.full_path.is_empty() {
-            let symbol = symbol_table::get(self.symbol).unwrap();
+            let symbol = symbol_table::get_rc(self.symbol).unwrap();
             symbol.inner_namespace()
         } else {
             let mut ret = Namespace::new();
@@ -325,7 +325,7 @@ impl Signature {
 
 impl fmt::Display for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let symbol = symbol_table::get(self.symbol).unwrap();
+        let symbol = symbol_table::get_rc(self.symbol).unwrap();
         let mut ret = symbol.token.text.to_string();
 
         for x in &self.generic_parameters {
@@ -339,7 +339,7 @@ impl fmt::Display for Signature {
 fn write_stable_symbol(id: SymbolId, ret: &mut String) {
     use std::fmt::Write;
 
-    let symbol = symbol_table::get(id).unwrap();
+    let symbol = symbol_table::get_rc(id).unwrap();
     let _ = write!(ret, "{}::{}", symbol.namespace, symbol.token.text);
 }
 

@@ -188,9 +188,9 @@ impl GenericMap {
             ) {
                 return None;
             }
-            let mut owner = symbol_table::get(owner)?;
+            let mut owner = symbol_table::get_rc(owner)?;
             if let SymbolKind::GenericInstance(instance) = &owner.kind {
-                owner = symbol_table::get(instance.base)?;
+                owner = symbol_table::get_rc(instance.base)?;
             }
             let namespace = owner.inner_namespace();
             let matches = match &parameter.found.kind {
@@ -218,9 +218,9 @@ impl GenericMap {
     }
 
     pub fn name(&self, include_namspace_prefix: bool, hashed_name: bool) -> String {
-        let symbol = symbol_table::get(self.id.unwrap()).unwrap();
-        if let SymbolKind::GenericInstance(x) = symbol.kind {
-            let base = symbol_table::get(x.base).unwrap();
+        let symbol = symbol_table::get_rc(self.id.unwrap()).unwrap();
+        if let SymbolKind::GenericInstance(x) = &symbol.kind {
+            let base = symbol_table::get_rc(x.base).unwrap();
             if hashed_name {
                 format!(
                     "{}__{}__{:x}",
@@ -323,12 +323,12 @@ impl Symbol {
         symbol_table::get_namespace_symbol(&self.namespace)
     }
 
-    pub fn get_parent_component(&self) -> Option<Symbol> {
+    pub fn get_parent_component(&self) -> Option<std::rc::Rc<Symbol>> {
         let parent = self.get_parent()?;
         Symbol::trace_component_symbol(&parent)
     }
 
-    fn trace_component_symbol(symbol: &Symbol) -> Option<Symbol> {
+    fn trace_component_symbol(symbol: &std::rc::Rc<Symbol>) -> Option<std::rc::Rc<Symbol>> {
         match &symbol.kind {
             SymbolKind::Module(_)
             | SymbolKind::Interface(_)
@@ -350,14 +350,14 @@ impl Symbol {
                 Symbol::trace_component_symbol(&symbol.found)
             }
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base)?;
+                let symbol = symbol_table::get_rc(x.base)?;
                 Symbol::trace_component_symbol(&symbol)
             }
             SymbolKind::GenericParameter(x) => {
                 if let Ok(ProtoBound::ProtoPackage(x)) =
                     x.bound.resolve_proto_bound(&symbol.namespace)
                 {
-                    Symbol::trace_component_symbol(&x)
+                    Symbol::trace_component_symbol(&std::rc::Rc::new(x))
                 } else {
                     None
                 }
@@ -367,7 +367,7 @@ impl Symbol {
         }
     }
 
-    pub fn get_parent_package(&self) -> Option<Symbol> {
+    pub fn get_parent_package(&self) -> Option<std::rc::Rc<Symbol>> {
         let parent = self.get_parent_component()?;
         if parent.is_package(true) {
             Some(parent)
@@ -393,7 +393,7 @@ impl Symbol {
             &self.generic_instances
         };
         for i in generic_instances {
-            let symbol = symbol_table::get(*i).unwrap();
+            let symbol = symbol_table::get_rc(*i).unwrap();
             let map = if let SymbolKind::GenericInstance(ref x) = symbol.kind {
                 self.generic_map(Some(symbol.id), &x.arguments)
             } else {
@@ -559,9 +559,9 @@ impl Symbol {
 
     pub fn generic_parameters(&self) -> Vec<(StrId, GenericParameterProperty)> {
         fn get_generic_parameter(id: SymbolId) -> (StrId, GenericParameterProperty) {
-            let symbol = symbol_table::get(id).unwrap();
-            if let SymbolKind::GenericParameter(x) = symbol.kind {
-                (symbol.token.text, x)
+            let symbol = symbol_table::get_rc(id).unwrap();
+            if let SymbolKind::GenericParameter(x) = &symbol.kind {
+                (symbol.token.text, x.clone())
             } else {
                 unreachable!()
             }
@@ -599,7 +599,7 @@ impl Symbol {
                 .map(|x| get_generic_parameter(*x))
                 .collect(),
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 symbol.generic_parameters()
             }
             SymbolKind::TbComponent(x) => x
@@ -620,7 +620,7 @@ impl Symbol {
             SymbolKind::Struct(x) => !x.generic_parameters.is_empty(),
             SymbolKind::Union(x) => !x.generic_parameters.is_empty(),
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 symbol.has_generic_paramters()
             }
             SymbolKind::TbComponent(x) => !x.generic_parameters.is_empty(),
@@ -630,9 +630,9 @@ impl Symbol {
 
     pub fn generic_consts(&self) -> Vec<(StrId, GenericConstProperty)> {
         fn get_generic_const(id: SymbolId) -> (StrId, GenericConstProperty) {
-            let symbol = symbol_table::get(id).unwrap();
-            if let SymbolKind::GenericConst(x) = symbol.kind {
-                (symbol.token.text, x)
+            let symbol = symbol_table::get_rc(id).unwrap();
+            if let SymbolKind::GenericConst(x) = &symbol.kind {
+                (symbol.token.text, x.clone())
             } else {
                 unreachable!()
             }
@@ -660,7 +660,7 @@ impl Symbol {
                 .map(|x| get_generic_const(*x))
                 .collect(),
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 symbol.generic_consts()
             }
             _ => Vec::new(),
@@ -674,7 +674,7 @@ impl Symbol {
             SymbolKind::Interface(x) => !x.generic_consts.is_empty(),
             SymbolKind::Package(x) => !x.generic_consts.is_empty(),
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 symbol.has_generic_consts()
             }
             _ => false,
@@ -774,7 +774,7 @@ impl Symbol {
             SymbolKind::Module(x) if x.is_proto => return include_proto,
             SymbolKind::Module(_) | SymbolKind::AliasModule(_) => return true,
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 return symbol.is_module(false);
             }
             SymbolKind::GenericParameter(x) => {
@@ -807,7 +807,7 @@ impl Symbol {
             SymbolKind::Interface(x) if x.is_proto => return include_proto,
             SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => return true,
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 return symbol.is_interface(false);
             }
             SymbolKind::GenericParameter(x) => {
@@ -851,7 +851,7 @@ impl Symbol {
             SymbolKind::Package(_) => return true,
             SymbolKind::AliasPackage(x) => return !x.is_proto || include_proto,
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 return symbol.is_package(false);
             }
             SymbolKind::GenericParameter(x) => {
@@ -878,7 +878,7 @@ impl Symbol {
             SymbolKind::AliasInterface(x) if !x.is_proto => return true,
             SymbolKind::AliasPackage(x) if !x.is_proto => return true,
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 return symbol.is_component(false);
             }
             SymbolKind::GenericParameter(x) => {
@@ -953,7 +953,7 @@ impl Symbol {
             SymbolKind::Parameter(x) => matches!(x.r#type.kind, TypeKind::Type),
             SymbolKind::GenericParameter(x) => matches!(x.bound, GenericBoundKind::Type),
             SymbolKind::GenericConst(x) => matches!(x.bound, GenericBoundKind::Type),
-            SymbolKind::GenericInstance(x) => symbol_table::get(x.base)
+            SymbolKind::GenericInstance(x) => symbol_table::get_rc(x.base)
                 .map(|x| x.is_variable_type())
                 .unwrap_or(false),
             SymbolKind::TbComponent(x) => x.kind.is_variable(),
@@ -1041,7 +1041,7 @@ impl Symbol {
         match &self.kind {
             SymbolKind::Function(x) if !x.is_proto => x.is_global(),
             SymbolKind::GenericInstance(x) => {
-                let symbol = symbol_table::get(x.base).unwrap();
+                let symbol = symbol_table::get_rc(x.base).unwrap();
                 symbol.is_global_function()
             }
             _ => false,
@@ -1243,7 +1243,7 @@ impl SymbolKind {
             | SymbolKind::ModportFunctionMember(..)
             | SymbolKind::SystemFunction(_) => true,
             SymbolKind::GenericInstance(x) => {
-                let base = symbol_table::get(x.base).unwrap();
+                let base = symbol_table::get_rc(x.base).unwrap();
                 matches!(
                     base.kind,
                     SymbolKind::Function(_)
@@ -2591,7 +2591,7 @@ impl fmt::Display for ClockDomain {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
             ClockDomain::Explicit(x) | ClockDomain::Inferred(x) => {
-                format!("'{}", symbol_table::get(*x).unwrap().token)
+                format!("'{}", symbol_table::get_rc(*x).unwrap().token)
             }
             ClockDomain::Implicit => "'_".to_string(),
             ClockDomain::None => "".to_string(),
@@ -2719,7 +2719,7 @@ impl fmt::Display for Parameter {
 
 impl Parameter {
     pub fn property(&self) -> ParameterProperty {
-        if let SymbolKind::Parameter(x) = symbol_table::get(self.symbol).unwrap().kind {
+        if let SymbolKind::Parameter(x) = &symbol_table::get_rc(self.symbol).unwrap().kind {
             x.clone()
         } else {
             unreachable!()
@@ -2940,8 +2940,8 @@ impl StructProperty {
     /// User-defined types have to be resolved before calling it.
     pub fn clock_reset_kind(&self) -> Option<TypeKind> {
         let first_member_type = |members: &[SymbolId]| {
-            if let SymbolKind::StructMember(x) = symbol_table::get(*members.first()?)?.kind {
-                Some(x.r#type)
+            if let SymbolKind::StructMember(x) = &symbol_table::get_rc(*members.first()?)?.kind {
+                Some(x.r#type.clone())
             } else {
                 None
             }
@@ -2960,9 +2960,9 @@ impl StructProperty {
                 return None;
             }
             visited.push(id);
-            r#type = match symbol_table::get(id)?.kind {
+            r#type = match &symbol_table::get_rc(id)?.kind {
                 SymbolKind::Struct(x) => first_member_type(&x.members)?,
-                SymbolKind::TypeDef(x) => x.r#type?,
+                SymbolKind::TypeDef(x) => x.r#type.clone()?,
                 _ => return None,
             };
         }

@@ -1579,7 +1579,7 @@ pub fn eval_type(
                     let members = context.block(|c| {
                         let mut members = vec![];
                         for x in &x.members {
-                            let member = symbol_table::get(*x).unwrap();
+                            let member = symbol_table::get_rc(*x).unwrap();
                             let name = member.token.text;
 
                             if let SymbolKind::StructMember(x) = &member.kind {
@@ -1612,7 +1612,7 @@ pub fn eval_type(
                     let members = context.block(|c| {
                         let mut members = vec![];
                         for x in &x.members {
-                            let member = symbol_table::get(*x).unwrap();
+                            let member = symbol_table::get_rc(*x).unwrap();
                             let name = member.token.text;
                             if let SymbolKind::UnionMember(x) = &member.kind {
                                 if symbol.found.token.text == x.r#type.token.beg.text {
@@ -2664,7 +2664,7 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
     let is_module = match &type_symbol.found.kind {
         SymbolKind::Module(_) | SymbolKind::AliasModule(_) => true,
         SymbolKind::GenericInstance(x) => matches!(
-            symbol_table::get(x.base).map(|x| x.kind),
+            symbol_table::get_rc(x.base).as_deref().map(|x| &x.kind),
             Some(SymbolKind::Module(_))
         ),
         _ => false,
@@ -3587,7 +3587,7 @@ pub fn eval_factor_symbol(
             return Ok(ir::Factor::Value(x));
         }
         SymbolKind::ModportVariableMember(x) => {
-            let variable = symbol_table::get(x.variable).unwrap();
+            let variable = symbol_table::get_rc(x.variable).unwrap();
             if let SymbolKind::Variable(x) = &variable.kind {
                 let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
                 let x = Comptime::from_type(r#type, x.clock_domain, token);
@@ -4089,7 +4089,7 @@ pub fn get_component_body(
     if !unit_cache::is_header_only(&sig) {
         return Ok(ret);
     }
-    let symbol = symbol_table::get(sig.symbol).unwrap();
+    let symbol = symbol_table::get_rc(sig.symbol).unwrap();
     convert_whole(context, &symbol, &sig, token, None, None)
 }
 
@@ -4159,7 +4159,7 @@ fn get_component_at(
     sig.normalize();
     let sig = &sig;
 
-    let symbol = symbol_table::get(sig.symbol).unwrap();
+    let symbol = symbol_table::get_rc(sig.symbol).unwrap();
     if let SymbolKind::SystemVerilog = symbol.kind {
         let component = ir::SystemVerilog {
             name: symbol.token.text,
@@ -5068,12 +5068,12 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
     }
 
     if !context.func_paths.contains_key(path) {
-        let symbol = symbol_table::get(path.sig.symbol).unwrap();
+        let symbol = symbol_table::get_rc(path.sig.symbol).unwrap();
         let definition = match &symbol.kind {
             SymbolKind::Function(x) => x.definition.unwrap(),
             SymbolKind::ModportFunctionMember(x) => {
-                let symbol = symbol_table::get(x.function).unwrap();
-                let SymbolKind::Function(x) = symbol.kind else {
+                let symbol = symbol_table::get_rc(x.function).unwrap();
+                let SymbolKind::Function(x) = &symbol.kind else {
                     unreachable!();
                 };
                 x.definition.unwrap()
@@ -5162,7 +5162,7 @@ pub fn function_call(
         let func = get_function(c, &path, token)?;
         let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
 
-        let symbol = symbol_table::get(sig.symbol);
+        let symbol = symbol_table::get_rc(sig.symbol);
         let mut effect = symbol
             .as_ref()
             .and_then(|symbol| match &symbol.kind {
@@ -5215,7 +5215,7 @@ pub fn function_call(
                 let output_port = symbol.as_ref().and_then(|symbol| match &symbol.kind {
                     SymbolKind::Function(function) => function.ports.iter().find(|port| {
                         port.token.token.text == *formal_name
-                            && symbol_table::get(port.symbol).is_some_and(|symbol| {
+                            && symbol_table::get_rc(port.symbol).is_some_and(|symbol| {
                                 matches!(symbol.kind, SymbolKind::Port(ref port) if port.direction == symbol::Direction::Output)
                             })
                     }),
@@ -5249,7 +5249,7 @@ pub fn function_call(
             && let Some(symbol) = &symbol
             && let SymbolKind::Function(function) = &symbol.kind
             && let Some(output_port) = function.ports.iter().find(|port| {
-                symbol_table::get(port.symbol).is_some_and(|x| {
+                symbol_table::get_rc(port.symbol).is_some_and(|x| {
                     matches!(
                         x.kind,
                         SymbolKind::Port(ref p)
@@ -5488,8 +5488,8 @@ pub fn check_module_with_unevaluable_generic_parameters(ident: &Identifier) -> b
         let mut ret = false;
 
         for x in &x.generic_parameters {
-            let param = symbol_table::get(*x).unwrap();
-            if let SymbolKind::GenericParameter(x) = param.kind {
+            let param = symbol_table::get_rc(*x).unwrap();
+            if let SymbolKind::GenericParameter(x) = &param.kind {
                 let has_default = x.default_value.is_some();
                 ret |= match &x.bound {
                     GenericBoundKind::Type => false,
