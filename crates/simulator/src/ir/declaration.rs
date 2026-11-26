@@ -2420,6 +2420,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if parent_meta.elements.len() != child_meta.elements.len()
                     || parent_meta.width != child_meta.width
                     || parent_meta.native_bytes != child_meta.native_bytes
+                    || parent_meta.r#type.is_string() != child_meta.r#type.is_string()
                 {
                     continue;
                 }
@@ -2476,6 +2477,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if parent_meta.elements.len() != child_meta.elements.len()
                     || parent_meta.width != child_meta.width
                     || parent_meta.native_bytes != child_meta.native_bytes
+                    || parent_meta.r#type.is_string() != child_meta.r#type.is_string()
                 {
                     continue;
                 }
@@ -2801,7 +2803,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
             }
 
-            let mut proto_expr: ProtoExpression = Conv::conv(context, input_expr)?;
+            // A `string` port takes the handle of the text it is given.
+            let mut proto_expr: ProtoExpression =
+                ProtoExpression::conv_for(context, input_expr, &child_meta.r#type)?;
             // No assignment statement here to size the literal.
             size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
             let element = &child_meta.elements[0];
@@ -2838,7 +2842,27 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 continue;
             }
             let child_meta = child_variable_meta.get(&output.id).unwrap();
+            let child_is_string = child_meta.r#type.is_string();
             let multi_dst = output.dst.len() > 1;
+            let mut parent_is_string = Vec::with_capacity(output.dst.len());
+            for parent_dst in &output.dst {
+                let is_string = super::string_type_utils::is_var(context, &parent_dst.id);
+                super::string_type_utils::check_dst(
+                    &parent_dst.comptime.r#type,
+                    &parent_dst.select,
+                    "a bit operation",
+                    &parent_dst.token,
+                )?;
+                // Several non-string destinations slice the port's value,
+                // which for a `string` is its handle, not its text.
+                if child_is_string && !is_string && multi_dst {
+                    return Err(SimulatorError::unsupported_string_operation(
+                        "a bit operation",
+                        &parent_dst.token,
+                    ));
+                }
+                parent_is_string.push(is_string);
+            }
             // One dst per array element (`o: arr[2*n+:2]`) is element-wise
             // wiring, not a concat destructure of a single packed port value.
             let element_wise = multi_dst && child_meta.elements.len() == output.dst.len();
@@ -3011,7 +3035,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             },
                         }
                     } else {
-                        ProtoExpression::Variable {
+                        let read = ProtoExpression::Variable {
                             var_offset: child_element.current,
                             select: None,
                             dynamic_select: None,
@@ -3021,6 +3045,25 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 width: child_meta.width,
                                 signed: false,
                             },
+                        };
+                        // A `string` port's handle moves into a `string`; a
+                        // non-string reads the port as the bytes of its text,
+                        // at the width of the child's longest text.
+                        if child_is_string {
+                            super::string_type_utils::cast(
+                                read,
+                                child_meta.string_width,
+                                parent_is_string[dst_idx],
+                                "a bit operation",
+                                &parent_dst.token,
+                                // No context of its own: the bytes' width.
+                                ExpressionContext {
+                                    width: 0,
+                                    signed: false,
+                                },
+                            )?
+                        } else {
+                            read
                         }
                     };
 

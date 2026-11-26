@@ -17,6 +17,7 @@ pub(crate) mod opt;
 pub(crate) mod partial_index;
 pub(crate) mod site_table;
 mod statement;
+pub(crate) mod string_type_utils;
 pub(crate) mod variable;
 pub(crate) mod write_log;
 
@@ -47,6 +48,7 @@ pub use statement::{
     veryl_aot_sysfn_print,
 };
 pub(crate) use statement::{extend_to_i64, for_bound_reached};
+pub use string_type_utils::{ProtoText, Text};
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
     create_variable_meta, native_bytes, read_native_value, read_payload, strided_span, value_size,

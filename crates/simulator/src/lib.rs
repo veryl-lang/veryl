@@ -9,6 +9,7 @@ pub mod residency;
 pub mod sim_status;
 pub mod simulator;
 pub mod simulator_error;
+pub mod string_pool;
 pub(crate) mod tb_dirty;
 pub mod testbench;
 pub mod wave_dumper;

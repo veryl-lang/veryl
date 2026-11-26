@@ -7102,6 +7102,42 @@ fn readmemh_basic() {
         assert!(dump.contains("mem[3] = 8'h28"));
     }
 
+    // The file name can also be a `string` variable, including one whose
+    // length is not known before the simulation starts (an input port).
+    let code = format!(
+        r#"
+    module Sub (path: input string) {{
+        #[allow(initial_assign)]
+        var mem: logic<8> [4];
+        initial {{
+            $readmemh(path, mem);
+            $display("%h %h", mem[0], mem[3]);
+        }}
+    }}
+    #[test(Top)]
+    module Top {{
+        var path: string;
+        #[allow(initial_assign)]
+        var mem: logic<8> [4];
+        inst u: Sub (path: "{hex_path_str}");
+        initial {{
+            path = "{hex_path_str}";
+            $readmemh(path, mem);
+            $display("%h %h", mem[0], mem[3]);
+        }}
+    }}
+    "#
+    );
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze_top(&code, &config, "Top").unwrap();
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(output, "0a 28\n0a 28\n", "config={config:?}");
+    }
+
     let _ = std::fs::remove_file(&hex_path);
 }
 
@@ -35290,18 +35326,20 @@ fn display_string_argument_renders_text() {
 
 #[test]
 fn string_let_and_var_hold_their_text() {
-    // A `string` type's width is a nominal 1 bit, and a `let`/`var` of it was
-    // allocated that: `%s` printed the low bits of the text, and a bare
-    // `$display(a)` printed them in hex. The storage is now as wide as the
-    // longest text assigned, and a shorter text is zero-padded in it.
+    // A `string` `let`/`var` holds its text: `%s` prints it, a bare
+    // `$display(a)` prints it as text, and one variable's text copies into
+    // another, including from a `let` into a `var` the testbench writes.
     let code = r#"
     #[test(Top)]
     module Top {
         let a: string = "hi";
         var b: string;
         var c: string;
+        var d: string;
         var x: logic<8>;
         initial {
+            d = a;
+            $write("[%s]", d);
             b = "hello";
             c = b;
             b = "hi";
@@ -35324,7 +35362,123 @@ fn string_let_and_var_hold_their_text() {
         sim.step(&Event::Initial);
         let output = output_buffer::take();
         assert_eq!(
-            output, "[hi][hi][hello][   hi]hi ab hello[eq][longer text]",
+            output, "[hi][hi][hi][hello][   hi]hi ab hello[eq][longer text]",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn string_bits_read_and_write_as_its_bytes() {
+    // A `string` variable stores a handle of its text. Read as bits it is the
+    // bytes of its text, as wide as its longest text, so a select (also at a
+    // runtime position), a concatenation, an assignment to a non-string, a
+    // comparison with a non-string or by order, and `%h`/`%d` give what they
+    // did when the variable held those bytes. Such a statement runs on the
+    // interpreter, so every backend agrees.
+    let code = r#"
+    #[test(Top)]
+    module Top {
+        var s: string;
+        var t: string;
+        var x: logic<16>;
+        var b: logic;
+        let c: string = if x == 16'h4445 ? "yes" : "no";
+        let cb: logic<8> = c[7:0];
+        var u: string;
+        var i: u32;
+        initial {
+            u = "ABCD";
+            i = 8;
+            $display("%b %h %h", u[i], u[i+:8], u[i + 3-:4]);
+            s = "AB";
+            x = s;
+            $display("%h %h %h %h", x, s, s[7:0], {s, 8'h43});
+            b = s == 16'h4142;
+            $display("%b", b);
+            b = s <: "AC";
+            $display("%b", b);
+            s = "DE";
+            $display("[%s] %d", s, s);
+            case s {
+                "DE"   : $display("de");
+                default: $display("other");
+            }
+            t = s;
+            $display("[%s] %b %b", t, t == s, t != "DE");
+            x = 16'h4445;
+            $display("[%s] %h", c, cb);
+            $display(c);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(
+            output, "1 43 3\n4142 4142 42 414243\n1\n1\n[DE] 17477\nde\n[DE] 1 0\n[no] 6f\nno\n",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn string_crosses_ports_functions_and_hierarchy() {
+    // A `string` stores a fixed-width handle, so its text moves through an
+    // input or output port, a function's argument and return value, and a
+    // hierarchical read or write, where storage sized by the text could not
+    // follow it. A non-string connected to a `string` output reads it as the
+    // bytes of its text, as wide as the longest text the other side sets.
+    let code = r#"
+    function greet (name: input string, out: output string) -> string {
+        out = name;
+        return if name == "bob" ? "hi bob" : "hello";
+    }
+    function name_bits (out: output string) {
+        out = "AB";
+    }
+    module Word (o: output string) {
+        assign o = "CD";
+    }
+    module Sub (i: input string, o: output string) {
+        #[allow(initial_assign)]
+        var m: string;
+        assign o = if i == "ping" ? "pong" : "?";
+        initial {
+            m = "inner";
+        }
+    }
+    #[test(Top)]
+    module Top {
+        var r: string;
+        var g: string;
+        var n: string;
+        var w: logic<16>;
+        var b: logic<16>;
+        inst u: Sub (i: "ping", o: r);
+        inst v: Word (o: w);
+        initial {
+            g = greet("bob", n);
+            name_bits(b);
+            $display("[%s][%s][%s][%s] %h %h", r, g, n, u.m, w, b);
+            u.m = "changed";
+            $display("[%s][%b]", u.m, u.i == "ping");
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze_top(code, &config, "Top").unwrap();
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(
+            output, "[pong][hi bob][bob][inner] 4344 4142\n[changed][1]\n",
             "config={config:?}"
         );
     }

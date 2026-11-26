@@ -305,6 +305,7 @@ fn create_variables_recursive(
                 native_bytes: meta.native_bytes,
                 current_values,
                 next_values,
+                string_width: meta.string_width,
             },
         );
     }
@@ -4273,6 +4274,14 @@ fn gather_bit_aware_expr_reads(expr: &ProtoExpression, out: &mut Vec<(VarOffset,
         ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             gather_bit_aware_expr_reads(x, out)
         }
+        ProtoExpression::StringBytes {
+            x, dynamic_select, ..
+        } => {
+            gather_bit_aware_expr_reads(x, out);
+            if let Some(d) = dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             gather_bit_aware_expr_reads(x, out);
             gather_bit_aware_expr_reads(y, out);
@@ -8099,6 +8108,14 @@ fn collect_dynamic_bases(stmt: &ProtoStatement, out: &mut HashSet<VarOffset>) {
             }
             ProtoExpression::Variable { .. } | ProtoExpression::HierVariable(_) => {}
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                expr(x, out);
+                if let Some(d) = dynamic_select {
+                    expr(&d.index_expr, out);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 expr(x, out);
                 expr(y, out);
@@ -8299,7 +8316,7 @@ mod event_written_comb_tests {
     fn registers_readmemh_element_offsets() {
         let stmts = vec![ProtoStatement::SystemFunctionCall(
             ProtoSystemFunctionCall::Readmemh {
-                filename: "x.hex".into(),
+                filename: crate::ir::ProtoText::constant("x.hex"),
                 elements: vec![
                     ReadmemhElement {
                         current: VarOffset::Comb(0x30),
@@ -8379,7 +8396,7 @@ mod event_written_comb_tests {
         assert_eq!(
             event_comb_write_offsets(&[ProtoStatement::SystemFunctionCall(
                 ProtoSystemFunctionCall::Readmemh {
-                    filename: "x.hex".into(),
+                    filename: crate::ir::ProtoText::constant("x.hex"),
                     elements: vec![ReadmemhElement {
                         current: VarOffset::Ff(0x8),
                         next_offset: None,

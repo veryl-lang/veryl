@@ -454,6 +454,14 @@ impl LocalAnalysis {
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 self.walk_reads(x, i)
             }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                self.walk_reads(x, i);
+                if let Some(d) = dynamic_select {
+                    self.walk_reads(&d.index_expr, i);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 self.walk_reads(x, i);
                 self.walk_reads(y, i);
@@ -574,6 +582,14 @@ impl LocalAnalysis {
             ProtoExpression::Value { .. } => {}
             ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 self.poison_expr(x)
+            }
+            ProtoExpression::StringBytes {
+                x, dynamic_select, ..
+            } => {
+                self.poison_expr(x);
+                if let Some(d) = dynamic_select {
+                    self.poison_expr(&d.index_expr);
+                }
             }
             ProtoExpression::Binary { x, y, .. } => {
                 self.poison_expr(x);
@@ -822,7 +838,7 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
     }
 
     match expr {
-        ProtoExpression::HierVariable(_) => None,
+        ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => None,
         ProtoExpression::Value {
             value,
             width,
@@ -2611,6 +2627,7 @@ fn concat_evaluates_empty(elements: &[(Box<ProtoExpression>, usize, usize)]) -> 
 fn diag_expr_kind(e: &ProtoExpression) -> &'static str {
     match e {
         ProtoExpression::HierVariable(_) => "HierVar",
+        ProtoExpression::StringBytes { .. } => "StrConv",
         ProtoExpression::Variable { .. } => "Var",
         ProtoExpression::Value { .. } => "Val",
         ProtoExpression::Unary { .. } => "Un",
@@ -2631,6 +2648,7 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
     }
     match e {
         ProtoExpression::HierVariable(_) => "hier_variable".to_string(),
+        ProtoExpression::StringBytes { .. } => "string_conv".to_string(),
         ProtoExpression::Variable {
             var_full_width,
             select,
@@ -2926,6 +2944,8 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
         return false;
     }
     match e {
+        // Only the interpreter converts strings.
+        ProtoExpression::StringBytes { .. } => false,
         // emit_value masks the payload to the node width.
         ProtoExpression::Value { .. } => true,
         ProtoExpression::Variable {
@@ -8694,7 +8714,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
     }
 
     match expr {
-        ProtoExpression::HierVariable(_) => None,
+        ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => None,
         ProtoExpression::Value {
             value,
             width,

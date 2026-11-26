@@ -6176,6 +6176,66 @@ fn incompat_proto() {
 
 #[test]
 fn mismatch_type() {
+    // Like an enum, a `string` takes only a string, while it reads as bits
+    // into a non-string.
+    let string_cases = [
+        ("assignment", "s = x;", true),
+        ("constant", "s = 8'h41;", true),
+        ("select", "s[7:0] = x;", true),
+        ("input port", "inst u: SubIn (i: x);", true),
+        ("output port", "inst u: SubOut (o: s);", true),
+        ("function input", "f_in(x);", true),
+        ("function output", "f_out(s);", true),
+        ("string", "s = t;", false),
+        ("literal", "s = \"a\";", false),
+        (
+            "choice of strings",
+            "s = if x == 0 ? \"a\" : \"bb\";",
+            false,
+        ),
+        ("read as bits", "x = s;", false),
+        ("string output port", "inst u: SubStr (o: x);", false),
+        ("string function output", "f_str(x);", false),
+    ];
+    for (name, stmt, error) in string_cases {
+        let (decl, stmt) = if stmt.starts_with("inst") {
+            (stmt, "")
+        } else {
+            ("", stmt)
+        };
+        let code = format!(
+            r#"
+            module SubIn (i: input string) {{}}
+            module SubOut (o: output logic<8>) {{ assign o = 0; }}
+            module SubStr (o: output string) {{ assign o = "a"; }}
+            function f_in (i: input string) {{}}
+            function f_out (o: output logic<8>) {{ o = 0; }}
+            function f_str (o: output string) {{ o = "a"; }}
+            module ModuleA {{
+                var s: string;
+                var t: string;
+                var x: logic<8>;
+                {decl}
+                initial {{
+                    t = "b";
+                    {stmt}
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        let found = errors.iter().any(|e| {
+            matches!(
+                e,
+                AnalyzerError::MismatchType {
+                    kind: crate::analyzer_error::MismatchTypeKind::Assignment { .. },
+                    ..
+                }
+            )
+        });
+        assert_eq!(found, error, "{name}: {errors:?}");
+    }
+
     let code = r#"
     module ModuleA {
         union UnionA {

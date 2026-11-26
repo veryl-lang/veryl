@@ -144,6 +144,14 @@ fn walk_expr_reads(expr: &ProtoExpression, c: &mut Census) {
         ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             walk_expr_reads(x, c)
         }
+        ProtoExpression::StringBytes {
+            x, dynamic_select, ..
+        } => {
+            walk_expr_reads(x, c);
+            if let Some(d) = dynamic_select {
+                walk_expr_reads(&d.index_expr, c);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             walk_expr_reads(x, c);
             walk_expr_reads(y, c);
@@ -282,7 +290,7 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                     walk_expr_reads(a, c);
                 }
             }
-            ProtoSystemFunctionCall::Readmemh { .. } => {}
+            ProtoSystemFunctionCall::Readmemh { filename, .. } => walk_expr_reads(&filename.0, c),
             ProtoSystemFunctionCall::Assert {
                 condition, args, ..
             } => {
@@ -331,9 +339,9 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             // file-write arguments.
             ProtoTbMethodKind::Component { args, .. } => {
                 for a in args {
-                    if let crate::ir::statement::ProtoComponentArg::Expr(e) = a {
-                        walk_expr_reads(e, c);
-                    }
+                    let (crate::ir::statement::ProtoComponentArg::Expr(e)
+                    | crate::ir::statement::ProtoComponentArg::Text(crate::ir::ProtoText(e))) = a;
+                    walk_expr_reads(e, c);
                 }
             }
             // `$tb::random` argument signals are reads, like file-write args.
@@ -349,8 +357,10 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                 walk_expr_reads(min, c);
                 walk_expr_reads(max, c);
             }
-            ProtoTbMethodKind::FileOpen { .. }
-            | ProtoTbMethodKind::FileClose
+            ProtoTbMethodKind::FileOpen { path, .. } => {
+                walk_expr_reads(&path.0, c);
+            }
+            ProtoTbMethodKind::FileClose
             | ProtoTbMethodKind::FileFlush
             | ProtoTbMethodKind::RandomGet { .. }
             | ProtoTbMethodKind::RandomGetSeed { .. } => {}

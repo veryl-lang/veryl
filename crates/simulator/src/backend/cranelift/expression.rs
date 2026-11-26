@@ -464,7 +464,7 @@ impl ProtoExpression {
                 };
         }
         match self {
-            ProtoExpression::HierVariable(_) => false,
+            ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => false,
             ProtoExpression::Variable {
                 dynamic_select,
                 select,
@@ -619,7 +619,7 @@ impl ProtoExpression {
             return super::selection::read(self, context, builder);
         }
         match self {
-            ProtoExpression::HierVariable(_) => None,
+            ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => None,
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,

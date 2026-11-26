@@ -5294,12 +5294,44 @@ pub fn function_call(
     ret
 }
 
+/// Report a value of another type stored into a `string`. Like an enum, a
+/// `string` reads as bits but takes only a string. Returns whether it was
+/// reported.
+pub fn check_string_assignment(
+    context: &mut Context,
+    dst: &ir::Type,
+    src: &ir::Type,
+    token: &TokenRange,
+) -> bool {
+    if dst.is_string() && !src.is_string() && !src.is_unknown() && !src.is_systemverilog() {
+        context.insert_error(AnalyzerError::mismatch_type(
+            MismatchTypeKind::Assignment {
+                src: src.to_string(),
+                dst: dst.to_string(),
+            },
+            token,
+        ));
+        return true;
+    }
+    false
+}
+
 pub fn check_compatibility(
     context: &mut Context,
     dst: &ir::Type,
     src: &ir::Comptime,
     token: &TokenRange,
 ) {
+    // An output port's value flows from the port into the connected
+    // variable, the reverse of `dst`/`src` here.
+    let reported = if matches!(context.inst_port_kind, Some(VarKind::Output)) {
+        check_string_assignment(context, &src.r#type, dst, token)
+    } else {
+        check_string_assignment(context, dst, &src.r#type, token)
+    };
+    if reported {
+        return;
+    }
     if dst.is_positive
         && let Ok(value) = src.get_value()
         && !(src.r#type.is_positive && value.is_xz())
