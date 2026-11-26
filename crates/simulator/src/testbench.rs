@@ -432,12 +432,17 @@ pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestR
 /// Run a test module's `initial` blocks, one process each.
 pub fn run_testbench_blocks(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> TestResult {
     sim.status.reset();
+    // Components initialize before the testbench starts. Honor their finish
+    // requests at the first cycle boundary, even if they have no clock.
+    if sim.components.iter().any(|c| c.host.finish_requested()) {
+        sim.status.request_stop();
+    }
     crate::file_table::reset();
     crate::random_table::reset(sim.ir.seed);
     crate::queue_table::reset();
     let result: TestResult = run_processes(sim, blocks).into();
-    // The comb's failures in the final state are reported whether or not a
-    // dump or a read settled it after the last edge.
+    // Collect failures after the final settle so waveform dumping can't
+    // affect which failures are reported.
     sim.ensure_comb_updated();
     // End-of-test component hooks may still record failures.
     sim.finish_components();
@@ -1056,7 +1061,7 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
             Due::Negedge(t) => {
                 for &(_, clock) in negedges.iter().filter(|(tt, _)| *tt == t) {
                     if let Some(id) = clocks[clock].event.var_id() {
-                        sim.set_var_by_id(&id, Value::new(0, 1, false));
+                        sim.set_wave_clock(id, false);
                     }
                 }
                 negedges.retain(|(tt, _)| *tt != t);
@@ -1099,7 +1104,7 @@ fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecR
     for (t, clock) in negedges {
         sim.time = t;
         if let Some(id) = clocks[clock].event.var_id() {
-            sim.set_var_by_id(&id, Value::new(0, 1, false));
+            sim.set_wave_clock(id, false);
         }
         sim.dump_variables();
     }
@@ -1150,10 +1155,9 @@ fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
     if let Some(id) = reset.and_then(Event::var_id) {
         sim.set_reset_level(&id, true);
     }
-    let mut result = ExecResult::Continue;
     for i in 0..count {
         if has_dump && let Some(id) = clock.var_id() {
-            sim.set_var_by_id(&id, Value::new(1, 1, false));
+            sim.set_wave_clock(id, true);
         }
         match reset {
             Some(reset) => sim.step_in_reset(clock, reset, i == 0),
@@ -1162,42 +1166,33 @@ fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
         sim.time += high_time;
         if has_dump {
             if let Some(id) = clock.var_id() {
-                sim.set_var_by_id(&id, Value::new(0, 1, false));
+                sim.set_wave_clock(id, false);
             }
             sim.dump_variables();
         }
         sim.time += low_time;
-        // Requested termination, as latched by the edge; acted on at cycle
-        // end (after commit and dump).
-        if sim.status.stop_requested() {
-            result = stop_result(sim);
-            break;
-        }
-        // Stop once the optional clock-cycle cap is reached.
-        if let Some(limit) = sim.cycle_limit {
-            sim.cycle_count += 1;
-            if sim.cycle_count >= limit {
-                result = ExecResult::Finished;
-                break;
-            }
+        if stop_at_cycle_end(sim) {
+            return ExecResult::Finished;
         }
     }
     if let Some(id) = reset.and_then(Event::var_id) {
         sim.set_reset_level(&id, false);
     }
-    result
+    ExecResult::Continue
 }
 
-/// How a run ends once something asked it to stop: a fatal assertion, then
-/// a component's failure, fail it; otherwise it finishes.
-fn stop_result(sim: &mut Simulator) -> ExecResult {
-    if sim.status.has_fatal() {
-        return ExecResult::Fail(sim.status.take_failure().unwrap_or_default());
+/// Decide before releasing a reset held across the edge, so the final
+/// combinational settle observes the same state that stopped the run.
+#[inline]
+fn stop_at_cycle_end(sim: &mut Simulator) -> bool {
+    if sim.status.stop_requested() {
+        return true;
     }
-    if sim.components_failed() {
-        return ExecResult::Fail(sim.take_component_failures().join("\n"));
+    if let Some(limit) = sim.cycle_limit {
+        sim.cycle_count += 1;
+        return sim.cycle_count >= limit;
     }
-    ExecResult::Finished
+    false
 }
 
 /// Run one process until it waits on a clock, ends, or stops the run.
@@ -1313,7 +1308,7 @@ fn take_edges<'a>(
     if has_dump {
         for &i in fired {
             if let Some(id) = clocks[i].event.var_id() {
-                sim.set_var_by_id(&id, Value::new(1, 1, false));
+                sim.set_wave_clock(id, true);
             }
         }
     }
@@ -1325,6 +1320,9 @@ fn take_edges<'a>(
         if has_dump {
             negedges.push((t + clock.high_time, i));
         }
+    }
+    if stop_at_cycle_end(sim) {
+        return ExecResult::Finished;
     }
     for task in tasks.iter_mut() {
         let TaskState::Waiting {
@@ -1351,17 +1349,6 @@ fn take_edges<'a>(
         task.state = TaskState::Runnable {
             at: clocks[*clock].next_edge,
         };
-    }
-    // Requested termination, as latched by the edge.
-    if sim.status.stop_requested() {
-        return stop_result(sim);
-    }
-    // Stop once the optional clock-cycle cap is reached.
-    if let Some(limit) = sim.cycle_limit {
-        sim.cycle_count += 1;
-        if sim.cycle_count >= limit {
-            return ExecResult::Finished;
-        }
     }
     ExecResult::Continue
 }
