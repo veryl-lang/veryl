@@ -370,12 +370,7 @@ impl Metadata {
         self.build_info.generated_mtimes.remove(path);
     }
 
-    pub fn paths<T: AsRef<Path>>(
-        &mut self,
-        files: &[T],
-        symlink: bool,
-        include_dependencies: bool,
-    ) -> Result<Vec<PathSet>, MetadataError> {
+    fn source_dirs(&self, examples_base: &Path) -> Result<Vec<(PathBuf, bool)>, MetadataError> {
         let sources = if self.build.source.iter().count() > 0 {
             warn!(
                 "[Veryl.toml] \"source\" field is deprecated. Replace it with \"sources\" field."
@@ -386,6 +381,36 @@ impl Metadata {
         };
 
         let base = self.project_path();
+        // `examples/` is reserved; dependency source collection skips it.
+        if let Some(source) = sources
+            .iter()
+            .find(|x| base.join(x).starts_with(examples_base))
+        {
+            return Err(MetadataError::ReservedSourceDir(base.join(source)));
+        }
+        let mut dirs: Vec<_> = sources.iter().map(|x| (base.join(x), false)).collect();
+        if examples_base.exists() {
+            dirs.push((examples_base.to_path_buf(), true));
+        }
+        Ok(dirs)
+    }
+
+    /// Checks a discovered source path using its location in the project, including symlinks.
+    pub fn contains_source_path(&self, path: &Path) -> bool {
+        let examples_base = self.project_path().join("examples");
+        self.source_dirs(&examples_base).is_ok_and(|dirs| {
+            dirs.iter().any(|(dir, is_example)| {
+                path.starts_with(dir) && (*is_example || !path.starts_with(&examples_base))
+            })
+        })
+    }
+
+    pub fn paths<T: AsRef<Path>>(
+        &mut self,
+        files: &[T],
+        symlink: bool,
+        include_dependencies: bool,
+    ) -> Result<Vec<PathSet>, MetadataError> {
         // Build outputs may be redirected (e.g. `veryl build --out-dir`);
         // sources are always resolved against the project path.
         let out_base = self.output_dir();
@@ -408,23 +433,8 @@ impl Metadata {
         };
         let mut explicit_routed = canonical_files.as_ref().map(|v| vec![false; v.len()]);
 
-        // `examples/` is reserved; dependency source collection
-        // (`Lockfile::paths`) skips it entirely.
-        let examples_base = base.join("examples");
-        if let Some(source) = sources
-            .iter()
-            .find(|x| base.join(x).starts_with(&examples_base))
-        {
-            return Err(MetadataError::ReservedSourceDir(base.join(source)));
-        }
-
-        let mut source_dirs: Vec<(PathBuf, bool)> =
-            sources.iter().map(|x| (base.join(x), false)).collect();
-        if examples_base.exists() {
-            source_dirs.push((examples_base.clone(), true));
-        }
-
-        for (src_base, is_example) in source_dirs {
+        let examples_base = self.project_path().join("examples");
+        for (src_base, is_example) in self.source_dirs(&examples_base)? {
             let src_files = if let Some(cf) = canonical_files.as_ref() {
                 // Only keep files that live under this source dir; other
                 // source dirs in `sources` will pick them up. Files under

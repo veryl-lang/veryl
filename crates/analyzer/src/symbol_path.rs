@@ -779,9 +779,8 @@ impl GenericSymbolPath {
                 }
 
                 for (i, path) in package_path.paths.iter().enumerate() {
-                    let token = Token::generate(path.base.text, self_file_path);
-                    scope::insert_token_scope(
-                        token.id,
+                    let token = scope::path_token(
+                        path.base.text,
                         self_file_path,
                         self_scope,
                         &self_define_context,
@@ -851,8 +850,12 @@ impl GenericSymbolPath {
                 // The given path is referened from the `target_namespace`
                 // but it is not visible because it has no package paths.
                 for i in 1..namespace.depth() {
-                    let token = Token::generate(namespace.paths[i], file_path);
-                    scope::insert_token(token.id, file_path, &namespace);
+                    let token = scope::path_token(
+                        namespace.paths[i],
+                        file_path,
+                        scope::intern_namespace(&namespace),
+                        &namespace.define_context,
+                    );
 
                     let symbol_path = GenericSymbol {
                         base: token,
@@ -878,8 +881,12 @@ impl GenericSymbolPath {
                 && is_head_component
             {
                 // Append the project prefix to the path.
-                let token = Token::generate(head_project, file_path);
-                scope::insert_token(token.id, file_path, &namespace);
+                let token = scope::path_token(
+                    head_project,
+                    file_path,
+                    scope::intern_namespace(&namespace),
+                    &namespace.define_context,
+                );
 
                 let symbol_path = GenericSymbol {
                     base: token,

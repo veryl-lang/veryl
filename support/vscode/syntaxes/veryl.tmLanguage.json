@@ -6,6 +6,15 @@
 	],
 	"patterns": [
 		{
+			"include": "#declarations"
+		},
+		{
+			"include": "#imports"
+		},
+		{
+			"include": "#generics"
+		},
+		{
 			"include": "#keywords"
 		},
 		{
@@ -18,6 +27,12 @@
 			"include": "#comments"
 		},
 		{
+			"include": "#numbers"
+		},
+		{
+			"include": "#operators"
+		},
+		{
 			"include": "#identifiers"
 		}
 	],
@@ -26,11 +41,11 @@
 			"patterns": [
 				{
 					"name": "keyword.control.veryl",
-					"match": "\\b(case|default|else|if_reset|if|inside|outside|switch|for|in|repeat|rev|step)\\b"
+					"match": "(?<![a-zA-Z0-9_$])(case|default|else|if_reset|if|inside|outside|switch|for|in|repeat|rev|step)(?![a-zA-Z0-9_$])"
 				},
 				{
 					"name": "keyword.other.veryl",
-					"match": "\\b(embed|enum|function|include|interface|modport|module|package|proto|pub|struct|union|unsafe|alias|always_comb|always_ff|assign|as|bind|block|connect|const|final|gen|import|initial|inst|let|mixin|param|return|break|type|var|false|lsb|msb|reset_active|reset_inactive|true)\\b"
+					"match": "(?<![a-zA-Z0-9_$])(embed|enum|function|include|interface|modport|module|package|proto|pub|struct|union|unsafe|alias|always_comb|always_ff|assign|as|bind|block|connect|const|final|gen|import|initial|inst|let|mixin|param|return|break|type|var|false|lsb|msb|reset_active|reset_inactive|true)(?![a-zA-Z0-9_$])"
 				}
 			]
 		},
@@ -38,11 +53,11 @@
 			"patterns": [
 				{
 					"name": "storage.type.veryl",
-					"match": "\\b(bit|bbool|lbool|clock|clock_posedge|clock_negedge|f32|f64|i8|i16|i32|i64|logic|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|signed|string|tri|p8|p16|p32|p64|u8|u16|u32|u64)\\b"
+					"match": "(?<![a-zA-Z0-9_$])(bit|bbool|lbool|clock|clock_posedge|clock_negedge|f32|f64|i8|i16|i32|i64|logic|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|signed|string|tri|p8|p16|p32|p64|u8|u16|u32|u64)(?![a-zA-Z0-9_$])"
 				},
 				{
 					"name": "storage.modifier.veryl",
-					"match": "\\b(converse|inout|input|output|same)\\b"
+					"match": "(?<![a-zA-Z0-9_$])(converse|inout|input|output|same)(?![a-zA-Z0-9_$])"
 				}
 			]
 		},
@@ -86,10 +101,196 @@
 				}
 			]
 		},
+		"declarations": {
+			"patterns": [
+				{
+					"begin": "(?<![a-zA-Z0-9_$])module(?![a-zA-Z0-9_$])",
+					"beginCaptures": {
+						"0": {
+							"name": "keyword.other.veryl"
+						}
+					},
+					"end": "((?:r#)?[a-zA-Z_][a-zA-Z0-9_$]*)|(?=\\S)(?!//|/\\*)",
+					"endCaptures": {
+						"1": {
+							"name": "entity.name.type.module.veryl"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#comments"
+						}
+					]
+				},
+				{
+					"begin": "(?<![a-zA-Z0-9_$])interface(?![a-zA-Z0-9_$])",
+					"beginCaptures": {
+						"0": {
+							"name": "keyword.other.veryl"
+						}
+					},
+					"end": "((?:r#)?[a-zA-Z_][a-zA-Z0-9_$]*)|(?=\\S)(?!//|/\\*)",
+					"endCaptures": {
+						"1": {
+							"name": "entity.name.type.interface.veryl"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#comments"
+						}
+					]
+				},
+				{
+					"begin": "(?<![a-zA-Z0-9_$])package(?![a-zA-Z0-9_$])",
+					"beginCaptures": {
+						"0": {
+							"name": "keyword.other.veryl"
+						}
+					},
+					"end": "((?:r#)?[a-zA-Z_][a-zA-Z0-9_$]*)|(?=\\S)(?!//|/\\*)",
+					"endCaptures": {
+						"1": {
+							"name": "entity.name.type.namespace.veryl"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#comments"
+						}
+					]
+				},
+				{
+					"begin": "(?<![a-zA-Z0-9_$])function(?![a-zA-Z0-9_$])",
+					"beginCaptures": {
+						"0": {
+							"name": "keyword.other.veryl"
+						}
+					},
+					"end": "((?:r#)?[a-zA-Z_][a-zA-Z0-9_$]*)|(?=\\S)(?!//|/\\*)",
+					"endCaptures": {
+						"1": {
+							"name": "entity.name.function.veryl"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#comments"
+						}
+					]
+				},
+				{
+					"begin": "(?<![a-zA-Z0-9_$])struct(?![a-zA-Z0-9_$])",
+					"beginCaptures": {
+						"0": {
+							"name": "keyword.other.veryl"
+						}
+					},
+					"end": "((?:r#)?[a-zA-Z_][a-zA-Z0-9_$]*)|(?=\\S)(?!//|/\\*)",
+					"endCaptures": {
+						"1": {
+							"name": "entity.name.type.struct.veryl"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#comments"
+						}
+					]
+				},
+				{
+					"begin": "(?<![a-zA-Z0-9_$])enum(?![a-zA-Z0-9_$])",
+					"beginCaptures": {
+						"0": {
+							"name": "keyword.other.veryl"
+						}
+					},
+					"end": "((?:r#)?[a-zA-Z_][a-zA-Z0-9_$]*)|(?=\\S)(?!//|/\\*)",
+					"endCaptures": {
+						"1": {
+							"name": "entity.name.type.enum.veryl"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#comments"
+						}
+					]
+				}
+			]
+		},
+		"imports": {
+			"begin": "(?<![a-zA-Z0-9_$])import(?![a-zA-Z0-9_$])",
+			"beginCaptures": {
+				"0": {
+					"name": "keyword.other.veryl"
+				}
+			},
+			"end": ";",
+			"patterns": [
+				{
+					"name": "punctuation.definition.wildcard.veryl",
+					"match": "\\*"
+				},
+				{
+					"include": "$self"
+				}
+			]
+		},
+		"generics": {
+			"begin": "(::)(<)",
+			"beginCaptures": {
+				"1": {
+					"name": "punctuation.separator.namespace.veryl"
+				},
+				"2": {
+					"name": "punctuation.definition.generic.begin.veryl"
+				}
+			},
+			"end": "(>)|(?=[;{}])",
+			"endCaptures": {
+				"1": {
+					"name": "punctuation.definition.generic.end.veryl"
+				}
+			},
+			"patterns": [
+				{
+					"include": "$self"
+				}
+			]
+		},
+		"numbers": {
+			"patterns": [
+				{
+					"name": "constant.numeric.integer.veryl",
+					"match": "(?<![a-zA-Z0-9_$])(?:[0-9]+(?:_[0-9]+)*)?'(?:s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*|[01xzXZ])(?![a-zA-Z0-9_$])"
+				},
+				{
+					"name": "constant.numeric.float.veryl",
+					"match": "(?<![a-zA-Z0-9_$])[0-9]+(?:_[0-9]+)*\\.[0-9]+(?:_[0-9]+)*(?:[eE][+-]?[0-9]+(?:_[0-9]+)*)?(?![a-zA-Z0-9_$])"
+				},
+				{
+					"name": "constant.numeric.integer.veryl",
+					"match": "(?<![a-zA-Z0-9_$])[0-9]+(?:_[0-9]+)*(?![a-zA-Z0-9_$])"
+				}
+			]
+		},
+		"operators": {
+			"patterns": [
+				{
+					"name": "punctuation.separator.namespace.veryl",
+					"match": "::"
+				},
+				{
+					"name": "keyword.operator.veryl",
+					"match": "<<<=|>>>=|<<=|>>=|<<<|>>>|<<|>>|==\\?|!=\\?|==|!=|<=|>=|<:|>:|<>|->|<-|\\+:|-:|\\.\\.=|\\.\\.|\\*\\*|\\|\\||&&|~[&|^]|[+*/%&|^\\-]=|[=+*/%&|^~!?\\-]"
+				}
+			]
+		},
 		"identifiers": {
 			"patterns": [
 				{
-					"match": "\\b[a-zA-Z_][a-zA-Z0-9_$]*\\b",
+					"match": "(?<![a-zA-Z0-9_$])(?:r#|\\$)?[a-zA-Z_][a-zA-Z0-9_$]*",
 					"name": "variable.other.identifier.veryl"
 				}
 			]

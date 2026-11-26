@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
-use veryl_parser::resource_table::{self, PathId, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId, TokenId};
 use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{Expression, ExpressionIdentifier, HierarchicalIdentifier};
@@ -78,6 +78,18 @@ pub struct Import {
     pub path: GenericSymbolPathNamespace,
     pub namespace: Namespace,
     pub wildcard: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum ImportTarget {
+    Explicit {
+        name: StrId,
+        id: SymbolId,
+    },
+    Wildcard {
+        scope: scope::ScopeId,
+        context: DefineContext,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1753,12 +1765,52 @@ impl SymbolTable {
 
         let prj = prj.map(resource_table::canonical_str_id);
 
-        let drop_list: Vec<_> = self
+        let mut drop_list: HashSet<_> = self
             .symbol_table
             .iter()
             .filter(|x| is_drop_symbol(x.1, file_path, prj))
             .map(|x| *x.0)
             .collect();
+
+        // A specialization can be registered by a different file than its base.
+        let mut dropped_instance_scopes = HashSet::default();
+        loop {
+            let mut changed = false;
+            for (id, symbol) in &self.symbol_table {
+                let SymbolKind::GenericInstance(instance) = &symbol.kind else {
+                    continue;
+                };
+                let mut enclosing = Some(symbol.scope);
+                let mut dropped_parent = false;
+                while !dropped_instance_scopes.is_empty()
+                    && let Some(scope) = enclosing
+                {
+                    if dropped_instance_scopes.contains(&scope) {
+                        dropped_parent = true;
+                        break;
+                    }
+                    enclosing = scope::parent(scope);
+                }
+                if drop_list.contains(&instance.base) || dropped_parent {
+                    changed |= drop_list.insert(*id);
+                }
+                if drop_list.contains(id)
+                    && let Some(inner) = scope::child(symbol.scope, symbol.token.text)
+                    && scope::owner_of(inner) == Some(*id)
+                {
+                    changed |= dropped_instance_scopes.insert(inner);
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        GENERIC_INSTANCE_INDEX.with(|index| {
+            index.borrow_mut().retain(|(_, base, _), instance| {
+                !drop_list.contains(base) && !drop_list.contains(instance)
+            });
+        });
 
         // Read while the symbols are still in the table.
         let dropped: Vec<_> = drop_list
@@ -1786,6 +1838,29 @@ impl SymbolTable {
 
         for symbols in self.name_table.values_mut() {
             symbols.retain(|x| !drop_list.contains(x));
+        }
+
+        for symbol in self.symbol_table.values_mut() {
+            if symbol
+                .generic_instances
+                .iter()
+                .any(|id| drop_list.contains(id))
+            {
+                Rc::make_mut(symbol)
+                    .generic_instances
+                    .retain(|id| !drop_list.contains(id));
+            }
+            if let SymbolKind::GenericInstance(instance) = &symbol.kind
+                && instance
+                    .affiliation_symbols
+                    .iter()
+                    .any(|id| drop_list.contains(id))
+                && let SymbolKind::GenericInstance(instance) = &mut Rc::make_mut(symbol).kind
+            {
+                instance
+                    .affiliation_symbols
+                    .retain(|id| !drop_list.contains(id));
+            }
         }
 
         for tokens in self.reference_table.values_mut() {
@@ -1970,56 +2045,127 @@ impl SymbolTable {
     }
 
     pub fn apply_import(&mut self) {
-        // Set skip_generic_args to true to skip applying generic args during resolving the path.
-        // symbol_table::get is used when applying generic args but it is forbidden in
-        // apply import which borrows `&mut self`.
+        let imports = std::mem::take(&mut self.import_list);
+        self.apply_imports(&imports);
+    }
+
+    fn apply_imports(&mut self, imports: &[Import]) {
+        // Resolving generic arguments can borrow the symbol table again.
         self.skip_generic_args = true;
-
-        let import_list: Vec<_> = std::mem::take(&mut self.import_list);
-        for import in &import_list {
-            let context = ResolveContext::new(&import.path.1);
-            let Ok((symbol, imported)) = self
-                .resolve(&import.path.0.generic_path(), &[], context)
-                .map(|x| ((*x.found).clone(), x.imported))
-            else {
-                continue;
-            };
-
-            // The import target scope records the binding; resolution and
-            // imported-path expansion read it from the scope tree.
-            let target_scope = scope::intern_namespace(&import.namespace);
-            let define_context = import.namespace.define_context.clone();
-
-            if import.wildcard {
-                let wildcard_target = if matches!(symbol.kind, SymbolKind::Enum(_)) {
-                    Some(symbol.clone())
-                } else {
-                    self.get_package(&symbol, false, imported)
-                };
-                if let Some(target_symbol) = wildcard_target {
-                    let target = target_symbol.inner_namespace();
-                    let source_scope = scope::intern_namespace(&target);
-                    scope::add_wildcard(
-                        target_scope,
-                        source_scope,
-                        define_context,
-                        target.define_context.clone(),
-                        import.path.0.clone(),
-                    );
-                }
-            } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                let mut package_path = import.path.0.clone();
-                package_path.paths.pop();
-                scope::add_import(
-                    target_scope,
-                    symbol.token.text,
-                    symbol.id,
-                    define_context,
-                    package_path,
-                );
+        for import in imports {
+            if let Some(target) = self.resolve_import(import) {
+                Self::install_import(import, &target);
             }
         }
+        self.skip_generic_args = false;
+    }
 
+    fn resolve_import(&self, import: &Import) -> Option<ImportTarget> {
+        let context = ResolveContext::new(&import.path.1);
+        let result = self
+            .resolve(&import.path.0.generic_path(), &[], context)
+            .ok()?;
+        let symbol = &result.found;
+        if import.wildcard {
+            let target = if matches!(symbol.kind, SymbolKind::Enum(_)) {
+                symbol.inner_namespace()
+            } else {
+                self.get_package(symbol, false, result.imported)?
+                    .inner_namespace()
+            };
+            Some(ImportTarget::Wildcard {
+                scope: scope::intern_namespace(&target),
+                context: target.define_context,
+            })
+        } else if matches!(symbol.kind, SymbolKind::SystemVerilog) {
+            None
+        } else {
+            Some(ImportTarget::Explicit {
+                name: symbol.token.text,
+                id: symbol.id,
+            })
+        }
+    }
+
+    fn install_import(import: &Import, target: &ImportTarget) {
+        let target_scope = scope::intern_namespace(&import.namespace);
+        let define_context = import.namespace.define_context.clone();
+        match target {
+            ImportTarget::Wildcard { scope, context } => scope::add_wildcard(
+                target_scope,
+                *scope,
+                define_context,
+                context.clone(),
+                import.path.0.clone(),
+            ),
+            ImportTarget::Explicit { name, id } => {
+                let mut package_path = import.path.0.clone();
+                package_path.paths.pop();
+                scope::add_import(target_scope, *name, *id, define_context, package_path);
+            }
+        }
+    }
+
+    fn reapply_imports(
+        &mut self,
+        imports: &[&Import],
+        by_scope: &HashMap<scope::ScopeId, HashSet<TokenId>>,
+    ) {
+        self.skip_generic_args = true;
+        let mut targets = vec![None; imports.len()];
+        let mut history = HashMap::default();
+        let mut cyclic = HashSet::default();
+
+        loop {
+            // Evaluate against the previous round as a whole. A successful
+            // lookup can change when a later binding shadows its fallback.
+            let next: Vec<_> = imports
+                .iter()
+                .enumerate()
+                .map(|(i, import)| {
+                    if cyclic.contains(&i) {
+                        None
+                    } else {
+                        self.resolve_import(import)
+                    }
+                })
+                .collect();
+            if next == targets {
+                break;
+            }
+
+            if let Some(&cycle_start) = history.get(&next) {
+                // Invalid cyclic imports can oscillate. Drop the bindings that
+                // vary across the cycle and resolve the remaining imports again.
+                for state in history
+                    .iter()
+                    .filter(|&(_, &round)| round >= cycle_start)
+                    .map(|(state, _)| state)
+                    .chain(std::iter::once(&targets))
+                {
+                    cyclic.extend(
+                        state
+                            .iter()
+                            .zip(&next)
+                            .enumerate()
+                            .filter_map(|(i, (old, new))| (old != new).then_some(i)),
+                    );
+                }
+                history.clear();
+                targets.fill(None);
+            } else {
+                let round = history.len();
+                history.insert(targets, round);
+                targets = next;
+            }
+
+            scope::remove_imports(by_scope);
+            for (import, target) in imports.iter().zip(&targets) {
+                if let Some(target) = target {
+                    Self::install_import(import, target);
+                }
+            }
+        }
         self.skip_generic_args = false;
     }
 
@@ -3244,6 +3390,10 @@ thread_local!(static SYMBOL_ERR_CACHE: RefCell<HashMap<ResolveCacheKey, ResolveE
 type GenericInstanceKey = (scope::ScopeId, SymbolId, Vec<SymbolPath>);
 thread_local!(static GENERIC_INSTANCE_INDEX: RefCell<HashMap<GenericInstanceKey, SymbolId>> = RefCell::new(HashMap::default()));
 
+pub(crate) fn generic_instance_count() -> usize {
+    GENERIC_INSTANCE_INDEX.with(|index| index.borrow().len())
+}
+
 fn generic_instance_key(
     enclosing: scope::ScopeId,
     base: SymbolId,
@@ -3320,6 +3470,10 @@ pub fn insert_sv_member(token: &Token, symbol: Symbol) {
 
 pub fn get(id: SymbolId) -> Option<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get(id))
+}
+
+pub fn get_shared(id: SymbolId) -> Option<Rc<Symbol>> {
+    SYMBOL_TABLE.with(|table| table.borrow().symbol_table.get(&id).cloned())
 }
 
 /// The declarations whose guards a modport member is subject to, outermost
@@ -3556,6 +3710,38 @@ pub fn apply_import() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import());
 }
 
+fn import_tokens_by_scope<'a>(
+    imports: impl IntoIterator<Item = &'a Import>,
+) -> HashMap<scope::ScopeId, HashSet<TokenId>> {
+    let mut by_scope = HashMap::<_, HashSet<_>>::default();
+    for import in imports {
+        let target = scope::intern_namespace(&import.namespace);
+        by_scope
+            .entry(target)
+            .or_default()
+            .insert(import.path.0.range.beg.id);
+    }
+    by_scope
+}
+
+/// Removes the resolved bindings of these import statements.
+pub fn remove_imports<'a>(imports: impl IntoIterator<Item = &'a Import>) {
+    clear_resolve_caches();
+    scope::remove_imports(&import_tokens_by_scope(imports));
+}
+
+/// Rebinds a batch of imports after declarations have been replaced.
+pub fn reapply_imports(imports: Vec<&Import>) {
+    let by_scope = import_tokens_by_scope(imports.iter().copied());
+    clear_resolve_caches();
+    scope::remove_imports(&by_scope);
+    SYMBOL_TABLE.with(|table| table.borrow_mut().reapply_imports(&imports, &by_scope));
+}
+
+pub fn export_imports_since(watermark: PendingWatermark) -> Vec<Import> {
+    SYMBOL_TABLE.with(|table| table.borrow().import_list[watermark.import..].to_vec())
+}
+
 pub fn resolve_interfaces() -> Vec<AnalyzerError> {
     clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().resolve_interfaces())
@@ -3621,6 +3807,17 @@ pub fn get_reference_functions(id: SymbolId) -> Option<Vec<GenericSymbolPath>> {
 
 pub fn get_references(id: SymbolId) -> Option<Vec<Token>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_references(id))
+}
+
+/// The callback runs with the symbol table borrowed and must not mutate it.
+pub fn for_each_symbol_with_references(mut visit: impl FnMut(&Symbol, &[Token])) {
+    SYMBOL_TABLE.with(|table| {
+        let table = table.borrow();
+        for (id, symbol) in &table.symbol_table {
+            let references = table.reference_table.get(id).map_or(&[][..], Vec::as_slice);
+            visit(symbol, references);
+        }
+    });
 }
 
 /// See [`SymbolTable::pending_watermark`].
