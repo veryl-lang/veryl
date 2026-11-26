@@ -3652,6 +3652,7 @@ pub(crate) fn build_packed_range_select(
 pub(crate) fn array_slice_elements(
     context: &mut Context,
     expression: &air::Expression,
+    target: Option<&air::Type>,
 ) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
     let air::Expression::Term(factor) = expression else {
         return Ok(None);
@@ -3683,7 +3684,11 @@ pub(crate) fn array_slice_elements(
         let element = reference
             .array_element(&mut context.scope().analyzer_context, &shape, i)
             .ok_or_else(|| SimulatorError::unsupported_description(&reference.token_range()))?;
-        elements.push(Conv::conv(context, &element)?);
+        let element = match target {
+            Some(target) => ProtoExpression::conv_for(context, &element, target)?,
+            None => Conv::conv(context, &element)?,
+        };
+        elements.push(element);
     }
     Ok(Some(elements))
 }

@@ -35427,6 +35427,85 @@ fn string_bits_read_and_write_as_its_bytes() {
 }
 
 #[test]
+fn string_input_array_port_from_literals_and_constants() {
+    let code = r#"
+    package Words {
+        const ITEMS: string [2] = '{"longer text", ""};
+    }
+    module Sub (a: input string [2], b: input string [2]) {
+        initial {
+            $display("[%s][%s][%s][%s]", a[0], a[1], b[0], b[1]);
+        }
+    }
+    #[test(Top)]
+    module Top {
+        inst u: Sub (a: '{"ab", default: "cd"}, b: Words::ITEMS);
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(output, "[ab][cd][longer text][]\n", "config={config:?}");
+    }
+}
+
+#[test]
+fn string_array_into_numeric_input_port() {
+    let code = r#"
+    module Sub (a: input logic<64> [2]) {
+        initial { $display("[%h][%h]", a[0], a[1]); }
+    }
+    #[test(Top)]
+    module Top {
+        let a: string [2] = '{"ab", "cd"};
+        inst u: Sub (a: a);
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let result = run_native_testbench(ir, None, "Top".to_string()).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config={config:?}");
+        assert_eq!(
+            output, "[0000000000006162][0000000000006364]\n",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn string_input_array_port_from_runtime_slice() {
+    let code = r#"
+    module Sub (a: input string [2], pair: output logic<3>) {
+        assign pair = {a[0] == "ab", a[1] == "cd", a[1] == ""};
+    }
+    module Top (index: input u32, pair: output logic<3>) {
+        let words: string [3] = '{"start", "ab", "cd"};
+        inst u: Sub (a: words[index+:2], pair: pair);
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (index, pair) in [(1, 0b110), (2, 0b001), (3, 0b001)] {
+            sim.set("index", Value::new(index, 32, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("pair").unwrap(),
+                Value::new(pair, 3, false),
+                "config={config:?}, index={index}"
+            );
+        }
+    }
+}
+
+#[test]
 fn string_crosses_ports_functions_and_hierarchy() {
     // A `string` stores a fixed-width handle, so its text moves through an
     // input or output port, a function's argument and return value, and a

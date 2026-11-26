@@ -4826,6 +4826,15 @@ pub fn get_port_connects(
         )?;
 
         check_compatibility(context, port_type, &comptime, &token);
+        if matches!(context.inst_port_kind, Some(VarKind::Input))
+            && port_type.is_string()
+            && !port_type.array.is_empty()
+            && let ir::Expression::ArrayLiteral(items, _) = &expr
+        {
+            let mut element_type = port_type.clone();
+            element_type.array.clear();
+            check_string_array_items(context, &element_type, items);
+        }
 
         let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
 
@@ -5314,6 +5323,28 @@ pub fn check_string_assignment(
         return true;
     }
     false
+}
+
+fn check_string_array_items(
+    context: &mut Context,
+    element_type: &ir::Type,
+    items: &[ir::ArrayLiteralItem],
+) {
+    for item in items {
+        let expr = match item {
+            ir::ArrayLiteralItem::Value(expr, _) | ir::ArrayLiteralItem::Defaul(expr) => expr,
+        };
+        if let ir::Expression::ArrayLiteral(items, _) = expr.as_ref() {
+            check_string_array_items(context, element_type, items);
+        } else {
+            check_string_assignment(
+                context,
+                element_type,
+                &expr.comptime().r#type,
+                &expr.token_range(),
+            );
+        }
+    }
 }
 
 pub fn check_compatibility(
