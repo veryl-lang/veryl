@@ -5953,8 +5953,27 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     load_module(&so_path)
 }
 
+/// Bumps the mtime of a cached `.so` so a cache pruner can tell objects still
+/// in use from ones no current design compiles to. Best effort.
+fn mark_used(so_path: &Path) {
+    let mut options = fs::File::options();
+    // Write access to a loaded DLL is refused; the attributes alone are not.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+        options.access_mode(FILE_WRITE_ATTRIBUTES);
+    }
+    #[cfg(not(windows))]
+    options.write(true);
+    if let Ok(file) = options.open(so_path) {
+        let _ = file.set_modified(std::time::SystemTime::now());
+    }
+}
+
 /// Opens a published `.so` and wires up its runtime hooks.
 fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
+    mark_used(so_path);
     // SAFETY: the .so was just compiled by us (or previously cached) and
     // exposes only `veryl_aot_eval`.  We never unload while the FuncPtr
     // is in use because EmittedModule keeps the library alive.
