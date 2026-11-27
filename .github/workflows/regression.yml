@@ -90,26 +90,23 @@ jobs:
           path: ${{ github.workspace }}/.sccache
           key: sccache-${{ matrix.target }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.target }}-
-      # Simulator tests dual-check every design on the cc backend, and the C
-      # compiles dominate their run time. The objects are content addressed,
-      # so carrying them across runs skips every compile whose C is unchanged.
-      # A change to the C emitter or the compiler starts a fresh generation
-      # instead of piling up objects no run will hit again. Only `.so` files
-      # are kept: the `.c` copies are diagnostics, and the `.idx` files are
-      # keyed by the test binary, which differs every run.
+      # Simulator tests dual-check designs on the cc backend, and the C
+      # compiles dominate their run time. The objects are addressed by their C
+      # source, so carrying them across runs skips every compile whose C is
+      # unchanged, even across emitter changes. That key leaves out the
+      # compiler version, so it names the cache generation instead. Only `.so`
+      # files are kept: the `.c` copies are diagnostics, and the `.idx` files
+      # are keyed by the test binary, which differs every run.
       - name: Locate the AOT-C cache
         id: aot-c
         shell: bash
         run: |
           dir="${DEV_DRIVE:-$GITHUB_WORKSPACE}/aot-c"
           mkdir -p "$dir"
-          touch "$dir/.start"
           echo "VERYL_AOT_CACHE_DIR=$dir" >> "$GITHUB_ENV"
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           cc_version=$(cc --version 2>&1 || echo "no cc")
-          gen=$(printf '%s\n' "${cc_version%%$'\n'*}" \
-            "$(git rev-parse HEAD:crates/simulator/src/backend/aot_c HEAD:crates/simulator/src/backend/aot_c.rs)" \
-            | git hash-object --stdin)
+          gen=$(printf '%s\n' "${cc_version%%$'\n'*}" | git hash-object --stdin)
           echo "gen=$gen" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
         continue-on-error: true
@@ -117,6 +114,14 @@ jobs:
           path: ${{ steps.aot-c.outputs.dir }}/*.so
           key: aot-c-${{ matrix.target }}-${{ steps.aot-c.outputs.gen }}-${{ github.sha }}
           restore-keys: aot-c-${{ matrix.target }}-${{ steps.aot-c.outputs.gen }}-
+      # The simulator bumps the mtime of every object it loads, so the ones
+      # older than this stamp after the tests are what no design uses anymore.
+      - name: Stamp the AOT-C cache
+        shell: bash
+        run: |
+          cd "$VERYL_AOT_CACHE_DIR"
+          find . -name '*.so' | sort > .restored
+          touch .start
       # The heavy analyzer and simulator tests are compute bound; opt-level 1
       # cuts their run time far more than it adds to the build. The simulator's
       # hot paths sit in dependencies, so those are raised too.
@@ -139,16 +144,19 @@ jobs:
         with:
           path: ${{ github.workspace }}/.sccache
           key: sccache-${{ matrix.target }}-${{ github.sha }}
-      - name: Look for new AOT-C objects
-        id: aot-c-new
+      - name: Prune unused AOT-C objects
+        id: aot-c-prune
         if: github.ref == 'refs/heads/master'
         shell: bash
         run: |
-          if [ -n "$(find "$VERYL_AOT_CACHE_DIR" -name '*.so' -newer "$VERYL_AOT_CACHE_DIR/.start" -print -quit)" ]; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
+          cd "$VERYL_AOT_CACHE_DIR"
+          find . -name '*.so' ! -newer .start -delete
+          find . -name '*.so' | sort > .kept
+          if ! cmp -s .restored .kept; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/cache/save@v4
-        if: steps.aot-c-new.outputs.found == 'true'
+        if: steps.aot-c-prune.outputs.changed == 'true'
         continue-on-error: true
         with:
           path: ${{ steps.aot-c.outputs.dir }}/*.so
