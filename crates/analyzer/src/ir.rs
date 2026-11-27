@@ -31,10 +31,10 @@ pub use comptime::{
     TypeKindEnum, TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
 };
 pub use declaration::{
-    CombDeclaration, ComponentRef, ComponentRefMember, Declaration, DeclarationBlock,
-    ExternalConnect, ExternalDeclaration, ExternalParamValue, FfClock, FfDeclaration, FfReset,
-    FinalDeclaration, InitialDeclaration, InstDeclaration, InstInput, InstInterfaceBinding,
-    InstOutput, qualified_prefix_len,
+    CombDeclaration, ComponentArg, ComponentRef, ComponentRefMember, ComponentRefRole, Declaration,
+    DeclarationBlock, ExternalConnect, ExternalDeclaration, ExternalParamValue, FfClock,
+    FfDeclaration, FfReset, FinalDeclaration, InitialDeclaration, InstDeclaration, InstInput,
+    InstInterfaceBinding, InstOutput, qualified_prefix_len,
 };
 pub use expression::{
     ArrayLiteralItem, Expression, Factor, HierVarRef, ResetPolarity, ResetValueKind,

@@ -619,7 +619,8 @@ pub(crate) fn resolve_component_connects(
                                     && meta.elements[0].current == *var_offset)
                                     .then_some(*vid)
                             })
-                    });
+                    })
+                    .map(|vid| (vid, 0));
             }
         }
     }

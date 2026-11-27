@@ -200,6 +200,8 @@ pub enum ComponentError {
         var: String,
         other: String,
     },
+    #[error("component `{inst}`: `{var}` is driven through more than one connection or reference")]
+    OutputDrivenTwice { inst: String, var: String },
     #[error("{messages}")]
     InitFailed { messages: String },
 }

@@ -3,8 +3,8 @@ use crate::ir::Module;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::write_summary::lifted_processes;
 use crate::ir::{
-    AssignDestination, Component, Comptime, Expression, FfTable, Statement, VarId, VarIndex,
-    VarSelect,
+    AssignDestination, Component, Comptime, Expression, FfTable, Statement, SystemFunctionInput,
+    VarId, VarIndex, VarSelect,
 };
 use crate::value::Value;
 use indent::indent_all_by;
@@ -161,13 +161,36 @@ pub struct ExternalConnect {
     pub token: TokenRange,
 }
 
-/// A reference argument of a component method call
-/// (`tb.probe("x", dut.x)`): the component binds a port to each referenced
-/// variable when the method is called.
+/// An argument of a component method call.
+#[derive(Clone)]
+pub enum ComponentArg {
+    Value(SystemFunctionInput),
+    /// An argument the manifest declares as a reference
+    /// (`tb.probe("x", dut.x)`): the component gets a port bound to each
+    /// referenced variable.
+    Ref(ComponentRef),
+}
+
+impl fmt::Display for ComponentArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ComponentArg::Value(x) => x.fmt(f),
+            ComponentArg::Ref(x) => {
+                let path = x.members.first().map_or("", |m| m.path.as_str());
+                match &x.modport {
+                    Some((_, modport)) => match path.rsplit_once('.') {
+                        Some((instance, _)) => write!(f, "{instance}.{modport}"),
+                        None => modport.fmt(f),
+                    },
+                    None => path.fmt(f),
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ComponentRef {
-    /// Position of the argument.
-    pub index: usize,
     /// The interface and modport of a modport reference; `None` for a
     /// signal.
     pub modport: Option<(String, StrId)>,
@@ -176,18 +199,24 @@ pub struct ComponentRef {
     pub members: Vec<ComponentRefMember>,
 }
 
+/// How the component uses a referenced variable.
+#[derive(Clone)]
+pub enum ComponentRefRole {
+    Input,
+    Output(Box<AssignDestination>),
+    /// Fires the component's `on_clock`.
+    Clock(VarId),
+    /// Fires the component's `on_reset`.
+    Reset(VarId),
+}
+
 #[derive(Clone)]
 pub struct ComponentRefMember {
     /// Member name of a modport reference.
     pub member: Option<StrId>,
     /// Reads the variable.
     pub expr: Expression,
-    /// Present when the component drives the variable.
-    pub output: Option<AssignDestination>,
-    /// The clock variable, when it fires the component's `on_clock`.
-    pub clock: Option<VarId>,
-    /// The reset variable, when it fires the component's `on_reset`.
-    pub reset: Option<VarId>,
+    pub role: ComponentRefRole,
     /// Width of the variable (one element).
     pub width: u32,
     /// Packed dimensions, outermost first.

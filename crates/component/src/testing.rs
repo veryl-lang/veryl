@@ -21,7 +21,7 @@
 //! the unit test.
 
 use crate::value::words_for;
-use crate::{BuildCtx, Component, MethodArg, Result, SimCtx, Value, sys};
+use crate::{BuildCtx, Component, MethodArg, RefArg, Result, SimCtx, Value, sys};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Dir {
@@ -31,15 +31,7 @@ enum Dir {
 
 /// The direction of a member of a modport reference, from the
 /// component's side; see [`MockSim::modport_ref`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RefDir {
-    Input,
-    Output,
-    /// An input of a clock type, fired like a connected clock.
-    Clock,
-    /// An input of a reset type, fired like a connected reset.
-    Reset,
-}
+pub use sys::PortDescDir as RefDir;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Role {
@@ -173,42 +165,23 @@ impl MockSim {
             RefDir::Input
         };
         let port = self.add_ref_port(name, dir, dims, "", "", "");
-        MethodArg::Ref {
-            kind: sys::VRL_REF_SIGNAL,
-            ports: vec![port],
-        }
+        MethodArg::Ref(RefArg::new(sys::VRL_REF_SIGNAL, vec![port]))
     }
 
     /// Binds a clock port named `name` for a clock reference argument and
     /// returns the argument to give [`Self::call_with_refs`]. Fire it with
     /// [`Self::set_fired_clock`] and [`Self::clock`] like a connected clock.
     pub fn clock_ref(&mut self, name: &str) -> MethodArg {
-        self.add_port(name, Dir::Input, Role::Clock, 1);
-        let sep = sys::VRL_PORT_DESC_SEP.to_string();
-        let idx = (self.ports.len() - 1).to_string();
-        let desc = ["clock", "1", "1", "", name, "", "", "", &idx].join(&sep);
-        let port = self.ports.last_mut().expect("just added");
-        port.desc = Some(desc);
-        MethodArg::Ref {
-            kind: sys::VRL_REF_SIGNAL,
-            ports: vec![(self.ports.len() - 1) as u32],
-        }
+        let port = self.add_ref_port(name, RefDir::Clock, &[1], "", "", "");
+        MethodArg::Ref(RefArg::new(sys::VRL_REF_SIGNAL, vec![port]))
     }
 
     /// Binds a reset port named `name` for a reset reference argument and
     /// returns the argument to give [`Self::call_with_refs`]. Fire it with
-    /// [`Self::reset`] like a connected reset.
+    /// [`Self::set_fired_clock`] and [`Self::reset`] like a connected reset.
     pub fn reset_ref(&mut self, name: &str) -> MethodArg {
-        self.add_port(name, Dir::Input, Role::Reset, 1);
-        let sep = sys::VRL_PORT_DESC_SEP.to_string();
-        let idx = (self.ports.len() - 1).to_string();
-        let desc = ["reset", "1", "1", "", name, "", "", "", &idx].join(&sep);
-        let port = self.ports.last_mut().expect("just added");
-        port.desc = Some(desc);
-        MethodArg::Ref {
-            kind: sys::VRL_REF_SIGNAL,
-            ports: vec![(self.ports.len() - 1) as u32],
-        }
+        let port = self.add_ref_port(name, RefDir::Reset, &[1], "", "", "");
+        MethodArg::Ref(RefArg::new(sys::VRL_REF_SIGNAL, vec![port]))
     }
 
     /// Binds the members of a modport for a modport reference argument and
@@ -237,10 +210,7 @@ impl MockSim {
                 )
             })
             .collect();
-        MethodArg::Ref {
-            kind: sys::VRL_REF_MODPORT,
-            ports,
-        }
+        MethodArg::Ref(RefArg::new(sys::VRL_REF_MODPORT, ports))
     }
 
     fn add_ref_port(
@@ -253,36 +223,26 @@ impl MockSim {
         modport: &str,
     ) -> u32 {
         let width = dims.iter().product::<u32>().max(1);
-        let (port_dir, role, text) = match dir {
-            RefDir::Input => (Dir::Input, Role::Data, "input"),
-            RefDir::Output => (Dir::Output, Role::Data, "output"),
-            RefDir::Clock => (Dir::Input, Role::Clock, "clock"),
-            RefDir::Reset => (Dir::Input, Role::Reset, "reset"),
+        let (port_dir, role) = match dir {
+            RefDir::Input => (Dir::Input, Role::Data),
+            RefDir::Output => (Dir::Output, Role::Data),
+            RefDir::Clock => (Dir::Input, Role::Clock),
+            RefDir::Reset => (Dir::Input, Role::Reset),
         };
         self.add_port(name, port_dir, role, width);
-        let list = |d: &[u32]| d.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-        let sep = sys::VRL_PORT_DESC_SEP.to_string();
-        let idx = self.ports.len() - 1;
-        // A clock or a reset fires its hook through itself.
-        let event_port = match role {
-            Role::Data => String::new(),
-            _ => idx.to_string(),
+        let idx = (self.ports.len() - 1) as u32;
+        let desc = sys::PortDesc {
+            dir,
+            width,
+            dims: dims.to_vec(),
+            unpacked_dims: vec![],
+            path: name.to_string(),
+            member: member.to_string(),
+            interface: interface.to_string(),
+            modport: modport.to_string(),
         };
-        let desc = [
-            text.to_string(),
-            width.to_string(),
-            list(dims),
-            String::new(),
-            name.to_string(),
-            member.to_string(),
-            interface.to_string(),
-            modport.to_string(),
-            event_port,
-        ]
-        .join(&sep);
-        let port = self.ports.last_mut().expect("just added");
-        port.desc = Some(desc);
-        idx as u32
+        self.ports.last_mut().expect("just added").desc = Some(desc.encode());
+        idx
     }
 
     fn port_position(&self, name: &str, dir: Dir) -> Option<usize> {
@@ -338,8 +298,8 @@ impl MockSim {
         component.on_clock(&mut ctx)
     }
 
-    /// Selects which port `SimCtx::clock`/`SimCtx::fired` report for
-    /// subsequent hooks.
+    /// Selects which clock or reset port `SimCtx::clock`/`SimCtx::fired`
+    /// report for subsequent hooks.
     pub fn set_fired_clock(&mut self, name: &str) {
         self.fired_clock =
             self.port_position(name, Dir::Input)
@@ -372,7 +332,8 @@ impl MockSim {
         args: &[Value],
     ) -> Result<Value> {
         let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
-        component.method(name, args, &mut ctx)
+        let args: Vec<MethodArg> = args.iter().cloned().map(MethodArg::from).collect();
+        component.method(name, &args, &mut ctx)
     }
 
     /// Calls a method with references and ordinary values.
@@ -383,7 +344,7 @@ impl MockSim {
         args: &[MethodArg],
     ) -> Result<Value> {
         let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
-        component.__method(name, args, &mut ctx)
+        component.method(name, args, &mut ctx)
     }
 
     /// True when the component reported a failure via `ctx.fail`.
@@ -488,6 +449,11 @@ extern "C" fn mock_write_output(
             std::ptr::copy_nonoverlapping(mask_xz, port.mask_xz.as_mut_ptr(), n);
         }
     }
+}
+
+/// Mock ports never share an event, so a port fires only itself.
+extern "C" fn mock_port_event(_: *mut sys::VrlCtx, idx: u32) -> u32 {
+    idx
 }
 
 extern "C" fn mock_port_desc(ctx: *mut sys::VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64 {
@@ -812,6 +778,7 @@ static MOCK_API: sys::VrlHostApi = sys::VrlHostApi {
     runtime_arg_value: mock_runtime_arg_value,
     port_desc: mock_port_desc,
     write_output_bits: mock_write_output_bits,
+    port_event: mock_port_event,
 };
 
 #[cfg(test)]
@@ -853,7 +820,7 @@ mod tests {
             Ok(())
         }
 
-        fn method(&mut self, name: &str, _args: &[Value], ctx: &mut SimCtx) -> Result<Value> {
+        fn method(&mut self, name: &str, _args: &[MethodArg], ctx: &mut SimCtx) -> Result<Value> {
             match name {
                 "cycle" => Ok(Value::from_u64(ctx.cycle(), 64)),
                 _ => bail!("unknown method: {name}"),
@@ -900,7 +867,7 @@ mod tests {
             })
         }
 
-        fn method(&mut self, name: &str, _args: &[Value], ctx: &mut SimCtx) -> Result<Value> {
+        fn method(&mut self, name: &str, _args: &[MethodArg], ctx: &mut SimCtx) -> Result<Value> {
             match name {
                 "rounds" => Ok(Value::from_u64(self.rounds as u64, 32)),
                 "verbose" => Ok(Value::from_u64(ctx.runtime_arg_exists("VERBOSE") as u64, 1)),

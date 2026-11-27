@@ -43,13 +43,13 @@ pub use opt::field_unfuse::force_disable as force_disable_field_unfuse;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use statement::flat_stmts;
 pub use statement::{
-    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg, ComponentRef,
+    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
-    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoHierEvents,
-    ProtoIfStatement, ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,
-    ProtoSystemFunctionCall, RetWidthCheck, RuntimeArgOp, RuntimeForBound, RuntimeForRange,
-    Statement, SystemFunctionCall, TbMethodKind, format_assert_message, format_output,
-    parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
+    ProtoComponentArg, ProtoComponentRef, ProtoForBound, ProtoForRange, ProtoForStatement,
+    ProtoHierEvents, ProtoIfStatement, ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock,
+    ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck, RuntimeArgOp, RuntimeForBound,
+    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
+    format_output, parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
 };
 pub(crate) use statement::{extend_to_i64, for_bound_reached};
 pub use string_type_utils::{ProtoText, Text};

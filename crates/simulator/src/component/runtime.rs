@@ -8,7 +8,7 @@ use crate::component::host::{ExternalInstance, HostContext, HostValue, PortDir, 
 use crate::component::loader::{ComponentError, lookup_component_backend};
 use crate::ir::external::OutputTarget;
 use crate::ir::variable::{VarOffset, read_payload, write_payload};
-use crate::ir::{ComponentRef, Event, Expression, Ir};
+use crate::ir::{Event, Expression, Ir};
 use num_bigint::BigUint;
 use veryl_analyzer::value::{MaskCache, Value, ValueBigUint, ValueU64};
 use veryl_component_sys as sys;
@@ -41,13 +41,25 @@ pub struct RuntimeComponent {
     /// Reused by `stage_inputs` so staging allocates no words per port/step.
     words_scratch: Vec<u64>,
     mask_scratch: Vec<u64>,
-    /// Each reference port has both a source and a description. A source
-    /// may have several descriptions, and local paths can be reused in
-    /// different scopes.
-    ref_ports: HashMap<*const u8, HashMap<String, u32>>,
-    /// Position in `inputs` of each input port bound for a reference, to
-    /// stage the ones a method call passes right before the call.
-    ref_inputs: HashMap<u32, usize>,
+    /// Ports of the deferred connections, by connection index: bound with
+    /// the others, handed to the component by the method calls passing them.
+    deferred: HashMap<u32, DeferredPort>,
+}
+
+/// A port bound for a deferred connection (a reference argument).
+struct DeferredPort {
+    idx: u32,
+    /// The clock or reset event that fires the component once the port is
+    /// handed over.
+    event: Option<Event>,
+    /// Position in `inputs` or `outputs`.
+    binding: DeferredBinding,
+    handed_over: bool,
+}
+
+enum DeferredBinding {
+    Input(usize),
+    Output(usize),
 }
 
 /// How an input port's value is produced each step. A direct read of a plain
@@ -90,10 +102,9 @@ struct OutputBinding {
     dest: *mut u8,
     native_bytes: usize,
     width: usize,
-    // The guest's output buffer, its X/Z mask and its dirty flag, filled by
-    // `cache_port_buffers` and read in place so the write-back skips the
-    // bounds-checked slice accessors. The host keeps the flag at a stable
-    // address, so it stays valid when a method call adds reference ports.
+    // The guest's output buffer, its X/Z mask and its dirty flag, filled
+    // once the port table is final and read in place so the write-back
+    // skips the bounds-checked slice accessors.
     src_words: *const u64,
     src_mask: *const u64,
     dirty: *mut u8,
@@ -377,7 +388,7 @@ fn check_manifest_connections(
         }
     }
     let mut bound: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for connect in &ext.connects {
+    for connect in ext.connects.iter().filter(|c| c.deferred.is_none()) {
         if !has_decls {
             break;
         }
@@ -487,6 +498,61 @@ fn check_manifest_connections(
     Ok(())
 }
 
+/// Binds the port of a deferred connection and returns it with the clock or
+/// reset event that fires the component once the port is handed over.
+fn bind_deferred(
+    host: &mut HostContext,
+    inputs: &mut Vec<(u32, InputSource, u32)>,
+    outputs: &mut Vec<OutputBinding>,
+    connect: &crate::ir::ExternalConnectInst,
+    desc: &sys::PortDesc,
+    derived: &crate::ir::DerivedClockSchedule,
+    inst_name: &str,
+) -> Result<(u32, Option<Event>), ComponentError> {
+    if connect.width == 0 {
+        return Err(ComponentError::UndeterminedWidth {
+            inst: inst_name.to_string(),
+            port: desc.path.clone(),
+        });
+    }
+    let (role, event) = match connect.event_var {
+        Some(var_id) if connect.is_clock => (
+            PortRole::Clock,
+            Some(Event::clock(derived.source_of(var_id))),
+        ),
+        Some(var_id) if connect.is_reset => (
+            PortRole::Reset,
+            Some(Event::reset(derived.reset_source_of(var_id))),
+        ),
+        None if connect.is_clock || connect.is_reset => {
+            let role = if connect.is_clock { "clock" } else { "reset" };
+            return Err(ComponentError::UndeterminedEventSource {
+                inst: inst_name.to_string(),
+                port: desc.path.clone(),
+                role: role.to_string(),
+            });
+        }
+        _ => (PortRole::Data, None),
+    };
+    let idx = match &connect.output {
+        Some(target) => {
+            let idx = host.add_ref_port(PortDir::Output, role, desc.clone());
+            outputs.push(OutputBinding::new(idx, target));
+            idx
+        }
+        None => {
+            let idx = host.add_ref_port(PortDir::Input, role, desc.clone());
+            inputs.push((
+                idx,
+                InputSource::classify(connect.expr.clone()),
+                connect.width,
+            ));
+            idx
+        }
+    };
+    Ok((idx, event))
+}
+
 /// Builds every component instance for the IR: resolves vtables, sets up
 /// ports/params, runs `create`, and validates the connection contract.
 /// Errors carry the instance name and become `TestResult::Fail`.
@@ -585,7 +651,22 @@ pub fn build_components(
         // with the matching role; a modport group member may go unused.
         let mut role_connections = vec![];
 
-        for connect in &ext.connects {
+        // (connection index, port, event, output) of each deferred connection
+        let mut deferred_ports = vec![];
+        for (connect_idx, connect) in ext.connects.iter().enumerate() {
+            if let Some(desc) = &connect.deferred {
+                let (idx, event) = bind_deferred(
+                    &mut host,
+                    &mut inputs,
+                    &mut outputs,
+                    connect,
+                    desc,
+                    &ir.derived_clock_schedule,
+                    &inst_name,
+                )?;
+                deferred_ports.push((connect_idx as u32, idx, event, connect.output.is_some()));
+                continue;
+            }
             let port_name = str_of(connect.port);
             if connect.width == 0 {
                 return Err(ComponentError::UndeterminedWidth {
@@ -649,6 +730,7 @@ pub fn build_components(
                     clock_events.push((Event::clock(var_id), in_idx));
                 }
                 if connect.is_reset {
+                    let var_id = ir.derived_clock_schedule.reset_source_of(var_id);
                     reset_events.push((Event::reset(var_id), in_idx));
                 }
             }
@@ -660,6 +742,29 @@ pub fn build_components(
                 veryl_analyzer::ir::ExternalParamValue::Str(s) => HostValue::Str(s.clone()),
             };
             host.add_param(&str_of(*name), host_value);
+        }
+
+        // Ports hearing one clock or reset share its index, so the component
+        // tells which one fired from the ports it resolved.
+        let mut events: Vec<&Event> = vec![];
+        let event_ports = clock_events
+            .iter()
+            .chain(&reset_events)
+            .map(|(event, idx)| (event, *idx))
+            .chain(
+                deferred_ports
+                    .iter()
+                    .filter_map(|(_, idx, event, _)| Some((event.as_ref()?, *idx))),
+            );
+        for (event, idx) in event_ports {
+            let pos = match events.iter().position(|e| *e == event) {
+                Some(pos) => pos,
+                None => {
+                    events.push(event);
+                    events.len() - 1
+                }
+            };
+            host.set_port_event(idx, pos as u32);
         }
 
         let instance = ExternalInstance::create(backend, &mut host).map_err(in_instance)?;
@@ -688,24 +793,24 @@ pub fn build_components(
             .retain(|(_, in_idx)| host.port_resolved_role(*in_idx) == Some(PortRole::Clock));
         reset_events
             .retain(|(_, in_idx)| host.port_resolved_role(*in_idx) == Some(PortRole::Reset));
+        // Ports connected to one event fire the hook once.
+        for events in [&mut clock_events, &mut reset_events] {
+            let mut seen: Vec<Event> = vec![];
+            events.retain(|(event, _)| {
+                let first = !seen.contains(event);
+                if first {
+                    seen.push(event.clone());
+                }
+                first
+            });
+        }
 
-        // A clocked component may take its clocks through methods instead
-        // (a `clock` argument, or a `modport` one whose interface has a
-        // clock); it then has none until such a call.
-        let takes_clock_arg = manifest.as_ref().is_some_and(|m| {
-            m.methods.iter().any(|method| {
-                method.args.iter().any(|a| {
-                    matches!(
-                        a.ref_kind(),
-                        Some(
-                            veryl_metadata::ManifestRefKind::Clock
-                                | veryl_metadata::ManifestRefKind::Modport
-                        )
-                    )
-                })
-            })
-        });
-        if kind == sys::VRL_KIND_CLOCKED && clock_events.is_empty() && !takes_clock_arg {
+        // A clocked component may take its clocks through methods instead;
+        // it then has none until such a call.
+        let takes_clock_ref = deferred_ports
+            .iter()
+            .any(|(_, _, event, _)| matches!(event, Some(Event::Clock(..))));
+        if kind == sys::VRL_KIND_CLOCKED && clock_events.is_empty() && !takes_clock_ref {
             return Err(ComponentError::NoClockPortResolved {
                 inst: inst_name.clone(),
                 type_name: type_name.clone(),
@@ -777,6 +882,30 @@ pub fn build_components(
         // Output ports the component asked for keep only those bindings.
         outputs.retain(|o| host.port_touched(o.idx));
         inputs.retain(|(idx, _, _)| host.port_touched(*idx));
+        let deferred = deferred_ports
+            .into_iter()
+            .map(|(connect_idx, idx, event, output)| {
+                let binding = if output {
+                    DeferredBinding::Output(
+                        outputs.iter().position(|o| o.idx == idx).expect("touched"),
+                    )
+                } else {
+                    DeferredBinding::Input(
+                        inputs
+                            .iter()
+                            .position(|(i, _, _)| *i == idx)
+                            .expect("touched"),
+                    )
+                };
+                let port = DeferredPort {
+                    idx,
+                    event,
+                    binding,
+                    handed_over: false,
+                };
+                (connect_idx, port)
+            })
+            .collect();
 
         // The port table is now final, so its buffers no longer move; cache
         // each staging buffer for the hot paths to dereference directly.
@@ -815,6 +944,12 @@ pub fn build_components(
                 });
             }
             if let Some(other) = driven.insert(out.offset, inst_name.clone()) {
+                if other == inst_name {
+                    return Err(ComponentError::OutputDrivenTwice {
+                        inst: inst_name.clone(),
+                        var: var_name,
+                    });
+                }
                 return Err(ComponentError::OutputComponentConflict {
                     inst: inst_name.clone(),
                     var: var_name,
@@ -839,185 +974,84 @@ pub fn build_components(
             fire_count: 0,
             words_scratch: Vec::new(),
             mask_scratch: Vec::new(),
-            ref_ports: HashMap::default(),
-            ref_inputs: HashMap::default(),
+            deferred,
         });
     }
     Ok(result)
 }
 
 impl RuntimeComponent {
-    /// Storage this component drives through output ports.
-    pub fn output_offsets(&self) -> impl Iterator<Item = VarOffset> + '_ {
-        self.outputs.iter().map(|o| o.offset)
-    }
-
-    /// Binds a port for each member of a reference argument of a method
-    /// call and returns the argument for the component. As with port
-    /// connections, a variable may be read through any number of
-    /// references, which share one port, but driven through one only: an
-    /// output must not be driven yet, by the design (`rtl_driven`), another
-    /// component (`other_drivers`) or this one. An input is staged right
-    /// away, so the method itself reads the current value; an output starts
-    /// from the variable's current value.
-    pub fn bind_ref(
+    /// Hands the ports of deferred connections `connects` to the component
+    /// for a method call passing them as a reference of `kind`. An input is
+    /// staged, so the method sees its value at the call, and an output is
+    /// loaded with its variable's value when first handed over, so a partial
+    /// write keeps the other bits; a clock or a reset fires the component
+    /// from now on. An event already heard through another port still fires
+    /// the hook once, through that port, and the new port reports it too.
+    pub fn hand_over_refs(
         &mut self,
-        r: &ComponentRef,
-        rtl_driven: &crate::HashSet<VarOffset>,
-        other_drivers: &HashMap<VarOffset, String>,
-        derived: &crate::ir::DerivedClockSchedule,
+        kind: u32,
+        connects: &[u32],
         mask_cache: &mut MaskCache,
-    ) -> Result<HostValue, String> {
+    ) -> HostValue {
         let use_4state = self.host.use_4state;
-        let path_of = |desc: &str| {
-            desc.split(sys::VRL_PORT_DESC_SEP)
-                .nth(4)
-                .unwrap_or_default()
-                .to_string()
-        };
-        // Check every output before binding anything, so a rejected modport
-        // leaves no member bound.
-        for m in &r.members {
-            let Some(target) = &m.output else {
-                continue;
-            };
-            let path = path_of(&m.desc);
-            if rtl_driven.contains(&target.offset) {
-                return Err(format!(
-                    "component `{}` cannot drive `{path}`: the design drives it",
-                    self.name
-                ));
-            }
-            if let Some(other) = other_drivers.get(&target.offset) {
-                return Err(format!(
-                    "component `{}` cannot drive `{path}`: component `{other}` drives it",
-                    self.name
-                ));
-            }
-            if self.outputs.iter().any(|o| o.offset == target.offset) {
-                return Err(format!("component `{}` already drives `{path}`", self.name));
-            }
-        }
-        let mut ports = Vec::with_capacity(r.members.len());
-        for m in &r.members {
-            let idx = match &m.output {
-                None => {
-                    let source_key = match &m.expr {
-                        Expression::Variable {
-                            value,
-                            select: None,
-                            dynamic_select: None,
-                            ..
-                        } => *value,
-                        expr => std::ptr::from_ref(expr).cast(),
-                    };
-                    let descriptions = self.ref_ports.entry(source_key).or_default();
-                    if let Some(&idx) = descriptions.get(&m.desc) {
-                        ports.push(u64::from(idx));
-                        continue;
-                    }
-                    // A clock fires `on_clock` on the event its edges are
-                    // scheduled under. A reset fires `on_reset` on its event:
-                    // its assertion, and the clock edges of a `rst.assert()`
-                    // window; a copy of a reset (an interface member assigned
-                    // from it) hears the events of the reset it copies.
-                    let (role, event) = match m.event {
-                        Some(Event::Clock(var_id, 0)) => (
-                            PortRole::Clock,
-                            Some(Event::clock(derived.source_of(var_id))),
-                        ),
-                        Some(Event::Reset(var_id, 0)) => (
-                            PortRole::Reset,
-                            Some(Event::reset(derived.reset_source_of(var_id))),
-                        ),
-                        None => (PortRole::Data, None),
-                        _ => unreachable!(
-                            "component reference events are resolved during IR assembly"
-                        ),
-                    };
-                    // Each reference gets its own port, so it keeps its own
-                    // description. An event already heard through another
-                    // port (connected, passed apart, or a member of another
-                    // modport) still fires the hook once, through that port;
-                    // the new port names it as the port it fires through.
-                    let events = if role == PortRole::Clock {
-                        &self.clock_events
-                    } else {
-                        &self.reset_events
-                    };
-                    let shared = event.as_ref().and_then(|event| {
-                        events.iter().find(|(e, _)| e == event).map(|(_, idx)| *idx)
-                    });
-                    let idx = self.host.add_ref_port(
-                        PortDir::Input,
-                        role,
-                        m.width,
-                        &m.desc,
-                        shared,
-                        None,
-                    );
-                    if let Some(event) = event
-                        && shared.is_none()
-                    {
-                        if role == PortRole::Clock {
-                            self.clock_events.push((event, idx));
-                        } else {
-                            self.reset_events.push((event, idx));
+        let mut ports = Vec::with_capacity(connects.len());
+        for connect in connects {
+            let port = self
+                .deferred
+                .get_mut(connect)
+                .expect("deferred connections are bound with the component");
+            match &port.binding {
+                DeferredBinding::Input(pos) => stage_input(
+                    &mut self.host,
+                    &mut self.words_scratch,
+                    &mut self.mask_scratch,
+                    &self.inputs[*pos],
+                    use_4state,
+                    mask_cache,
+                ),
+                // Later hand-overs keep what the component wrote since.
+                DeferredBinding::Output(_) if port.handed_over => {}
+                DeferredBinding::Output(pos) => {
+                    let out = &self.outputs[*pos];
+                    let nwords = out.width.div_ceil(64).max(1);
+                    self.words_scratch.clear();
+                    self.words_scratch.resize(nwords, 0);
+                    self.mask_scratch.clear();
+                    self.mask_scratch.resize(nwords, 0);
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            out.dest,
+                            self.words_scratch.as_mut_ptr().cast::<u8>(),
+                            out.native_bytes,
+                        );
+                        if use_4state {
+                            std::ptr::copy_nonoverlapping(
+                                out.dest.add(out.native_bytes),
+                                self.mask_scratch.as_mut_ptr().cast::<u8>(),
+                                out.native_bytes,
+                            );
                         }
                     }
-                    let mut source = InputSource::classify(m.expr.clone());
-                    if let InputSource::DirectScalar {
-                        dst_words,
-                        dst_mask,
-                        ..
-                    }
-                    | InputSource::DirectWide {
-                        dst_words,
-                        dst_mask,
-                        ..
-                    } = &mut source
-                    {
-                        let d = self.host.svc_port_direct(idx).expect("port exists");
-                        *dst_words = d.words;
-                        *dst_mask = d.mask_xz;
-                    }
-                    self.ref_inputs.insert(idx, self.inputs.len());
-                    self.inputs.push((idx, source, m.width));
-                    descriptions.insert(m.desc.clone(), idx);
-                    idx
+                    let mask = use_4state.then_some(self.mask_scratch.as_slice());
+                    self.host.load_output(out.idx, &self.words_scratch, mask);
                 }
-                Some(target) => {
-                    let nwords = (m.width as usize).div_ceil(64).max(1);
-                    let value = m.expr.eval(mask_cache);
-                    let mut words = Vec::new();
-                    let mut mask_xz = Vec::new();
-                    value_to_words_into(&value, nwords, &mut words);
-                    if use_4state {
-                        value_to_mask_xz_into(&value, nwords, &mut mask_xz);
+            }
+            if !port.handed_over {
+                port.handed_over = true;
+                if let Some(event) = &port.event {
+                    let events = match event {
+                        Event::Reset(..) => &mut self.reset_events,
+                        _ => &mut self.clock_events,
+                    };
+                    if !events.iter().any(|(e, _)| e == event) {
+                        events.push((event.clone(), port.idx));
                     }
-                    let idx = self.host.add_ref_port(
-                        PortDir::Output,
-                        PortRole::Data,
-                        m.width,
-                        &m.desc,
-                        None,
-                        Some((&words, &mask_xz)),
-                    );
-                    let mut out = OutputBinding::new(idx, target);
-                    let d = self.host.svc_port_direct(idx).expect("port exists");
-                    out.src_words = d.words.cast_const();
-                    out.src_mask = d.mask_xz.cast_const();
-                    out.dirty = d.dirty;
-                    self.outputs.push(out);
-                    idx
                 }
-            };
-            ports.push(u64::from(idx));
+            }
+            ports.push(u64::from(port.idx));
         }
-        Ok(HostValue::Ref {
-            kind: r.kind,
-            ports,
-        })
+        HostValue::Ref { kind, ports }
     }
 
     /// Moves accumulated `ctx.log` messages into the per-test output
@@ -1045,34 +1079,6 @@ impl RuntimeComponent {
         }
     }
 
-    /// Stages the input ports bound for the references among `args`, right
-    /// before a method call: the method reads the current values even when
-    /// it reuses a port bound by an earlier call with no hook since.
-    pub fn stage_ref_inputs(&mut self, args: &[HostValue], mask_cache: &mut MaskCache) {
-        let use_4state = self.host.use_4state;
-        for arg in args {
-            let HostValue::Ref { ports, .. } = arg else {
-                continue;
-            };
-            for idx in ports {
-                let Some(&pos) = u32::try_from(*idx)
-                    .ok()
-                    .and_then(|idx| self.ref_inputs.get(&idx))
-                else {
-                    continue;
-                };
-                stage_input(
-                    &mut self.host,
-                    &mut self.words_scratch,
-                    &mut self.mask_scratch,
-                    &self.inputs[pos],
-                    use_4state,
-                    mask_cache,
-                );
-            }
-        }
-    }
-
     /// Runs one hook; a non-zero return code is a component failure.
     /// Well-behaved guests report the cause via `fail` before returning
     /// it; fall back to a generic message naming the hook.
@@ -1096,7 +1102,7 @@ impl RuntimeComponent {
                     .find(|(e, _)| e == event)
                     .map(|(_, i)| *i);
                 if let Some(in_idx) = in_idx {
-                    self.host.fired_clock = in_idx;
+                    self.host.fired_clock = self.host.svc_port_event(in_idx);
                     self.run_hook("on_reset", |i, h| i.on_reset(h));
                 }
             }
@@ -1109,7 +1115,7 @@ impl RuntimeComponent {
                 if let Some(in_idx) = in_idx {
                     self.fire_count += 1;
                     self.host.cycle = self.fire_count;
-                    self.host.fired_clock = in_idx;
+                    self.host.fired_clock = self.host.svc_port_event(in_idx);
                     self.run_hook("on_clock", |i, h| i.on_clock(h));
                 }
             }

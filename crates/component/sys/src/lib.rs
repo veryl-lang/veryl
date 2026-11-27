@@ -70,9 +70,9 @@ pub const VRL_VALUE_BITS: u32 = 0;
 pub const VRL_VALUE_STRING: u32 = 1;
 pub const VRL_VALUE_UNIT: u32 = 2;
 /// A reference to design variables, passed to a method argument declared
-/// as `clock`, `reset`, `input`, `output` or `modport`. `words` holds `nwords` port indices
-/// the host bound for the call, one per referenced variable (one for a
-/// signal, one per member for a modport), and `width` one of `VRL_REF_*`.
+/// as `clock`, `reset`, `input`, `output` or `modport`. `words` holds
+/// `nwords` port indices, one per referenced variable (one for a signal, one
+/// per member for a modport), and `width` one of `VRL_REF_*`.
 /// [`VrlHostApi::port_desc`] describes each port. Only sent to methods whose
 /// manifest declares such an argument.
 pub const VRL_VALUE_REF: u32 = 3;
@@ -81,9 +81,111 @@ pub const VRL_VALUE_REF: u32 = 3;
 pub const VRL_REF_SIGNAL: u32 = 0;
 pub const VRL_REF_MODPORT: u32 = 1;
 
-/// Separator of the fields of a port description, see
-/// [`VrlHostApi::port_desc`].
-pub const VRL_PORT_DESC_SEP: char = '\t';
+/// How a component uses a port bound for a reference argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PortDescDir {
+    Input,
+    Output,
+    /// An input that fires `on_clock`.
+    Clock,
+    /// An input that fires `on_reset`.
+    Reset,
+}
+
+impl PortDescDir {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Output => "output",
+            Self::Clock => "clock",
+            Self::Reset => "reset",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "input" => Self::Input,
+            "output" => Self::Output,
+            "clock" => Self::Clock,
+            "reset" => Self::Reset,
+            _ => return None,
+        })
+    }
+}
+
+/// Description of a port bound for a reference argument, served by
+/// [`VrlHostApi::port_desc`] in the text form of [`PortDesc::encode`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PortDesc {
+    pub dir: PortDescDir,
+    /// Width of one element.
+    pub width: u32,
+    /// Packed dimensions, outermost first.
+    pub dims: Vec<u32>,
+    /// Unpacked dimensions, outermost first.
+    pub unpacked_dims: Vec<u32>,
+    /// Hierarchical path of the referenced variable.
+    pub path: String,
+    /// For a modport member, the member name; empty otherwise.
+    pub member: String,
+    /// For a modport member, its interface; empty otherwise.
+    pub interface: String,
+    /// For a modport member, its modport; empty otherwise.
+    pub modport: String,
+}
+
+impl PortDesc {
+    const SEP: char = '\t';
+
+    /// Fields separated by tabs, lists by commas.
+    pub fn encode(&self) -> String {
+        let list = |d: &[u32]| d.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        [
+            self.dir.as_str().to_string(),
+            self.width.to_string(),
+            list(&self.dims),
+            list(&self.unpacked_dims),
+            self.path.clone(),
+            self.member.clone(),
+            self.interface.clone(),
+            self.modport.clone(),
+        ]
+        .join(&Self::SEP.to_string())
+    }
+
+    pub fn decode(text: &str) -> Option<Self> {
+        let fields: Vec<&str> = text.split(Self::SEP).collect();
+        let [
+            dir,
+            width,
+            dims,
+            unpacked_dims,
+            path,
+            member,
+            interface,
+            modport,
+        ] = fields[..]
+        else {
+            return None;
+        };
+        let list = |s: &str| -> Option<Vec<u32>> {
+            s.split(',')
+                .filter(|x| !x.is_empty())
+                .map(|x| x.parse().ok())
+                .collect()
+        };
+        Some(Self {
+            dir: PortDescDir::parse(dir)?,
+            width: width.parse().ok()?,
+            dims: list(dims)?,
+            unpacked_dims: list(unpacked_dims)?,
+            path: path.to_string(),
+            member: member.to_string(),
+            interface: interface.to_string(),
+            modport: modport.to_string(),
+        })
+    }
+}
 
 /// File open modes for [`VrlHostApi::file_open`].
 pub const VRL_FILE_READ: u32 = 0;
@@ -234,7 +336,8 @@ pub struct VrlHostApi {
     pub cycle: unsafe extern "C" fn(*mut VrlCtx) -> u64,
     pub sim_time: unsafe extern "C" fn(*mut VrlCtx) -> u64,
     pub seed: unsafe extern "C" fn(*mut VrlCtx) -> u64,
-    /// Input port index of the clock that fired the current hook.
+    /// Index identifying the clock or reset event that fires the current
+    /// hook: the [`VrlHostApi::port_event`] of the ports hearing it.
     pub fired_clock: unsafe extern "C" fn(*mut VrlCtx) -> u32,
     // Host-mediated file service.
     /// Returns a handle, or -1 on failure.
@@ -279,16 +382,8 @@ pub struct VrlHostApi {
     /// Copies the description of a port bound for a reference argument into
     /// `buf` (up to `cap` bytes) and returns its full length in bytes, or -1
     /// for a port that was not bound for a reference. Callable from any hook
-    /// or method. The description is UTF-8 text, fields separated by
-    /// [`VRL_PORT_DESC_SEP`]: direction (`input`, `output`, `clock` for an
-    /// input that fires `on_clock`, or `reset` for one that fires `on_reset`),
-    /// width of one
-    /// element, packed dimensions and unpacked dimensions (each a
-    /// comma-separated list, possibly empty), hierarchical path, for a
-    /// modport member the member name, interface and modport (empty
-    /// otherwise), then for a clock or a reset the index of the port its
-    /// hook fires through (empty otherwise): the first port bound to its
-    /// event, which [`VrlHostApi::fired_clock`] reports when the event fires.
+    /// or method. The description is a [`PortDesc`] in its
+    /// [`PortDesc::encode`] form.
     pub port_desc: unsafe extern "C" fn(*mut VrlCtx, idx: u32, buf: *mut u8, cap: usize) -> i64,
     /// Writes `width` bits from `lsb` of an output port from `words` and
     /// their four-state mask from `mask_xz` (null for two-state), leaving the
@@ -302,6 +397,10 @@ pub struct VrlHostApi {
         words: *const u64,
         mask_xz: *const u64,
     ) -> i32,
+    /// Index identifying the event that clock or reset port `idx` hears,
+    /// which [`VrlHostApi::fired_clock`] reports when it fires. Ports hearing
+    /// one event, connected or bound for references, share it.
+    pub port_event: unsafe extern "C" fn(*mut VrlCtx, idx: u32) -> u32,
 }
 
 /// Least [`VrlHostApi::size`] that includes the trace entries. Derived from
@@ -445,9 +544,10 @@ pub fn parse_runtime_arg_int(text: &str) -> Option<RuntimeArgInt> {
     })
 }
 /// Least [`VrlHostApi::size`] that includes the reference entries
-/// ([`VrlHostApi::port_desc`] and [`VrlHostApi::write_output_bits`]).
-pub const VRL_HOST_API_REF_SIZE: usize = std::mem::offset_of!(VrlHostApi, write_output_bits)
-    + size_of::<unsafe extern "C" fn(*mut VrlCtx, u32, u32, u32, *const u64, *const u64) -> i32>();
+/// ([`VrlHostApi::port_desc`], [`VrlHostApi::write_output_bits`] and
+/// [`VrlHostApi::port_event`]).
+pub const VRL_HOST_API_REF_SIZE: usize = std::mem::offset_of!(VrlHostApi, port_event)
+    + size_of::<unsafe extern "C" fn(*mut VrlCtx, u32) -> u32>();
 
 #[cfg(test)]
 mod tests {
@@ -539,6 +639,23 @@ mod tests {
         assert_eq!(v("-1").to_words(64), vec![!0]);
         assert_eq!(v("-1").to_words(70), vec![!0, 0x3f]);
         assert_eq!(v("0x1f").to_words(32), vec![0x1f]);
+    }
+
+    #[test]
+    fn port_desc_round_trips() {
+        let desc = PortDesc {
+            dir: PortDescDir::Clock,
+            width: 32,
+            dims: vec![4, 8],
+            unpacked_dims: vec![],
+            path: "top.bus.clk".to_string(),
+            member: "clk".to_string(),
+            interface: "bus_if".to_string(),
+            modport: "tb".to_string(),
+        };
+        assert_eq!(PortDesc::decode(&desc.encode()), Some(desc));
+        assert_eq!(PortDesc::decode("sideways\t1\t\t\t\t\t\t"), None);
+        assert_eq!(PortDesc::decode("input\t1\t\t\t\t\t"), None);
     }
 
     #[test]

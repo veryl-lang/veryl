@@ -2,26 +2,36 @@
 //!
 //! A method argument typed [`ClockPort`], [`ResetPort`], [`InputPort`],
 //! [`OutputPort`] or [`ModportRef`] takes a reference from the testbench
-//! (`tb.probe("x", dut.x)`). The host binds a port to each referenced
-//! variable when the method is called, so the component keeps the handle and
-//! reads or writes through it in later hooks like any connected port. A
-//! clock or a reset passed this way fires `on_clock` or `on_reset` like a
-//! connected clock or reset port.
+//! (`tb.probe("x", dut.x)`). The method gets a port bound to each referenced
+//! variable, so the component keeps the handle and reads or writes through
+//! it in later hooks like any connected port. A clock or a reset passed this
+//! way fires `on_clock` or `on_reset` like a connected clock or reset port,
+//! from the call on. [`SimCtx::port_info`] describes the referenced variable.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-
+use crate::sys::{PortDesc, PortDescDir};
 use crate::{ClockPort, InputPort, OutputPort, ResetPort, Result, SimCtx, Value, bail, sys};
 
-/// A value or a bound reference passed to a component method.
+/// An argument passed to a component method: a value, or a reference to
+/// design variables, which the dispatch `#[component_impl]` generates turns
+/// into a port handle or a [`ModportRef`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MethodArg {
     Value(Value),
-    #[doc(hidden)]
-    Ref {
-        kind: u32,
-        ports: Vec<u32>,
-    },
+    Ref(RefArg),
+}
+
+/// The ports the host bound for a reference argument.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefArg {
+    /// One of `VRL_REF_*`.
+    kind: u32,
+    ports: Vec<u32>,
+}
+
+impl RefArg {
+    pub(crate) fn new(kind: u32, ports: Vec<u32>) -> Self {
+        Self { kind, ports }
+    }
 }
 
 impl From<Value> for MethodArg {
@@ -31,11 +41,10 @@ impl From<Value> for MethodArg {
 }
 
 impl MethodArg {
-    #[doc(hidden)]
     pub fn as_value(&self) -> Result<&Value> {
         match self {
             Self::Value(value) => Ok(value),
-            Self::Ref { .. } => bail!("expected a value, got a reference"),
+            Self::Ref(_) => bail!("expected a value, got a reference"),
         }
     }
 
@@ -52,164 +61,127 @@ impl MethodArg {
                 .map(|&port| port as u32)
                 .collect()
         };
-        Self::Ref {
-            kind: arg.width,
-            ports,
-        }
+        Self::Ref(RefArg::new(arg.width, ports))
     }
 }
 
-/// Shape of a port bound for a reference, from the host's description.
-/// Interned, so a handle stays `Copy`.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct PortShape {
-    pub(crate) output: bool,
-    /// A clock firing `on_clock`; read like an input.
-    pub(crate) clock: bool,
-    /// A reset firing `on_reset`; read like an input.
-    pub(crate) reset: bool,
-    pub(crate) width: u32,
-    pub(crate) dims: Vec<u32>,
-    pub(crate) unpacked_dims: Vec<u32>,
-    pub(crate) path: String,
-    pub(crate) member: String,
-    pub(crate) interface: String,
-    pub(crate) modport: String,
-    /// For a clock or a reset, the port its hook fires through.
-    pub(crate) event_port: Option<u32>,
+/// `width` bits from `lsb` of a port.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BitRange {
+    pub lsb: u32,
+    pub width: u32,
 }
 
-impl PortShape {
-    fn parse(desc: &str) -> Result<Self> {
-        let fields: Vec<&str> = desc.split(sys::VRL_PORT_DESC_SEP).collect();
-        let [
-            dir,
-            width,
-            dims,
-            unpacked,
-            path,
-            member,
-            interface,
-            modport,
-            event_port,
-        ] = fields[..]
-        else {
-            bail!("malformed port description `{desc}`");
-        };
-        let list = |s: &str| -> Result<Vec<u32>> {
-            s.split(',')
-                .filter(|x| !x.is_empty())
-                .map(|x| Ok(x.parse::<u32>()?))
-                .collect()
-        };
-        let (output, clock, reset) = match dir {
-            "input" => (false, false, false),
-            "output" => (true, false, false),
-            "clock" => (false, true, false),
-            "reset" => (false, false, true),
-            _ => bail!("malformed port direction `{dir}`"),
-        };
-        Ok(Self {
-            output,
-            clock,
-            reset,
-            width: width.parse()?,
-            dims: list(dims)?,
-            unpacked_dims: list(unpacked)?,
-            path: path.to_string(),
-            member: member.to_string(),
-            interface: interface.to_string(),
-            modport: modport.to_string(),
-            event_port: (!event_port.is_empty())
-                .then(|| event_port.parse())
-                .transpose()?,
-        })
+/// The shape of a port's variable, from [`SimCtx::port_info`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortInfo {
+    width: u32,
+    dims: Vec<u32>,
+    path: String,
+}
+
+impl PortInfo {
+    /// Width of one element.
+    pub fn width(&self) -> u32 {
+        self.width
     }
 
-    /// Interns the shape described by `desc`. The set of distinct shapes is
-    /// bounded by the testbench's call sites, so the leak is too.
-    pub(crate) fn intern(desc: &str) -> Result<&'static PortShape> {
-        static SHAPES: OnceLock<Mutex<HashMap<String, &'static PortShape>>> = OnceLock::new();
-        let mut shapes = SHAPES
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if let Some(shape) = shapes.get(desc) {
-            return Ok(shape);
-        }
-        let shape: &'static PortShape = Box::leak(Box::new(Self::parse(desc)?));
-        shapes.insert(desc.to_string(), shape);
-        Ok(shape)
+    /// Packed dimensions, outermost first: `[4, 8]` for `logic<4, 8>`. A
+    /// connected port, whose type is not described, has one dimension of its
+    /// width.
+    pub fn dims(&self) -> &[u32] {
+        &self.dims
     }
 
-    /// Bit range `(lsb, width)` of the element at packed indices `index`,
-    /// outermost first: `[2]` of `logic<4, 8>` is bits `[23:16]`, as in
-    /// SystemVerilog. Fewer indices than dimensions select a whole
-    /// sub-element.
-    pub(crate) fn packed_range(dims: &[u32], width: u32, index: &[u32]) -> Result<(u32, u32)> {
-        if index.len() > dims.len() {
+    /// Hierarchical path of the referenced variable; empty for a connected
+    /// port.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// The bits of the element at packed indices `index`, outermost first:
+    /// `[2]` of `logic<4, 8>` is bits `[23:16]`, as in SystemVerilog. Fewer
+    /// indices than dimensions select a whole sub-element.
+    pub fn elem(&self, index: &[u32]) -> Result<BitRange> {
+        if index.len() > self.dims.len() {
             bail!(
                 "{} indices for {} packed dimension(s)",
                 index.len(),
-                dims.len()
+                self.dims.len()
             );
         }
         let mut lsb = 0;
-        let mut size = width;
-        for (i, (&x, &dim)) in index.iter().zip(dims).enumerate() {
+        let mut width = self.width;
+        for (i, (&x, &dim)) in index.iter().zip(&self.dims).enumerate() {
             if x >= dim {
                 bail!("index {x} out of range of dimension {i} of size {dim}");
             }
-            size /= dim;
-            lsb += x * size;
+            width /= dim;
+            lsb += x * width;
         }
-        Ok((lsb, size))
+        Ok(BitRange { lsb, width })
     }
 }
 
-/// Packed dimensions of a port without a description: one dimension of its
-/// width.
-fn plain_dims(width: u32) -> Vec<u32> {
-    vec![width]
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for crate::InputPort {}
+    impl Sealed for crate::OutputPort {}
+    impl Sealed for crate::ClockPort {}
+    impl Sealed for crate::ResetPort {}
 }
 
-impl InputPort {
-    /// Packed dimensions, outermost first: `[4, 8]` for `logic<4, 8>`. A
-    /// connected port, whose type is not described, reports its width.
-    pub fn dims(&self) -> Vec<u32> {
-        self.shape
-            .map_or_else(|| plain_dims(self.width), |s| s.dims.clone())
-    }
+/// A port handle, as [`SimCtx::port_info`] takes it.
+pub trait Port: Copy + sealed::Sealed {
+    #[doc(hidden)]
+    fn port_index(&self) -> u32;
+}
 
-    /// Unpacked dimensions, outermost first; empty for a single variable.
-    pub fn unpacked_dims(&self) -> &[u32] {
-        self.shape.map_or(&[], |s| &s.unpacked_dims)
-    }
-
-    /// Hierarchical path of the referenced variable; empty for a connected
-    /// port.
-    pub fn path(&self) -> &str {
-        self.shape.map_or("", |s| &s.path)
+impl Port for InputPort {
+    fn port_index(&self) -> u32 {
+        self.idx
     }
 }
 
-impl OutputPort {
-    /// Packed dimensions, outermost first: `[4, 8]` for `logic<4, 8>`. A
-    /// connected port, whose type is not described, reports its width.
-    pub fn dims(&self) -> Vec<u32> {
-        self.shape
-            .map_or_else(|| plain_dims(self.width), |s| s.dims.clone())
+impl Port for OutputPort {
+    fn port_index(&self) -> u32 {
+        self.idx
     }
+}
 
-    /// Unpacked dimensions, outermost first; empty for a single variable.
-    pub fn unpacked_dims(&self) -> &[u32] {
-        self.shape.map_or(&[], |s| &s.unpacked_dims)
+impl Port for ClockPort {
+    fn port_index(&self) -> u32 {
+        self.idx
     }
+}
 
-    /// Hierarchical path of the referenced variable; empty for a connected
-    /// port.
-    pub fn path(&self) -> &str {
-        self.shape.map_or("", |s| &s.path)
+impl Port for ResetPort {
+    fn port_index(&self) -> u32 {
+        self.idx
+    }
+}
+
+/// The clock or reset event a port hears. Ports hearing one event, connected
+/// or passed as references, have equal ids; ids compare only within one
+/// component instance.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct EventId(pub(crate) u32);
+
+/// A clock or reset port handle, as [`SimCtx::fired`] takes it.
+pub trait EventPort: Port {
+    /// The event the port hears.
+    fn event(&self) -> EventId;
+}
+
+impl EventPort for ClockPort {
+    fn event(&self) -> EventId {
+        EventId(self.event)
+    }
+}
+
+impl EventPort for ResetPort {
+    fn event(&self) -> EventId {
+        EventId(self.event)
     }
 }
 
@@ -311,118 +283,116 @@ impl ModportRef {
     }
 }
 
-/// Reference conversions used by the code `#[component_impl]` generates for
-/// reference arguments.
+/// Conversions of reference arguments into port handles, which the dispatch
+/// `#[component_impl]` generates calls for each reference argument; a
+/// hand-written [`crate::Component::method`] calls them itself.
 impl SimCtx {
     fn ref_ports(value: &MethodArg, kind: u32) -> Result<&[u32]> {
         match value {
-            MethodArg::Ref { kind: k, ports } if *k == kind => Ok(ports),
-            MethodArg::Ref { .. } => bail!("reference of the wrong kind"),
-            _ => bail!("not a reference"),
+            MethodArg::Ref(r) if r.kind == kind => Ok(&r.ports),
+            MethodArg::Ref(_) => bail!("reference of the wrong kind"),
+            MethodArg::Value(_) => bail!("not a reference"),
         }
     }
 
-    fn ref_port(&mut self, idx: u32) -> Result<(&'static PortShape, crate::sys::VrlPortDirect)> {
-        let Some(desc) = self.raw.port_desc(idx) else {
-            bail!("port {idx} is not bound for a reference");
-        };
-        Ok((PortShape::intern(&desc)?, self.raw.port_direct(idx)))
+    fn ref_desc(&mut self, idx: u32) -> Result<PortDesc> {
+        match self.port_desc(idx)? {
+            Some(desc) => Ok(desc),
+            None => bail!("port {idx} is not bound for a reference"),
+        }
     }
 
-    fn member_port(&mut self, idx: u32) -> Result<(MemberPort, &'static PortShape)> {
-        let (shape, direct) = self.ref_port(idx)?;
-        let port = if shape.clock {
-            MemberPort::Clock(ClockPort {
+    fn port_desc(&mut self, idx: u32) -> Result<Option<PortDesc>> {
+        let Some(text) = self.raw.port_desc(idx) else {
+            return Ok(None);
+        };
+        match PortDesc::decode(&text) {
+            Some(desc) => Ok(Some(desc)),
+            None => bail!("malformed port description `{text}`"),
+        }
+    }
+
+    fn member_port(&mut self, idx: u32) -> Result<(MemberPort, PortDesc)> {
+        let desc = self.ref_desc(idx)?;
+        let direct = self.raw.port_direct(idx);
+        let port = match desc.dir {
+            PortDescDir::Clock => MemberPort::Clock(ClockPort {
                 idx,
-                event_port: shape.event_port.unwrap_or(idx),
-            })
-        } else if shape.reset {
-            MemberPort::Reset(ResetPort { idx })
-        } else if shape.output {
-            MemberPort::Output(OutputPort {
+                event: self.raw.port_event(idx),
+            }),
+            PortDescDir::Reset => MemberPort::Reset(ResetPort {
                 idx,
-                width: shape.width,
+                event: self.raw.port_event(idx),
+            }),
+            PortDescDir::Output => MemberPort::Output(OutputPort {
+                idx,
+                width: desc.width,
                 words_ptr: direct.words,
                 mask_ptr: direct.mask_xz,
                 dirty_ptr: direct.dirty,
-                shape: Some(shape),
-            })
-        } else {
-            MemberPort::Input(InputPort {
+            }),
+            PortDescDir::Input => MemberPort::Input(InputPort {
                 idx,
-                width: shape.width,
+                width: desc.width,
                 words_ptr: direct.words.cast_const(),
-                shape: Some(shape),
-            })
+            }),
         };
-        Ok((port, shape))
+        Ok((port, desc))
     }
 
-    #[doc(hidden)]
-    pub fn __input_ref(&mut self, value: &MethodArg) -> Result<InputPort> {
+    fn signal_ref(&mut self, value: &MethodArg) -> Result<MemberPort> {
         let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
             bail!("malformed signal reference");
         };
-        match self.member_port(idx)?.0 {
+        Ok(self.member_port(idx)?.0)
+    }
+
+    /// The input port of a signal reference.
+    pub fn input_ref(&mut self, value: &MethodArg) -> Result<InputPort> {
+        match self.signal_ref(value)? {
             MemberPort::Input(port) => Ok(port),
             _ => bail!("expected an input reference"),
         }
     }
 
-    #[doc(hidden)]
-    pub fn __output_ref(&mut self, value: &MethodArg) -> Result<OutputPort> {
-        let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
-            bail!("malformed signal reference");
-        };
-        match self.member_port(idx)?.0 {
+    /// The output port of a signal reference.
+    pub fn output_ref(&mut self, value: &MethodArg) -> Result<OutputPort> {
+        match self.signal_ref(value)? {
             MemberPort::Output(port) => Ok(port),
             _ => bail!("expected an output reference"),
         }
     }
 
-    #[doc(hidden)]
-    pub fn __clock_ref(&mut self, value: &MethodArg) -> Result<ClockPort> {
-        let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
-            bail!("malformed clock reference");
-        };
-        let (shape, _) = self.ref_port(idx)?;
-        if !shape.clock {
-            bail!("expected a clock reference");
+    /// The clock port of a clock reference, firing `on_clock` from the call
+    /// on.
+    pub fn clock_ref(&mut self, value: &MethodArg) -> Result<ClockPort> {
+        match self.signal_ref(value)? {
+            MemberPort::Clock(port) => Ok(port),
+            _ => bail!("expected a clock reference"),
         }
-        Ok(ClockPort {
-            idx,
-            event_port: shape.event_port.unwrap_or(idx),
-        })
     }
 
-    #[doc(hidden)]
-    pub fn __reset_ref(&mut self, value: &MethodArg) -> Result<ResetPort> {
-        let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
-            bail!("malformed reset reference");
-        };
-        let (shape, _) = self.ref_port(idx)?;
-        if !shape.reset {
-            bail!("expected a reset reference");
+    /// The reset port of a reset reference, firing `on_reset` from the call
+    /// on.
+    pub fn reset_ref(&mut self, value: &MethodArg) -> Result<ResetPort> {
+        match self.signal_ref(value)? {
+            MemberPort::Reset(port) => Ok(port),
+            _ => bail!("expected a reset reference"),
         }
-        Ok(ResetPort { idx })
     }
 
-    #[doc(hidden)]
-    pub fn __modport_ref(&mut self, value: &MethodArg) -> Result<ModportRef> {
+    /// The members of a modport reference.
+    pub fn modport_ref(&mut self, value: &MethodArg) -> Result<ModportRef> {
         let ports = Self::ref_ports(value, sys::VRL_REF_MODPORT)?.to_vec();
         let mut members = Vec::with_capacity(ports.len());
         let mut info = None;
         for idx in ports {
-            let (port, shape) = self.member_port(idx)?;
-            info.get_or_insert((
-                shape.interface.clone(),
-                shape.modport.clone(),
-                shape.path.clone(),
-            ));
+            let (port, desc) = self.member_port(idx)?;
             members.push(ModportMember {
-                name: shape.member.clone(),
+                name: desc.member.clone(),
                 port,
             });
+            info.get_or_insert((desc.interface, desc.modport, desc.path));
         }
         let (interface, modport, path) = info.unwrap_or_default();
         // The path of a member names the member; the modport's is its
@@ -441,7 +411,8 @@ impl SimCtx {
 }
 
 /// Bits `[lsb, lsb + width)` of `value`.
-pub(crate) fn slice_bits(value: &Value, lsb: u32, width: u32) -> Value {
+fn slice_bits(value: &Value, range: BitRange) -> Value {
+    let BitRange { lsb, width } = range;
     let Value::Bits { words, mask_xz, .. } = value else {
         return Value::from_u64(0, width);
     };
@@ -464,97 +435,70 @@ pub(crate) fn slice_bits(value: &Value, lsb: u32, width: u32) -> Value {
     Value::from_bits(out_words, out_mask, width)
 }
 
-/// Element and bit-range access of ports.
+fn check_range(port_width: u32, range: BitRange) -> Result<()> {
+    let BitRange { lsb, width } = range;
+    if width == 0 || lsb.checked_add(width).is_none_or(|end| end > port_width) {
+        bail!("bits [{lsb} +: {width}] out of a {port_width}-bit port");
+    }
+    Ok(())
+}
+
+/// Port descriptions and bit-range access.
 impl SimCtx {
-    /// The pre-edge value of the element of `port` at `index`: unpacked
-    /// indices first (all of them), then packed indices, outermost first and
-    /// possibly fewer than the packed dimensions. `[2]` of `logic<4, 8>` is
-    /// bits `[23:16]`.
-    pub fn read_elem(&mut self, port: InputPort, index: &[u32]) -> Result<Value> {
-        let packed = Self::packed_index(port.unpacked_dims(), index)?;
-        let (lsb, width) = PortShape::packed_range(&port.dims(), port.width, packed)?;
+    /// The shape of `port`'s variable. A port bound for a reference gets its
+    /// variable's dimensions and path; a connected port, whose type is not
+    /// described, one dimension of its width and no path.
+    pub fn port_info(&mut self, port: impl Port) -> Result<PortInfo> {
+        let idx = port.port_index();
+        if let Some(desc) = self.port_desc(idx)? {
+            return Ok(PortInfo {
+                width: desc.width,
+                dims: desc.dims,
+                path: desc.path,
+            });
+        }
+        let width = self.raw.port_width(idx);
+        Ok(PortInfo {
+            width,
+            dims: vec![width],
+            path: String::new(),
+        })
+    }
+
+    /// The pre-edge value of bits `range` of `port`.
+    pub fn read_bits(&mut self, port: impl Into<InputPort>, range: BitRange) -> Result<Value> {
+        let port = port.into();
+        check_range(port.width, range)?;
         let value = self.read(port);
-        Ok(slice_bits(&value, lsb, width))
+        Ok(slice_bits(&value, range))
     }
 
-    /// Writes the element of `port` at `index` (see [`Self::read_elem`]),
-    /// leaving the other bits as written before. Commits with FFs.
-    pub fn write_elem(
-        &mut self,
-        port: OutputPort,
-        index: &[u32],
-        value: impl Into<Value>,
-    ) -> Result<()> {
-        let packed = Self::packed_index(port.unpacked_dims(), index)?;
-        let (lsb, width) = PortShape::packed_range(&port.dims(), port.width, packed)?;
-        self.write_bits_at(port, lsb, width, value.into())
-    }
-
-    /// The pre-edge value of `width` bits from `lsb` of the element at
-    /// unpacked indices `unpacked` (empty for a single variable).
-    pub fn read_bits(
-        &mut self,
-        port: InputPort,
-        unpacked: &[u32],
-        lsb: u32,
-        width: u32,
-    ) -> Result<Value> {
-        Self::packed_index(port.unpacked_dims(), unpacked)?;
-        Self::check_range(port.width, lsb, width)?;
-        let value = self.read(port);
-        Ok(slice_bits(&value, lsb, width))
-    }
-
-    /// Writes `width` bits from `lsb` of the element at unpacked indices
-    /// `unpacked` (empty for a single variable), leaving the other bits as
-    /// written before. Commits with FFs.
+    /// Writes bits `range` of `port`, leaving the other bits as written
+    /// before. Commits with FFs.
     pub fn write_bits(
         &mut self,
         port: OutputPort,
-        unpacked: &[u32],
-        lsb: u32,
-        width: u32,
+        range: BitRange,
         value: impl Into<Value>,
     ) -> Result<()> {
-        Self::packed_index(port.unpacked_dims(), unpacked)?;
-        Self::check_range(port.width, lsb, width)?;
-        self.write_bits_at(port, lsb, width, value.into())
-    }
-
-    /// Splits `index` past the unpacked indices. Unpacked arrays are not
-    /// bound yet, so there are none.
-    fn packed_index<'a>(unpacked_dims: &[u32], index: &'a [u32]) -> Result<&'a [u32]> {
-        if !unpacked_dims.is_empty() {
-            bail!("unpacked array references are not supported");
-        }
-        Ok(index)
-    }
-
-    fn check_range(port_width: u32, lsb: u32, width: u32) -> Result<()> {
-        if width == 0 || lsb.checked_add(width).is_none_or(|end| end > port_width) {
-            bail!("bits [{lsb} +: {width}] out of a {port_width}-bit port");
-        }
-        Ok(())
-    }
-
-    fn write_bits_at(
-        &mut self,
-        port: OutputPort,
-        lsb: u32,
-        width: u32,
-        value: Value,
-    ) -> Result<()> {
-        let words = value.to_port_words(width)?;
+        check_range(port.width, range)?;
+        let value = value.into();
+        let words = value.to_port_words(range.width)?;
         let mask_xz = if self.is_4state() {
-            Some(value.to_port_mask_xz(width)?)
+            Some(value.to_port_mask_xz(range.width)?)
         } else {
             None
         };
         if !self
             .raw
-            .write_output_bits(port.idx, lsb, width, &words, mask_xz.as_deref())
+            .write_output_bits(port.idx, range.lsb, range.width, &words, mask_xz.as_deref())
         {
-            bail!("cannot write bits [{lsb} +: {width}] of port {}", port.idx);
+            bail!(
+                "cannot write bits [{} +: {}] of port {}",
+                range.lsb,
+                range.width,
+                port.idx
+            );
         }
         Ok(())
     }
@@ -565,39 +509,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn packed_range_follows_sv() {
-        // logic<4, 8>
-        assert_eq!(PortShape::packed_range(&[4, 8], 32, &[]).unwrap(), (0, 32));
-        assert_eq!(PortShape::packed_range(&[4, 8], 32, &[2]).unwrap(), (16, 8));
-        assert_eq!(
-            PortShape::packed_range(&[4, 8], 32, &[2, 5]).unwrap(),
-            (21, 1)
-        );
-        assert!(PortShape::packed_range(&[4, 8], 32, &[4]).is_err());
-        assert!(PortShape::packed_range(&[4, 8], 32, &[0, 0, 0]).is_err());
-    }
-
-    #[test]
-    fn parses_a_description() {
-        let shape =
-            PortShape::parse("output\t32\t4,8\t\ttop.bus.data\tdata\tbus_if\ttb\t").unwrap();
-        assert!(shape.output);
-        assert_eq!(shape.width, 32);
-        assert_eq!(shape.dims, vec![4, 8]);
-        assert!(shape.unpacked_dims.is_empty());
-        assert_eq!(shape.member, "data");
-        assert_eq!(shape.event_port, None);
-        let shape = PortShape::parse("clock\t1\t1\t\ttop.bus.clk\tclk\tbus_if\ttb\t3").unwrap();
-        assert!(shape.clock);
-        assert_eq!(shape.event_port, Some(3));
-        assert!(PortShape::parse("sideways\t1\t\t\t\t\t\t\t").is_err());
-        assert!(PortShape::parse("input\t1\t\t\t\t\t\t").is_err());
+    fn elem_follows_sv() {
+        let info = PortInfo {
+            width: 32,
+            dims: vec![4, 8],
+            path: String::new(),
+        };
+        let range = |lsb, width| BitRange { lsb, width };
+        assert_eq!(info.elem(&[]).unwrap(), range(0, 32));
+        assert_eq!(info.elem(&[2]).unwrap(), range(16, 8));
+        assert_eq!(info.elem(&[2, 5]).unwrap(), range(21, 1));
+        assert!(info.elem(&[4]).is_err());
+        assert!(info.elem(&[0, 0, 0]).is_err());
     }
 
     #[test]
     fn slices_bits() {
         let v = Value::from_u64(0xab_cd, 16);
-        assert_eq!(slice_bits(&v, 8, 8), Value::from_u64(0xab, 8));
-        assert_eq!(slice_bits(&v, 4, 4), Value::from_u64(0xc, 4));
+        let range = |lsb, width| BitRange { lsb, width };
+        assert_eq!(slice_bits(&v, range(8, 8)), Value::from_u64(0xab, 8));
+        assert_eq!(slice_bits(&v, range(4, 4)), Value::from_u64(0xc, 4));
     }
 }

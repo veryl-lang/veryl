@@ -1,4 +1,5 @@
 pub mod checker;
+mod component_ref;
 mod context;
 pub mod conv_profiler;
 pub mod declaration;

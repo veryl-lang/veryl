@@ -177,7 +177,7 @@ pub unsafe extern "C" fn call_method<T: Component>(
                 .collect()
         };
         let mut sim = unsafe { SimCtx::new(ctx, api, four_state) };
-        let value = instance.inner.__method(name, &args, &mut sim)?;
+        let value = instance.inner.method(name, &args, &mut sim)?;
         write_return(value, unsafe { &mut *ret })
     }));
     match result {
