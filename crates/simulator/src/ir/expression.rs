@@ -3349,34 +3349,45 @@ fn packed_write_coordinate_valid(
     }
 }
 
-/// Converts `expr`, wrapping the statements its inlined function calls push
-/// into `pending_statements` in an `if` on `guard`, so they run only when
-/// `guard`'s truthiness equals `when`. Without calls this is a plain conversion.
-fn conv_guarded(
+/// Converts `expr`, returning the statements its inlined function calls
+/// produce instead of leaving them in `pending_statements`.
+fn conv_deferred(
     context: &mut Context,
     expr: &air::Expression,
-    guard: &ProtoExpression,
-    when: bool,
-) -> Result<ProtoExpression, SimulatorError> {
+) -> Result<(ProtoExpression, Vec<ProtoStatement>), SimulatorError> {
     let outer = std::mem::take(&mut context.pending_statements);
     let result = Conv::conv(context, expr);
-    let inner = std::mem::replace(&mut context.pending_statements, outer);
-    let result = result?;
-    if !inner.is_empty() {
-        let (true_side, false_side) = if when {
-            (inner, vec![])
-        } else {
-            (vec![], inner)
-        };
-        context
-            .pending_statements
-            .push(ProtoStatement::If(super::statement::ProtoIfStatement {
-                cond: Some(guard.clone()),
-                true_side,
-                false_side,
-            }));
+    let deferred = std::mem::replace(&mut context.pending_statements, outer);
+    Ok((result?, deferred))
+}
+
+/// Runs the deferred statements of a short-circuited operand under `cond`,
+/// sampling `guard` first: those statements may write what `guard` reads,
+/// and both the branch and the returned expression must see the value from
+/// before them.
+fn guard_deferred(
+    context: &mut Context,
+    guard: ProtoExpression,
+    cond: impl FnOnce(&ProtoExpression) -> ProtoExpression,
+    true_side: Vec<ProtoStatement>,
+    false_side: Vec<ProtoStatement>,
+) -> ProtoExpression {
+    if true_side.is_empty() && false_side.is_empty() {
+        return guard;
     }
-    Ok(result)
+    let guard = if matches!(guard, ProtoExpression::Value { .. }) {
+        guard
+    } else {
+        snapshot_expression(context, guard)
+    };
+    context
+        .pending_statements
+        .push(ProtoStatement::If(super::statement::ProtoIfStatement {
+            cond: Some(cond(&guard)),
+            true_side,
+            false_side,
+        }));
+    guard
 }
 
 /// Inlines a call into `context.pending_statements` and returns the offset of
@@ -4507,15 +4518,31 @@ impl Conv<&air::Expression> for ProtoExpression {
                     )
                 } else {
                     let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
-                    // `&&` / `||` evaluate the right operand only when the left
-                    // one does not decide the result, so its inlined calls run
-                    // under that condition.
-                    let y: ProtoExpression = match op {
-                        Op::LogicAnd => conv_guarded(context, y.as_ref(), &x, true)?,
-                        Op::LogicOr => conv_guarded(context, y.as_ref(), &x, false)?,
-                        _ => Conv::conv(context, y.as_ref())?,
-                    };
-                    (x, y)
+                    match op {
+                        // `&&` skips its right operand only when the left one
+                        // is definitely zero: an X/Z left operand still
+                        // evaluates it (IEEE 1800-2023 11.4.7).
+                        Op::LogicAnd => {
+                            let (y, y_stmts) = conv_deferred(context, y.as_ref())?;
+                            let not_x = |x: &ProtoExpression| ProtoExpression::Unary {
+                                op: Op::LogicNot,
+                                x: Box::new(x.clone()),
+                                width: 1,
+                                expr_context: ExpressionContext {
+                                    width: 1,
+                                    signed: false,
+                                },
+                            };
+                            (guard_deferred(context, x, not_x, vec![], y_stmts), y)
+                        }
+                        // `||` skips it only when the left one is definitely
+                        // nonzero, which is what `if` tests.
+                        Op::LogicOr => {
+                            let (y, y_stmts) = conv_deferred(context, y.as_ref())?;
+                            (guard_deferred(context, x, Clone::clone, vec![], y_stmts), y)
+                        }
+                        _ => (x, Conv::conv(context, y.as_ref())?),
+                    }
                 };
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
@@ -4698,8 +4725,11 @@ impl Conv<&air::Expression> for ProtoExpression {
             }
             air::Expression::Ternary(cond, true_expr, false_expr, comptime) => {
                 let cond: ProtoExpression = Conv::conv(context, cond.as_ref())?;
-                let true_expr = conv_guarded(context, true_expr.as_ref(), &cond, true)?;
-                let false_expr = conv_guarded(context, false_expr.as_ref(), &cond, false)?;
+                // Only the arm the condition selects runs its calls; an X/Z
+                // condition selects the false arm, as `if` does.
+                let (true_expr, true_stmts) = conv_deferred(context, true_expr.as_ref())?;
+                let (false_expr, false_stmts) = conv_deferred(context, false_expr.as_ref())?;
+                let cond = guard_deferred(context, cond, Clone::clone, true_stmts, false_stmts);
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
