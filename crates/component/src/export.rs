@@ -4,7 +4,7 @@
 //! panics and `Err` returns are reported through the host `fail` service and
 //! folded into the non-zero return code.
 
-use crate::{BuildCtx, Component, SimCtx, Value, sys};
+use crate::{BuildCtx, Component, MethodArg, SimCtx, Value, sys};
 use std::any::Any;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -152,7 +152,6 @@ fn write_return(value: Value, ret: &mut sys::VrlValue) -> crate::Result<()> {
             Ok(())
         }
         Value::Str(_) => crate::bail!("string method return values are not supported"),
-        Value::Ref { .. } => crate::bail!("reference method return values are not supported"),
     }
 }
 
@@ -169,16 +168,16 @@ pub unsafe extern "C" fn call_method<T: Component>(
     let four_state = instance.four_state;
     let result = catch_unwind(AssertUnwindSafe(|| {
         let name = unsafe { name.as_str() };
-        let args: Vec<Value> = if nargs == 0 {
+        let args: Vec<MethodArg> = if nargs == 0 {
             vec![]
         } else {
             unsafe { std::slice::from_raw_parts(args, nargs) }
                 .iter()
-                .map(|v| unsafe { Value::from_vrl(v) })
+                .map(|v| unsafe { MethodArg::from_vrl(v) })
                 .collect()
         };
         let mut sim = unsafe { SimCtx::new(ctx, api, four_state) };
-        let value = instance.inner.method(name, &args, &mut sim)?;
+        let value = instance.inner.__method(name, &args, &mut sim)?;
         write_return(value, unsafe { &mut *ret })
     }));
     match result {

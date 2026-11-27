@@ -21,7 +21,7 @@
 //! the unit test.
 
 use crate::value::words_for;
-use crate::{BuildCtx, Component, Result, SimCtx, Value, sys};
+use crate::{BuildCtx, Component, MethodArg, Result, SimCtx, Value, sys};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Dir {
@@ -163,56 +163,56 @@ impl MockSim {
 
     /// Binds a port named `name` for a signal reference argument, as the
     /// host does when a testbench passes `dut.<name>`, and returns the
-    /// argument to give [`Self::call`]. `dims` are the packed dimensions,
+    /// argument to give [`Self::call_with_refs`]. `dims` are the packed dimensions,
     /// outermost first (`&[8]` for `logic<8>`). Drive and observe it with
     /// [`Self::set`] and [`Self::get`] like any port.
-    pub fn signal_ref(&mut self, name: &str, output: bool, dims: &[u32]) -> Value {
+    pub fn signal_ref(&mut self, name: &str, output: bool, dims: &[u32]) -> MethodArg {
         let dir = if output {
             RefDir::Output
         } else {
             RefDir::Input
         };
         let port = self.add_ref_port(name, dir, dims, "", "", "");
-        Value::Ref {
+        MethodArg::Ref {
             kind: sys::VRL_REF_SIGNAL,
             ports: vec![port],
         }
     }
 
     /// Binds a clock port named `name` for a clock reference argument and
-    /// returns the argument to give [`Self::call`]. Fire it with
+    /// returns the argument to give [`Self::call_with_refs`]. Fire it with
     /// [`Self::set_fired_clock`] and [`Self::clock`] like a connected clock.
-    pub fn clock_ref(&mut self, name: &str) -> Value {
+    pub fn clock_ref(&mut self, name: &str) -> MethodArg {
         self.add_port(name, Dir::Input, Role::Clock, 1);
         let sep = sys::VRL_PORT_DESC_SEP.to_string();
         let idx = (self.ports.len() - 1).to_string();
         let desc = ["clock", "1", "1", "", name, "", "", "", &idx].join(&sep);
         let port = self.ports.last_mut().expect("just added");
         port.desc = Some(desc);
-        Value::Ref {
+        MethodArg::Ref {
             kind: sys::VRL_REF_SIGNAL,
             ports: vec![(self.ports.len() - 1) as u32],
         }
     }
 
     /// Binds a reset port named `name` for a reset reference argument and
-    /// returns the argument to give [`Self::call`]. Fire it with
+    /// returns the argument to give [`Self::call_with_refs`]. Fire it with
     /// [`Self::reset`] like a connected reset.
-    pub fn reset_ref(&mut self, name: &str) -> Value {
+    pub fn reset_ref(&mut self, name: &str) -> MethodArg {
         self.add_port(name, Dir::Input, Role::Reset, 1);
         let sep = sys::VRL_PORT_DESC_SEP.to_string();
         let idx = (self.ports.len() - 1).to_string();
         let desc = ["reset", "1", "1", "", name, "", "", "", &idx].join(&sep);
         let port = self.ports.last_mut().expect("just added");
         port.desc = Some(desc);
-        Value::Ref {
+        MethodArg::Ref {
             kind: sys::VRL_REF_SIGNAL,
             ports: vec![(self.ports.len() - 1) as u32],
         }
     }
 
     /// Binds the members of a modport for a modport reference argument and
-    /// returns the argument to give [`Self::call`]. Each member is
+    /// returns the argument to give [`Self::call_with_refs`]. Each member is
     /// `(name, direction, packed dims)` from the component's side; its port
     /// is named `<instance>.<name>` for [`Self::set`] and [`Self::get`], and
     /// a clock or reset member is fired by that name like a clock or reset
@@ -223,7 +223,7 @@ impl MockSim {
         interface: &str,
         modport: &str,
         members: &[(&str, RefDir, &[u32])],
-    ) -> Value {
+    ) -> MethodArg {
         let ports = members
             .iter()
             .map(|(member, dir, dims)| {
@@ -237,7 +237,7 @@ impl MockSim {
                 )
             })
             .collect();
-        Value::Ref {
+        MethodArg::Ref {
             kind: sys::VRL_REF_MODPORT,
             ports,
         }
@@ -373,6 +373,17 @@ impl MockSim {
     ) -> Result<Value> {
         let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
         component.method(name, args, &mut ctx)
+    }
+
+    /// Calls a method with references and ordinary values.
+    pub fn call_with_refs<T: Component>(
+        &mut self,
+        component: &mut T,
+        name: &str,
+        args: &[MethodArg],
+    ) -> Result<Value> {
+        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
+        component.__method(name, args, &mut ctx)
     }
 
     /// True when the component reported a failure via `ctx.fail`.
@@ -1103,6 +1114,27 @@ mod tests {
         assert!(err.to_string().contains("expects 1 argument(s)"));
         let err = sim.call(&mut c, "nope", &[]).unwrap_err();
         assert!(err.to_string().contains("unknown method: nope"));
+    }
+
+    #[derive(veryl_component::Component)]
+    struct RefReader {}
+
+    #[veryl_component::component_impl]
+    impl RefReader {
+        fn read(&mut self, ctx: &mut SimCtx, port: InputPort, addend: u64) -> Result<u64> {
+            Ok(ctx.read_u64(port) + addend)
+        }
+    }
+
+    #[test]
+    fn mock_method_accepts_references_and_values() {
+        let mut sim = MockSim::new();
+        let mut component = sim.build::<RefReader>().unwrap();
+        let reference = sim.signal_ref("signal", false, &[8]);
+        sim.set("signal", 10u64);
+        let args = [reference, Value::from(2u64).into()];
+        let result = sim.call_with_refs(&mut component, "read", &args).unwrap();
+        assert_eq!(result.as_u64().unwrap(), 12);
     }
 
     #[test]

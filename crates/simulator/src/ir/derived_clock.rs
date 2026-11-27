@@ -78,8 +78,8 @@ pub struct DerivedClockSchedule {
     /// differs between the master's two phases.
     pub resets_read_master: bool,
     /// `(copy, source)` for a reset that only copies another reset of the
-    /// same polarity, such as a testbench reset assigned to an interface
-    /// member: a component bound to the copy hears the source's events.
+    /// same polarity that generates reset events: a component bound to
+    /// the copy hears the source's events.
     pub reset_aliases: Vec<(VarId, VarId)>,
 }
 

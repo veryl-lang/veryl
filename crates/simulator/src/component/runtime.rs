@@ -41,10 +41,10 @@ pub struct RuntimeComponent {
     /// Reused by `stage_inputs` so staging allocates no words per port/step.
     words_scratch: Vec<u64>,
     mask_scratch: Vec<u64>,
-    /// Ports bound for reference arguments, keyed by their description
-    /// (path, direction and shape), so passing the same reference again
-    /// reuses the port.
-    ref_ports: HashMap<String, u32>,
+    /// Each reference port has both a source and a description. A source
+    /// may have several descriptions, and local paths can be reused in
+    /// different scopes.
+    ref_ports: HashMap<*const u8, HashMap<String, u32>>,
     /// Position in `inputs` of each input port bound for a reference, to
     /// stage the ones a method call passes right before the call.
     ref_inputs: HashMap<u32, usize>,
@@ -900,31 +900,40 @@ impl RuntimeComponent {
         }
         let mut ports = Vec::with_capacity(r.members.len());
         for m in &r.members {
-            if m.output.is_none()
-                && let Some(&idx) = self.ref_ports.get(&m.desc)
-            {
-                ports.push(u64::from(idx));
-                continue;
-            }
             let idx = match &m.output {
                 None => {
+                    let source_key = match &m.expr {
+                        Expression::Variable {
+                            value,
+                            select: None,
+                            dynamic_select: None,
+                            ..
+                        } => *value,
+                        expr => std::ptr::from_ref(expr).cast(),
+                    };
+                    let descriptions = self.ref_ports.entry(source_key).or_default();
+                    if let Some(&idx) = descriptions.get(&m.desc) {
+                        ports.push(u64::from(idx));
+                        continue;
+                    }
                     // A clock fires `on_clock` on the event its edges are
                     // scheduled under. A reset fires `on_reset` on its event:
                     // its assertion, and the clock edges of a `rst.assert()`
                     // window; a copy of a reset (an interface member assigned
                     // from it) hears the events of the reset it copies.
-                    let (role, event) = if let Some(var_id) = m.clock {
-                        (
+                    let (role, event) = match m.event {
+                        Some(Event::Clock(var_id, 0)) => (
                             PortRole::Clock,
                             Some(Event::clock(derived.source_of(var_id))),
-                        )
-                    } else if let Some(var_id) = m.reset {
-                        (
+                        ),
+                        Some(Event::Reset(var_id, 0)) => (
                             PortRole::Reset,
                             Some(Event::reset(derived.reset_source_of(var_id))),
-                        )
-                    } else {
-                        (PortRole::Data, None)
+                        ),
+                        None => (PortRole::Data, None),
+                        _ => unreachable!(
+                            "component reference events are resolved during IR assembly"
+                        ),
                     };
                     // Each reference gets its own port, so it keeps its own
                     // description. An event already heard through another
@@ -974,7 +983,7 @@ impl RuntimeComponent {
                     }
                     self.ref_inputs.insert(idx, self.inputs.len());
                     self.inputs.push((idx, source, m.width));
-                    self.ref_ports.insert(m.desc.clone(), idx);
+                    descriptions.insert(m.desc.clone(), idx);
                     idx
                 }
                 Some(target) => {

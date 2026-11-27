@@ -5793,6 +5793,9 @@ fn conv_component_ref(
                 ));
                 continue;
             };
+            if member_comptime.r#type.is_array() {
+                return reject(context, "unpacked arrays cannot be referenced yet");
+            }
             member_comptime.token = token;
             let member: Vec<String> = member_path.0[path.0.len()..]
                 .iter()

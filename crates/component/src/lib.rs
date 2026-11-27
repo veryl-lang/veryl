@@ -23,7 +23,7 @@ mod value;
 pub mod export;
 
 pub use ctx::{BuildCtx, ClockPort, CtxFile, InputPort, OutputPort, ResetPort, SimCtx, TraceVar};
-pub use reference::{MemberPort, ModportMember, ModportRef};
+pub use reference::{MemberPort, MethodArg, ModportMember, ModportRef};
 pub use runtime_arg::{ArgError, ArgValue, RuntimeArg};
 pub use value::Value;
 pub use veryl_component_macros::{Component, VerylInterface, component_impl};
@@ -122,6 +122,15 @@ pub trait Component: Send + 'static {
     /// Zero-time method call from the testbench (`inst.name(args)`).
     fn method(&mut self, name: &str, _args: &[Value], _ctx: &mut SimCtx) -> Result<Value> {
         bail!("unknown method: {name}")
+    }
+
+    #[doc(hidden)]
+    fn __method(&mut self, name: &str, args: &[MethodArg], ctx: &mut SimCtx) -> Result<Value> {
+        let values = args
+            .iter()
+            .map(|arg| arg.as_value().cloned())
+            .collect::<Result<Vec<_>>>()?;
+        self.method(name, &values, ctx)
     }
 
     /// Called when the test ends (normally or via `finish`/`fail`).

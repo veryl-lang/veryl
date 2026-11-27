@@ -5635,3 +5635,245 @@ fn method_reset_reference_must_be_a_reset() {
     let what = "argument 1 of method `count_resets` takes a reference: pass a reset";
     assert!(text.contains(what), "missing `{what}` in:\n{text}");
 }
+
+#[test]
+fn method_references_distinguish_same_name_across_scopes() {
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst c: $comp::ref_probe (clk);
+        var x: logic<4, 8>;
+        var n: u32;
+
+        initial {
+            x = 32'd1;
+            n = c.peek(x);
+            $assert(n == 1, "nested x");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+        var x: logic<4, 8>;
+        var n: u32;
+
+        initial {
+            x = 32'd2;
+            n = u.c.peek(x);
+            $assert(n == 2, "top x");
+        }
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        let ir = analyze_component_top(code, &config, "top")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn method_modport_reference_rejects_unpacked_array_members() {
+    let code = r#"
+    interface PairIf {
+        var req: logic<8> [2];
+        var ack: logic<8>;
+        modport tb {
+            req: input,
+            ack: output,
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst bus: PairIf;
+        inst c: $comp::ref_probe (clk);
+
+        initial {
+            c.attach(bus.tb);
+        }
+    }
+    "#;
+    let errors = errors_text(&analyze_component_errors(code));
+    assert!(
+        errors.contains(
+            "argument 1 of method `attach` takes a reference: unpacked arrays cannot be referenced"
+        ),
+        "{errors}"
+    );
+}
+
+#[test]
+fn nested_test_module_clock_and_reset_references_fire_hooks() {
+    let code = r#"
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        let reset_copy: reset = rst;
+        inst c: $comp::reset_watch_ref;
+        var clocks: logic<8>;
+        var resets: logic<8>;
+
+        initial {
+            c.count_clocks(clk, clocks);
+            c.count_resets(rst, resets);
+            rst.assert(3);
+            clk.next(4);
+            $assert(resets == 3, "nested reset reference");
+            $assert(clocks == 4, "nested clock reference");
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst u: harness;
+
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        for reset in ["rst", "reset_copy"] {
+            let code = code.replace("count_resets(rst,", &format!("count_resets({reset},"));
+            let ir = analyze_component_top(&code, &config, "top")
+                .unwrap_or_else(|x| panic!("build failed for {reset} in {config:?}: {x:?}"));
+            let module_name = ir.name.to_string();
+            let result = run_native_testbench(ir, None, module_name);
+            assert_eq!(result.unwrap(), TestResult::Pass, "{reset} in {config:?}");
+        }
+    }
+}
+
+#[test]
+fn method_reset_reference_fires_on_monitored_copy() {
+    let code = r#"
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        var pad: logic;
+        let source: reset_async_high = pad as reset_async_high;
+        let monitored: reset_async_high = source;
+        var q: logic<8>;
+        var clocks: logic<8>;
+        var resets: logic<8>;
+        inst c: $comp::reset_watch_ref;
+
+        always_ff (clk, monitored) {
+            if_reset { q = 0; } else { q = 1; }
+        }
+
+        initial {
+            pad = 0;
+            resets = 0;
+            c.count_clocks(clk, clocks);
+            c.count_resets(monitored, resets);
+            clk.next();
+            $assert(q == 1, "left reset");
+            pad = 1;
+            clk.next();
+            $assert(q == 0, "RTL reset asserted");
+            $assert(resets == 1, "component reset asserted");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn nested_modport_clock_and_reset_references_fire_hooks() {
+    // The clock and the reset of an interface, passed with its modport,
+    // fire `on_clock` and `on_reset` as when passed on their own: the edges
+    // of the `rst.assert(3)` window fire `on_reset`, the later ones
+    // `on_clock`.
+    let code = r#"
+    interface ClkIf {
+        var clk   : clock   ;
+        var rst   : reset   ;
+        var clocks: logic<8>;
+        var resets: logic<8>;
+
+        modport tb {
+            clk   : input ,
+            rst   : input ,
+            clocks: output,
+            resets: output,
+        }
+    }
+
+    #[test(harness)]
+    module harness {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        inst bus: ClkIf;
+        assign bus.clk = clk;
+        assign bus.rst = rst;
+
+        inst c: $comp::bus_clock_watch;
+
+        initial {
+            c.attach(bus.tb);
+            rst.assert(3);
+            clk.next(5);
+            $assert(bus.resets == 3, "on_reset on each edge of the reset window");
+            $assert(bus.clocks == 5, "on_clock on the edges after it");
+        }
+    }
+    #[test(top)]
+    module top {
+        inst u: harness;
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        let ir = analyze_component_top(code, &config, "top")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn nested_clock_reference_follows_connected_array_element() {
+    let code = r#"
+    #[test(harness)]
+    module harness (clk: input clock) {
+        inst c: $comp::clock_watch;
+        var ticks: logic<8>;
+        initial {
+            ticks = 0;
+            c.watch(clk, ticks);
+        }
+    }
+
+    #[test(top)]
+    module top {
+        inst other: $tb::clock_gen;
+        inst clk: $tb::clock_gen;
+        var clocks: clock [2];
+        assign clocks[0] = other;
+        assign clocks[1] = clk;
+        inst u: harness (clk: clocks[1]);
+
+        initial {
+            other.next(2);
+            clk.next(4);
+            $assert(u.ticks == 4, "nested clock input");
+        }
+    }
+    "#;
+    LazyLock::force(&REGISTER);
+    for config in Config::all() {
+        let ir = analyze_component_top(code, &config, "top")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(result.unwrap(), TestResult::Pass, "config: {config:?}");
+    }
+}

@@ -13,6 +13,52 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::{ClockPort, InputPort, OutputPort, ResetPort, Result, SimCtx, Value, bail, sys};
 
+/// A value or a bound reference passed to a component method.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MethodArg {
+    Value(Value),
+    #[doc(hidden)]
+    Ref {
+        kind: u32,
+        ports: Vec<u32>,
+    },
+}
+
+impl From<Value> for MethodArg {
+    fn from(value: Value) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl MethodArg {
+    #[doc(hidden)]
+    pub fn as_value(&self) -> Result<&Value> {
+        match self {
+            Self::Value(value) => Ok(value),
+            Self::Ref { .. } => bail!("expected a value, got a reference"),
+        }
+    }
+
+    /// The caller must supply valid pointers for the declared lengths.
+    pub(crate) unsafe fn from_vrl(arg: &sys::VrlValue) -> Self {
+        if arg.kind != sys::VRL_VALUE_REF {
+            return Self::Value(unsafe { Value::from_vrl(arg) });
+        }
+        let ports = if arg.nwords == 0 || arg.words.is_null() {
+            vec![]
+        } else {
+            unsafe { std::slice::from_raw_parts(arg.words, arg.nwords) }
+                .iter()
+                .map(|&port| port as u32)
+                .collect()
+        };
+        Self::Ref {
+            kind: arg.width,
+            ports,
+        }
+    }
+}
+
 /// Shape of a port bound for a reference, from the host's description.
 /// Interned, so a handle stays `Copy`.
 #[derive(Debug, PartialEq, Eq)]
@@ -268,10 +314,10 @@ impl ModportRef {
 /// Reference conversions used by the code `#[component_impl]` generates for
 /// reference arguments.
 impl SimCtx {
-    fn ref_ports(value: &Value, kind: u32) -> Result<&[u32]> {
+    fn ref_ports(value: &MethodArg, kind: u32) -> Result<&[u32]> {
         match value {
-            Value::Ref { kind: k, ports } if *k == kind => Ok(ports),
-            Value::Ref { .. } => bail!("reference of the wrong kind"),
+            MethodArg::Ref { kind: k, ports } if *k == kind => Ok(ports),
+            MethodArg::Ref { .. } => bail!("reference of the wrong kind"),
             _ => bail!("not a reference"),
         }
     }
@@ -313,7 +359,7 @@ impl SimCtx {
     }
 
     #[doc(hidden)]
-    pub fn __input_ref(&mut self, value: &Value) -> Result<InputPort> {
+    pub fn __input_ref(&mut self, value: &MethodArg) -> Result<InputPort> {
         let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
             bail!("malformed signal reference");
         };
@@ -324,7 +370,7 @@ impl SimCtx {
     }
 
     #[doc(hidden)]
-    pub fn __output_ref(&mut self, value: &Value) -> Result<OutputPort> {
+    pub fn __output_ref(&mut self, value: &MethodArg) -> Result<OutputPort> {
         let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
             bail!("malformed signal reference");
         };
@@ -335,7 +381,7 @@ impl SimCtx {
     }
 
     #[doc(hidden)]
-    pub fn __clock_ref(&mut self, value: &Value) -> Result<ClockPort> {
+    pub fn __clock_ref(&mut self, value: &MethodArg) -> Result<ClockPort> {
         let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
             bail!("malformed clock reference");
         };
@@ -350,7 +396,7 @@ impl SimCtx {
     }
 
     #[doc(hidden)]
-    pub fn __reset_ref(&mut self, value: &Value) -> Result<ResetPort> {
+    pub fn __reset_ref(&mut self, value: &MethodArg) -> Result<ResetPort> {
         let &[idx] = Self::ref_ports(value, sys::VRL_REF_SIGNAL)? else {
             bail!("malformed reset reference");
         };
@@ -362,7 +408,7 @@ impl SimCtx {
     }
 
     #[doc(hidden)]
-    pub fn __modport_ref(&mut self, value: &Value) -> Result<ModportRef> {
+    pub fn __modport_ref(&mut self, value: &MethodArg) -> Result<ModportRef> {
         let ports = Self::ref_ports(value, sys::VRL_REF_MODPORT)?.to_vec();
         let mut members = Vec::with_capacity(ports.len());
         let mut info = None;

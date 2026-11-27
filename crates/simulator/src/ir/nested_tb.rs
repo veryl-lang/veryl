@@ -10,7 +10,7 @@ use crate::HashMap;
 use crate::ir::ProtoStatement;
 use crate::ir::context::Context;
 use crate::ir::event::Event;
-use crate::ir::statement::ProtoTbMethodKind;
+use crate::ir::statement::{ProtoComponentArg, ProtoTbMethodKind};
 use crate::ir::variable::{VarOffset, VariableMeta};
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
@@ -27,6 +27,13 @@ pub struct TbVariable {
     /// The hierarchical name testbench statements address a `$tb` clock or
     /// reset by.
     pub handle: Option<StrId>,
+}
+
+/// A nested reset's event identity, storage, and declared kind.
+pub struct ResetNet {
+    pub id: air::VarId,
+    pub offset: VarOffset,
+    pub kind: air::TypeKind,
 }
 
 /// The event a `$tb` clock or reset handle fires.
@@ -120,6 +127,32 @@ pub fn rename_handles(
                 *inst = hierarchical_name(hierarchy, name, *inst);
                 if let ProtoTbMethodKind::ResetAssert { clock, .. } = method {
                     *clock = hierarchical_name(hierarchy, name, *clock);
+                }
+            });
+        }
+    }
+}
+
+/// Remaps the clock and reset subscriptions of component method arguments.
+pub fn remap_reference_events(
+    events: &mut HashMap<Event, Vec<ProtoStatement>>,
+    mut remap: impl FnMut(air::VarId, u32) -> (air::VarId, u32),
+) {
+    for (event, stmts) in events {
+        if event.is_initial() || *event == Event::Final {
+            walk_mut(stmts, &mut |_, method| {
+                if let ProtoTbMethodKind::Component { args, .. } = method {
+                    for arg in args {
+                        if let ProtoComponentArg::Ref(reference) = arg {
+                            for member in &mut reference.members {
+                                if let Some(Event::Clock(id, element) | Event::Reset(id, element)) =
+                                    &mut member.event
+                                {
+                                    (*id, *element) = remap(*id, *element);
+                                }
+                            }
+                        }
+                    }
                 }
             });
         }

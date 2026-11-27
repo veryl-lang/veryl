@@ -18,7 +18,7 @@ use crate::ir::write_log::{
     event_write_log_push_static, event_write_log_push_wide_range, log_window_for_span,
     static_field_byte_span,
 };
-use crate::ir::{Expression, ProtoExpression, Value};
+use crate::ir::{Event, Expression, ProtoExpression, Value};
 use crate::output_buffer;
 use crate::sim_status::SimStatus;
 use crate::simulator_error::SimulatorError;
@@ -430,10 +430,8 @@ pub struct ProtoComponentRefMember {
     /// variable itself is the one `expr` reads, so it follows `expr` through
     /// offset remapping.
     pub output: Option<StrId>,
-    /// The clock variable, for a clock firing the component's `on_clock`.
-    pub clock: Option<VarId>,
-    /// The reset variable, for a reset firing the component's `on_reset`.
-    pub reset: Option<VarId>,
+    /// The clock or reset event this reference subscribes to.
+    pub event: Option<Event>,
     pub width: u32,
     /// The port description served by `port_desc`.
     pub desc: String,
@@ -538,8 +536,7 @@ pub struct ComponentRef {
 pub struct ComponentRefMember {
     pub expr: Expression,
     pub output: Option<crate::ir::external::OutputTarget>,
-    pub clock: Option<VarId>,
-    pub reset: Option<VarId>,
+    pub event: Option<Event>,
     pub width: u32,
     pub desc: String,
 }
@@ -3591,8 +3588,7 @@ impl ProtoStatement {
                                                             comb_values_ptr,
                                                         )
                                                     }),
-                                                    clock: m.clock,
-                                                    reset: m.reset,
+                                                    event: m.event.clone(),
                                                     width: m.width,
                                                     desc: m.desc.clone(),
                                                 })
@@ -7000,8 +6996,10 @@ fn conv_component_ref(
                 .output
                 .as_ref()
                 .map(|_| veryl_parser::resource_table::insert_str(&m.path)),
-            clock: m.clock,
-            reset: m.reset,
+            event: m
+                .clock
+                .map(Event::clock)
+                .or_else(|| m.reset.map(Event::reset)),
             width: m.width,
             desc,
         });
