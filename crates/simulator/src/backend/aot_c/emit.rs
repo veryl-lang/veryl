@@ -4905,6 +4905,7 @@ enum IndexedEvent {
 fn load_indexed_event(input: Option<u128>) -> Option<IndexedEvent> {
     let path = index_path("event", input)?;
     let text = fs::read_to_string(&path).ok()?;
+    mark_used(&path);
     let mut fields = text.split_whitespace();
     let hash = fields.next()?;
     if hash == "declined" {
@@ -4987,6 +4988,7 @@ enum IndexedDataflow {
 fn load_indexed_dataflow(input: Option<u128>) -> Option<IndexedDataflow> {
     let path = index_path("dataflow", input)?;
     let text = fs::read_to_string(&path).ok()?;
+    mark_used(&path);
     let mut fields = text.split_whitespace();
     let hash = fields.next()?;
     if hash == "declined" {
@@ -6169,6 +6171,122 @@ fn gc_orphan_temps(cache_dir: &Path) {
     });
 }
 
+/// How long a published artifact may go unused before the cache drops it
+/// (`VERYL_AOT_C_RETAIN_DAYS`, default 7; 0 keeps everything).  Use bumps the
+/// mtime of `.so` and `.idx` files, so the age is time since last use; a
+/// dropped entry costs one recompile.
+fn retention() -> Option<Duration> {
+    let days = std::env::var("VERYL_AOT_C_RETAIN_DAYS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(7);
+    (days != 0).then(|| Duration::from_secs(days * 24 * 3600))
+}
+
+/// How often a cache directory is scanned for unused artifacts.  A scan
+/// stats every entry, which runs to seconds on a directory of a few hundred
+/// thousand files.
+const GC_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+
+/// How long a started scan holds others off.  A scan dies with its process,
+/// so a claim that never completes expires after this and another process
+/// takes the scan over.
+const GC_LEASE: Duration = Duration::from_secs(600);
+
+/// The cache's own record of its unused-artifact scans: its mtime is when the
+/// next one is due, less [`GC_INTERVAL`].
+const GC_STAMP: &str = "veryl_aot_gc.stamp";
+
+/// A published cache entry: an object, its index, a kept source or the log of
+/// a failed compile.  Temps and locks have their own rules.
+fn is_published_artifact(name: &str) -> bool {
+    name.starts_with("veryl_aot_")
+        && [".so", ".idx", ".c", ".log"]
+            .iter()
+            .any(|ext| name.ends_with(ext))
+        && !is_temp_artifact(name)
+}
+
+fn sweep_unused_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !is_published_artifact(name) {
+            continue;
+        }
+        let unused = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m < cutoff);
+        if unused {
+            // A `.so` another process still has loaded refuses deletion on
+            // Windows; it was used too recently to get here anyway.
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Sets the stamp so the next scan of `dir` is due after `wait`.
+fn set_gc_stamp(dir: &Path, wait: Duration) -> bool {
+    let stamp = dir.join(GC_STAMP);
+    let Some(time) = (std::time::SystemTime::now() + wait).checked_sub(GC_INTERVAL) else {
+        return false;
+    };
+    fs::write(&stamp, b"").is_ok()
+        && fs::File::options()
+            .write(true)
+            .open(&stamp)
+            .and_then(|f| f.set_modified(time))
+            .is_ok()
+}
+
+/// Takes this interval's scan of `dir` for [`GC_LEASE`].  Two processes may
+/// both take it; deleting twice is harmless.
+fn claim_gc_scan(dir: &Path) -> bool {
+    // A stamp in the future means the clock went back; waiting for it to
+    // catch up could stall the cache for as long.
+    let due = fs::metadata(dir.join(GC_STAMP))
+        .and_then(|m| m.modified())
+        .map_or(true, |t| t.elapsed().map_or(true, |e| e >= GC_INTERVAL));
+    due && set_gc_stamp(dir, GC_LEASE)
+}
+
+/// Records a finished scan, holding the next one off for [`GC_INTERVAL`].
+fn finish_gc_scan(dir: &Path) {
+    set_gc_stamp(dir, GC_INTERVAL);
+}
+
+/// Drops published artifacts unused for longer than [`retention`], at most
+/// once per [`GC_INTERVAL`] per cache directory.
+///
+/// The scan runs on its own thread so no simulation waits for it.  A process
+/// that exits first leaves the rest to whoever takes the scan once its lease
+/// runs out.  Losing a race with a process about to load an entry the scan
+/// deletes only drops that process to Cranelift.
+fn gc_unused_artifacts(dir: &Path) {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    STARTED.get_or_init(|| {
+        let Some(cutoff) =
+            retention().and_then(|age| std::time::SystemTime::now().checked_sub(age))
+        else {
+            return;
+        };
+        if !claim_gc_scan(dir) {
+            return;
+        }
+        let dir = dir.to_path_buf();
+        let _ = thread::Builder::new()
+            .name("veryl-aot-gc".into())
+            .spawn(move || {
+                sweep_unused_artifacts(&dir, cutoff);
+                finish_gc_scan(&dir);
+            });
+    });
+}
+
 /// The head of every emitted chunk function.  The emitters and the split
 /// below share it, so the split cannot drift from what they write.
 const CHUNK_FN_MARKER: &str = "static __attribute__((noinline)) void veryl_aot_chunk_";
@@ -6659,9 +6777,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     load_module(&so_path)
 }
 
-/// Bumps the mtime of a cached `.so` so a cache pruner can tell objects still
-/// in use from ones no current design compiles to. Best effort.
-fn mark_used(so_path: &Path) {
+/// Bumps the mtime of a cached `.so` or `.idx` so a cache pruner can tell
+/// entries still in use from ones nothing reaches anymore. Best effort.
+fn mark_used(path: &Path) {
     let mut options = fs::File::options();
     // Write access to a loaded DLL is refused; the attributes alone are not.
     #[cfg(windows)]
@@ -6672,7 +6790,7 @@ fn mark_used(so_path: &Path) {
     }
     #[cfg(not(windows))]
     options.write(true);
-    if let Ok(file) = options.open(so_path) {
+    if let Ok(file) = options.open(path) {
         let _ = file.set_modified(std::time::SystemTime::now());
     }
 }
@@ -6680,6 +6798,9 @@ fn mark_used(so_path: &Path) {
 /// Opens a published `.so` and wires up its runtime hooks.
 fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
     mark_used(so_path);
+    if let Some(dir) = so_path.parent() {
+        gc_unused_artifacts(dir);
+    }
     // SAFETY: the .so was just compiled by us (or previously cached) and
     // exposes only `veryl_aot_eval`.  We never unload while the FuncPtr
     // is in use because EmittedModule keeps the library alive.
@@ -17562,6 +17683,99 @@ mod tests {
         for f in stale_files {
             assert!(!f.exists(), "{} must be swept", f.display());
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gc_drops_only_unused_published_artifacts() {
+        let dir = std::env::temp_dir().join(format!("veryl_gc_unused_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let unused: Vec<PathBuf> = [
+            "veryl_aot_dead.so",
+            "veryl_aot_dead.c",
+            "veryl_aot_event_00ff.idx",
+            "veryl_aot_dead.123.0.log",
+        ]
+        .iter()
+        .map(|n| dir.join(n))
+        .collect();
+        let kept: Vec<PathBuf> = [
+            "veryl_aot_dead.123.0.c",
+            "veryl_aot_dead.123.0.u0.c",
+            "veryl_aot_dead.lock",
+            GC_STAMP,
+        ]
+        .iter()
+        .map(|n| dir.join(n))
+        .collect();
+        let used = dir.join("veryl_aot_live.so");
+        let now = std::time::SystemTime::now();
+        for f in unused.iter().chain(&kept) {
+            fs::write(f, "x").unwrap();
+            fs::File::options()
+                .write(true)
+                .open(f)
+                .unwrap()
+                .set_modified(now - Duration::from_secs(30 * 24 * 3600))
+                .unwrap();
+        }
+        fs::write(&used, "x").unwrap();
+
+        sweep_unused_artifacts(&dir, now - Duration::from_secs(7 * 24 * 3600));
+
+        for f in &unused {
+            assert!(!f.exists(), "{} went unused and must go", f.display());
+        }
+        for f in &kept {
+            assert!(f.exists(), "{} is not a published artifact", f.display());
+        }
+        assert!(used.exists(), "an entry used within the retention stays");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gc_scan_runs_once_per_interval_and_survives_a_dead_scanner() {
+        let dir = std::env::temp_dir().join(format!("veryl_gc_stamp_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let age_stamp = |by: Duration| {
+            let stamp = dir.join(GC_STAMP);
+            let t = fs::metadata(&stamp).unwrap().modified().unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&stamp)
+                .unwrap()
+                .set_modified(t - by)
+                .unwrap();
+        };
+
+        assert!(claim_gc_scan(&dir), "a directory never scanned is due");
+        assert!(!claim_gc_scan(&dir), "a running scan holds others off");
+        age_stamp(GC_LEASE);
+        assert!(
+            claim_gc_scan(&dir),
+            "a scan that never finished is taken over"
+        );
+        finish_gc_scan(&dir);
+        age_stamp(GC_LEASE);
+        assert!(
+            !claim_gc_scan(&dir),
+            "a finished scan holds the next one off"
+        );
+        age_stamp(GC_INTERVAL);
+        assert!(
+            claim_gc_scan(&dir),
+            "the next scan is due after the interval"
+        );
+        fs::File::options()
+            .write(true)
+            .open(dir.join(GC_STAMP))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + GC_INTERVAL)
+            .unwrap();
+        assert!(claim_gc_scan(&dir), "a stamp from a clock gone back is due");
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -38,6 +38,10 @@ jobs:
       # skip dependency compilation entirely.
       SCCACHE_CACHE_SIZE: "1G"
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      # The AOT-C cache is pruned below by what this run used. The simulator's
+      # own GC would instead drop restored objects by age, and they carry the
+      # mtimes of their last save.
+      VERYL_AOT_C_RETAIN_DAYS: "0"
     steps:
       - uses: actions/checkout@v6
       # Windows file I/O is slow on the build outputs. On Windows the build runs
