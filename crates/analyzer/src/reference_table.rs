@@ -799,13 +799,22 @@ impl ReferenceTable {
                         affiliation_symbol,
                     );
                 } else {
+                    // A generic function's own references belong to the
+                    // component the function instance belongs to, not to the
+                    // function instance: the emitter keeps an instance in a
+                    // generic component only if it is affiliated with it.
+                    let affiliation = if matches!(target.kind, SymbolKind::Function(_)) {
+                        affiliation_symbol
+                    } else {
+                        inst_symbol
+                    };
                     Self::insert_generic_instance(
                         path,
                         ith,
                         target_namespace,
                         &path_symbol.found,
                         &mut generic_maps.to_vec(),
-                        inst_symbol,
+                        affiliation,
                     );
                 }
             }
