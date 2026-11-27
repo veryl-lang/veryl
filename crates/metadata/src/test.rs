@@ -33,6 +33,12 @@ pub struct Test {
     /// otherwise.
     #[serde(default)]
     pub component_backend: Option<ComponentBackendKind>,
+    /// Modules whose instances share one schedule and one compiled code in
+    /// the native simulator. Worth it for a large module instantiated many
+    /// times; the boundary between the instances and their parent costs some
+    /// run time.
+    #[serde(default)]
+    pub shared_modules: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

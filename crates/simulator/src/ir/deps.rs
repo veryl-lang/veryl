@@ -130,7 +130,9 @@ pub fn collect_stmt_deps(stmt: &ProtoStatement, deps: &mut StmtDeps) {
             }
         }
         ProtoStatement::CompiledBlock(x) => {
-            if !x.original_stmts.is_empty() {
+            if let Some(h) = &x.hier {
+                h.summary.deps(x, deps);
+            } else if !x.original_stmts.is_empty() {
                 for s in x.original_stmts.iter() {
                     collect_stmt_deps(s, deps);
                 }
@@ -155,6 +157,9 @@ pub fn collect_stmt_deps(stmt: &ProtoStatement, deps: &mut StmtDeps) {
         ProtoStatement::TbMethodCall { .. } => {}
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
+        &ProtoStatement::HierEvents(_) => {
+            unreachable!("template events are expanded by expand_hier_events")
         }
     }
 }
@@ -181,8 +186,8 @@ pub fn stmts_infeasible(stmts: &[ProtoStatement]) -> bool {
     fn walk(stmts: &[ProtoStatement], total: &mut usize) -> bool {
         for s in stmts {
             match s {
-                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-                    if walk(&cb.original_stmts, total) {
+                ProtoStatement::CompiledBlock(cb) if cb.has_originals() => {
+                    if walk(&cb.originals(), total) {
                         return true;
                     }
                 }

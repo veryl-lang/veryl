@@ -538,6 +538,8 @@ pub enum Statement {
     Compiled(CompiledStmt),
     /// Consecutive `Compiled` chunks sharing the same `artifact`.
     CompiledBatch(CompiledBatchStmt),
+    /// One class of a hierarchy template instance, run through its cells.
+    HierClass(Box<crate::ir::hier_cells::HierClassRun>),
     SequentialBlock(Vec<Statement>),
     SystemFunctionCall(SystemFunctionCall),
     TbMethodCall {
@@ -582,6 +584,9 @@ pub fn patch_stmt_log_buf(s: &mut Statement, log_buf: *mut u8) {
             c.log_buf = log_buf;
         }
         Statement::CompiledBatch(c) => {
+            c.log_buf = log_buf;
+        }
+        Statement::HierClass(c) => {
             c.log_buf = log_buf;
         }
         Statement::If(if_stmt) => {
@@ -728,6 +733,10 @@ impl Statement {
                 }
                 ControlFlow::Continue
             },
+            Statement::HierClass(c) => unsafe {
+                c.run();
+                ControlFlow::Continue
+            },
             Statement::SequentialBlock(body) => {
                 for s in body {
                     if s.eval_step(mask_cache, status) == ControlFlow::Break {
@@ -755,7 +764,10 @@ impl Statement {
                     s.gather_variable(inputs, outputs);
                 }
             }
-            Statement::Compiled(_) | Statement::CompiledBatch(_) | Statement::Break => {}
+            Statement::Compiled(_)
+            | Statement::CompiledBatch(_)
+            | Statement::HierClass(_)
+            | Statement::Break => {}
             Statement::SequentialBlock(body) => {
                 for s in body {
                     s.gather_variable(inputs, outputs);
@@ -804,6 +816,7 @@ pub(crate) fn make_ff_stores_direct(stmts: &mut [Statement]) {
             // the JIT path, so none reach here.
             Statement::Compiled(_)
             | Statement::CompiledBatch(_)
+            | Statement::HierClass(_)
             | Statement::SystemFunctionCall(_)
             | Statement::Break
             | Statement::TbMethodCall { .. } => {}
@@ -1246,7 +1259,7 @@ impl std::hash::Hash for ProtoReadmemhHier {
     }
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone, Debug)]
 pub struct ProtoAssignDynamicStatement {
     pub dst_base: VarOffset,
     pub dst_stride: isize,
@@ -1263,6 +1276,38 @@ pub struct ProtoAssignDynamicStatement {
     /// `force_ff`, which puts every element of a runtime-indexed array in FF
     /// storage so the stride is uniform, comb-driven elements included.
     pub comb_direct: bool,
+}
+
+impl std::hash::Hash for ProtoAssignDynamicStatement {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoAssignDynamicStatement {
+            dst_base,
+            dst_stride,
+            dst_num_elements,
+            dst_index_expr,
+            dst_width,
+            select,
+            dynamic_select,
+            rhs_select,
+            expr,
+            dst_ff_current_base_offset,
+            comb_direct,
+        } = self;
+        dst_base.hash(state);
+        dst_stride.hash(state);
+        dst_num_elements.hash(state);
+        dst_index_expr.hash(state);
+        dst_width.hash(state);
+        select.hash(state);
+        dynamic_select.hash(state);
+        rhs_select.hash(state);
+        expr.hash(state);
+        // See `ProtoAssignStatement`'s hash.
+        if dst_base.is_ff() {
+            dst_ff_current_base_offset.hash(state);
+        }
+        comb_direct.hash(state);
+    }
 }
 
 /// Reused compiled block from a cached module instance.  Byte deltas
@@ -1286,6 +1331,74 @@ pub struct CompiledBlockStatement {
     /// relocates by a zero delta hands the same list to every test rather than
     /// deep-cloning the whole tree per test (`backend::inst::relocate_entry`).
     pub original_stmts: Arc<Vec<ProtoStatement>>,
+    /// Code shared by every instance of a hierarchy template: the block is
+    /// never expanded back into its originals.
+    pub shared: bool,
+    /// Runs as the dirty-tracked cells of one template class instead of
+    /// `artifact` (see `ir::hier_cells`).
+    pub hier: Option<HierRef>,
+}
+
+#[derive(Clone)]
+pub struct HierRef {
+    pub(crate) cells: Arc<crate::ir::hier_cells::HierCells>,
+    pub(crate) class: u32,
+    /// The instance's partition in the dataflow cell layout; numbered once
+    /// the comb list is final.
+    pub(crate) partition: u32,
+    /// The class's reads and writes, standing in for walking `original_stmts`.
+    pub(crate) summary: Arc<crate::ir::hier::HierSummary>,
+    /// The template's comb bytes in the reference instance's offsets.
+    pub(crate) region: (isize, isize),
+    /// The class's template statements at the template's own offsets, shared
+    /// by every instance; `original_stmts` stays empty, since one shifted copy
+    /// per instance would hold the template many times over.
+    pub(crate) class_stmts: Arc<Vec<ProtoStatement>>,
+}
+
+impl CompiledBlockStatement {
+    /// The statements this block executes, at this instance's offsets.
+    pub fn originals(&self) -> std::borrow::Cow<'_, [ProtoStatement]> {
+        match &self.hier {
+            Some(h) => std::borrow::Cow::Owned(
+                h.class_stmts
+                    .iter()
+                    .map(|s| {
+                        let mut s = s.clone();
+                        s.adjust_offsets(self.ff_delta_bytes, self.comb_delta_bytes);
+                        s
+                    })
+                    .collect(),
+            ),
+            None => std::borrow::Cow::Borrowed(&self.original_stmts),
+        }
+    }
+
+    /// The `i`th of `originals()`, made alone.
+    pub fn original_at(&self, i: usize) -> ProtoStatement {
+        match &self.hier {
+            Some(h) => {
+                let mut s = h.class_stmts[i].clone();
+                s.adjust_offsets(self.ff_delta_bytes, self.comb_delta_bytes);
+                s
+            }
+            None => self.original_stmts[i].clone(),
+        }
+    }
+
+    pub fn has_originals(&self) -> bool {
+        self.hier.is_some() || !self.original_stmts.is_empty()
+    }
+
+    /// `originals()` before they are moved to this instance, with the
+    /// `(ff, comb)` delta that moves an offset they name: a walk that only
+    /// collects offsets moves those instead of a copy of a whole class.
+    pub fn unshifted_originals(&self) -> (&[ProtoStatement], isize, isize) {
+        match &self.hier {
+            Some(h) => (&h.class_stmts, self.ff_delta_bytes, self.comb_delta_bytes),
+            None => (&self.original_stmts, 0, 0),
+        }
+    }
 }
 
 // `stmt_deps` and `original_stmts` are excluded from `Debug` and `Hash`: both are
@@ -1308,9 +1421,18 @@ impl std::fmt::Debug for CompiledBlockStatement {
             ff_canonical_offsets,
             stmt_deps: _,
             original_stmts: _,
+            shared,
+            hier,
         } = self;
         f.debug_struct("CompiledBlockStatement")
-            .field("artifact", artifact)
+            .field("shared", shared)
+            .field(
+                "hier",
+                &hier
+                    .as_ref()
+                    .map(|h| (h.cells.fingerprint, h.class, h.partition)),
+            )
+            .field("artifact", &hier.is_none().then_some(artifact))
             .field("ff_delta_bytes", ff_delta_bytes)
             .field("comb_delta_bytes", comb_delta_bytes)
             .field("input_offsets", input_offsets)
@@ -1331,8 +1453,18 @@ impl std::hash::Hash for CompiledBlockStatement {
             ff_canonical_offsets,
             stmt_deps: _,
             original_stmts: _,
+            shared,
+            hier,
         } = self;
-        artifact.hash(state);
+        shared.hash(state);
+        hier.as_ref()
+            .map(|h| (h.cells.fingerprint, h.class, h.partition))
+            .hash(state);
+        // A template class runs through its cells; its artifact's address
+        // would only make the hash differ between runs.
+        if hier.is_none() {
+            artifact.hash(state);
+        }
         ff_delta_bytes.hash(state);
         comb_delta_bytes.hash(state);
         input_offsets.hash(state);
@@ -1518,6 +1650,122 @@ pub enum ProtoStatement {
     /// stage ever sees this — the write-side twin of
     /// `ProtoExpression::HierVariable`.
     HierAssign(Box<ProtoHierAssign>),
+    /// One template instance's statements of one clock or reset event, kept
+    /// whole from its conversion until `expand_hier_events` lays them out.
+    HierEvents(Box<ProtoHierEvents>),
+}
+
+#[derive(Clone, Debug, Hash)]
+pub struct ProtoHierEvents {
+    /// The template's statements in the reference instance's coordinates,
+    /// shared by every instance.
+    pub(crate) stmts: Arc<Vec<ProtoStatement>>,
+    pub(crate) ff_delta: isize,
+    pub(crate) comb_delta: isize,
+    /// Port storage the instance reads from its parent instead, in the
+    /// instance's coordinates (see `read_clock_reset_from_parent`).
+    pub(crate) inputs: Vec<(VarOffset, VarOffset)>,
+}
+
+impl ProtoHierEvents {
+    pub(crate) fn expand(&self) -> Vec<ProtoStatement> {
+        let map: HashMap<VarOffset, VarOffset> = self.inputs.iter().copied().collect();
+        self.stmts
+            .iter()
+            .map(|s| {
+                let mut s = s.clone();
+                s.adjust_offsets(self.ff_delta, self.comb_delta);
+                if !map.is_empty() {
+                    s.remap_offsets(&map);
+                }
+                s
+            })
+            .collect()
+    }
+}
+
+/// `stmts` with every template node laid out, for a pass that only reads
+/// them; borrowed when there is none.
+pub(crate) fn flat_stmts(stmts: &[ProtoStatement]) -> std::borrow::Cow<'_, [ProtoStatement]> {
+    if !stmts
+        .iter()
+        .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+    {
+        return std::borrow::Cow::Borrowed(stmts);
+    }
+    let mut flat = Vec::with_capacity(stmts.len());
+    for s in stmts {
+        match s {
+            ProtoStatement::HierEvents(h) => flat.extend(h.expand()),
+            other => flat.push(other.clone()),
+        }
+    }
+    std::borrow::Cow::Owned(flat)
+}
+
+/// `events` with every template node laid out, for a pass that only reads
+/// them; borrowed when there is none.
+pub(crate) fn flat_events(
+    events: &HashMap<crate::ir::Event, Vec<ProtoStatement>>,
+) -> std::borrow::Cow<'_, HashMap<crate::ir::Event, Vec<ProtoStatement>>> {
+    let any = events
+        .values()
+        .flatten()
+        .any(|s| matches!(s, ProtoStatement::HierEvents(_)));
+    if !any {
+        return std::borrow::Cow::Borrowed(events);
+    }
+    let mut flat = events.clone();
+    expand_hier_events(&mut flat);
+    std::borrow::Cow::Owned(flat)
+}
+
+/// Lay one event's template nodes out in place, moving each gate's range of
+/// top-level statements with the statements it covers.  A gate never splits
+/// a node, so its ends map exactly.
+pub(crate) fn expand_gated(
+    stmts: &mut Vec<ProtoStatement>,
+    gates: &mut [crate::ir::opt::event_gate::EventGate],
+) {
+    if !stmts
+        .iter()
+        .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+    {
+        return;
+    }
+    let taken = std::mem::take(stmts);
+    let mut at = Vec::with_capacity(taken.len() + 1);
+    for s in taken {
+        at.push(stmts.len());
+        match s {
+            ProtoStatement::HierEvents(h) => stmts.extend(h.expand()),
+            other => stmts.push(other),
+        }
+    }
+    at.push(stmts.len());
+    for g in gates {
+        g.lo = at[g.lo];
+        g.hi = at[g.hi];
+    }
+}
+
+/// Lay every template instance's event statements out in place.
+pub(crate) fn expand_hier_events(events: &mut HashMap<crate::ir::Event, Vec<ProtoStatement>>) {
+    for stmts in events.values_mut() {
+        if !stmts
+            .iter()
+            .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+        {
+            continue;
+        }
+        let taken = std::mem::take(stmts);
+        for s in taken {
+            match s {
+                ProtoStatement::HierEvents(h) => stmts.extend(h.expand()),
+                other => stmts.push(other),
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1573,11 +1821,17 @@ impl ProtoStatement {
             ProtoStatement::SequentialBlock(b) => {
                 b.iter().map(ProtoStatement::statement_mass).sum()
             }
-            ProtoStatement::CompiledBlock(cb) => cb
-                .original_stmts
-                .iter()
-                .map(ProtoStatement::statement_mass)
-                .sum(),
+            ProtoStatement::CompiledBlock(cb) => match &cb.hier {
+                Some(h) => h.summary.mass,
+                None => cb
+                    .original_stmts
+                    .iter()
+                    .map(ProtoStatement::statement_mass)
+                    .sum(),
+            },
+            ProtoStatement::HierEvents(h) => {
+                h.stmts.iter().map(ProtoStatement::statement_mass).sum()
+            }
             _ => 0,
         };
         1 + kids
@@ -1612,6 +1866,9 @@ impl ProtoStatement {
             | ProtoStatement::TbMethodCall { .. } => false,
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -1783,6 +2040,14 @@ impl ProtoStatement {
             &mut ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            ProtoStatement::HierEvents(h) => {
+                h.ff_delta += ff_delta;
+                h.comb_delta += comb_delta;
+                for (from, to) in &mut h.inputs {
+                    *from = from.adjust(ff_delta, comb_delta);
+                    *to = to.adjust(ff_delta, comb_delta);
+                }
+            }
         }
     }
 
@@ -1835,6 +2100,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -1997,6 +2265,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &mut ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &mut ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2176,6 +2447,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
 
@@ -2283,6 +2557,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
 
@@ -2302,6 +2579,9 @@ impl ProtoStatement {
             }
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
             ProtoStatement::AssignDynamic(_)
             | ProtoStatement::Assign(_)
@@ -2328,11 +2608,14 @@ impl ProtoStatement {
                     s.gather_dynamic_write_spans(out);
                 }
             }
-            ProtoStatement::CompiledBlock(x) => {
-                for s in x.original_stmts.iter() {
-                    s.gather_dynamic_write_spans(out);
+            ProtoStatement::CompiledBlock(x) => match &x.hier {
+                Some(h) => h.summary.dynamic_writes(x, out),
+                None => {
+                    for s in x.original_stmts.iter() {
+                        s.gather_dynamic_write_spans(out);
+                    }
                 }
-            }
+            },
         }
     }
 
@@ -2427,7 +2710,9 @@ impl ProtoStatement {
                 // DynamicVariable expansions are applied; fall back to the
                 // cached base+last input_offsets / output_offsets if the
                 // originals weren't retained.
-                if !x.original_stmts.is_empty() {
+                if let Some(h) = &x.hier {
+                    h.summary.gather_expanded(x, fold, inputs, outputs);
+                } else if !x.original_stmts.is_empty() {
                     for s in x.original_stmts.iter() {
                         s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
@@ -2472,6 +2757,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2538,8 +2826,12 @@ impl ProtoStatement {
                 // retained originals can name a foldable array.  A block
                 // reduced to its cache keeps its arrays expanded — safe,
                 // since the gather reads the same lists.
-                for s in x.original_stmts.iter() {
-                    s.collect_big_arrays(fold);
+                if let Some(h) = &x.hier {
+                    h.summary.collect_big_arrays(x, fold);
+                } else {
+                    for s in x.original_stmts.iter() {
+                        s.collect_big_arrays(fold);
+                    }
                 }
             }
             ProtoStatement::For(x) => {
@@ -2558,6 +2850,9 @@ impl ProtoStatement {
             ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
             ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2628,7 +2923,9 @@ impl ProtoStatement {
                 // as ranges; without them only cached base+last point offsets
                 // exist (covered by the non-expanded read set), so nothing to
                 // add here.
-                if !x.original_stmts.is_empty() {
+                if let Some(h) = &x.hier {
+                    h.summary.dynamic_reads(x, ranges);
+                } else if !x.original_stmts.is_empty() {
                     for s in x.original_stmts.iter() {
                         s.gather_dynamic_read_ranges(ranges);
                     }
@@ -2651,6 +2948,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -2715,6 +3015,9 @@ impl ProtoStatement {
             ProtoStatement::Break => {}
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
         result
@@ -2938,6 +3241,21 @@ impl ProtoStatement {
                         Statement::SystemFunctionCall(SystemFunctionCall::Finish)
                     }
                 },
+                ProtoStatement::CompiledBlock(x) if x.hier.is_some() => {
+                    let h = x.hier.as_ref().unwrap();
+                    Statement::HierClass(Box::new(crate::ir::hier_cells::HierClassRun {
+                        cells: Arc::clone(&h.cells),
+                        class: h.class,
+                        partition: h.partition,
+                        ff: (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes),
+                        comb: (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes),
+                        bits: std::ptr::null_mut(),
+                        log_buf: std::ptr::null_mut(),
+                        ff_delta: x.ff_delta_bytes,
+                        compare_inputs: true,
+                        primed: std::cell::Cell::new(false),
+                    }))
+                }
                 ProtoStatement::CompiledBlock(x) => {
                     // Use wrapping_offset because the adjusted pointer may temporarily
                     // go before the buffer start when ff_delta_bytes is negative.
@@ -3272,6 +3590,9 @@ impl ProtoStatement {
                 }
                 &ProtoStatement::HierAssign(_) => {
                     unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+                }
+                &ProtoStatement::HierEvents(_) => {
+                    unreachable!("template events are expanded by expand_hier_events")
                 }
             }
         }
@@ -3634,7 +3955,11 @@ impl std::hash::Hash for ProtoAssignStatement {
         dynamic_select.hash(state);
         rhs_select.hash(state);
         expr.hash(state);
-        dst_ff_current_offset.hash(state);
+        // Only an FF destination has a current slot; a comb one keeps a stale
+        // value through relocation.
+        if dst.is_ff() {
+            dst_ff_current_offset.hash(state);
+        }
     }
 }
 

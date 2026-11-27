@@ -9,6 +9,8 @@ pub mod derived_clock;
 mod event;
 mod expression;
 pub(crate) mod external;
+pub(crate) mod hier;
+pub(crate) mod hier_cells;
 pub(crate) mod hier_ref;
 pub(crate) mod inst_layout;
 pub(crate) mod module;
@@ -38,11 +40,13 @@ pub use module::{Module, ProtoModule};
 pub use opt::comb_fusion::force_disable as force_disable_comb_fusion;
 pub use opt::dead_var_dce::force_disable as force_disable_dead_var_dce;
 pub use opt::field_unfuse::force_disable as force_disable_field_unfuse;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) use statement::flat_stmts;
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
-    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
-    ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,
+    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoHierEvents,
+    ProtoIfStatement, ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,
     ProtoSystemFunctionCall, RetWidthCheck, RuntimeArgOp, RuntimeForBound, RuntimeForRange,
     Statement, SystemFunctionCall, TbMethodKind, format_assert_message, format_output,
     parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
@@ -127,12 +131,23 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
+    /// See `Module::hier_shared_blocks`.
+    pub hier_shared_blocks: usize,
+    /// Hierarchy template instances run in this design: only then does a
+    /// settle touch their per-thread state and partitions.
+    has_hier_templates: bool,
     /// See `Module::master_cone`.
     pub master_cone: Option<Vec<Statement>>,
+    /// See `Module::master_cone_marks`, as absolute dirty bits.
+    pub master_cone_marks: Vec<u32>,
     /// See `Module::dataflow`.
-    pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
-    /// See `Module::dataflow_interp`, by cell.
-    dataflow_interp: HashMap<usize, Vec<Statement>>,
+    pub dataflow: Option<Arc<crate::ir::opt::dataflow::CellSpace>>,
+    /// See `Module::dataflow_interp`.
+    dataflow_interp: HashMap<(usize, usize), Vec<Statement>>,
+    /// The hierarchy class runs the root cells call, by `(class, instance
+    /// comb delta)`.
+    pub(crate) hier_runs:
+        HashMap<crate::ir::hier_cells::RunKey, crate::ir::hier_cells::HierClassRun>,
     /// Cells whose inputs changed since they last ran.
     pub(crate) dataflow_dirty: std::cell::RefCell<Vec<u64>>,
     /// Whether the dirty words record everything that moved since the last
@@ -143,6 +158,8 @@ pub struct Ir {
     pub(crate) dataflow_live: std::cell::Cell<bool>,
     /// Whether the last dataflow settle ran the `.so` cells (else Cranelift).
     pub(crate) dataflow_on_aot: std::cell::Cell<bool>,
+    /// Latched `dataflow_ready`: compiled cells never go away once there.
+    dataflow_ready_latch: std::cell::Cell<bool>,
     /// Per-cell dispatch or the whole-settle entry, settle by settle.
     pub(crate) dataflow_mode: DataflowMode,
     /// Bits of the cells dirty at every settle.
@@ -251,6 +268,20 @@ impl Drop for Ir {
 
 impl Ir {
     pub fn from_module(module: Module, config: &Config, token: TokenRange) -> Ir {
+        // A cone mark the layout has no partition for would leave its cell's
+        // readers unmarked, so the cone gives way to full settles instead.
+        let cone_marks: Option<Vec<u32>> = match module.dataflow.as_ref() {
+            None => Some(Vec::new()),
+            Some(d) => module
+                .master_cone_marks
+                .iter()
+                .map(|&(p, cell)| Some(d.layout.hier_partition(p as usize)?.word_base * 64 + cell))
+                .collect(),
+        };
+        let (master_cone, master_cone_marks) = match cone_marks {
+            Some(marks) => (module.master_cone, marks),
+            None => (None, Vec::new()),
+        };
         let mut ir = Ir {
             name: module.name,
             token,
@@ -279,16 +310,24 @@ impl Ir {
             disable_ff_opt: config.disable_ff_opt,
             derived_clock_schedule: module.derived_clock_schedule,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
-            master_cone: module.master_cone,
+            hier_shared_blocks: module.hier_shared_blocks,
+            has_hier_templates: module.hier_shared_blocks > 0
+                || module
+                    .dataflow
+                    .as_ref()
+                    .is_some_and(|d| d.layout.partitions.iter().any(|p| p.set.is_none())),
+            master_cone,
+            master_cone_marks,
             dataflow_dirty: std::cell::RefCell::new(vec![
                 0;
                 module
                     .dataflow
                     .as_ref()
-                    .map_or(0, |d| d.plan.buffer_words())
+                    .map_or(0, |d| d.layout.words)
             ]),
             dataflow_live: std::cell::Cell::new(false),
             dataflow_on_aot: std::cell::Cell::new(false),
+            dataflow_ready_latch: std::cell::Cell::new(false),
             dataflow_mode: DataflowMode::default(),
             dataflow_always_mask: std::cell::OnceCell::new(),
             dataflow_unmarked: std::cell::Cell::new(false),
@@ -309,6 +348,7 @@ impl Ir {
             dataflow_check_mismatches: std::cell::Cell::new(0),
             dataflow: module.dataflow,
             dataflow_interp: module.dataflow_interp.into_iter().collect(),
+            hier_runs: HashMap::default(),
             aot_c_validate: config.aot_c_validate,
             aot_c_validate_stride: config.aot_c_validate_stride,
             whole_events: module.whole_events,
@@ -334,8 +374,37 @@ impl Ir {
         // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
         // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
-        if ir.dataflow.is_some() {
-            ir.write_log_buffer.df_dirty = ir.dataflow_dirty.borrow_mut().as_mut_ptr();
+        if let Some(space) = ir.dataflow.clone() {
+            let base = ir.dataflow_dirty.borrow_mut().as_mut_ptr();
+            ir.write_log_buffer.df_dirty = base;
+            // The interpreted cells come from statements numbered before the
+            // partitions were, so they take theirs from the comb list's.
+            let mut partitions = HashMap::default();
+            for s in &ir.comb_statements {
+                collect_partitions(s, ir.comb_values.as_ptr(), &mut partitions);
+            }
+            let patch = HierPatch {
+                layout: &space.layout,
+                partitions,
+                bits: base,
+                comb: ir.comb_values.as_ptr(),
+                log_buf: (&*ir.write_log_buffer) as *const _ as *mut write_log::WriteLogBuffer
+                    as *mut u8,
+                compare_inputs: space.root_set().is_none(),
+            };
+            for s in &mut ir.comb_statements {
+                patch.apply(s);
+            }
+            for v in ir.dataflow_interp.values_mut() {
+                for s in v {
+                    patch.apply(s);
+                }
+            }
+            let mut runs = HashMap::default();
+            for s in &ir.comb_statements {
+                collect_hier_runs(s, ir.comb_values.as_ptr(), &mut runs);
+            }
+            ir.hier_runs = runs;
         }
         ir.backend_diag();
         if env::var("VERYL_DUMP_VARMAP").ok().as_deref() == Some("1") {
@@ -463,6 +532,7 @@ impl Ir {
         }
         fn classify(s: &Statement) -> String {
             match s {
+                Statement::HierClass(_) => "HierClass".to_string(),
                 Statement::Assign(a) => format!(
                     "Assign dst_width={}{}{}",
                     a.dst_width,
@@ -608,11 +678,20 @@ impl Ir {
         };
         // A dataflow settle leaves chunk-local bytes stale in storage.
         #[cfg(not(target_family = "wasm"))]
-        if self.dataflow.is_some() {
+        if self
+            .dataflow
+            .as_ref()
+            .is_some_and(|d| d.root_set().is_some())
+        {
             return false;
         }
         for x in cone {
             dispatch_stmt_fast(x, mask_cache, status);
+        }
+        // The cone rewrote these cells' bytes behind their dirty bits.
+        let mut dirty = self.dataflow_dirty.borrow_mut();
+        for &k in &self.master_cone_marks {
+            dirty[k as usize / 64] |= 1u64 << (k % 64);
         }
         true
     }
@@ -640,10 +719,56 @@ impl Ir {
         #[cfg(target_family = "wasm")]
         let settled = false;
         if !settled {
+            self.seed_hier_partitions();
             self.run_chunked_settle(mask_cache, status, profile);
         }
         if settle_converge_check() {
             self.check_settled(mask_cache, settled);
+        }
+        // A dataflow settle leaves chunk-local bytes stale on purpose.
+        if self.hier_shared_blocks > 0 && !settled && crate::ir::hier_cells::check_enabled() {
+            self.check_hier_cells(mask_cache);
+        }
+    }
+
+    /// Outside the dataflow settle the template instances' cells all run
+    /// once whenever the marks cannot be trusted: always under a root set,
+    /// whose cells would have marked what the parent stores.
+    fn seed_hier_partitions(&self) {
+        if !self.has_hier_templates {
+            return;
+        }
+        let Some(space) = self.dataflow.as_ref() else {
+            return;
+        };
+        if space.root_set().is_none() && self.dataflow_live.replace(true) {
+            return;
+        }
+        let mut dirty = self.dataflow_dirty.borrow_mut();
+        for p in space.layout.partitions.iter().filter(|p| p.set.is_none()) {
+            fill_cell_bits(&mut dirty, p);
+        }
+    }
+
+    /// See `hier_cells::check_enabled`.
+    fn check_hier_cells(&self, mask_cache: &mut MaskCache) {
+        let logic = self.gate_state_base as usize;
+        let before = self.comb_values[..logic].to_vec();
+        let mut status = SimStatus::default();
+        crate::ir::hier_cells::FORCE_ALL.with(|f| f.set(true));
+        for x in &self.comb_statements {
+            dispatch_stmt_fast(x, mask_cache, &mut status);
+        }
+        crate::ir::hier_cells::FORCE_ALL.with(|f| f.set(false));
+        if let Some(i) = before
+            .iter()
+            .zip(self.comb_values[..logic].iter())
+            .position(|(a, b)| a != b)
+        {
+            panic!(
+                "hierarchy cells left comb byte {i} stale ({:?})",
+                self.var_name_at(VarOffset::Comb(i as isize))
+            );
         }
     }
 
@@ -691,6 +816,7 @@ impl Ir {
         let stale = self
             .dataflow
             .as_ref()
+            .and_then(|d| d.root_set())
             .map(|d| d.localized.as_slice())
             .unwrap_or(&[]);
         let localized = |i: usize| {
@@ -720,18 +846,28 @@ impl Ir {
     /// none or it has not landed yet; the caller then settles everything.
     #[cfg(not(target_family = "wasm"))]
     fn settle_dataflow(&self, status: &mut SimStatus) -> bool {
-        let Some(df) = self.dataflow.as_ref() else {
+        let Some(space) = self.dataflow.as_ref() else {
             return false;
         };
-        // The `.so` once it lands, the Cranelift cells until then.  Both run
-        // the same plan on the same dirty words.
-        let aot = df.cell.get();
-        let jit = if aot.is_none() { df.jit.as_ref() } else { None };
-        if aot.is_none() && jit.is_none() {
+        let _end = self.has_hier_templates.then(|| {
+            crate::ir::hier_cells::begin_settle();
+            crate::ir::hier_cells::SettleEnd
+        });
+        let layout = &space.layout;
+        let Some(df) = space.root_set() else {
+            return false;
+        };
+        // The `.so` once every set's lands, the Cranelift cells until then.
+        // Both run the same plans on the same dirty words.
+        let root_aot = df.cell.get();
+        let others = &space.sets[1..];
+        let on_aot = root_aot.is_some() && others.iter().all(|s| s.cell.get().is_some());
+        let on_jit = !on_aot && space.sets.iter().all(|s| s.jit.is_some());
+        if !on_aot && !on_jit {
             self.dataflow_live.set(false);
             return false;
         }
-        if aot.is_some() {
+        if on_aot {
             self.dataflow_dispatch[0].fetch_add(1, Ordering::Relaxed);
         } else if !df.jit_only {
             self.dataflow_dispatch[1].fetch_add(1, Ordering::Relaxed);
@@ -745,14 +881,24 @@ impl Ir {
         // The Cranelift cells keep no boundary shadow, so on the switch to the
         // `.so` every shadow is stale: a cell whose new value happens to equal
         // it would mark nothing.  Running every cell once refreshes them all.
-        if self.dataflow_on_aot.replace(aot.is_some()) != aot.is_some() {
+        if self.dataflow_on_aot.replace(on_aot) != on_aot {
             self.dataflow_live.set(false);
         }
-        let coarse_fn = aot.and_then(|m| m.coarse_func);
+        let has_coarse = on_aot
+            && root_aot.is_some_and(|m| m.coarse_func.is_some())
+            && others
+                .iter()
+                .all(|s| s.cell.get().is_some_and(|m| m.coarse_func.is_some()));
         // With no `.so` coming, the whole settle is the chunked one.
-        let (coarse, probing) = if coarse_fn.is_some() || df.jit_only {
-            self.dataflow_mode
-                .next(|| df.plan.cells.iter().map(Vec::len).sum())
+        let (coarse, probing) = if has_coarse || df.jit_only {
+            self.dataflow_mode.next(|| {
+                space
+                    .sets
+                    .iter()
+                    .flat_map(|s| s.plan.cells.iter())
+                    .map(Vec::len)
+                    .sum()
+            })
         } else {
             (false, false)
         };
@@ -776,13 +922,14 @@ impl Ir {
         if self.dataflow_mode.was_coarse.replace(coarse) && !coarse {
             self.dataflow_live.set(false);
         }
-        if coarse && aot.is_none() {
+        if coarse && !on_aot {
             return false;
         }
         static LANDED: std::sync::Once = std::sync::Once::new();
         LANDED.call_once(|| {
             if crate::ir::opt::dataflow::diag() {
-                eprintln!("[dataflow] {} cells live", df.plan.cells.len());
+                let cells: u32 = layout.set_partitions().map(|(_, p, _)| p.cells).sum();
+                eprintln!("[dataflow] {cells} cells live");
             }
         });
         let mut dirty = self.dataflow_dirty.borrow_mut();
@@ -795,8 +942,9 @@ impl Ir {
             if !self.dataflow_live.get() {
                 FULL.fetch_add(1, Ordering::Relaxed);
             }
-            let seeded: u32 = dirty[..df.plan.words()]
-                .iter()
+            let seeded: u32 = layout
+                .set_partitions()
+                .flat_map(|(_, p, _)| &dirty[p.cell_words()])
                 .map(|w| w.count_ones())
                 .sum();
             SEEDED.fetch_add(seeded as u64, Ordering::Relaxed);
@@ -805,14 +953,11 @@ impl Ir {
             None
         };
         if !self.dataflow_live.replace(true) {
-            let nw = df.plan.words();
-            dirty[..nw].iter_mut().for_each(|w| *w = u64::MAX);
-            let tail = df.plan.cells.len() % 64;
-            if tail != 0 {
-                dirty[nw - 1] = (1u64 << tail) - 1;
+            for p in &layout.partitions {
+                fill_cell_bits(&mut dirty, p);
             }
         }
-        for &k in &df.plan.always_run {
+        for &k in &layout.always_run {
             dirty[k as usize / 64] |= 1u64 << (k % 64);
         }
         let ff_ptr = self.ff_values.as_ptr();
@@ -835,73 +980,101 @@ impl Ir {
         } else {
             None
         };
-        let counted = aot.and_then(|m| m.counted).filter(|_| probing);
-        let count_jit = probing && aot.is_none();
+        let count_jit = probing && !on_aot;
         // Through the log argument, which the per-cell entries leave unused.
         let mut counts = [0u64; 2];
         // A settle the whole-settle entry would skip costs the same in either
         // mode, so the probe counts neither it nor its work.
         let mut idle = false;
-        // SAFETY: the dataflow entry has the `FuncPtr` ABI, reading and
-        // writing the same buffers; `ff_delta` carries the dirty words,
-        // which it clears as it runs.
-        if let Some(m) = aot {
-            let nw = df.plan.words();
+        if on_aot {
             let always = self.dataflow_always_mask.get_or_init(|| {
-                let mut v = vec![0u64; nw];
-                for &k in &df.plan.always_run {
+                let mut v = vec![0u64; layout.words];
+                for &k in &layout.always_run {
                     v[k as usize / 64] |= 1u64 << (k % 64);
                 }
                 v
             });
             let any = self.dataflow_any.replace(false);
-            idle = !any && dirty[..nw].iter().zip(always).all(|(&d, &a)| d & !a == 0);
+            idle = !any
+                && layout.set_partitions().all(|(_, p, _)| {
+                    let words = p.cell_words();
+                    dirty[words.clone()]
+                        .iter()
+                        .zip(&always[words])
+                        .all(|(&d, &a)| d & !a == 0)
+                });
             let whole = coarse && !idle;
-            match coarse_fn {
-                Some(f) if whole => {
-                    unsafe {
-                        f(ff_ptr, comb_ptr, log_ptr, dirty.as_mut_ptr() as isize);
-                    }
-                    dirty[..nw].fill(0);
-                }
-                _ => unsafe {
-                    match counted {
-                        Some(f) => f(
-                            ff_ptr,
-                            comb_ptr,
-                            counts.as_mut_ptr().cast(),
-                            dirty.as_mut_ptr() as isize,
-                        ),
-                        None => (m.func)(ff_ptr, comb_ptr, log_ptr, dirty.as_mut_ptr() as isize),
-                    }
-                },
+            if self.has_hier_templates {
+                crate::ir::hier_cells::set_active(&self.hier_runs);
+                // The whole-settle entry runs with no marks to go by.
+                crate::ir::hier_cells::FORCE_ALL.with(|f| f.set(whole));
             }
-        } else if let Some(j) = jit {
-            let bits = dirty.as_mut_ptr();
-            for w in 0..df.plan.words() {
-                // SAFETY: `w` is inside the dirty words; a cell only sets
-                // bits of later cells, through the same pointer.
+            for (_, p, set) in layout.set_partitions() {
+                let m = match set {
+                    0 => root_aot,
+                    set => space.sets[set as usize].cell.get(),
+                };
+                let Some(m) = m else {
+                    continue;
+                };
+                // SAFETY: the dataflow entry has the `FuncPtr` ABI, reading
+                // and writing this partition's storage; `ff_delta` carries
+                // its dirty words, which it clears as it runs.
                 unsafe {
-                    loop {
-                        let b = *bits.add(w);
-                        if b == 0 {
-                            break;
+                    let ff = ff_ptr.add(p.ff_base as usize);
+                    let comb = comb_ptr.add(p.comb_base as usize);
+                    let bits = dirty.as_mut_ptr().add(p.word_base as usize) as isize;
+                    match m.coarse_func {
+                        Some(f) if whole => {
+                            f(ff, comb, log_ptr, bits);
+                            dirty[p.cell_words()].fill(0);
                         }
-                        *bits.add(w) = b & (b - 1);
-                        let k = w * 64 + b.trailing_zeros() as usize;
-                        if count_jit {
-                            counts[0] += df.plan.cells[k].len() as u64;
-                            counts[1] += 1;
-                        }
-                        match j.funcs[k] {
-                            Some(f) => f(ff_ptr, comb_ptr, log_ptr, bits as isize),
-                            None => self.interpret_cell(df, k, bits, status),
+                        _ => match m.counted.filter(|_| probing) {
+                            Some(f) => f(ff, comb, counts.as_mut_ptr().cast(), bits),
+                            None => (m.func)(ff, comb, log_ptr, bits),
+                        },
+                    }
+                }
+            }
+            if self.has_hier_templates {
+                crate::ir::hier_cells::FORCE_ALL.with(|f| f.set(false));
+            }
+        } else {
+            for (pi, p, set) in layout.set_partitions() {
+                let rt = &space.sets[set as usize];
+                let Some(j) = rt.jit.as_ref() else {
+                    continue;
+                };
+                let ff = unsafe { ff_ptr.add(p.ff_base as usize) };
+                let comb = unsafe { comb_ptr.add(p.comb_base as usize) };
+                let bits = unsafe { dirty.as_mut_ptr().add(p.word_base as usize) };
+                for w in 0..p.cell_words().len() {
+                    // SAFETY: `w` is inside the partition's dirty words; a
+                    // cell only sets bits of later cells, through the same
+                    // pointer.
+                    unsafe {
+                        loop {
+                            let b = *bits.add(w);
+                            if b == 0 {
+                                break;
+                            }
+                            *bits.add(w) = b & (b - 1);
+                            let k = w * 64 + b.trailing_zeros() as usize;
+                            if count_jit {
+                                counts[0] += rt.plan.cells[k].len() as u64;
+                                counts[1] += 1;
+                            }
+                            match j.funcs[k] {
+                                Some(f) => f(ff, comb, log_ptr, bits as isize),
+                                None => self.interpret_cell(rt, pi, p.comb_base, k, bits, status),
+                            }
                         }
                     }
                 }
             }
         }
-        if (counted.is_some() && !idle) || count_jit {
+        let counted = on_aot && probing && root_aot.is_some_and(|m| m.counted.is_some());
+        if (counted && !idle) || count_jit {
             self.dataflow_mode.record(counts[0], counts[1]);
         }
         drop(dirty);
@@ -931,28 +1104,35 @@ impl Ir {
     /// interpreter, with the boundary watch the compiled cells carry.
     ///
     /// # Safety
-    /// `bits` points at the dirty words.
+    /// `bits` points at the partition's dirty words.
     #[cfg(not(target_family = "wasm"))]
     unsafe fn interpret_cell(
         &self,
         df: &crate::ir::opt::dataflow::DataflowRt,
+        partition: usize,
+        comb_base: isize,
         k: usize,
         bits: *mut u64,
         status: &mut SimStatus,
     ) {
+        let base = comb_base as usize;
         let watch = &df.plan.boundary[k];
         let before: Vec<u8> = watch
             .iter()
-            .flat_map(|&(a, b)| self.comb_values[a as usize..b as usize].iter().copied())
+            .flat_map(|&(a, b)| {
+                self.comb_values[base + a as usize..base + b as usize]
+                    .iter()
+                    .copied()
+            })
             .collect();
         let mut mc = MaskCache::default();
-        for x in &self.dataflow_interp[&k] {
+        for x in &self.dataflow_interp[&(partition, k)] {
             dispatch_stmt_fast(x, &mut mc, status);
         }
         let mut pos = 0usize;
         let changed = df.plan.mark_always[k]
             || watch.iter().any(|&(a, b)| {
-                let (a, b) = (a as usize, b as usize);
+                let (a, b) = (base + a as usize, base + b as usize);
                 let moved = before[pos..pos + (b - a)] != self.comb_values[a..b];
                 pos += b - a;
                 moved
@@ -992,12 +1172,15 @@ impl Ir {
             scatter_ranges(self.ff_values.as_ptr() as *mut u8, written_ff, pre_ff);
         }
         // The settle already ran the effect cells; the rerun is for values.
+        // Template classes rerun every cell: the settle cleared their marks.
         let mute = crate::output_buffer::Mute::begin();
         let mut mc = MaskCache::default();
         let mut status = SimStatus::default();
+        crate::ir::hier_cells::FORCE_ALL.with(|f| f.set(true));
         for x in &self.comb_statements {
             dispatch_stmt_fast(x, &mut mc, &mut status);
         }
+        crate::ir::hier_cells::FORCE_ALL.with(|f| f.set(false));
         drop(mute);
         let mut pos = 0usize;
         for &(a, b) in written_ff {
@@ -1102,7 +1285,7 @@ impl Ir {
     pub(crate) fn dataflow_mark_comb(&self, a: usize, b: usize) {
         if let Some(df) = self.dataflow.as_ref() {
             mark_readers(
-                &df.plan.comb_marked,
+                &df.layout.comb_marked,
                 &mut self.dataflow_dirty.borrow_mut(),
                 a,
                 b,
@@ -1114,7 +1297,7 @@ impl Ir {
     pub(crate) fn dataflow_mark_ff(&self, a: usize, b: usize) {
         if let Some(df) = self.dataflow.as_ref() {
             mark_readers(
-                &df.plan.ff_marked,
+                &df.layout.ff_marked,
                 &mut self.dataflow_dirty.borrow_mut(),
                 a,
                 b,
@@ -1161,9 +1344,9 @@ impl Ir {
         let comb = self.comb_values.as_ptr() as usize;
         let ff = self.ff_values.as_ptr() as usize;
         let (table, a) = if (comb..comb + self.comb_values.len()).contains(&p) {
-            (&df.plan.comb_marked, p - comb)
+            (&df.layout.comb_marked, p - comb)
         } else if (ff..ff + self.ff_values.len()).contains(&p) {
-            (&df.plan.ff_marked, p - ff)
+            (&df.layout.ff_marked, p - ff)
         } else {
             return OutputMarks::All;
         };
@@ -1201,9 +1384,20 @@ impl Ir {
     pub(crate) fn dataflow_ready(&self) -> bool {
         #[cfg(not(target_family = "wasm"))]
         {
-            self.dataflow
-                .as_ref()
-                .is_some_and(|d| d.cell.get().is_some() || d.jit.is_some())
+            if self.dataflow_ready_latch.get() {
+                return true;
+            }
+            // Template instances read their marks at every settle.
+            let ready = self.dataflow.as_ref().is_some_and(|d| {
+                let Some(root) = d.root_set() else {
+                    return true;
+                };
+                let others = &d.sets[1..];
+                (root.cell.get().is_some() && others.iter().all(|s| s.cell.get().is_some()))
+                    || (root.jit.is_some() && others.iter().all(|s| s.jit.is_some()))
+            });
+            self.dataflow_ready_latch.set(ready);
+            ready
         }
         #[cfg(target_family = "wasm")]
         {
@@ -1496,6 +1690,12 @@ pub struct Config {
     /// `BuildSession`. Different sessions never share these caches. Default
     /// off; `apply_env` enables it for the CLI unless explicitly disabled.
     pub dut_reuse: bool,
+    /// Schedule and compile each hierarchy template once (see `ir::hier`):
+    /// the declaration count (own plus descendants') a component needs to
+    /// become one.  Default off; `VERYL_HIER=1` enables it for the CLI.
+    pub hier_templates: Option<usize>,
+    /// Modules made hierarchy templates by name (`[test] shared_modules`).
+    pub shared_modules: Vec<String>,
     /// Base seed for user-defined component instances (from `[test] seed`
     /// or `--seed`).
     pub seed: u64,
@@ -1509,6 +1709,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub(crate) fn has_hier_templates(&self) -> bool {
+        self.hier_templates.is_some() || !self.shared_modules.is_empty()
+    }
+
     /// Run on Cranelift alone, for a host where AOT-C modules cannot load.
     pub fn fall_back_to_cranelift(&mut self) {
         self.use_jit = true;
@@ -1556,6 +1760,14 @@ impl Config {
         // On by default for the CLI; `VERYL_DUT_REUSE=0` opts out.  Off in the
         // unit-test harness, which never calls `apply_env` (see `Config::dut_reuse`).
         self.dut_reuse = env::var("VERYL_DUT_REUSE").ok().as_deref() != Some("0");
+        if let Some(v) = env_bool("VERYL_HIER") {
+            self.hier_templates = v.then(|| {
+                env::var("VERYL_HIER_MIN_DECLS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(2000)
+            });
+        }
     }
 }
 
@@ -1728,5 +1940,106 @@ impl DataflowMode {
         for (x, v) in self.counted.iter().zip([stmts, calls, 1]) {
             x.set(x.get() + v);
         }
+    }
+}
+
+/// Mark every cell of `p`.
+fn fill_cell_bits(dirty: &mut [u64], p: &crate::ir::opt::dataflow::Partition) {
+    if p.cells == 0 {
+        return;
+    }
+    let words = p.cell_words();
+    let last = words.end - 1;
+    dirty[words].fill(u64::MAX);
+    let tail = p.cells % 64;
+    if tail != 0 {
+        dirty[last] = (1u64 << tail) - 1;
+    }
+}
+
+/// What every hierarchy class block needs from the `Ir`: its partition of
+/// the dirty buffer, which the `Ir` owns and never resizes, and the log.
+struct HierPatch<'a> {
+    layout: &'a crate::ir::opt::dataflow::CellLayout,
+    /// The partition of each `(template fingerprint, comb delta)`: the
+    /// interpreted cells may come from another build of the same template.
+    partitions: HashMap<(u64, isize), u32>,
+    bits: *mut u64,
+    comb: *const u8,
+    log_buf: *mut u8,
+    compare_inputs: bool,
+}
+
+impl HierPatch<'_> {
+    fn apply(&self, s: &mut Statement) {
+        match s {
+            Statement::HierClass(c) => {
+                if c.partition == u32::MAX {
+                    let delta = (c.comb as isize).wrapping_sub(self.comb as isize);
+                    c.partition = *self
+                        .partitions
+                        .get(&(c.cells.fingerprint, delta))
+                        .expect("an interpreted template class run without a comb list copy");
+                }
+                let p = self
+                    .layout
+                    .hier_partition(c.partition as usize)
+                    .expect("a hierarchy instance outside the cell layout");
+                // SAFETY: the partition lies inside the buffer the layout sized.
+                c.bits = unsafe { self.bits.add(p.word_base as usize) };
+                c.log_buf = self.log_buf;
+                c.compare_inputs = self.compare_inputs;
+            }
+            Statement::SequentialBlock(body) => {
+                for s in body {
+                    self.apply(s);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_partitions(s: &Statement, comb: *const u8, out: &mut HashMap<(u64, isize), u32>) {
+    match s {
+        Statement::HierClass(c) => {
+            let delta = (c.comb as isize).wrapping_sub(comb as isize);
+            assert_ne!(
+                c.partition,
+                u32::MAX,
+                "a template class run left unnumbered"
+            );
+            out.insert((c.cells.fingerprint, delta), c.partition);
+        }
+        Statement::SequentialBlock(body) => {
+            for s in body {
+                collect_partitions(s, comb, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_hier_runs(
+    s: &Statement,
+    comb: *const u8,
+    out: &mut HashMap<crate::ir::hier_cells::RunKey, crate::ir::hier_cells::HierClassRun>,
+) {
+    match s {
+        Statement::HierClass(c) => {
+            let delta = (c.comb as isize).wrapping_sub(comb as isize);
+            let key = (c.class, delta, c.cells.fingerprint);
+            let clash = out.insert(key, (**c).clone());
+            assert!(
+                clash.is_none(),
+                "two template class runs share the key {key:?}"
+            );
+        }
+        Statement::SequentialBlock(body) => {
+            for s in body {
+                collect_hier_runs(s, comb, out);
+            }
+        }
+        _ => {}
     }
 }

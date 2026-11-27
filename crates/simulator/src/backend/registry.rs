@@ -377,6 +377,9 @@ fn classify_proto_stmt(s: &ProtoStatement) -> String {
         &ProtoStatement::HierAssign(_) => {
             unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
+        &ProtoStatement::HierEvents(_) => {
+            unreachable!("template events are expanded by expand_hier_events")
+        }
     }
 }
 
@@ -461,6 +464,53 @@ pub(crate) fn compile_plans_parallel(
     done.into_iter()
         .map(|o| o.expect("every plan is claimed exactly once"))
         .collect()
+}
+
+/// One artifact per group, compiled on helper threads; a group the backend
+/// declines comes back `None` (no bisecting: the caller keeps the group whole).
+pub(crate) fn compile_chunks_parallel(
+    registry: &mut BackendRegistry,
+    ctx: &CompileCtx,
+    groups: &[&[ProtoStatement]],
+) -> Vec<Option<Arc<ChunkArtifact>>> {
+    let threads = jit_parallelism().min(groups.len());
+    if threads < 2 {
+        return groups
+            .iter()
+            .map(|g| registry.try_compile_chunk(ctx, g))
+            .collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let parts: Vec<Vec<(usize, Option<Arc<ChunkArtifact>>)>> = std::thread::scope(|s| {
+        let next = &next;
+        let chunk_cache = &registry.chunk_cache;
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                std::thread::Builder::new()
+                    .stack_size(crate::IR_WALK_STACK_BYTES)
+                    .spawn_scoped(s, move || {
+                        let mut local = BackendRegistry::for_config(ctx.config);
+                        local.chunk_cache = Arc::clone(chunk_cache);
+                        let mut mine = Vec::new();
+                        loop {
+                            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(g) = groups.get(i) else {
+                                break;
+                            };
+                            mine.push((i, local.try_compile_chunk(ctx, g)));
+                        }
+                        mine
+                    })
+                    .expect("spawn chunk compiler")
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let mut done: Vec<Option<Arc<ChunkArtifact>>> = vec![None; groups.len()];
+    for (i, a) in parts.into_iter().flatten() {
+        done[i] = a;
+    }
+    done
 }
 
 fn jit_parallelism() -> usize {

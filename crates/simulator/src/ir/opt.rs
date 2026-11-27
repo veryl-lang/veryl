@@ -142,6 +142,11 @@ pub(crate) mod dead_var_dce {
     ) -> (Vec<ProtoStatement>, usize) {
         (stmts, 0)
     }
+    pub fn apply_to_hier_events(
+        _events: &mut crate::HashMap<crate::ir::Event, Vec<ProtoStatement>>,
+        _dead: &HashSet<VarOffset>,
+    ) {
+    }
     pub fn localize_comb_ranges(_comb: &[ProtoStatement]) -> Vec<(isize, usize, isize)> {
         Vec::new()
     }

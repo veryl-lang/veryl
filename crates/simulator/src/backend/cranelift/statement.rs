@@ -1278,6 +1278,9 @@ impl ProtoStatement {
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
+            }
         }
     }
     pub fn build_binary(
@@ -1376,6 +1379,9 @@ impl ProtoStatement {
             ProtoStatement::Break => None,
             &ProtoStatement::HierAssign(_) => {
                 unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+            &ProtoStatement::HierEvents(_) => {
+                unreachable!("template events are expanded by expand_hier_events")
             }
         }
     }
@@ -3190,7 +3196,7 @@ mod tests {
 
     mod dataflow_marks {
         use crate::backend::cranelift::runtime::{
-            CellWatch, build_binary_marked, build_cell_binary,
+            CellWatch, build_binary_marked, build_cell_binary, build_reporting_binary,
         };
         use crate::ir::opt::dataflow::{EventMarks, MarkTable, StoreMarks};
         use crate::ir::variable::VarOffset;
@@ -3262,6 +3268,39 @@ mod tests {
             assert_eq!(run(false, 5, 0), [0b100, 0b1], "a change must mark");
             assert_eq!(run(false, 5, 5), [0, 0], "no change marks nothing");
             assert_eq!(run(true, 5, 5), [0b100, 0b1], "`always` marks every run");
+        }
+
+        /// A reporting cell copying comb byte 0 to byte 8 returns nonzero
+        /// exactly when byte 8 changed, and keeps its fourth argument as the
+        /// FF delta.
+        #[test]
+        fn a_reporting_cell_returns_whether_its_boundary_moved() {
+            let stmt = assign(VarOffset::Comb(8), 0);
+            let (f, _keep) = build_reporting_binary(&Config::default(), vec![stmt], &[(8, 9)])
+                .expect("the cell must compile");
+            let run = |src: u8, old: u8| -> u64 {
+                let mut comb = [0u8; 16];
+                comb[0] = src;
+                comb[8] = old;
+                let ff = [0u8; 8];
+                let mut log = WriteLogBuffer::with_capacity(4, 4);
+                let changed = unsafe {
+                    f(
+                        ff.as_ptr(),
+                        comb.as_mut_ptr(),
+                        &mut log as *mut _ as *mut u8,
+                        0,
+                    )
+                };
+                assert_eq!(comb[8], src);
+                changed
+            };
+            assert_ne!(run(5, 0), 0, "a change must report");
+            assert_eq!(run(5, 5), 0, "no change reports nothing");
+            assert!(
+                build_reporting_binary(&Config::default(), vec![], &[(0, 65)]).is_none(),
+                "a boundary past the compare cap is left to the caller"
+            );
         }
 
         fn event_marks(comb: MarkTable, ff: MarkTable) -> StoreMarks {

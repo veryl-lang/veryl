@@ -227,6 +227,8 @@ fn resolve_stmt(
         ProtoStatement::CompiledBlock(_) | ProtoStatement::Break => {}
         // Expanded by `resolve_stmts`, which owns the enclosing list.
         ProtoStatement::HierAssign(_) => unreachable!("handled by resolve_stmts"),
+        // A template has no hierarchical references of its own.
+        ProtoStatement::HierEvents(_) => {}
     }
     Ok(())
 }

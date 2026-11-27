@@ -30,7 +30,8 @@ pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             }
             ProtoStatement::CompiledBlock(mut cb) => {
                 pending.clear();
-                if !cb.original_stmts.is_empty() {
+                // A template class runs through its cells, never its copy.
+                if cb.hier.is_none() && !cb.original_stmts.is_empty() {
                     let owned = std::sync::Arc::make_mut(&mut cb.original_stmts);
                     *owned = dce_aggressive(std::mem::take(owned));
                 }

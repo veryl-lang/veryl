@@ -446,6 +446,7 @@ impl CmdTest {
                 .or(metadata.test.seed)
                 .unwrap_or_else(random_seed),
             use_4state: self.opt.four_state || metadata.test.four_state,
+            shared_modules: metadata.test.shared_modules.clone(),
             abstract_reset_active_high: matches!(
                 metadata.build.reset_type,
                 veryl_metadata::ResetType::AsyncHigh | veryl_metadata::ResetType::SyncHigh
@@ -553,6 +554,9 @@ impl CmdTest {
                 })
                 .collect();
             let session = BuildSession::new(&ir, &config, &tops);
+            for name in session.unmatched_shared_modules() {
+                warn!("[test] shared_modules: no test instantiates {name} more than once");
+            }
             // Tests left to build per top: a worker keeps a converted top only
             // while another test still needs it, so a run's memory follows the
             // tests in flight rather than every top it has seen.
