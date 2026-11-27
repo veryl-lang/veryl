@@ -2610,6 +2610,216 @@ endmodule
 }
 
 #[test]
+fn nested_generic_function_in_generic_module() {
+    let code = r#"
+proto package ProtoPkg {
+    const W: u32;
+}
+package PkgA for ProtoPkg {
+    const W: u32 = 4;
+}
+module ModuleA::<PKG: ProtoPkg> (
+    i_a: input  logic<8>,
+    o_y: output logic<8>,
+) {
+    function FuncA::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return a + PKG::W;
+    }
+    function FuncB::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return FuncA::<N>(a) ^ a;
+    }
+    assign o_y = FuncB::<8>(i_a);
+}
+module ModuleB (
+    i_a: input  logic<8>,
+    o_a: output logic<8>,
+) {
+    inst u_a: ModuleA::<PkgA> (i_a, o_y: o_a);
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    localparam int unsigned W = 4;
+endpackage
+module prj___ModuleA__PkgA (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_y
+);
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] a
+    ) ;
+        return a + prj_PkgA::W;
+    endfunction
+    function automatic logic [8-1:0] __FuncB__8(
+        input var logic [8-1:0] a
+    ) ;
+        return __FuncA__8(a) ^ a;
+    endfunction
+    always_comb o_y = __FuncB__8(i_a);
+endmodule
+module prj_ModuleB (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_a
+);
+    prj___ModuleA__PkgA u_a (
+        .i_a (i_a),
+        .o_y (o_a)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn nested_generic_function_three_deep_in_generic_module() {
+    let code = r#"
+proto package ProtoPkg {
+    const W: u32;
+}
+package PkgA for ProtoPkg {
+    const W: u32 = 4;
+}
+module ModuleA::<PKG: ProtoPkg> (
+    i_a: input  logic<8>,
+    o_y: output logic<8>,
+) {
+    function FuncA::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return a + PKG::W;
+    }
+    function FuncB::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return FuncA::<N>(a) ^ a;
+    }
+    function FuncC::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return FuncB::<N>(a) | a;
+    }
+    assign o_y = FuncC::<8>(i_a);
+}
+module ModuleB (
+    i_a: input  logic<8>,
+    o_a: output logic<8>,
+) {
+    inst u_a: ModuleA::<PkgA> (i_a, o_y: o_a);
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    localparam int unsigned W = 4;
+endpackage
+module prj___ModuleA__PkgA (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_y
+);
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] a
+    ) ;
+        return a + prj_PkgA::W;
+    endfunction
+    function automatic logic [8-1:0] __FuncB__8(
+        input var logic [8-1:0] a
+    ) ;
+        return __FuncA__8(a) ^ a;
+    endfunction
+    function automatic logic [8-1:0] __FuncC__8(
+        input var logic [8-1:0] a
+    ) ;
+        return __FuncB__8(a) | a;
+    endfunction
+    always_comb o_y = __FuncC__8(i_a);
+endmodule
+module prj_ModuleB (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_a
+);
+    prj___ModuleA__PkgA u_a (
+        .i_a (i_a),
+        .o_y (o_a)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn nested_generic_function_in_generic_package() {
+    let code = r#"
+package PkgA::<W: u32> {
+    function FuncA::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return a + W;
+    }
+    function FuncB::<N: u32> (
+        a: input logic<N>,
+    ) -> logic<N> {
+        return FuncA::<N>(a) ^ a;
+    }
+}
+module ModuleA (
+    i_a: input  logic<8>,
+    o_y: output logic<8>,
+) {
+    assign o_y = PkgA::<3>::FuncB::<8>(i_a);
+}
+"#;
+
+    let expect = r#"package prj___PkgA__3;
+    function automatic logic [8-1:0] __FuncA__8(
+        input var logic [8-1:0] a
+    ) ;
+        return a + 3;
+    endfunction
+    function automatic logic [8-1:0] __FuncB__8(
+        input var logic [8-1:0] a
+    ) ;
+        return __FuncA__8(a) ^ a;
+    endfunction
+endpackage
+module prj_ModuleA (
+    input  var logic [8-1:0] i_a,
+    output var logic [8-1:0] o_y
+);
+    always_comb o_y = prj___PkgA__3::__FuncB__8(i_a);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn generic_function_with_fixed_args_in_generic_package() {
     let code = r#"
 package PkgA::<W: u32> {
