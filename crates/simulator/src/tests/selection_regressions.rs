@@ -1602,3 +1602,395 @@ fn multidimensional_union_array_member_write() {
         &[("o", "96'h4444000000000000")],
     );
 }
+
+#[test]
+fn select_range_on_struct_typed_member_read() {
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        o: output logic<4>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic,
+            flit: f_t  ,
+        }
+        var b: c_t;
+        assign b = i;
+        assign o = b.flit[3:0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x3ab, 10, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xb, 4, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_dynamic_bit_on_struct_typed_member_read() {
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        k: input  logic<4>,
+        o: output logic,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic,
+            flit: f_t  ,
+        }
+        var b: c_t;
+        assign b = i;
+        assign o = b.flit[k];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x3ab, 10, false));
+        sim.set("k", Value::new(4, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0, 1, false), "{config:?}");
+    }
+}
+
+#[test]
+fn select_range_on_struct_typed_member_write() {
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        o: output logic<10>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic,
+            flit: f_t  ,
+        }
+        var w: c_t;
+        always_comb {
+            w = i;
+            w.flit[3:0] = 4'ha;
+        }
+        assign o = w;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x3ab, 10, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x3aa, 10, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_bit_on_struct_typed_member_write() {
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        o: output logic<10>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic,
+            flit: f_t  ,
+        }
+        var w: c_t;
+        always_comb {
+            w = i;
+            w.flit[8] = 0;
+        }
+        assign o = w;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x3ab, 10, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x2ab, 10, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_range_on_enum_typed_member_read() {
+    let code = r#"
+    module Top (
+        i: input  logic<4>,
+        o: output logic<2>,
+    ) {
+        enum e_t: logic<3> {
+            A = 3'd5,
+            B = 3'd2,
+        }
+        struct c_t {
+            wr: logic,
+            e : e_t  ,
+        }
+        var b: c_t;
+        assign b = i;
+        assign o = b.e[1:0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0xd, 4, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0b01, 2, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_range_on_struct_array_typed_member_read() {
+    let code = r#"
+    module Top (
+        i: input  logic<19>,
+        o: output logic<4>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic ,
+            flit: f_t<2>,
+        }
+        var b: c_t;
+        assign b = i;
+        assign o = b.flit[1][3:0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x0356cd, 19, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xb, 4, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_range_on_struct_array_typed_member_write() {
+    let code = r#"
+    module Top (
+        o: output logic<19>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic ,
+            flit: f_t<2>,
+        }
+        var r: c_t;
+        always_comb {
+            r = '0;
+            r.flit[1][3:0] = 4'h5;
+        }
+        assign o = r;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x00a00, 19, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_bit_on_struct_array_typed_member_write() {
+    let code = r#"
+    module Top (
+        o: output logic<19>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct c_t {
+            wr  : logic ,
+            flit: f_t<2>,
+        }
+        var s: c_t;
+        always_comb {
+            s = '0;
+            s.flit[1][3] = 1;
+        }
+        assign o = s;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x01000, 19, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_range_on_struct_array_variable_read() {
+    let code = r#"
+    module Top (
+        i: input  logic<18>,
+        o: output logic<4>,
+    ) {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        var a: f_t<2>;
+        assign a = i;
+        assign o = a[1][3:0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x356cd, 18, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xb, 4, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_range_on_union_typed_member_read() {
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        o: output logic<4>,
+    ) {
+        union u_t {
+            x: logic<9>,
+            y: logic<9>,
+        }
+        struct c_t {
+            wr: logic,
+            u : u_t  ,
+        }
+        var b: c_t;
+        assign b = i;
+        assign o = b.u[3:0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x3ab, 10, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xb, 4, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_range_on_union_typed_member_write() {
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        o: output logic<10>,
+    ) {
+        union u_t {
+            x: logic<9>,
+            y: logic<9>,
+        }
+        struct c_t {
+            wr: logic,
+            u : u_t  ,
+        }
+        var w: c_t;
+        always_comb {
+            w = i;
+            w.u[3:0] = 4'ha;
+        }
+        assign o = w;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x3ab, 10, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x3aa, 10, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn select_bit_on_union_typed_member_write() {
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        o: output logic<10>,
+    ) {
+        union u_t {
+            x: logic<9>,
+            y: logic<9>,
+        }
+        struct c_t {
+            wr: logic,
+            u : u_t  ,
+        }
+        var w: c_t;
+        always_comb {
+            w = i;
+            w.u[8] = 0;
+        }
+        assign o = w;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("i", Value::new(0x3ab, 10, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x2ab, 10, false),
+            "{config:?}"
+        );
+    }
+}

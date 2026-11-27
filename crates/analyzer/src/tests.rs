@@ -27948,3 +27948,64 @@ fn op_assign_on_multidimensional_struct_array_element() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn dynamic_select_on_struct_typed_member_is_not_a_loop() {
+    let code = r#"
+    package PackageA {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct d_t {
+            wr  : logic,
+            flit: f_t  ,
+        }
+    }
+    module ModuleA (
+        i: input  logic<10>       ,
+        k: input  logic<4>        ,
+        o: output PackageA::d_t   ,
+    ) {
+        var lq: PackageA::d_t;
+        assign lq.wr   = lq.flit[k];
+        assign lq.flit = i[8:0];
+        assign o       = lq;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn dynamic_write_on_struct_typed_member_is_one_driver() {
+    let code = r#"
+    package PackageA {
+        struct f_t {
+            hdr : logic   ,
+            data: logic<8>,
+        }
+        struct d_t {
+            wr  : logic,
+            flit: f_t  ,
+        }
+    }
+    module ModuleA (
+        i: input  logic<10>       ,
+        k: input  logic<4>        ,
+        o: output PackageA::d_t   ,
+    ) {
+        var x: PackageA::d_t;
+        assign x.wr = i[9];
+        always_comb {
+            x.flit    = 0;
+            x.flit[k] = 1;
+        }
+        assign o = x;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}

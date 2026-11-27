@@ -10,6 +10,7 @@ use crate::literal::TypeLiteral;
 use crate::symbol::ClockDomain;
 use crate::symbol::{Direction, SymbolId};
 use crate::value::Value;
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::{Arc, LazyLock};
 use veryl_parser::resource_table::StrId;
@@ -81,11 +82,16 @@ impl PartSelectPath {
 
         let mut consumed_dims = 0;
         let mut containing_part = None;
+        let last = self.part_select.len();
         for (part, r#type) in std::iter::once(&self.base)
             .chain(self.part_select.iter().map(|part| &part.r#type))
             .enumerate()
         {
-            consumed_dims += r#type.width.dims();
+            consumed_dims += if part == last && (r#type.is_struct_union() || r#type.is_enum()) {
+                member_select_type(r#type).width.dims()
+            } else {
+                r#type.width.dims()
+            };
             if prefix_len < consumed_dims {
                 containing_part = Some(part);
                 break;
@@ -162,6 +168,17 @@ impl PartSelectPath {
 
         for (i, x) in part_select.enumerate() {
             let has_sub_part = i != (len - 1);
+            let x = if !has_sub_part
+                && select.len() + usize::from(range_select.is_some()) > x.r#type.width.dims()
+                && (x.r#type.is_struct_union() || x.r#type.is_enum())
+            {
+                Cow::Owned(PartSelect {
+                    pos: x.pos,
+                    r#type: member_select_type(&x.r#type),
+                })
+            } else {
+                Cow::Borrowed(x)
+            };
             let dims = x.r#type.width.dims();
             let select_dims = select.len().min(dims);
             let remaining_dims = dims - select_dims;
@@ -448,6 +465,24 @@ fn repeatable_coordinate(expression: &Expression) -> bool {
         }
         _ => false,
     }
+}
+
+fn member_select_type(r#type: &Type) -> Type {
+    let mut r#type = r#type.clone();
+    if r#type.is_enum() {
+        r#type.flatten_struct_union_enum();
+    } else {
+        let mut dims = r#type.width.as_slice().to_vec();
+        dims.push(r#type.kind.width());
+        r#type.kind = if r#type.is_2state() {
+            TypeKind::Bit
+        } else {
+            TypeKind::Logic
+        };
+        r#type.signed = false;
+        r#type.set_concrete_width(Shape::new(dims));
+    }
+    r#type
 }
 
 fn const_usize(context: &mut Context, x: &Expression) -> Option<usize> {
