@@ -3,6 +3,9 @@ name: Commit Check
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   ai-coauthor:
     name: No AI co-authors

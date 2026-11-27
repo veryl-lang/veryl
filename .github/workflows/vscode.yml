@@ -13,6 +13,9 @@ on:
       - 'support/highlightgen/**'
       - '.github/workflows/vscode.yml'
 
+permissions:
+  contents: read
+
 jobs:
   grammar:
     runs-on: ubuntu-latest

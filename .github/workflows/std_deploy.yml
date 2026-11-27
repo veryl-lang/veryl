@@ -7,6 +7,9 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: read
+
 jobs:
   std:
     runs-on: ubuntu-latest

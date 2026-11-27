@@ -17,6 +17,9 @@ on:
           - vsce
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     if: github.event_name == 'push'
@@ -90,6 +93,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # creates the release and uploads the archives
     steps:
     - name: Download artifacts
       uses: actions/download-artifact@v8
