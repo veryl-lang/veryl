@@ -30,6 +30,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         submodules: 'true'
+        persist-credentials: false
     - name: Run tests
       run: |
         cargo update
@@ -54,6 +55,8 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v6
+      with:
+        persist-credentials: false
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
     - name: Setup sccache
