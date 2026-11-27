@@ -6117,6 +6117,10 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
+        crate::ir::external::bind_component_refs(
+            &mut all_event_statements,
+            &mut all_external_components,
+        )?;
         // Hierarchical testbench references need the complete child meta
         // tree; resolve them before any optimization or backend runs.
         crate::ir::hier_ref::resolve_hier_refs(
@@ -7000,11 +7004,15 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
-        if !all_external_components.is_empty() {
-            crate::ir::nested_tb::remap_reference_events(
-                &mut all_event_statements,
-                |id, element| (edge_elem_ids.get(&(id, element)).copied().unwrap_or(id), 0),
-            );
+        // An array element's clock or reset fires on its own event id.
+        for component in &mut all_external_components {
+            for connect in &mut component.connects {
+                if let Some((id, element)) = &mut connect.event_var
+                    && let Some(&elem_id) = edge_elem_ids.get(&(*id, *element))
+                {
+                    (*id, *element) = (elem_id, 0);
+                }
+            }
         }
 
         let size_ok = {

@@ -727,13 +727,20 @@ fn add_host_imports(linker: &mut Linker<StoreCtx>) -> WResult<()> {
             let memory = memory_of(&mut caller)?;
             let Some(desc) = host_of(&caller)
                 .and_then(|h| h.svc_port_desc(idx))
-                .map(|d| d.as_bytes().to_vec())
+                .map(String::into_bytes)
             else {
                 return Ok(-1);
             };
             let n = desc.len().min(cap as usize);
             memory.write(&mut caller, buf as usize, &desc[..n])?;
             Ok(desc.len() as i64)
+        },
+    )?;
+    linker.func_wrap(
+        m,
+        "port_event",
+        |caller: Caller<'_, StoreCtx>, idx: u32| -> u32 {
+            host_of(&caller).map_or(idx, |h| h.svc_port_event(idx))
         },
     )?;
     linker.func_wrap(

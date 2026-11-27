@@ -7,8 +7,8 @@ use crate::component::loader::{ComponentError, lookup_component, register_static
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use veryl_component::{
-    BuildCtx, Component, ComponentKind, InputPort, OutputPort, Result, SimCtx, Value, bail, sys,
-    veryl_component_export,
+    BuildCtx, Component, ComponentKind, InputPort, MethodArg, OutputPort, Result, SimCtx, Value,
+    bail, sys, veryl_component_export,
 };
 
 struct Counter {
@@ -97,11 +97,14 @@ impl Component for MethodOnly {
         Ok(Self)
     }
 
-    fn method(&mut self, name: &str, args: &[Value], ctx: &mut SimCtx) -> Result<Value> {
+    fn method(&mut self, name: &str, args: &[MethodArg], ctx: &mut SimCtx) -> Result<Value> {
         match name {
-            "add" => Ok(Value::from_u64(args[0].as_u64()? + args[1].as_u64()?, 64)),
+            "add" => Ok(Value::from_u64(
+                args[0].as_value()?.as_u64()? + args[1].as_value()?.as_u64()?,
+                64,
+            )),
             "greet" => {
-                ctx.log(format!("hello {}", args[0].as_str()?));
+                ctx.log(format!("hello {}", args[0].as_value()?.as_str()?));
                 Ok(Value::unit())
             }
             _ => bail!("unknown method: {name}"),

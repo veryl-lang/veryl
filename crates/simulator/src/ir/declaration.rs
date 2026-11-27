@@ -1749,10 +1749,11 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                         input: c.input,
                         group: c.group,
                         member: c.member,
-                        event_var,
+                        event_var: event_var.map(|id| (id, 0)),
                         is_clock: c.is_clock,
                         is_reset: c.is_reset,
                         width: c.width,
+                        deferred: None,
                         token: c.token,
                     });
                 }
@@ -2953,6 +2954,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // parent, where the same instance names may mean other instances;
             // resolve them against its own child tree while its scope is
             // current.
+            crate::ir::external::bind_component_refs(
+                &mut all_event_statements,
+                &mut all_external_components,
+            )?;
             crate::ir::hier_ref::resolve_hier_refs(
                 context,
                 &mut all_event_statements,
@@ -3062,8 +3067,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(nodes) = nodes {
                     all_event_statements = nodes;
                 }
-            } else if !has_reference_aliases && all_external_components.is_empty() {
-                // Resolve component clock and reset copies before compiling the comb logic.
+            } else if !has_reference_aliases && !hears_component_reset(&all_external_components) {
                 let mut comb = std::mem::take(&mut all_comb_statements).into_vec();
                 try_compile_inst_chunks(
                     context,
@@ -3569,8 +3573,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // The id each clock and reset is re-keyed to, for the component
         // connections that fire on it.
         let mut rekeyed: HashMap<(air::VarId, u32), air::VarId> = HashMap::default();
-        let mut unmonitored_resets = HashMap::default();
-        let track_reference_events = !all_external_components.is_empty();
+        // A component may hear a reset that fires nothing in the child, when
+        // it copies one that does; give it an id and record its storage so
+        // the top can follow the copy.
+        let track_component_resets = !all_external_components.is_empty();
         for (vid, var) in &child_module.variables {
             let is_clock = var.r#type.is_clock();
             let is_reset = var.r#type.is_reset();
@@ -3592,11 +3598,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let key = (*vid, elem_idx as u32);
                     let stmts = remapped_events.remove(&Event::Reset(key.0, key.1));
                     let has_event = stmts.is_some() || handle.is_some();
-                    if !has_event && !track_reference_events {
+                    if !has_event && !track_component_resets {
                         continue;
                     }
                     let unique_id = context.alloc_internal_event_id();
-                    if track_reference_events {
+                    rekeyed.insert(key, unique_id);
+                    if track_component_resets {
                         all_tb_reset_nets.push(ResetNet {
                             id: unique_id,
                             offset: elem.current,
@@ -3604,11 +3611,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         });
                     }
                     if !has_event {
-                        unmonitored_resets.insert(key, unique_id);
                         continue;
-                    }
-                    if elem_idx == 0 || track_reference_events {
-                        rekeyed.insert(key, unique_id);
                     }
                     if let Some(stmts) = stmts {
                         remapped_events.insert(Event::reset(unique_id), stmts);
@@ -3644,9 +3647,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid, elem_idx as u32)) {
                     remapped_events.insert(Event::clock(unique_id), stmts);
                 }
-                if elem_idx == 0 || track_reference_events {
-                    rekeyed.insert((*vid, elem_idx as u32), unique_id);
-                }
+                rekeyed.insert((*vid, elem_idx as u32), unique_id);
                 if handle.is_some() {
                     all_tb_variables.push(tb_variable(meta, unique_id, handle));
                     continue;
@@ -3662,17 +3663,6 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         }
 
         nested_tb::rename_handles(&mut remapped_events, &src.hierarchy, src.name);
-        nested_tb::remap_reference_events(&mut remapped_events, |id, element| {
-            if let Some(&(parent, base)) = child_to_parent_var.get(&id) {
-                (parent, base + element)
-            } else {
-                let key = (id, element);
-                rekeyed
-                    .get(&key)
-                    .or_else(|| unmonitored_resets.get(&key))
-                    .map_or((id, element), |&id| (id, 0))
-            }
-        });
         // A re-keyed id passes through every boundary unchanged.
         let mut returns: HashMap<air::VarId, air::VarId> = HashMap::default();
         nested_tb::remap_returns(&mut remapped_events, |id| {
@@ -3696,17 +3686,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
                 // Left unset, the event source is recovered from the
                 // connected storage at the top.
-                connect.event_var =
-                    connect
-                        .event_var
-                        .and_then(|id| match child_to_parent_var.get(&id) {
-                            Some((parent, 0)) => Some(*parent),
-                            Some(_) => None,
-                            None => rekeyed
-                                .get(&(id, 0))
-                                .copied()
-                                .or_else(|| Context::is_internal_event_id(id).then_some(id)),
-                        });
+                connect.event_var = connect.event_var.and_then(|(id, element)| {
+                    if let Some(&(parent, base)) = child_to_parent_var.get(&id) {
+                        Some((parent, base + element))
+                    } else if let Some(&id) = rekeyed.get(&(id, element)) {
+                        Some((id, 0))
+                    } else {
+                        Context::is_internal_event_id(id).then_some((id, element))
+                    }
+                });
             }
         }
 
@@ -3729,4 +3717,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             hier_instances: all_hier_instances,
         })
     }
+}
+
+/// Whether a component hears a reset of this subtree. The top follows a
+/// reset copy through the comb statements, so they must stay uncompiled.
+fn hears_component_reset(components: &[ProtoExternalComponent]) -> bool {
+    components
+        .iter()
+        .any(|c| c.connects.iter().any(|connect| connect.is_reset))
 }

@@ -11,10 +11,10 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
-    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain,
-    Module, Op, RuntimeArgOp, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod,
-    Type, VarIndex, VarPath, VarSelect, VarSelectOp,
+    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, ComponentArg, Expression,
+    ExpressionContext, Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement,
+    MemberSelectDomain, Module, Op, RuntimeArgOp, Shape, Statement, SystemFunctionCall,
+    SystemFunctionKind, TbMethod, Type, VarIndex, VarPath, VarSelect, VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -725,9 +725,27 @@ fn collect_summary_statement_variables(
                     TbMethod::FileOpen { name, .. } => {
                         collect_summary_expression_variables(module, &name.0, ids);
                     }
-                    TbMethod::FileWrite { args } | TbMethod::Component { args, .. } => {
+                    TbMethod::FileWrite { args } => {
                         for argument in args {
                             collect_summary_expression_variables(module, &argument.0, ids);
+                        }
+                    }
+                    TbMethod::Component { args, .. } => {
+                        for argument in args {
+                            match argument {
+                                ComponentArg::Value(x) => {
+                                    collect_summary_expression_variables(module, &x.0, ids);
+                                }
+                                ComponentArg::Ref(x) => {
+                                    for member in &x.members {
+                                        collect_summary_expression_variables(
+                                            module,
+                                            &member.expr,
+                                            ids,
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                     TbMethod::RandomSeed { value } => {

@@ -1,6 +1,6 @@
 use crate::runtime_arg::{self, ArgError, ArgValue, RuntimeArg};
 use crate::value::words_for;
-use crate::{Result, Value, bail, sys};
+use crate::{EventId, EventPort, Result, Value, bail, sys};
 use smallvec::SmallVec;
 use std::cell::OnceCell;
 
@@ -14,9 +14,6 @@ pub struct InputPort {
     /// Host staging buffer, or null when the host cannot share memory (wasm)
     /// and the read path must fall back to a host call.
     pub(crate) words_ptr: *const u64,
-    /// Shape of a port bound for a reference argument; `None` for a
-    /// connected port.
-    pub(crate) shape: Option<&'static crate::reference::PortShape>,
 }
 
 /// Handle to a component output port, resolved once in [`BuildCtx::output`].
@@ -31,9 +28,6 @@ pub struct OutputPort {
     pub(crate) words_ptr: *mut u64,
     pub(crate) mask_ptr: *mut u64,
     pub(crate) dirty_ptr: *mut u8,
-    /// Shape of a port bound for a reference argument; `None` for a
-    /// connected port.
-    pub(crate) shape: Option<&'static crate::reference::PortShape>,
 }
 
 // The cached pointers address host buffers that outlive the instance and are
@@ -104,9 +98,7 @@ impl OutputPort {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ClockPort {
     pub(crate) idx: u32,
-    /// The port its hook fires through, which `fired_clock` reports: itself,
-    /// or for a reference to a clock another port already hears, that port.
-    pub(crate) event_port: u32,
+    pub(crate) event: u32,
 }
 
 /// Handle to a reset input port, resolved once in [`BuildCtx::reset`].
@@ -115,6 +107,7 @@ pub struct ClockPort {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ResetPort {
     pub(crate) idx: u32,
+    pub(crate) event: u32,
 }
 
 impl From<ClockPort> for InputPort {
@@ -123,7 +116,6 @@ impl From<ClockPort> for InputPort {
             idx: port.idx,
             width: 1,
             words_ptr: std::ptr::null(),
-            shape: None,
         }
     }
 }
@@ -134,7 +126,6 @@ impl From<ResetPort> for InputPort {
             idx: port.idx,
             width: 1,
             words_ptr: std::ptr::null(),
-            shape: None,
         }
     }
 }
@@ -255,9 +246,24 @@ impl RawCtx {
     }
 
     /// Whether the host provides the reference entries (`port_desc`,
-    /// `write_output_bits`).
+    /// `write_output_bits`, `port_event`).
     fn has_ref_api(&self) -> bool {
         self.api().size >= sys::VRL_HOST_API_REF_SIZE
+    }
+
+    pub(crate) fn port_width(&self, idx: u32) -> u32 {
+        unsafe { (self.api().port_width)(self.ctx, idx) }
+    }
+
+    /// The event that clock or reset port `idx` hears, as `fired_clock` reports
+    /// it. A host without the reference entries binds no port sharing
+    /// another's event, so each port is its own.
+    pub(crate) fn port_event(&self, idx: u32) -> u32 {
+        if self.has_ref_api() {
+            unsafe { (self.api().port_event)(self.ctx, idx) }
+        } else {
+            idx
+        }
     }
 
     /// Description of a port bound for a reference, or `None` for another
@@ -364,7 +370,6 @@ impl BuildCtx {
                     idx,
                     width,
                     words_ptr: direct.words.cast_const(),
-                    shape: None,
                 })
             }
             None => bail!("no input port named `{name}`"),
@@ -381,7 +386,6 @@ impl BuildCtx {
                     words_ptr: direct.words,
                     mask_ptr: direct.mask_xz,
                     dirty_ptr: direct.dirty,
-                    shape: None,
                 })
             }
             None => bail!("no output port named `{name}`"),
@@ -393,7 +397,7 @@ impl BuildCtx {
         match self.raw.port(name, sys::VRL_DIR_CLOCK) {
             Some((idx, _)) => Ok(ClockPort {
                 idx,
-                event_port: idx,
+                event: self.raw.port_event(idx),
             }),
             None if self.raw.port(name, sys::VRL_DIR_INPUT).is_some() => {
                 bail!("port `{name}` is connected, but not with a clock")
@@ -405,7 +409,10 @@ impl BuildCtx {
     /// A reset input port; the connection must be a reset.
     pub fn reset(&mut self, name: &str) -> Result<ResetPort> {
         match self.raw.port(name, sys::VRL_DIR_RESET) {
-            Some((idx, _)) => Ok(ResetPort { idx }),
+            Some((idx, _)) => Ok(ResetPort {
+                idx,
+                event: self.raw.port_event(idx),
+            }),
             None if self.raw.port(name, sys::VRL_DIR_INPUT).is_some() => {
                 bail!("port `{name}` is connected, but not with a reset")
             }
@@ -477,6 +484,8 @@ impl_runtime_args!(SimCtx);
 pub struct SimCtx {
     pub(crate) raw: RawCtx,
     four_state: bool,
+    /// `fired_clock`, asked once per hook.
+    fired: OnceCell<u32>,
 }
 
 impl SimCtx {
@@ -491,6 +500,7 @@ impl SimCtx {
         Self {
             raw: RawCtx::new(ctx, api),
             four_state,
+            fired: OnceCell::new(),
         }
     }
 
@@ -703,23 +713,28 @@ impl SimCtx {
         unsafe { (self.raw.api().sim_time)(self.raw.ctx) }
     }
 
-    /// The clock port that fired the current hook.
+    /// A port hearing the clock or reset that fired the current hook.
     pub fn clock(&self) -> InputPort {
-        let idx = unsafe { (self.raw.api().fired_clock)(self.raw.ctx) };
+        let idx = self.fired_clock();
         let width = unsafe { (self.raw.api().port_width)(self.raw.ctx, idx) };
         InputPort {
             idx,
             width,
             words_ptr: self.raw.port_direct(idx).words.cast_const(),
-            shape: None,
         }
     }
 
-    /// Whether the given clock port fired the current hook. Distinguishes
-    /// the source on components connected to several clocks.
-    pub fn fired(&self, clock: ClockPort) -> bool {
-        let idx = unsafe { (self.raw.api().fired_clock)(self.raw.ctx) };
-        idx == clock.event_port
+    /// Whether the given clock or reset port fired the current hook.
+    /// Distinguishes the source on components hearing several clocks or
+    /// resets; ports hearing one clock or reset all report it.
+    pub fn fired(&self, port: impl EventPort) -> bool {
+        EventId(self.fired_clock()) == port.event()
+    }
+
+    fn fired_clock(&self) -> u32 {
+        *self
+            .fired
+            .get_or_init(|| unsafe { (self.raw.api().fired_clock)(self.raw.ctx) })
     }
 
     /// Opens a file for reading through the host. Host-mediated file I/O

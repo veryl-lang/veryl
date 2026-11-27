@@ -10,7 +10,7 @@ use crate::HashMap;
 use crate::ir::ProtoStatement;
 use crate::ir::context::Context;
 use crate::ir::event::Event;
-use crate::ir::statement::{ProtoComponentArg, ProtoTbMethodKind};
+use crate::ir::statement::ProtoTbMethodKind;
 use crate::ir::variable::{VarOffset, VariableMeta};
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
@@ -133,32 +133,6 @@ pub fn rename_handles(
     }
 }
 
-/// Remaps the clock and reset subscriptions of component method arguments.
-pub fn remap_reference_events(
-    events: &mut HashMap<Event, Vec<ProtoStatement>>,
-    mut remap: impl FnMut(air::VarId, u32) -> (air::VarId, u32),
-) {
-    for (event, stmts) in events {
-        if event.is_initial() || *event == Event::Final {
-            walk_mut(stmts, &mut |_, method| {
-                if let ProtoTbMethodKind::Component { args, .. } = method {
-                    for arg in args {
-                        if let ProtoComponentArg::Ref(reference) = arg {
-                            for member in &mut reference.members {
-                                if let Some(Event::Clock(id, element) | Event::Reset(id, element)) =
-                                    &mut member.event
-                                {
-                                    (*id, *element) = remap(*id, *element);
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    }
-}
-
 /// Replaces the return destination of every testbench method in `events`.
 pub fn remap_returns(
     events: &mut HashMap<Event, Vec<ProtoStatement>>,
@@ -184,7 +158,10 @@ pub fn remap_returns(
     }
 }
 
-fn walk_mut(stmts: &mut [ProtoStatement], f: &mut impl FnMut(&mut StrId, &mut ProtoTbMethodKind)) {
+pub(crate) fn walk_mut(
+    stmts: &mut [ProtoStatement],
+    f: &mut impl FnMut(&mut StrId, &mut ProtoTbMethodKind),
+) {
     for stmt in stmts {
         match stmt {
             ProtoStatement::TbMethodCall { inst, method } => f(inst, method),

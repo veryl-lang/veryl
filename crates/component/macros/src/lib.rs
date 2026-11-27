@@ -828,11 +828,11 @@ fn arg_conversion(ty: &Type, idx: usize) -> syn::Result<(String, TokenStream2)> 
     // References to design variables: the host binds a port for each when the
     // method is called, and `SimCtx` turns the argument into a handle.
     let reference = match seg.as_str() {
-        "InputPort" => Some(("input", quote!(ctx.__input_ref(&args[#idx])?))),
-        "OutputPort" => Some(("output", quote!(ctx.__output_ref(&args[#idx])?))),
-        "ClockPort" => Some(("clock", quote!(ctx.__clock_ref(&args[#idx])?))),
-        "ResetPort" => Some(("reset", quote!(ctx.__reset_ref(&args[#idx])?))),
-        "ModportRef" => Some(("modport", quote!(ctx.__modport_ref(&args[#idx])?))),
+        "InputPort" => Some(("input", quote!(ctx.input_ref(&args[#idx])?))),
+        "OutputPort" => Some(("output", quote!(ctx.output_ref(&args[#idx])?))),
+        "ClockPort" => Some(("clock", quote!(ctx.clock_ref(&args[#idx])?))),
+        "ResetPort" => Some(("reset", quote!(ctx.reset_ref(&args[#idx])?))),
+        "ModportRef" => Some(("modport", quote!(ctx.modport_ref(&args[#idx])?))),
         _ => None,
     };
     if let Some((ty_str, conv)) = reference {
@@ -1128,19 +1128,8 @@ fn method_dispatch(self_ty: &Type, methods: &[MethodSpec]) -> TokenStream2 {
         })
         .collect();
     quote! {
-        fn method(
-            &mut self,
-            name: &str,
-            args: &[::veryl_component::Value],
-            ctx: &mut ::veryl_component::SimCtx,
-        ) -> ::veryl_component::Result<::veryl_component::Value> {
-            let args: ::std::vec::Vec<_> = args.iter().cloned()
-                .map(::veryl_component::MethodArg::from).collect();
-            <Self as ::veryl_component::Component>::__method(self, name, &args, ctx)
-        }
-
         #[allow(clippy::needless_question_mark)]
-        fn __method(
+        fn method(
             &mut self,
             name: &str,
             args: &[::veryl_component::MethodArg],

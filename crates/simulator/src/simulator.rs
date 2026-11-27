@@ -1471,37 +1471,19 @@ impl Simulator {
         msgs
     }
 
-    /// Binds the ports of a reference argument for a method call on a
-    /// component instance; see [`crate::component::runtime::RuntimeComponent::bind_ref`].
-    pub fn bind_component_ref(
+    /// Hands the ports of a reference argument to a component instance for
+    /// a method call; see [`crate::component::runtime::RuntimeComponent::hand_over_refs`].
+    pub fn hand_over_component_refs(
         &mut self,
         inst: veryl_parser::resource_table::StrId,
-        r: &crate::ir::ComponentRef,
+        kind: u32,
+        connects: &[u32],
     ) -> Result<crate::component::host::HostValue, String> {
-        let Some(idx) = self.components.iter().position(|c| c.name_id == inst) else {
+        let Some(c) = self.components.iter_mut().find(|c| c.name_id == inst) else {
             let name = veryl_parser::resource_table::get_str_value(inst).unwrap_or_default();
             return Err(format!("unknown component instance `{name}`"));
         };
-        let mut other_drivers = crate::HashMap::default();
-        for (i, c) in self.components.iter().enumerate() {
-            if i != idx {
-                for offset in c.output_offsets() {
-                    other_drivers.insert(offset, c.name.clone());
-                }
-            }
-        }
-        let value = self.components[idx].bind_ref(
-            r,
-            &self.ir.rtl_driven,
-            &other_drivers,
-            &self.ir.derived_clock_schedule,
-            &mut self.mask_cache,
-        )?;
-        // An output bound just now marks its readers like a port connection.
-        self.components[idx].resolve_output_marks(self.ir.use_4state, |ptr, len| {
-            self.ir.dataflow_output_marks(ptr, len)
-        });
-        Ok(value)
+        Ok(c.hand_over_refs(kind, connects, &mut self.mask_cache))
     }
 
     /// Zero-time method call on a component instance. An `Err` carries the
@@ -1521,9 +1503,6 @@ impl Simulator {
         let mut components = std::mem::take(&mut self.components);
         let c = &mut components[idx];
         c.host.time = self.time;
-        // A referenced input reads the value at the call, even through a port
-        // an earlier call bound.
-        c.stage_ref_inputs(args, &mut self.mask_cache);
         let result = c.instance.call_method(&mut c.host, &method_name, args);
         c.drain_logs();
         let failures = c.host.take_failures();
