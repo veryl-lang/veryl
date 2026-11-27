@@ -38,6 +38,9 @@ jobs:
       # 30GB cache quota, evicting the rust-cache generations that let cargo
       # skip dependency compilation entirely.
       SCCACHE_CACHE_SIZE: "1G"
+      # The simulator's cache GC runs on a background thread; keep it out of
+      # the measurements.
+      VERYL_AOT_C_RETAIN_DAYS: "0"
     steps:
       - uses: actions/checkout@v6
 
@@ -102,6 +105,11 @@ jobs:
     timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "0"
+      # The simulator's cache GC runs on a background thread; keep it out of
+      # the measurement. The restored cache also carries the mtimes of its
+      # last save, which a long quiet spell on master would age past the
+      # retention.
+      VERYL_AOT_C_RETAIN_DAYS: "0"
     steps:
       - uses: actions/checkout@v6
         with:

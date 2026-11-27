@@ -4905,6 +4905,7 @@ enum IndexedEvent {
 fn load_indexed_event(input: Option<u128>) -> Option<IndexedEvent> {
     let path = index_path("event", input)?;
     let text = fs::read_to_string(&path).ok()?;
+    mark_used(&path);
     let mut fields = text.split_whitespace();
     let hash = fields.next()?;
     if hash == "declined" {
@@ -4987,6 +4988,7 @@ enum IndexedDataflow {
 fn load_indexed_dataflow(input: Option<u128>) -> Option<IndexedDataflow> {
     let path = index_path("dataflow", input)?;
     let text = fs::read_to_string(&path).ok()?;
+    mark_used(&path);
     let mut fields = text.split_whitespace();
     let hash = fields.next()?;
     if hash == "declined" {
@@ -6100,24 +6102,35 @@ fn gc_age() -> Option<Duration> {
     (hours != 0).then(|| Duration::from_secs(hours * 3600))
 }
 
-/// A compile's own temp files, `veryl_aot_<hash>.<pid>.<n>.<ext>`; published
+/// A compile's own temp files, `veryl_aot_<hash>.<pid>.<n>.<ext>`, and the
+/// split units it compiles, `….u<i>.c` and their `….u<i>.c.o`; published
 /// artifacts carry no such infix.  A failed compile's `.log` is left alone:
 /// it is the only record of why it failed.
 fn is_temp_artifact(name: &str) -> bool {
-    let mut parts = name.split('.');
-    let (Some(stem), Some(pid), Some(ctr), Some(ext), None) = (
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-    ) else {
+    let mut parts = name.splitn(4, '.');
+    let (Some(stem), Some(pid), Some(ctr), Some(rest)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
         return false;
+    };
+    let is_unit = |rest: &str| {
+        let unit = rest
+            .strip_suffix(".c.o")
+            .or_else(|| rest.strip_suffix(".c"));
+        unit.and_then(|u| u.strip_prefix('u'))
+            .is_some_and(|i| !i.is_empty() && i.bytes().all(|b| b.is_ascii_digit()))
     };
     stem.starts_with("veryl_aot_")
         && pid.parse::<u64>().is_ok()
         && ctr.parse::<u64>().is_ok()
-        && matches!(ext, "c" | "so" | "job" | "list")
+        && (matches!(rest, "c" | "so" | "job" | "list") || is_unit(rest))
+}
+
+/// A compile lock, `veryl_aot_<hash>.lock`.  Its owner releases it when the
+/// compile ends, so one past the sweep cutoff belongs to a compile that died.
+fn is_compile_lock(name: &str) -> bool {
+    name.strip_suffix(".lock")
+        .is_some_and(|stem| stem.starts_with("veryl_aot_") && !stem.contains('.'))
 }
 
 fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
@@ -6127,7 +6140,7 @@ fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !is_temp_artifact(name) {
+        if !is_temp_artifact(name) && !is_compile_lock(name) {
             continue;
         }
         let stale = entry
@@ -6140,7 +6153,7 @@ fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
     }
 }
 
-/// Sweep the temp files of compiles that never published.
+/// Sweep the temp files and locks of compiles that never published.
 ///
 /// The compiler is detached so it can publish after the run exits; nothing
 /// observes it dying either, so its temp files would stay forever.  Their
@@ -6155,6 +6168,122 @@ fn gc_orphan_temps(cache_dir: &Path) {
         {
             sweep_temp_artifacts(cache_dir, cutoff);
         }
+    });
+}
+
+/// How long a published artifact may go unused before the cache drops it
+/// (`VERYL_AOT_C_RETAIN_DAYS`, default 7; 0 keeps everything).  Use bumps the
+/// mtime of `.so` and `.idx` files, so the age is time since last use; a
+/// dropped entry costs one recompile.
+fn retention() -> Option<Duration> {
+    let days = std::env::var("VERYL_AOT_C_RETAIN_DAYS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(7);
+    (days != 0).then(|| Duration::from_secs(days * 24 * 3600))
+}
+
+/// How often a cache directory is scanned for unused artifacts.  A scan
+/// stats every entry, which runs to seconds on a directory of a few hundred
+/// thousand files.
+const GC_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+
+/// How long a started scan holds others off.  A scan dies with its process,
+/// so a claim that never completes expires after this and another process
+/// takes the scan over.
+const GC_LEASE: Duration = Duration::from_secs(600);
+
+/// The cache's own record of its unused-artifact scans: its mtime is when the
+/// next one is due, less [`GC_INTERVAL`].
+const GC_STAMP: &str = "veryl_aot_gc.stamp";
+
+/// A published cache entry: an object, its index, a kept source or the log of
+/// a failed compile.  Temps and locks have their own rules.
+fn is_published_artifact(name: &str) -> bool {
+    name.starts_with("veryl_aot_")
+        && [".so", ".idx", ".c", ".log"]
+            .iter()
+            .any(|ext| name.ends_with(ext))
+        && !is_temp_artifact(name)
+}
+
+fn sweep_unused_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !is_published_artifact(name) {
+            continue;
+        }
+        let unused = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m < cutoff);
+        if unused {
+            // A `.so` another process still has loaded refuses deletion on
+            // Windows; it was used too recently to get here anyway.
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Sets the stamp so the next scan of `dir` is due after `wait`.
+fn set_gc_stamp(dir: &Path, wait: Duration) -> bool {
+    let stamp = dir.join(GC_STAMP);
+    let Some(time) = (std::time::SystemTime::now() + wait).checked_sub(GC_INTERVAL) else {
+        return false;
+    };
+    fs::write(&stamp, b"").is_ok()
+        && fs::File::options()
+            .write(true)
+            .open(&stamp)
+            .and_then(|f| f.set_modified(time))
+            .is_ok()
+}
+
+/// Takes this interval's scan of `dir` for [`GC_LEASE`].  Two processes may
+/// both take it; deleting twice is harmless.
+fn claim_gc_scan(dir: &Path) -> bool {
+    // A stamp in the future means the clock went back; waiting for it to
+    // catch up could stall the cache for as long.
+    let due = fs::metadata(dir.join(GC_STAMP))
+        .and_then(|m| m.modified())
+        .map_or(true, |t| t.elapsed().map_or(true, |e| e >= GC_INTERVAL));
+    due && set_gc_stamp(dir, GC_LEASE)
+}
+
+/// Records a finished scan, holding the next one off for [`GC_INTERVAL`].
+fn finish_gc_scan(dir: &Path) {
+    set_gc_stamp(dir, GC_INTERVAL);
+}
+
+/// Drops published artifacts unused for longer than [`retention`], at most
+/// once per [`GC_INTERVAL`] per cache directory.
+///
+/// The scan runs on its own thread so no simulation waits for it.  A process
+/// that exits first leaves the rest to whoever takes the scan once its lease
+/// runs out.  Losing a race with a process about to load an entry the scan
+/// deletes only drops that process to Cranelift.
+fn gc_unused_artifacts(dir: &Path) {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    STARTED.get_or_init(|| {
+        let Some(cutoff) =
+            retention().and_then(|age| std::time::SystemTime::now().checked_sub(age))
+        else {
+            return;
+        };
+        if !claim_gc_scan(dir) {
+            return;
+        }
+        let dir = dir.to_path_buf();
+        let _ = thread::Builder::new()
+            .name("veryl-aot-gc".into())
+            .spawn(move || {
+                sweep_unused_artifacts(&dir, cutoff);
+                finish_gc_scan(&dir);
+            });
     });
 }
 
@@ -6618,7 +6747,11 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
             if out.status.success() {
                 // A racing peer publishes an equally valid file (same
                 // source), so an overwrite either way is fine.
-                let _ = fs::rename(&tmp_c, &c_path);
+                if keep_source() {
+                    let _ = fs::rename(&tmp_c, &c_path);
+                } else {
+                    let _ = fs::remove_file(&tmp_c);
+                }
                 fs::rename(&tmp_so, &so_path)
                     .map_err(|e| format!("rename {}: {}", tmp_so.display(), e))?;
             }
@@ -6644,9 +6777,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     load_module(&so_path)
 }
 
-/// Bumps the mtime of a cached `.so` so a cache pruner can tell objects still
-/// in use from ones no current design compiles to. Best effort.
-fn mark_used(so_path: &Path) {
+/// Bumps the mtime of a cached `.so` or `.idx` so a cache pruner can tell
+/// entries still in use from ones nothing reaches anymore. Best effort.
+fn mark_used(path: &Path) {
     let mut options = fs::File::options();
     // Write access to a loaded DLL is refused; the attributes alone are not.
     #[cfg(windows)]
@@ -6657,7 +6790,7 @@ fn mark_used(so_path: &Path) {
     }
     #[cfg(not(windows))]
     options.write(true);
-    if let Ok(file) = options.open(so_path) {
+    if let Ok(file) = options.open(path) {
         let _ = file.set_modified(std::time::SystemTime::now());
     }
 }
@@ -6665,6 +6798,9 @@ fn mark_used(so_path: &Path) {
 /// Opens a published `.so` and wires up its runtime hooks.
 fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
     mark_used(so_path);
+    if let Some(dir) = so_path.parent() {
+        gc_unused_artifacts(dir);
+    }
     // SAFETY: the .so was just compiled by us (or previously cached) and
     // exposes only `veryl_aot_eval`.  We never unload while the FuncPtr
     // is in use because EmittedModule keeps the library alive.
@@ -6797,13 +6933,13 @@ fn stage_compile(
     let tmp_c = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.c"));
     let tmp_so = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so"));
     // Where the compiler's own output goes: removed on success, left
-    // beside the kept `.c` on failure.
+    // beside the temp `.c` on failure.
     let log = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log"));
     fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
 
     // Split units are compiled in parallel and linked; `tmp_c` above stays
-    // the source that gets published, so the cache entry keeps naming the
-    // whole module however it was built.
+    // the source that gets kept, so the cache entry keeps naming the whole
+    // module however it was built.
     let unit_paths: Vec<PathBuf> = split_translation_units(src, tu_split_count(src))
         .map(|units| {
             units
@@ -6823,7 +6959,7 @@ fn stage_compile(
         cc: key.cc,
         tmp_so: &tmp_so,
         tmp_c: &tmp_c,
-        published_c: &c_path,
+        published_c: keep_source().then_some(c_path.as_path()),
         published_so: &so_path,
         lock,
         log: &log,
@@ -6946,11 +7082,11 @@ pub fn detach_pending_compiles() {}
 /// that argument list must agree, or a compiler flag silently lands in the
 /// slot after it and never reaches the compile.
 #[cfg(unix)]
-const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; shift 8; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; shift 8; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; if "$cc" "$@" -o "$tso" "$tc"; then if [ -n "$pc" ]; then mv -f "$tc" "$pc"; else rm -f "$tc"; fi; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
 
 /// [`COMPILE_SCRIPT`] for a source split into units: compile them at once,
 /// link, publish.  Same contract otherwise — one shell owns the publish and
-/// the lock, and the whole source (`$tc`) is what lands beside the `.so`.
+/// the lock, and the whole source (`$tc`) is what is kept beside the `.so`.
 ///
 /// The compile flags arrive as one word-split parameter because the unit paths
 /// take the variadic slot.  `-shared` belongs to the link, so the caller sends
@@ -6960,7 +7096,16 @@ const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; l
 /// invocation compiles them in sequence, which is the latency this exists to
 /// remove.
 #[cfg(unix)]
-const SPLIT_COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; cf="$9"; shift 9; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; ps=""; os=""; for u in "$@"; do "$cc" $cf -c "$u" -o "$u.o" & ps="$ps $!"; os="$os $u.o"; done; ok=1; for p in $ps; do wait "$p" || ok=0; done; if [ "$ok" = 1 ] && "$cc" -shared -fPIC -o "$tso" $os; then mv -f "$tc" "$pc"; rm -f "$lg" "$@" $os; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso" $os; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+const SPLIT_COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; cf="$9"; shift 9; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; ps=""; os=""; for u in "$@"; do "$cc" $cf -c "$u" -o "$u.o" & ps="$ps $!"; os="$os $u.o"; done; ok=1; for p in $ps; do wait "$p" || ok=0; done; if [ "$ok" = 1 ] && "$cc" -shared -fPIC -o "$tso" $os; then if [ -n "$pc" ]; then mv -f "$tc" "$pc"; else rm -f "$tc"; fi; rm -f "$lg" "$@" $os; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso" $os; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+
+/// Whether a successful compile keeps its C source beside the `.so`
+/// (`VERYL_AOT_C_KEEP_SOURCE=1`).  Off by default: nothing reads it back, and
+/// it is several times the size of the object.  A failed compile keeps its
+/// source regardless.
+fn keep_source() -> bool {
+    static KEEP: OnceLock<bool> = OnceLock::new();
+    *KEEP.get_or_init(|| std::env::var("VERYL_AOT_C_KEEP_SOURCE").as_deref() == Ok("1"))
+}
 
 /// Address-space ceiling for the compiler, in KiB (`VERYL_AOT_C_MAX_MEM_MB`
 /// gives it in MB; 0 disables).  The compile is detached on purpose — it has
@@ -6981,7 +7126,8 @@ struct CompileScriptPaths<'a> {
     cc: &'a str,
     tmp_so: &'a Path,
     tmp_c: &'a Path,
-    published_c: &'a Path,
+    /// `None` drops the source once the compile succeeds.
+    published_c: Option<&'a Path>,
     published_so: &'a Path,
     lock: Option<&'a Path>,
     log: &'a Path,
@@ -6996,7 +7142,9 @@ fn compile_script_args(p: &CompileScriptPaths, flags: &[String]) -> Vec<std::ffi
         p.cc.into(),
         p.tmp_so.as_os_str().to_os_string(),
         p.tmp_c.as_os_str().to_os_string(),
-        p.published_c.as_os_str().to_os_string(),
+        p.published_c
+            .map(|q| q.as_os_str().to_os_string())
+            .unwrap_or_default(),
         p.published_so.as_os_str().to_os_string(),
         p.lock
             .map(|q| q.as_os_str().to_os_string())
@@ -7029,7 +7177,9 @@ fn split_script_args(
         p.cc.into(),
         p.tmp_so.as_os_str().to_os_string(),
         p.tmp_c.as_os_str().to_os_string(),
-        p.published_c.as_os_str().to_os_string(),
+        p.published_c
+            .map(|q| q.as_os_str().to_os_string())
+            .unwrap_or_default(),
         p.published_so.as_os_str().to_os_string(),
         p.lock
             .map(|q| q.as_os_str().to_os_string())
@@ -17138,7 +17288,7 @@ mod tests {
                     cc: &fake_cc.to_string_lossy(),
                     tmp_so: &tmp_so,
                     tmp_c: &tmp_c,
-                    published_c: &c_path,
+                    published_c: Some(&c_path),
                     published_so: &so_path,
                     lock: Some(&lock),
                     log: &log,
@@ -17159,6 +17309,72 @@ mod tests {
         assert!(c_path.exists(), "the source must publish beside it");
         assert!(!log.exists(), "a successful compile leaves no log behind");
         assert!(!lock.exists(), "the script must release the lock");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn compile_scripts_drop_the_source_unless_kept() {
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_drop_c_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let fake_cc = tmp.join("touch_cc.sh");
+        write_executable(
+            &fake_cc,
+            "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
+        );
+        let cc = fake_cc.to_string_lossy();
+        let flags = ["-O3".to_string(), "-shared".to_string()];
+
+        for split in [false, true] {
+            let tmp_c = tmp.join("t.c");
+            let tmp_so = tmp.join("t.so");
+            let so_path = tmp.join("p.so");
+            let log = tmp.join("p.log");
+            fs::write(&tmp_c, b"").unwrap();
+            let units: Vec<PathBuf> = if split {
+                (0..2).map(|i| tmp.join(format!("t.u{i}.c"))).collect()
+            } else {
+                Vec::new()
+            };
+            for u in &units {
+                fs::write(u, b"").unwrap();
+            }
+            let paths = CompileScriptPaths {
+                cc: &cc,
+                tmp_so: &tmp_so,
+                tmp_c: &tmp_c,
+                published_c: None,
+                published_so: &so_path,
+                lock: None,
+                log: &log,
+            };
+            let (script, args) = if split {
+                (
+                    SPLIT_COMPILE_SCRIPT,
+                    split_script_args(&paths, &flags, &units),
+                )
+            } else {
+                (COMPILE_SCRIPT, compile_script_args(&paths, &flags))
+            };
+            let status = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "split={split}: the script must succeed");
+            assert!(so_path.exists(), "split={split}: the artifact must publish");
+            assert!(!tmp_c.exists(), "split={split}: the source must be dropped");
+            let left: Vec<_> = fs::read_dir(&tmp)
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".c") || n.ends_with(".o"))
+                .collect();
+            assert!(left.is_empty(), "split={split}: left behind {left:?}");
+            fs::remove_file(&so_path).unwrap();
+        }
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -17429,12 +17645,23 @@ mod tests {
         let log = dir.join("veryl_aot_dead.123.0.log");
         let stale = dir.join("veryl_aot_dead.123.0.c");
         let stale_so = dir.join("veryl_aot_dead.123.0.so");
+        let stale_unit = dir.join("veryl_aot_dead.123.0.u1.c");
+        let stale_obj = dir.join("veryl_aot_dead.123.0.u1.c.o");
+        let stale_lock = dir.join("veryl_aot_dead.lock");
         let fresh = dir.join("veryl_aot_beef.456.1.c");
-        for f in [&published, &published_so, &log, &stale, &stale_so, &fresh] {
+        let fresh_lock = dir.join("veryl_aot_beef.lock");
+        let stale_files = [&stale, &stale_so, &stale_unit, &stale_obj, &stale_lock];
+        for f in [&published, &published_so, &log, &fresh, &fresh_lock]
+            .into_iter()
+            .chain(stale_files)
+        {
             fs::write(f, "x").unwrap();
         }
         let now = std::time::SystemTime::now();
-        for f in [&published, &published_so, &log, &stale, &stale_so] {
+        for f in [&published, &published_so, &log]
+            .into_iter()
+            .chain(stale_files)
+        {
             fs::File::options()
                 .write(true)
                 .open(f)
@@ -17452,7 +17679,103 @@ mod tests {
             "a failed compile's log is the only record of why"
         );
         assert!(fresh.exists(), "a compile that may still be running");
-        assert!(!stale.exists() && !stale_so.exists());
+        assert!(fresh_lock.exists(), "a lock a compile may still hold");
+        for f in stale_files {
+            assert!(!f.exists(), "{} must be swept", f.display());
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gc_drops_only_unused_published_artifacts() {
+        let dir = std::env::temp_dir().join(format!("veryl_gc_unused_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let unused: Vec<PathBuf> = [
+            "veryl_aot_dead.so",
+            "veryl_aot_dead.c",
+            "veryl_aot_event_00ff.idx",
+            "veryl_aot_dead.123.0.log",
+        ]
+        .iter()
+        .map(|n| dir.join(n))
+        .collect();
+        let kept: Vec<PathBuf> = [
+            "veryl_aot_dead.123.0.c",
+            "veryl_aot_dead.123.0.u0.c",
+            "veryl_aot_dead.lock",
+            GC_STAMP,
+        ]
+        .iter()
+        .map(|n| dir.join(n))
+        .collect();
+        let used = dir.join("veryl_aot_live.so");
+        let now = std::time::SystemTime::now();
+        for f in unused.iter().chain(&kept) {
+            fs::write(f, "x").unwrap();
+            fs::File::options()
+                .write(true)
+                .open(f)
+                .unwrap()
+                .set_modified(now - Duration::from_secs(30 * 24 * 3600))
+                .unwrap();
+        }
+        fs::write(&used, "x").unwrap();
+
+        sweep_unused_artifacts(&dir, now - Duration::from_secs(7 * 24 * 3600));
+
+        for f in &unused {
+            assert!(!f.exists(), "{} went unused and must go", f.display());
+        }
+        for f in &kept {
+            assert!(f.exists(), "{} is not a published artifact", f.display());
+        }
+        assert!(used.exists(), "an entry used within the retention stays");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gc_scan_runs_once_per_interval_and_survives_a_dead_scanner() {
+        let dir = std::env::temp_dir().join(format!("veryl_gc_stamp_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let age_stamp = |by: Duration| {
+            let stamp = dir.join(GC_STAMP);
+            let t = fs::metadata(&stamp).unwrap().modified().unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&stamp)
+                .unwrap()
+                .set_modified(t - by)
+                .unwrap();
+        };
+
+        assert!(claim_gc_scan(&dir), "a directory never scanned is due");
+        assert!(!claim_gc_scan(&dir), "a running scan holds others off");
+        age_stamp(GC_LEASE);
+        assert!(
+            claim_gc_scan(&dir),
+            "a scan that never finished is taken over"
+        );
+        finish_gc_scan(&dir);
+        age_stamp(GC_LEASE);
+        assert!(
+            !claim_gc_scan(&dir),
+            "a finished scan holds the next one off"
+        );
+        age_stamp(GC_INTERVAL);
+        assert!(
+            claim_gc_scan(&dir),
+            "the next scan is due after the interval"
+        );
+        fs::File::options()
+            .write(true)
+            .open(dir.join(GC_STAMP))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + GC_INTERVAL)
+            .unwrap();
+        assert!(claim_gc_scan(&dir), "a stamp from a clock gone back is due");
         let _ = fs::remove_dir_all(&dir);
     }
 
