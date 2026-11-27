@@ -1724,8 +1724,11 @@ pub struct ProtoHierEvents {
     pub(crate) ff_delta: isize,
     pub(crate) comb_delta: isize,
     /// Port storage the instance reads from its parent instead, in the
-    /// instance's coordinates (see `read_clock_reset_from_parent`).
+    /// instance's coordinates (see `clock_reset_inputs`).
     pub(crate) inputs: Vec<(VarOffset, VarOffset)>,
+    /// `inputs` already name its template's boundary: an enclosing template
+    /// only redirects them (see `hier::read_from_parent`).
+    pub(crate) at_boundary: bool,
 }
 
 impl ProtoHierEvents {

@@ -299,6 +299,9 @@ pub(crate) fn diag() -> bool {
 #[derive(Default)]
 pub(crate) struct TemplateSet {
     pub(crate) templates: HashSet<usize>,
+    /// The templates chosen by name, the only ones a template's conversion
+    /// nests.
+    pub(crate) named: HashSet<usize>,
     /// A `named` module's specializations that differ in parameters, each
     /// mapped to the group's first one: an instance of any of them runs the
     /// group's template once its statements match the template's.
@@ -314,8 +317,9 @@ pub(crate) struct TemplateSet {
 /// Components instantiated at least twice under one top that are `named`, or
 /// have at least `min_decls` declarations of their own and their
 /// descendants'.  A `named` module counts the instances of all its
-/// specializations.  Only the topmost such component on a path is chosen;
-/// its descendants are converted inside it.
+/// specializations.  Below a chosen component only `named` ones are chosen
+/// again, as templates nested in it; the rest of its descendants are
+/// converted inside it.
 pub(crate) fn template_set(
     ir: &air::Ir,
     tops: &[StrId],
@@ -390,16 +394,20 @@ pub(crate) fn template_set(
         m: &'a air::Module,
         rule: &Rule,
         weights: &mut HashMap<usize, usize>,
-        visited: &mut HashSet<usize>,
+        visited: &mut HashSet<(usize, bool)>,
         picked: &mut Picked<'a>,
+        nested: bool,
     ) {
         for (k, child) in children(m) {
-            if !visited.insert(k) {
+            // Weight does not choose below a template, so a component seen
+            // there is looked at again where it is not.
+            if !visited.insert((k, nested)) {
                 continue;
             }
             let name = &rule.names[&k];
             let by_name = rule.named.contains(name) && rule.named_counts[name] >= 2;
-            let by_weight = rule.counts.get(&k).copied().unwrap_or(0) >= 2
+            let by_weight = !nested
+                && rule.counts.get(&k).copied().unwrap_or(0) >= 2
                 && rule
                     .min_decls
                     .is_some_and(|min| weight(k, child, weights) >= min);
@@ -420,8 +428,9 @@ pub(crate) fn template_set(
                         .or_default()
                         .push((k, child));
                 }
+                pick(child, rule, weights, visited, picked, true);
             } else {
-                pick(child, rule, weights, visited, picked);
+                pick(child, rule, weights, visited, picked, nested);
             }
         }
     }
@@ -459,9 +468,14 @@ pub(crate) fn template_set(
             named,
         };
         let mut visited = HashSet::default();
-        pick(m, &rule, &mut weights, &mut visited, &mut picked);
+        pick(m, &rule, &mut weights, &mut visited, &mut picked, false);
     }
     let mut set = TemplateSet {
+        named: picked
+            .named
+            .values()
+            .flat_map(|specs| specs.iter().map(|&(k, _)| k))
+            .collect(),
         templates: picked.out,
         ..Default::default()
     };
@@ -555,6 +569,48 @@ pub(crate) fn fingerprint(instances: &[HierInstance]) -> u128 {
         i.comb_delta.hash(&mut h);
     }
     u128::from(h.finish())
+}
+
+/// Remove the template nodes of nested instances from `events`.
+pub(crate) fn take_nested_events(
+    events: &mut HashMap<crate::ir::Event, Vec<ProtoStatement>>,
+) -> HashMap<crate::ir::Event, Vec<ProtoStatement>> {
+    let mut out: HashMap<crate::ir::Event, Vec<ProtoStatement>> = HashMap::default();
+    for (event, stmts) in events.iter_mut() {
+        if !stmts
+            .iter()
+            .any(|s| matches!(s, ProtoStatement::HierEvents(_)))
+        {
+            continue;
+        }
+        let (nodes, rest): (Vec<_>, Vec<_>) = std::mem::take(stmts)
+            .into_iter()
+            .partition(|s| matches!(s, ProtoStatement::HierEvents(_)));
+        *stmts = rest;
+        out.insert(event.clone(), nodes);
+    }
+    events.retain(|event, stmts| !stmts.is_empty() || !out.contains_key(event));
+    out
+}
+
+/// Have a template node read the parent nets in `map` (port to net, sorted
+/// as `inputs`) in place of the ports: a node of this template takes them
+/// all, as aliasing would; a nested one, which already reads its own ports
+/// from nets here, follows those nets that are ports of this template.
+pub(crate) fn read_from_parent(
+    h: &mut crate::ir::ProtoHierEvents,
+    map: &HashMap<VarOffset, VarOffset>,
+    inputs: &[(VarOffset, VarOffset)],
+) {
+    if std::mem::replace(&mut h.at_boundary, true) {
+        for (_, to) in &mut h.inputs {
+            if let Some(&net) = map.get(to) {
+                *to = net;
+            }
+        }
+    } else {
+        h.inputs = inputs.to_vec();
+    }
 }
 
 /// The FF bytes `stmt` reads and writes, as `(reads, writes)`.
@@ -669,6 +725,10 @@ impl HierTemplate {
             cells_plan: std::sync::OnceLock::new(),
             cells: Mutex::default(),
         }))
+    }
+
+    pub(crate) fn fingerprint(&self) -> u128 {
+        self.fingerprint
     }
 
     /// Plan the template's dataflow cells from the reference instance's
@@ -1271,14 +1331,18 @@ fn compile_classes(
 
 /// The template's pieces depend on their order where several write one
 /// offset; a sequential block keeps that order through the parent's analysis.
-fn push_flat(unified: &mut Vec<ProtoStatement>, inst: &HierInstance) {
-    let body = inst
-        .template
+fn push_flat(
+    unified: &mut Vec<ProtoStatement>,
+    template: &HierTemplate,
+    ff_delta: isize,
+    comb_delta: isize,
+) {
+    let body = template
         .sorted
         .iter()
         .map(|s| {
             let mut c = s.clone();
-            c.adjust_offsets(inst.ff_delta, inst.comb_delta);
+            c.adjust_offsets(ff_delta, comb_delta);
             c
         })
         .collect();
@@ -1316,64 +1380,77 @@ pub(crate) fn inject(
         };
         g.deltas.push((inst.ff_delta, inst.comb_delta));
     }
-    match plan_all(unified, &mut groups, names) {
-        Ok(()) => {}
-        Err(why) => {
+    // A template whose classes do not hold runs flat; the others are planned
+    // again around its statements.
+    let (partitions, with_cells, compiled_all) = loop {
+        if let Err(why) = plan_all(unified, &mut groups, names) {
             if diag() {
                 eprintln!("[hier] flat fallback: {why}");
             }
             context.hier_fell_back = Some(why);
-            for inst in instances {
-                push_flat(unified, inst);
+            for g in &groups {
+                for &(ff_delta, comb_delta) in &g.deltas {
+                    push_flat(unified, g.template, ff_delta, comb_delta);
+                }
             }
             return;
         }
-    }
+        let mut failed: Vec<(usize, String)> = Vec::new();
+        let mut partitions = Vec::with_capacity(groups.len());
+        for (gi, g) in groups.iter().enumerate() {
+            match partition(g) {
+                Ok(p) => partitions.push(p),
+                Err(why) => {
+                    failed.push((gi, why));
+                    partitions.push(Default::default());
+                }
+            }
+        }
+        let mut with_cells = Vec::new();
+        let mut compiled_all = Vec::with_capacity(groups.len());
+        if failed.is_empty() {
+            for (g, (class_of, order)) in groups.iter().zip(&partitions) {
+                with_cells.push(template_cells(context, g.template, class_of, order));
+            }
+            for (gi, ((g, (class_of, order)), cells)) in
+                groups.iter().zip(&partitions).zip(&with_cells).enumerate()
+            {
+                if cells.is_some() {
+                    compiled_all.push(Arc::new(Vec::new()));
+                    continue;
+                }
+                match compile_classes(context, g.template, class_of, order.len()) {
+                    Some(c) => compiled_all.push(c),
+                    None => failed.push((gi, "a chunk did not compile".to_string())),
+                }
+            }
+        }
+        if failed.is_empty() {
+            break (partitions, with_cells, compiled_all);
+        }
+        let all = failed.len() == groups.len();
+        for &(gi, ref why) in failed.iter().rev() {
+            let g = groups.remove(gi);
+            let why = format!("{}: {why}", g.template.name);
+            if diag() {
+                eprintln!("[hier] flat fallback: {why}");
+            }
+            for &(ff_delta, comb_delta) in &g.deltas {
+                push_flat(unified, g.template, ff_delta, comb_delta);
+            }
+            if all {
+                context.hier_fell_back = Some(why);
+            } else if !context.config.shared_modules.is_empty() {
+                // The others stay shared, so the build is not redone without
+                // templates: say which one runs flat.
+                log::warn!("[test] shared_modules: {why}, run flat");
+            }
+        }
+        if all {
+            return;
+        }
+    };
     let t1 = std::time::Instant::now();
-    let mut partitions = Vec::with_capacity(groups.len());
-    for g in &groups {
-        match partition(g) {
-            Ok(p) => partitions.push(p),
-            Err(why) => {
-                if diag() {
-                    eprintln!("[hier] {} flat fallback: {why}", g.template.name);
-                }
-                context.hier_fell_back = Some(format!("{}: {why}", g.template.name));
-                for inst in instances {
-                    push_flat(unified, inst);
-                }
-                return;
-            }
-        }
-    }
-    let mut with_cells: Vec<Option<Arc<crate::ir::hier_cells::HierCells>>> = Vec::new();
-    for (g, (class_of, order)) in groups.iter().zip(&partitions) {
-        with_cells.push(template_cells(context, g.template, class_of, order));
-    }
-    let mut compiled_all = Vec::with_capacity(groups.len());
-    for ((g, (class_of, order)), cells) in groups.iter().zip(&partitions).zip(&with_cells) {
-        if cells.is_some() {
-            compiled_all.push(Arc::new(Vec::new()));
-            continue;
-        }
-        match compile_classes(context, g.template, class_of, order.len()) {
-            Some(c) => compiled_all.push(c),
-            None => {
-                if diag() {
-                    eprintln!(
-                        "[hier] {} flat fallback: a chunk did not compile",
-                        g.template.name
-                    );
-                }
-                context.hier_fell_back =
-                    Some(format!("{}: a chunk did not compile", g.template.name));
-                for inst in instances {
-                    push_flat(unified, inst);
-                }
-                return;
-            }
-        }
-    }
     for (((g, (class_of, order)), compiled), cells) in groups
         .iter()
         .zip(partitions)
@@ -1449,7 +1526,7 @@ pub(crate) fn inject(
     }
     if diag() {
         eprintln!(
-            "[hier] plan {:.1}s, compile+emit {:.1}s",
+            "[hier] plan and compile {:.1}s, emit {:.1}s",
             (t1 - t0).as_secs_f64(),
             t1.elapsed().as_secs_f64()
         );
@@ -1620,11 +1697,56 @@ fn plan_all(
             }
         }
     }
+    // A nested template's ports are copied by its parent template, so one
+    // instance reads what another writes with no glue statement between
+    // them.  Such a read waits for the writer as if a copy were in the glue.
+    let mut read_by_instances: HashSet<isize> = HashSet::default();
+    for g in groups.iter() {
+        for &(_, comb_delta) in &g.deltas {
+            read_by_instances.extend(g.io.inputs.iter().map(|&o| o + comb_delta));
+        }
+    }
+    let mut direct: HashMap<isize, u32> = HashMap::default();
+    let mut direct_outs: Vec<Vec<Vec<(u32, isize)>>> = Vec::new();
+    let mut direct_ins: Vec<Vec<Vec<(u32, isize)>>> = Vec::new();
+    let mut writer_of: HashMap<isize, (usize, usize)> = HashMap::default();
+    for (gi, g) in groups.iter().enumerate() {
+        let mut outs = Vec::new();
+        let mut ins = Vec::new();
+        for (j, &(_, comb_delta)) in g.deltas.iter().enumerate() {
+            let mut o_list = Vec::new();
+            for (v, &o) in g.io.vars.iter().enumerate() {
+                let at = o + comb_delta;
+                if !read_by_instances.contains(&at) {
+                    continue;
+                }
+                if writer_of.insert(at, (gi, j)).is_some_and(|w| w != (gi, j)) {
+                    return Err(format!("offset {at} is written by two template instances"));
+                }
+                o_list.push((v as u32, at));
+                direct.insert(at, 0);
+            }
+            outs.push(o_list);
+            ins.push(Vec::new());
+        }
+        direct_outs.push(outs);
+        direct_ins.push(ins);
+    }
+    for (gi, g) in groups.iter().enumerate() {
+        for (j, &(_, comb_delta)) in g.deltas.iter().enumerate() {
+            for (k, &o) in g.io.inputs.iter().enumerate() {
+                let at = o + comb_delta;
+                if direct.contains_key(&at) {
+                    direct_ins[gi][j].push((k as u32, at));
+                }
+            }
+        }
+    }
     let max_iter = 64;
     for iter in 0..max_iter {
         glue.levels(&exits, &mut level);
         let mut changed = false;
-        for (g, per_inst) in groups.iter_mut().zip(&exit_nodes) {
+        for (gi, (g, per_inst)) in groups.iter_mut().zip(&exit_nodes).enumerate() {
             g.labels.resize(g.deltas.len(), Vec::new());
             let mut var_level = vec![0u32; g.io.vars.len()];
             let mut in_level = vec![0u32; g.io.inputs.len()];
@@ -1636,10 +1758,22 @@ fn plan_all(
                         .map(|&n| level[n as usize])
                         .unwrap_or(0);
                 }
+                for &(k, at) in &direct_ins[gi][j] {
+                    let slot = &mut in_level[k as usize];
+                    *slot = (*slot).max(direct[&at] + 1);
+                }
                 g.io.label(&in_level, &mut var_level, &mut g.labels[j]);
                 for &(n, v) in &per_inst[j] {
                     let l = var_level[v as usize];
                     let slot = exits.get_mut(&n).unwrap();
+                    if *slot != l {
+                        *slot = l;
+                        changed = true;
+                    }
+                }
+                for &(v, at) in &direct_outs[gi][j] {
+                    let l = var_level[v as usize];
+                    let slot = direct.get_mut(&at).unwrap();
                     if *slot != l {
                         *slot = l;
                         changed = true;

@@ -1141,3 +1141,316 @@ fn a_specialization_reached_from_several_tops_is_one() {
     assert_eq!(set.templates.len(), 1);
     assert!(set.groups.is_empty() && set.lifted.is_empty());
 }
+
+const GROUPS: usize = 2;
+
+/// `generate`'s design as a module `Group`, instantiated `GROUPS` times
+/// under a new `Top`: the first group reads the top inputs, each later one
+/// the previous group's outputs.
+fn emit_nested(d: &Design) -> String {
+    let mut s = emit(d).replace("module Top (", "module Group (");
+    s += "module Top (\n    clk: input clock,\n    rst: input reset,\n";
+    for i in 0..TOP_IN {
+        s += &format!("    i{i}: input logic<8>,\n");
+    }
+    for g in 0..GROUPS {
+        for c in 0..CELLS {
+            for j in 0..OUT {
+                s += &format!("    g{g}_o{c}_{j}: output logic<8>,\n");
+            }
+            s += &format!("    g{g}_r{c}: output logic<8>,\n    g{g}_z{c}: output logic<8>,\n");
+        }
+    }
+    s += ") {\n";
+    for g in 0..GROUPS {
+        s += &format!("    inst g{g}: Group (\n        clk,\n        rst,\n");
+        for i in 0..TOP_IN {
+            let src = if g == 0 {
+                format!("i{i}")
+            } else {
+                format!("g{}_o{i}_0", g - 1)
+            };
+            s += &format!("        i{i}: {src},\n");
+        }
+        for c in 0..CELLS {
+            for j in 0..OUT {
+                s += &format!("        o{c}_{j}: g{g}_o{c}_{j},\n");
+            }
+            s += &format!("        r{c}: g{g}_r{c},\n        z{c}: g{g}_z{c},\n");
+        }
+        s += "    );\n";
+    }
+    s += "}\n";
+    s
+}
+
+fn nested_outputs(sim: &mut Simulator) -> Vec<Value> {
+    let mut v = Vec::new();
+    for g in 0..GROUPS {
+        for c in 0..CELLS {
+            for j in 0..OUT {
+                v.push(sim.get(&format!("g{g}_o{c}_{j}")).unwrap());
+            }
+            v.push(sim.get(&format!("g{g}_r{c}")).unwrap());
+            v.push(sim.get(&format!("g{g}_z{c}")).unwrap());
+        }
+    }
+    v
+}
+
+/// Templates nested in a template: `Cell` inside `Group`, both shared.
+fn check_nested(seeds: std::ops::Range<u64>, flat: Config) {
+    let mut nested = 0;
+    let n = seeds.end - seeds.start;
+    for seed in seeds {
+        let code = emit_nested(&generate(seed));
+        let hier = Config {
+            shared_modules: vec!["Group".to_string(), "Cell".to_string()],
+            ..flat.clone()
+        };
+        let a = analyze_top(&code, &flat, "Top").unwrap();
+        let b = match analyze_top(&code, &hier, "Top") {
+            Ok(ir) => ir,
+            Err(e) => panic!("seed {seed}: {e:?}\n{code}"),
+        };
+        assert_eq!(b.required_comb_passes, 1, "seed {seed}\n{code}");
+        let templates: crate::HashSet<u64> =
+            b.hier_runs.values().map(|r| r.cells.fingerprint).collect();
+        if templates.len() >= 2 {
+            nested += 1;
+        }
+        let mut sa = Simulator::new(a, None);
+        let mut sb = Simulator::new(b, None);
+        let mut rng = Rng(seed + 1);
+        for sim in [&mut sa, &mut sb] {
+            let clk = sim.get_clock("clk").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.step_reset(&clk, &rst);
+        }
+        for step in 0..4 {
+            let inputs: Vec<u64> = (0..TOP_IN).map(|_| rng.next() & 0xff).collect();
+            for sim in [&mut sa, &mut sb] {
+                for (k, &x) in inputs.iter().enumerate() {
+                    sim.set(&format!("i{k}"), Value::new(x, 8, false));
+                }
+                let clk = sim.get_clock("clk").unwrap();
+                sim.step(&clk);
+            }
+            assert_eq!(
+                nested_outputs(&mut sa),
+                nested_outputs(&mut sb),
+                "seed {seed} step {step} inputs {inputs:x?}\n{code}"
+            );
+        }
+    }
+    if crate::tests::dataflow_on() {
+        assert!(
+            nested * 2 > n,
+            "nested templates ran their cells in only {nested} of {n} seeds"
+        );
+    }
+}
+
+#[test]
+fn nested_templates_match_flat_2state() {
+    check_nested(
+        200..232,
+        Config {
+            use_jit: true,
+            ..Default::default()
+        },
+    );
+}
+
+#[test]
+fn nested_templates_match_flat_4state() {
+    check_nested(
+        232..248,
+        Config {
+            use_jit: true,
+            use_4state: true,
+            ..Default::default()
+        },
+    );
+}
+
+#[test]
+fn nested_templates_match_flat_aot_c_events() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    check_nested(
+        248..256,
+        Config {
+            use_jit: true,
+            aot_c: true,
+            aot_c_event: true,
+            aot_c_async: false,
+            aot_c_min_stmts: 0,
+            ..Default::default()
+        },
+    );
+}
+
+/// A named module instantiating itself is shared at its outermost level only:
+/// a nested specialization of the group being converted would wait on that
+/// conversion.
+#[test]
+fn a_named_module_instantiating_itself_builds() {
+    let code = r#"
+    module Tree #(param N: u32 = 4) (i: input logic<8>, o: output logic<8>) {
+        if N == 1 :g {
+            assign o = i + 8'd1;
+        } else {
+            var a: logic<8>;
+            inst l: Tree #(N: N / 2) (i, o: a);
+            inst r: Tree #(N: N / 2) (i: a, o);
+        }
+    }
+    module Top (i: input logic<8>, o: output logic<8>, p: output logic<8>) {
+        var w: logic<8>;
+        inst t0: Tree (i, o: w);
+        inst t1: Tree (i: w, o);
+        assign p = w;
+    }
+    "#;
+    let top: veryl_parser::resource_table::StrId = "Top".into();
+    // Leaked so that a hung build does not hold the test at the join.
+    let air_ir: &'static air::Ir = Box::leak(Box::new(analyze_air(code)));
+    let config: &'static Config = Box::leak(Box::new(Config {
+        use_jit: true,
+        shared_modules: vec!["Tree".to_string()],
+        ..Default::default()
+    }));
+    let resources = veryl_parser::resource_table::export_tables();
+    let texts = veryl_parser::text_table::export_tables();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .stack_size(crate::IR_WALK_STACK_BYTES)
+        .spawn(move || {
+            veryl_parser::resource_table::import_tables(&resources);
+            veryl_parser::text_table::import_tables(&texts);
+            let ir = crate::ir::BuildSession::new(air_ir, config, &[top])
+                .build_ir(top)
+                .unwrap();
+            let mut sim = Simulator::new(ir, None);
+            sim.set("i", Value::new(5, 8, false));
+            let _ = tx.send((sim.get("o").unwrap(), sim.get("p").unwrap()));
+        })
+        .unwrap();
+    let got = rx
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the build hung");
+    assert_eq!(got, (Value::new(13, 8, false), Value::new(9, 8, false)));
+}
+
+/// Specializations of a named module with a gated clock below them run as
+/// they do without templates.
+#[test]
+fn specializations_with_a_gated_clock_inside_match_flat() {
+    let code = r#"
+    module Gate (
+        clk: input  '_ clock,
+        rst: input  '_ reset,
+        en : input  logic   ,
+        a  : input  logic<8>,
+        q  : output logic<8>,
+    ) {
+        let gclk: '_ clock = clk & en;
+        var r: logic<8>;
+        always_ff (gclk, rst) {
+            if_reset { r = 0; } else { r = r + a; }
+        }
+        assign q = r;
+    }
+    module Port #(param P: u32 = 0) (
+        clk: input  '_ clock  ,
+        rst: input  '_ reset  ,
+        a  : input  logic<8>,
+        q  : output logic<8>,
+    ) {
+        var en: logic;
+        always_ff (clk, rst) {
+            if_reset { en = 0; } else { en = a[1:0] == P; }
+        }
+        inst u_gate: Gate (clk, rst, en, a, q);
+    }
+    module Top (
+        clk: input  '_ clock     ,
+        rst: input  '_ reset     ,
+        a  : input  logic<8>   ,
+        q  : output logic<8>[4],
+    ) {
+        for i in 0..4 :g {
+            inst u: Port #(P: i) (clk, rst, a, q: q[i]);
+        }
+    }
+    "#;
+    let inputs = [0, 1, 2, 3, 5, 6, 7, 9, 10, 4, 3, 2];
+    let jit = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    compare_named(code, jit, &["Port"], &["q"], &inputs);
+}
+
+/// An async reset derived in the top reaches a template nested in another
+/// with the edge the top takes, through both template boundaries.
+#[test]
+fn nested_template_async_reset_from_parent_net() {
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset { r = 1'b0; } else { r = 1'b1; }
+        }
+        assign q = r;
+    }
+    module Mid (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q0   : output logic          ,
+        q1   : output logic          ,
+    ) {
+        inst s0: Sub (clk, rst_l, q: q0);
+        inst s1: Sub (clk, rst_l, q: q1);
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q   : output logic<4>,
+    ) {
+        var f: logic;
+        always_ff (clk) { f = trig; }
+        let n    : logic              = ~f;
+        let rst_a: '_ reset_async_low = n;
+        inst m0: Mid (clk, rst_l: rst_a, q0: q[0], q1: q[1]);
+        inst m1: Mid (clk, rst_l: rst_a, q0: q[2], q1: q[3]);
+    }
+    "#;
+    for named in [vec![], vec!["Mid", "Sub"]] {
+        let config = Config {
+            shared_modules: named.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        let ir = analyze_top(code, &config, "Top").unwrap();
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0xf, 4, false),
+            "{named:?}"
+        );
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(sim.get("q").unwrap(), Value::new(0, 4, false), "{named:?}");
+    }
+}
