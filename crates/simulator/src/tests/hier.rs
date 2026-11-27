@@ -244,7 +244,8 @@ fn check_seeds_with(seeds: std::ops::Range<u64>, flat: Config, chunk_mass: Optio
                     "seed {seed}: no AOT-C root cells\n{code}"
                 );
                 assert!(
-                    !b.hier_runs.is_empty() && b.hier_runs.values().all(|r| r.cells.aot_landed()),
+                    !b.hier_runs.is_empty()
+                        && b.hier_runs.iter().flatten().all(|r| r.cells.aot_landed()),
                     "seed {seed}: no AOT-C template cells\n{code}"
                 );
             }
@@ -1214,8 +1215,12 @@ fn check_nested(seeds: std::ops::Range<u64>, flat: Config) {
             Err(e) => panic!("seed {seed}: {e:?}\n{code}"),
         };
         assert_eq!(b.required_comb_passes, 1, "seed {seed}\n{code}");
-        let templates: crate::HashSet<u64> =
-            b.hier_runs.values().map(|r| r.cells.fingerprint).collect();
+        let templates: crate::HashSet<u64> = b
+            .hier_runs
+            .iter()
+            .flatten()
+            .map(|r| r.cells.fingerprint)
+            .collect();
         if templates.len() >= 2 {
             nested += 1;
         }

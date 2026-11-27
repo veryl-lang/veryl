@@ -711,16 +711,17 @@ impl HierCells {
     }
 }
 
-/// A class run as the compiled parent names it: the class, the instance's
-/// comb delta and the template's fingerprint, since instances of two
-/// templates may sit at the same delta.
-pub(crate) type RunKey = (u32, isize, u64);
+/// The class runs of a module by their `HierRef::run` number.
+pub(crate) type Runs = Vec<Option<HierClassRun>>;
 
 /// One class of one instance, as the settle runs it.
 #[derive(Clone)]
 pub struct HierClassRun {
     pub(crate) cells: Arc<HierCells>,
     pub(crate) class: u32,
+    pub(crate) run: u32,
+    /// A batch already ran this class this settle, so its own cell skips it.
+    pub(crate) pre_ran: std::cell::Cell<bool>,
     /// The instance's partition of the dataflow cell layout.
     pub(crate) partition: u32,
     pub(crate) ff: *const u8,
@@ -909,50 +910,45 @@ impl HierClassRun {
 }
 
 thread_local! {
-    /// The class runs of the `Ir` whose dataflow cells are running, by
-    /// `(class, instance comb delta)`.
-    static ACTIVE: std::cell::Cell<*const HashMap<RunKey, HierClassRun>> =
-        const { std::cell::Cell::new(std::ptr::null()) };
+    /// The class runs of the `Ir` whose dataflow cells are running.
+    static ACTIVE: std::cell::Cell<*const Runs> = const { std::cell::Cell::new(std::ptr::null()) };
+    /// The runs whose `pre_ran` a batch set this settle.
+    static PRE_RAN: std::cell::RefCell<Vec<*const HierClassRun>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Make `runs` the class runs compiled cells reach through
 /// `veryl_aot_hier_run` until the next call.
-pub(crate) fn set_active(runs: *const HashMap<RunKey, HierClassRun>) {
+pub(crate) fn set_active(runs: *const Runs) {
     ACTIVE.with(|a| a.set(runs));
 }
 
 /// Callback a compiled dataflow cell makes to run one class of one instance.
 ///
 /// # Safety
-/// The runs `set_active` installed must be alive and hold the class.
-pub unsafe extern "C" fn veryl_aot_hier_run(class: u32, comb_delta: i64, template: u64) {
-    let key = (class, comb_delta as isize, template);
-    if PRE_RAN.with(|p| {
-        let mut p = p.borrow_mut();
-        !p.is_empty() && p.remove(&key)
-    }) {
-        return;
-    }
+/// The runs `set_active` installed must be alive and hold `run`.
+pub unsafe extern "C" fn veryl_aot_hier_run(run: u32) {
     let runs = ACTIVE.with(|a| a.get());
     debug_assert!(!runs.is_null(), "a hierarchy class ran outside a settle");
     let runs = unsafe { &*runs };
-    let run = &runs[&key];
+    let run = runs[run as usize]
+        .as_ref()
+        .expect("a compiled call names a class run the module lacks");
+    if run.pre_ran.replace(false) {
+        return;
+    }
     unsafe { run.run() };
-}
-
-thread_local! {
-    /// Class runs a batch already ran this settle, which their own cells skip.
-    static PRE_RAN: std::cell::RefCell<HashSet<RunKey>> =
-        std::cell::RefCell::new(HashSet::default());
 }
 
 /// Forget the batch runs of the previous settle.
 pub(crate) fn begin_settle() {
     PRE_RAN.with(|p| {
         let mut p = p.borrow_mut();
-        if !p.is_empty() {
-            p.clear();
+        for &r in p.iter() {
+            // SAFETY: the settle that ran the batch keeps its runs alive.
+            unsafe { (*r).pre_ran.set(false) };
         }
+        p.clear();
     });
 }
 
@@ -1079,71 +1075,72 @@ unsafe fn work(b: &Batch) {
 ///
 /// # Safety
 /// As `veryl_aot_hier_run`, for each of the runs.
-pub unsafe extern "C" fn veryl_aot_hier_run_batch(
-    n: u32,
-    classes: *const u32,
-    deltas: *const i64,
-    templates: *const u64,
-) {
+pub unsafe extern "C" fn veryl_aot_hier_run_batch(n: u32, run_ids: *const u32) {
     use std::sync::atomic::Ordering;
-    let runs = ACTIVE.with(|a| a.get());
-    let runs = unsafe { &*runs };
-    let keys: Vec<RunKey> = unsafe {
-        let (classes, deltas, templates) = (
-            std::slice::from_raw_parts(classes, n as usize),
-            std::slice::from_raw_parts(deltas, n as usize),
-            std::slice::from_raw_parts(templates, n as usize),
-        );
-        (0..n as usize)
-            .map(|i| (classes[i], deltas[i] as isize, templates[i]))
-            .collect()
-    };
-    // Only AOT-C cells keep off the shared write log; any other run goes
-    // here, on this thread.
-    let (parallel, serial): (Vec<&RunKey>, Vec<&RunKey>) =
-        keys.iter().partition(|k| runs[*k].cells.aot_landed());
-    for k in serial {
-        unsafe { runs[k].run() };
+    let all = unsafe { &*ACTIVE.with(|a| a.get()) };
+    let ids = unsafe { std::slice::from_raw_parts(run_ids, n as usize) };
+    let mut parallel = BATCH_RUNS.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    parallel.clear();
+    for &id in ids {
+        let run = all[id as usize]
+            .as_ref()
+            .expect("a compiled call names a class run the module lacks");
+        // Only AOT-C cells keep off the shared write log; any other run goes
+        // here, on this thread.
+        if run.cells.aot_landed() {
+            parallel.push(run as *const HierClassRun);
+        } else {
+            unsafe { run.run() };
+        }
     }
     let batch = Batch {
-        runs: parallel
-            .into_iter()
-            .map(|k| &runs[k] as *const HierClassRun)
-            .collect(),
+        runs: parallel,
         next: std::sync::atomic::AtomicUsize::new(0),
         done: std::sync::atomic::AtomicUsize::new(0),
         force: FORCE_ALL.with(|f| f.get()),
     };
     if hier_threads() < 2 {
         unsafe { work(&batch) };
-        return pre_ran(keys);
-    }
-    let pool = pool();
-    match pool.busy.try_lock() {
-        Ok(_guard) => {
-            pool.batch
-                .store(&batch as *const Batch as *mut Batch, Ordering::SeqCst);
-            pool.generation.fetch_add(1, Ordering::SeqCst);
-            if pool.sleeping.load(Ordering::SeqCst) > 0 {
-                let _guard = pool.sleep.lock().unwrap();
-                pool.wake.notify_all();
+    } else {
+        let pool = pool();
+        match pool.busy.try_lock() {
+            Ok(_guard) => {
+                pool.batch
+                    .store(&batch as *const Batch as *mut Batch, Ordering::SeqCst);
+                pool.generation.fetch_add(1, Ordering::SeqCst);
+                if pool.sleeping.load(Ordering::SeqCst) > 0 {
+                    let _guard = pool.sleep.lock().unwrap();
+                    pool.wake.notify_all();
+                }
+                unsafe { work(&batch) };
+                while batch.done.load(Ordering::Acquire) < batch.runs.len() {
+                    std::hint::spin_loop();
+                }
+                pool.batch.store(std::ptr::null_mut(), Ordering::SeqCst);
+                while pool.active.load(Ordering::SeqCst) > 0 {
+                    std::hint::spin_loop();
+                }
             }
-            unsafe { work(&batch) };
-            while batch.done.load(Ordering::Acquire) < batch.runs.len() {
-                std::hint::spin_loop();
-            }
-            pool.batch.store(std::ptr::null_mut(), Ordering::SeqCst);
-            while pool.active.load(Ordering::SeqCst) > 0 {
-                std::hint::spin_loop();
-            }
+            Err(_) => unsafe { work(&batch) },
         }
-        Err(_) => unsafe { work(&batch) },
     }
-    pre_ran(keys);
+    PRE_RAN.with(|p| {
+        let mut p = p.borrow_mut();
+        for &id in ids {
+            let run = all[id as usize]
+                .as_ref()
+                .expect("a compiled call names a class run the module lacks");
+            run.pre_ran.set(true);
+            p.push(run as *const HierClassRun);
+        }
+    });
+    BATCH_RUNS.with(|b| *b.borrow_mut() = batch.runs);
 }
 
-fn pre_ran(keys: Vec<RunKey>) {
-    PRE_RAN.with(|p| p.borrow_mut().extend(keys));
+thread_local! {
+    /// The run list of the last batch, kept for its allocation.
+    static BATCH_RUNS: std::cell::RefCell<Vec<*const HierClassRun>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The partition of each `(cells, instance comb delta)`.

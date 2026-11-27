@@ -1451,6 +1451,7 @@ pub(crate) fn inject(
         }
     };
     let t1 = std::time::Instant::now();
+    let mut runs = 0u32;
     for (((g, (class_of, order)), compiled), cells) in groups
         .iter()
         .zip(partitions)
@@ -1458,7 +1459,7 @@ pub(crate) fn inject(
         .zip(with_cells)
     {
         if let Some(cells) = cells {
-            emit_cells(unified, g, &class_of, &order, &cells);
+            emit_cells(unified, g, &class_of, &order, &cells, &mut runs);
             continue;
         }
         if diag() {
@@ -1574,6 +1575,7 @@ fn emit_cells(
     class_of: &[u32],
     order: &[u32],
     cells: &Arc<crate::ir::hier_cells::HierCells>,
+    runs: &mut u32,
 ) {
     let classes = order.len();
     let mut per_class: Vec<Vec<&ProtoStatement>> = vec![Vec::new(); classes];
@@ -1646,6 +1648,10 @@ fn emit_cells(
                     cells: Arc::clone(cells),
                     class: c,
                     partition: u32::MAX,
+                    run: {
+                        *runs += 1;
+                        *runs - 1
+                    },
                     summary: Arc::clone(&summaries[c as usize]),
                     region: g.template.comb_region,
                     class_stmts: Arc::clone(&class_stmts[c as usize]),
