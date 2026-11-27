@@ -545,6 +545,11 @@ pub(crate) fn resolve_expr(
                 resolve_expr(&mut d.index_expr, context, children)?;
             }
         }
+        ProtoExpression::StringConcat { elements, .. } => {
+            for (x, _) in elements {
+                resolve_expr(x, context, children)?;
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             resolve_expr(x, context, children)?;
             resolve_expr(y, context, children)?;

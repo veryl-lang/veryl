@@ -189,6 +189,11 @@ fn expr_reads(e: &ProtoExpression, out: &mut Vec<Range>) {
                 expr_reads(&d.index_expr, out);
             }
         }
+        ProtoExpression::StringConcat { elements, .. } => {
+            for (x, _) in elements {
+                expr_reads(x, out);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             expr_reads(x, out);
             expr_reads(y, out);

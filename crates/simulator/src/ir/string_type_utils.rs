@@ -140,6 +140,32 @@ pub fn to_handle_expr(
     }
 }
 
+/// A concatenation of strings as the handle of its texts concatenated.
+pub fn conv_concat(
+    context: &mut Context,
+    items: &[(air::Expression, Option<air::Expression>)],
+) -> Result<ProtoExpression, SimulatorError> {
+    let mut elements = Vec::with_capacity(items.len());
+    for (x, repeat) in items {
+        let handle = ProtoExpression::conv_for(context, x, &x.comptime().r#type)?;
+        let repeat = match repeat {
+            Some(repeat) => repeat
+                .eval_value(&mut context.scope().analyzer_context)
+                .and_then(|x| x.to_usize())
+                .ok_or_else(|| SimulatorError::unsupported_description(&repeat.token_range()))?,
+            None => 1,
+        };
+        elements.push((Box::new(handle), repeat));
+    }
+    Ok(ProtoExpression::StringConcat {
+        elements,
+        expr_context: ExpressionContext {
+            width: string_pool::HANDLE_WIDTH,
+            signed: false,
+        },
+    })
+}
+
 /// `handle`, a read of a `string`'s handle, moved into a destination: a
 /// `string` takes the handle; anything else reads the bytes of its text at
 /// `string_width`, an error naming `operation` when that is not known before

@@ -4870,6 +4870,20 @@ fn conv_assign_statements(
         "a bit operation",
         &dst.token,
     )?;
+    if remaining_array_shape(context, &dst.id, &dst.index).is_none() {
+        let expr = ProtoExpression::conv_for(context, &src.expr, &dst.comptime.r#type)?;
+        let mut result = vec![ProtoStatement::conv_local_assignment(
+            context,
+            src,
+            dst,
+            Some(expr),
+        )?];
+        if context.in_initial {
+            append_ff_next_copies(&mut result);
+        }
+        return Ok(result);
+    }
+    // A whole array of `string`s, copied element by element.
     let mut x = src.clone();
     x.expr = string_type_utils::to_handle_expr(context, &src.expr)?;
     x.width = Some(crate::string_pool::HANDLE_WIDTH);

@@ -198,6 +198,11 @@ fn expr_nodes_capped(root: &ProtoExpression, cap: usize) -> usize {
                     stack.push(&d.index_expr);
                 }
             }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    stack.push(x);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 stack.push(x);
                 stack.push(y);
@@ -1372,7 +1377,7 @@ fn sel_width(e: &ProtoExpression) -> Option<usize> {
         | PE::Concatenation { width, .. }
         | PE::Ternary { width, .. }
         | PE::DynamicVariable { width, .. } => *width,
-        PE::HierVariable(_) | PE::StringBytes { .. } => return None,
+        PE::HierVariable(_) | PE::StringBytes { .. } | PE::StringConcat { .. } => return None,
     })
 }
 
@@ -1708,6 +1713,12 @@ fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &IMap) -> Option<(
             replace_dst_reads(x, dst, base)?;
             if let Some(d) = dynamic_select {
                 replace_dst_reads(&mut d.index_expr, dst, base)?;
+            }
+            Some(())
+        }
+        PE::StringConcat { elements, .. } => {
+            for (x, _) in elements {
+                replace_dst_reads(x, dst, base)?;
             }
             Some(())
         }

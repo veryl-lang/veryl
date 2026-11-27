@@ -331,6 +331,11 @@ pub(crate) fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isi
                     expr(&d.index_expr, out);
                 }
             }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    expr(x, out);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 expr(x, out);
                 expr(y, out);

@@ -490,7 +490,8 @@ fn value_range(e: &ProtoExpression) -> Option<ValueRange> {
         | ProtoExpression::Concatenation { expr_context, .. }
         | ProtoExpression::Ternary { expr_context, .. }
         | ProtoExpression::DynamicVariable { expr_context, .. }
-        | ProtoExpression::StringBytes { expr_context, .. } => expr_context.signed,
+        | ProtoExpression::StringBytes { expr_context, .. }
+        | ProtoExpression::StringConcat { expr_context, .. } => expr_context.signed,
         ProtoExpression::HierVariable(_) => true,
     };
     let boolean = Some((0, 1));
@@ -656,6 +657,9 @@ fn expr_read_bits(e: &ProtoExpression, out: &mut Reads) -> bool {
                 && dynamic_select
                     .as_ref()
                     .is_none_or(|d| expr_read_bits(&d.index_expr, out))
+        }
+        ProtoExpression::StringConcat { elements, .. } => {
+            elements.iter().all(|(x, _)| expr_read_bits(x, out))
         }
         ProtoExpression::Binary { x, y, .. } => expr_read_bits(x, out) && expr_read_bits(y, out),
         ProtoExpression::Ternary {
