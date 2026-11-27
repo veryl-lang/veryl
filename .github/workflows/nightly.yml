@@ -10,6 +10,9 @@ permissions:
 
 env:
   CHANNEL: -nightly
+  # rust-toolchain exported these two to the steps that followed it
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
 
 jobs:
   build:
@@ -23,9 +26,10 @@ jobs:
 
     steps:
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: ${{ matrix.rust }}
+      shell: bash
+      run: |
+        rustup toolchain install ${{ matrix.rust }} --profile minimal --no-self-update
+        rustup default ${{ matrix.rust }}
     - name: Checkout
       uses: actions/checkout@v6
       with:

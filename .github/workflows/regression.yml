@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # rust-toolchain exported these two to the steps that followed it
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
 jobs:
   build:
     strategy:
@@ -69,12 +74,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path $tmp | Out-Null
           "TMP=$tmp" >> $env:GITHUB_ENV
           "TEMP=$tmp" >> $env:GITHUB_ENV
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.rust }}
-          # wasm32 std lets the wasm component transport tests build their
-          # guest fixture; without it they skip silently.
-          targets: ${{ matrix.target }}, wasm32-unknown-unknown
+      # wasm32 std lets the wasm component transport tests build their
+      # guest fixture; without it they skip silently.
+      - name: Setup Rust
+        shell: bash
+        run: |
+          rustup toolchain install ${{ matrix.rust }} --profile minimal --no-self-update \
+            --target ${{ matrix.target }} --target wasm32-unknown-unknown
+          rustup default ${{ matrix.rust }}
       # rust-cache caches ~/.cargo and target/ (dependency compilation) so cargo
       # skips deps; sccache (content-addressed) then serves the workspace crates,
       # which rust-cache alone cannot reuse across runs (cargo's mtime fingerprints
@@ -177,9 +184,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+      - name: Setup Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --component rustfmt
+          rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: gen_sv
@@ -195,9 +203,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+      - name: Setup Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --component rustfmt
+          rustup default stable
       - name: Run rustfmt
         run: cargo fmt -- --check
 
@@ -207,9 +216,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - name: Setup Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --component clippy
+          rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy
@@ -235,7 +245,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
       # Same rust-cache + sccache split as the build job above (deps via
       # rust-cache; workspace crates via sccache, under a distinct -sccache key).
       - uses: Swatinem/rust-cache@v2
@@ -358,9 +371,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Setup Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --target wasm32-unknown-unknown
+          rustup default stable
       - uses: Swatinem/rust-cache@v2
         continue-on-error: true
         with:
@@ -376,7 +390,10 @@ jobs:
         with:
           submodules: 'true'
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
       - uses: Swatinem/rust-cache@v2
         continue-on-error: true
         with:
