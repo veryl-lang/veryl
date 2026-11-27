@@ -6618,7 +6618,11 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
             if out.status.success() {
                 // A racing peer publishes an equally valid file (same
                 // source), so an overwrite either way is fine.
-                let _ = fs::rename(&tmp_c, &c_path);
+                if keep_source() {
+                    let _ = fs::rename(&tmp_c, &c_path);
+                } else {
+                    let _ = fs::remove_file(&tmp_c);
+                }
                 fs::rename(&tmp_so, &so_path)
                     .map_err(|e| format!("rename {}: {}", tmp_so.display(), e))?;
             }
@@ -6797,13 +6801,13 @@ fn stage_compile(
     let tmp_c = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.c"));
     let tmp_so = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so"));
     // Where the compiler's own output goes: removed on success, left
-    // beside the kept `.c` on failure.
+    // beside the temp `.c` on failure.
     let log = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log"));
     fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
 
     // Split units are compiled in parallel and linked; `tmp_c` above stays
-    // the source that gets published, so the cache entry keeps naming the
-    // whole module however it was built.
+    // the source that gets kept, so the cache entry keeps naming the whole
+    // module however it was built.
     let unit_paths: Vec<PathBuf> = split_translation_units(src, tu_split_count(src))
         .map(|units| {
             units
@@ -6823,7 +6827,7 @@ fn stage_compile(
         cc: key.cc,
         tmp_so: &tmp_so,
         tmp_c: &tmp_c,
-        published_c: &c_path,
+        published_c: keep_source().then_some(c_path.as_path()),
         published_so: &so_path,
         lock,
         log: &log,
@@ -6946,11 +6950,11 @@ pub fn detach_pending_compiles() {}
 /// that argument list must agree, or a compiler flag silently lands in the
 /// slot after it and never reaches the compile.
 #[cfg(unix)]
-const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; shift 8; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; shift 8; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; if "$cc" "$@" -o "$tso" "$tc"; then if [ -n "$pc" ]; then mv -f "$tc" "$pc"; else rm -f "$tc"; fi; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
 
 /// [`COMPILE_SCRIPT`] for a source split into units: compile them at once,
 /// link, publish.  Same contract otherwise — one shell owns the publish and
-/// the lock, and the whole source (`$tc`) is what lands beside the `.so`.
+/// the lock, and the whole source (`$tc`) is what is kept beside the `.so`.
 ///
 /// The compile flags arrive as one word-split parameter because the unit paths
 /// take the variadic slot.  `-shared` belongs to the link, so the caller sends
@@ -6960,7 +6964,16 @@ const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; l
 /// invocation compiles them in sequence, which is the latency this exists to
 /// remove.
 #[cfg(unix)]
-const SPLIT_COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; cf="$9"; shift 9; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; ps=""; os=""; for u in "$@"; do "$cc" $cf -c "$u" -o "$u.o" & ps="$ps $!"; os="$os $u.o"; done; ok=1; for p in $ps; do wait "$p" || ok=0; done; if [ "$ok" = 1 ] && "$cc" -shared -fPIC -o "$tso" $os; then mv -f "$tc" "$pc"; rm -f "$lg" "$@" $os; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso" $os; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+const SPLIT_COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; cf="$9"; shift 9; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; ps=""; os=""; for u in "$@"; do "$cc" $cf -c "$u" -o "$u.o" & ps="$ps $!"; os="$os $u.o"; done; ok=1; for p in $ps; do wait "$p" || ok=0; done; if [ "$ok" = 1 ] && "$cc" -shared -fPIC -o "$tso" $os; then if [ -n "$pc" ]; then mv -f "$tc" "$pc"; else rm -f "$tc"; fi; rm -f "$lg" "$@" $os; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso" $os; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+
+/// Whether a successful compile keeps its C source beside the `.so`
+/// (`VERYL_AOT_C_KEEP_SOURCE=1`).  Off by default: nothing reads it back, and
+/// it is several times the size of the object.  A failed compile keeps its
+/// source regardless.
+fn keep_source() -> bool {
+    static KEEP: OnceLock<bool> = OnceLock::new();
+    *KEEP.get_or_init(|| std::env::var("VERYL_AOT_C_KEEP_SOURCE").as_deref() == Ok("1"))
+}
 
 /// Address-space ceiling for the compiler, in KiB (`VERYL_AOT_C_MAX_MEM_MB`
 /// gives it in MB; 0 disables).  The compile is detached on purpose — it has
@@ -6981,7 +6994,8 @@ struct CompileScriptPaths<'a> {
     cc: &'a str,
     tmp_so: &'a Path,
     tmp_c: &'a Path,
-    published_c: &'a Path,
+    /// `None` drops the source once the compile succeeds.
+    published_c: Option<&'a Path>,
     published_so: &'a Path,
     lock: Option<&'a Path>,
     log: &'a Path,
@@ -6996,7 +7010,9 @@ fn compile_script_args(p: &CompileScriptPaths, flags: &[String]) -> Vec<std::ffi
         p.cc.into(),
         p.tmp_so.as_os_str().to_os_string(),
         p.tmp_c.as_os_str().to_os_string(),
-        p.published_c.as_os_str().to_os_string(),
+        p.published_c
+            .map(|q| q.as_os_str().to_os_string())
+            .unwrap_or_default(),
         p.published_so.as_os_str().to_os_string(),
         p.lock
             .map(|q| q.as_os_str().to_os_string())
@@ -7029,7 +7045,9 @@ fn split_script_args(
         p.cc.into(),
         p.tmp_so.as_os_str().to_os_string(),
         p.tmp_c.as_os_str().to_os_string(),
-        p.published_c.as_os_str().to_os_string(),
+        p.published_c
+            .map(|q| q.as_os_str().to_os_string())
+            .unwrap_or_default(),
         p.published_so.as_os_str().to_os_string(),
         p.lock
             .map(|q| q.as_os_str().to_os_string())
@@ -17138,7 +17156,7 @@ mod tests {
                     cc: &fake_cc.to_string_lossy(),
                     tmp_so: &tmp_so,
                     tmp_c: &tmp_c,
-                    published_c: &c_path,
+                    published_c: Some(&c_path),
                     published_so: &so_path,
                     lock: Some(&lock),
                     log: &log,
@@ -17159,6 +17177,72 @@ mod tests {
         assert!(c_path.exists(), "the source must publish beside it");
         assert!(!log.exists(), "a successful compile leaves no log behind");
         assert!(!lock.exists(), "the script must release the lock");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn compile_scripts_drop_the_source_unless_kept() {
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_drop_c_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let fake_cc = tmp.join("touch_cc.sh");
+        write_executable(
+            &fake_cc,
+            "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
+        );
+        let cc = fake_cc.to_string_lossy();
+        let flags = ["-O3".to_string(), "-shared".to_string()];
+
+        for split in [false, true] {
+            let tmp_c = tmp.join("t.c");
+            let tmp_so = tmp.join("t.so");
+            let so_path = tmp.join("p.so");
+            let log = tmp.join("p.log");
+            fs::write(&tmp_c, b"").unwrap();
+            let units: Vec<PathBuf> = if split {
+                (0..2).map(|i| tmp.join(format!("t.u{i}.c"))).collect()
+            } else {
+                Vec::new()
+            };
+            for u in &units {
+                fs::write(u, b"").unwrap();
+            }
+            let paths = CompileScriptPaths {
+                cc: &cc,
+                tmp_so: &tmp_so,
+                tmp_c: &tmp_c,
+                published_c: None,
+                published_so: &so_path,
+                lock: None,
+                log: &log,
+            };
+            let (script, args) = if split {
+                (
+                    SPLIT_COMPILE_SCRIPT,
+                    split_script_args(&paths, &flags, &units),
+                )
+            } else {
+                (COMPILE_SCRIPT, compile_script_args(&paths, &flags))
+            };
+            let status = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "split={split}: the script must succeed");
+            assert!(so_path.exists(), "split={split}: the artifact must publish");
+            assert!(!tmp_c.exists(), "split={split}: the source must be dropped");
+            let left: Vec<_> = fs::read_dir(&tmp)
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".c") || n.ends_with(".o"))
+                .collect();
+            assert!(left.is_empty(), "split={split}: left behind {left:?}");
+            fs::remove_file(&so_path).unwrap();
+        }
         let _ = fs::remove_dir_all(&tmp);
     }
 
