@@ -4549,3 +4549,241 @@ fn started_clock_runs_beside_a_clock_waited_on() {
         );
     }
 }
+
+// `&&`, `||` and `?:` must not run the function calls of the operand they skip.
+#[test]
+fn tb_short_circuit_skips_calls() {
+    let code = r#"
+    #[test(test_short_circuit)]
+    module test_short_circuit {
+        var cnt : u32  ;
+        var flag: bbool;
+        var x   : u32  ;
+
+        function f() -> bbool {
+            cnt += 1;
+            return true;
+        }
+
+        initial {
+            flag = false;
+
+            cnt = 0;
+            if flag && f() { x = 1; }
+            $assert(cnt == 0, "&& ran its rhs: %d", cnt);
+
+            cnt = 0;
+            if !flag || f() { x = 2; }
+            $assert(cnt == 0, "|| ran its rhs: %d", cnt);
+
+            cnt = 0;
+            x   = if flag ? f() : 0;
+            $assert(cnt == 0, "?: ran the untaken true arm: %d", cnt);
+
+            cnt = 0;
+            x   = if !flag ? 0 : f();
+            $assert(cnt == 0, "?: ran the untaken false arm: %d", cnt);
+
+            // nested: the outer lhs is false, so the whole rhs is skipped
+            cnt = 0;
+            if flag && (!flag || f()) { x = 3; }
+            $assert(cnt == 0, "nested ran: %d", cnt);
+
+            // ternary inside &&
+            cnt = 0;
+            if flag && (if flag ? f() : f()) { x = 4; }
+            $assert(cnt == 0, "ternary in && ran: %d", cnt);
+
+            // the taken side still runs, exactly once
+            cnt = 0;
+            if !flag && f() { x = 5; }
+            $assert(cnt == 1 && x == 5, "&& taken: cnt=%d x=%d", cnt, x);
+
+            cnt = 0;
+            if flag || f() { x = 6; }
+            $assert(cnt == 1 && x == 6, "|| taken: cnt=%d x=%d", cnt, x);
+
+            cnt = 0;
+            x   = if flag ? 0 : f() as u32 + 7;
+            $assert(cnt == 1 && x == 8, "?: taken: cnt=%d x=%d", cnt, x);
+
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_short_circuit") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+// A call on the taken side that writes the guard must not change which side
+// was taken, nor the result.
+#[test]
+fn tb_short_circuit_guard_is_read_once() {
+    let code = r#"
+    #[test(test_short_circuit)]
+    module test_short_circuit {
+        var flag: bbool;
+        var n_yes: u32  ;
+        var n_no : u32  ;
+        var x    : u32  ;
+        var b    : bbool;
+
+        function yes() -> u32 {
+            flag  =  false;
+            n_yes += 1;
+            return 1;
+        }
+
+        function no() -> u32 {
+            n_no += 1;
+            return 2;
+        }
+
+        function clear() -> bbool {
+            flag = false;
+            return true;
+        }
+
+        initial {
+            flag  = true;
+            n_yes = 0;
+            n_no  = 0;
+            x     = if flag ? yes() : no();
+            $assert(x == 1 && n_yes == 1 && n_no == 0, "?: x=%d yes=%d no=%d", x, n_yes, n_no);
+
+            flag = true;
+            b    = flag && clear();
+            $assert(b, "&& saw the guard its rhs cleared");
+
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_short_circuit") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+// An X left operand decides neither `&&` nor `||`, so both run their right
+// operand.
+#[test]
+fn tb_short_circuit_unknown_lhs_runs_rhs() {
+    let code = r#"
+    #[test(test_short_circuit)]
+    module test_short_circuit {
+        var c  : logic;
+        var cnt: u32  ;
+        var x  : logic;
+
+        function f() -> logic {
+            cnt += 1;
+            return 0;
+        }
+
+        initial {
+            c   = 'x;
+            cnt = 0;
+            x   = c && f();
+            $assert(cnt == 1 && x == 0, "&& cnt=%d x=%b", cnt, x);
+
+            cnt = 0;
+            x   = c || f();
+            $assert(cnt == 1, "|| cnt=%d", cnt);
+
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all().into_iter().filter(|c| c.use_4state) {
+        let ir = match analyze_top(code, &config, "test_short_circuit") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+// Calls guarded by a short-circuit in a combinational assignment follow
+// their guard as it changes.
+#[test]
+fn tb_short_circuit_in_comb() {
+    let code = r#"
+    #[test(test_short_circuit)]
+    module test_short_circuit {
+        inst clk: $tb::clock_gen;
+        var c: logic   ;
+        var a: logic<8>;
+        var b: logic<8>;
+        var o: logic<8>;
+
+        function inc(v: input logic<8>) -> logic<8> {
+            return v + 1;
+        }
+
+        function dec(v: input logic<8>) -> logic<8> {
+            return v - 1;
+        }
+
+        assign o = if c ? inc(a) : dec(b);
+
+        initial {
+            a = 10;
+            b = 20;
+            c = 1;
+            clk.next(1);
+            $assert(o == 11, "o=%d", o);
+            c = 0;
+            clk.next(1);
+            $assert(o == 19, "o=%d", o);
+            a = 30;
+            b = 40;
+            clk.next(1);
+            $assert(o == 39, "o=%d", o);
+            c = 1;
+            clk.next(1);
+            $assert(o == 31, "o=%d", o);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_short_circuit") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
