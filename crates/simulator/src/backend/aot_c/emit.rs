@@ -6100,24 +6100,35 @@ fn gc_age() -> Option<Duration> {
     (hours != 0).then(|| Duration::from_secs(hours * 3600))
 }
 
-/// A compile's own temp files, `veryl_aot_<hash>.<pid>.<n>.<ext>`; published
+/// A compile's own temp files, `veryl_aot_<hash>.<pid>.<n>.<ext>`, and the
+/// split units it compiles, `….u<i>.c` and their `….u<i>.c.o`; published
 /// artifacts carry no such infix.  A failed compile's `.log` is left alone:
 /// it is the only record of why it failed.
 fn is_temp_artifact(name: &str) -> bool {
-    let mut parts = name.split('.');
-    let (Some(stem), Some(pid), Some(ctr), Some(ext), None) = (
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-    ) else {
+    let mut parts = name.splitn(4, '.');
+    let (Some(stem), Some(pid), Some(ctr), Some(rest)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
         return false;
+    };
+    let is_unit = |rest: &str| {
+        let unit = rest
+            .strip_suffix(".c.o")
+            .or_else(|| rest.strip_suffix(".c"));
+        unit.and_then(|u| u.strip_prefix('u'))
+            .is_some_and(|i| !i.is_empty() && i.bytes().all(|b| b.is_ascii_digit()))
     };
     stem.starts_with("veryl_aot_")
         && pid.parse::<u64>().is_ok()
         && ctr.parse::<u64>().is_ok()
-        && matches!(ext, "c" | "so" | "job" | "list")
+        && (matches!(rest, "c" | "so" | "job" | "list") || is_unit(rest))
+}
+
+/// A compile lock, `veryl_aot_<hash>.lock`.  Its owner releases it when the
+/// compile ends, so one past the sweep cutoff belongs to a compile that died.
+fn is_compile_lock(name: &str) -> bool {
+    name.strip_suffix(".lock")
+        .is_some_and(|stem| stem.starts_with("veryl_aot_") && !stem.contains('.'))
 }
 
 fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
@@ -6127,7 +6138,7 @@ fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !is_temp_artifact(name) {
+        if !is_temp_artifact(name) && !is_compile_lock(name) {
             continue;
         }
         let stale = entry
@@ -6140,7 +6151,7 @@ fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
     }
 }
 
-/// Sweep the temp files of compiles that never published.
+/// Sweep the temp files and locks of compiles that never published.
 ///
 /// The compiler is detached so it can publish after the run exits; nothing
 /// observes it dying either, so its temp files would stay forever.  Their
@@ -17513,12 +17524,23 @@ mod tests {
         let log = dir.join("veryl_aot_dead.123.0.log");
         let stale = dir.join("veryl_aot_dead.123.0.c");
         let stale_so = dir.join("veryl_aot_dead.123.0.so");
+        let stale_unit = dir.join("veryl_aot_dead.123.0.u1.c");
+        let stale_obj = dir.join("veryl_aot_dead.123.0.u1.c.o");
+        let stale_lock = dir.join("veryl_aot_dead.lock");
         let fresh = dir.join("veryl_aot_beef.456.1.c");
-        for f in [&published, &published_so, &log, &stale, &stale_so, &fresh] {
+        let fresh_lock = dir.join("veryl_aot_beef.lock");
+        let stale_files = [&stale, &stale_so, &stale_unit, &stale_obj, &stale_lock];
+        for f in [&published, &published_so, &log, &fresh, &fresh_lock]
+            .into_iter()
+            .chain(stale_files)
+        {
             fs::write(f, "x").unwrap();
         }
         let now = std::time::SystemTime::now();
-        for f in [&published, &published_so, &log, &stale, &stale_so] {
+        for f in [&published, &published_so, &log]
+            .into_iter()
+            .chain(stale_files)
+        {
             fs::File::options()
                 .write(true)
                 .open(f)
@@ -17536,7 +17558,10 @@ mod tests {
             "a failed compile's log is the only record of why"
         );
         assert!(fresh.exists(), "a compile that may still be running");
-        assert!(!stale.exists() && !stale_so.exists());
+        assert!(fresh_lock.exists(), "a lock a compile may still hold");
+        for f in stale_files {
+            assert!(!f.exists(), "{} must be swept", f.display());
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
