@@ -152,6 +152,7 @@ fn write_return(value: Value, ret: &mut sys::VrlValue) -> crate::Result<()> {
             Ok(())
         }
         Value::Str(_) => crate::bail!("string method return values are not supported"),
+        Value::Ref { .. } => crate::bail!("reference method return values are not supported"),
     }
 }
 

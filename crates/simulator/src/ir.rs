@@ -43,7 +43,7 @@ pub use opt::field_unfuse::force_disable as force_disable_field_unfuse;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use statement::flat_stmts;
 pub use statement::{
-    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
+    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg, ComponentRef,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
     ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoHierEvents,
     ProtoIfStatement, ProtoRuntimeArgOp, ProtoStatement, ProtoStatementBlock, ProtoStatements,

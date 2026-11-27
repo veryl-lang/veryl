@@ -125,6 +125,37 @@ pub struct ManifestParam {
     pub doc: Option<String>,
 }
 
+/// The kind of a method argument that takes a reference to design
+/// variables instead of a value.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ManifestRefKind {
+    /// A variable the component only reads.
+    Input,
+    /// A variable the component drives.
+    Output,
+    /// A clock that fires the component's `on_clock`.
+    Clock,
+    /// A reset that fires the component's `on_reset`.
+    Reset,
+    /// A modport of any interface.
+    Modport,
+}
+
+impl ManifestParam {
+    /// The reference kind of a method argument, or `None` for a value
+    /// argument.
+    pub fn ref_kind(&self) -> Option<ManifestRefKind> {
+        match self.ty.as_str() {
+            "input" => Some(ManifestRefKind::Input),
+            "output" => Some(ManifestRefKind::Output),
+            "clock" => Some(ManifestRefKind::Clock),
+            "reset" => Some(ManifestRefKind::Reset),
+            "modport" => Some(ManifestRefKind::Modport),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ManifestMethod {
     pub name: String,

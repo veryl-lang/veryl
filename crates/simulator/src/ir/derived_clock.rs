@@ -77,6 +77,10 @@ pub struct DerivedClockSchedule {
     /// A derived reset's comb reads a master input clock, so its level
     /// differs between the master's two phases.
     pub resets_read_master: bool,
+    /// `(copy, source)` for a reset that only copies another reset of the
+    /// same polarity, such as a testbench reset assigned to an interface
+    /// member: a component bound to the copy hears the source's events.
+    pub reset_aliases: Vec<(VarId, VarId)>,
 }
 
 impl DerivedClockSchedule {
@@ -91,6 +95,15 @@ impl DerivedClockSchedule {
             .find(|(copy, _)| *copy == clock)
             .map_or(clock, |(_, source)| *source)
     }
+
+    /// The reset whose events `reset` hears: the start of its copy chain,
+    /// else itself.
+    pub fn reset_source_of(&self, reset: VarId) -> VarId {
+        self.reset_aliases
+            .iter()
+            .find(|(copy, _)| *copy == reset)
+            .map_or(reset, |(_, source)| *source)
+    }
 }
 
 pub fn build_schedule(
@@ -99,28 +112,7 @@ pub fn build_schedule(
     input_clock_offsets: &HashMap<VarOffset, VarId>,
     negedge_inputs: &HashSet<VarId>,
 ) -> DerivedClockSchedule {
-    // FF outputs go through the event/commit path.  Every writer, not the
-    // last: an offset written by sibling conditional arms has one fragment
-    // per arm, and keeping only the last drops the others from the closure.
-    let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
-    let mut scratch_in: Vec<VarOffset> = Vec::new();
-    let mut scratch_out: Vec<VarOffset> = Vec::new();
-    for (i, stmt) in pre_jit_stmts.iter().enumerate() {
-        scratch_in.clear();
-        scratch_out.clear();
-        stmt.gather_variable_offsets(&mut scratch_in, &mut scratch_out);
-        for off in &scratch_out {
-            if !off.is_ff() {
-                // A statement holding sibling arms gathers its output once per
-                // arm, and only WHICH statements to run matters below.  Its
-                // pushes are adjacent, so the tail is enough to dedupe.
-                let writers = output_to_writer.entry(*off).or_default();
-                if writers.last() != Some(&i) {
-                    writers.push(i);
-                }
-            }
-        }
-    }
+    let output_to_writer = writers_of(pre_jit_stmts);
 
     // Skip nets with no writer: testbench-driven (e.g. `inst clk:
     // $tb::clock_gen`, `inst rst: $tb::reset_gen`) nets have their edges
@@ -224,6 +216,7 @@ pub fn build_schedule(
         master_input_clocks,
         aliases,
         resets_read_master,
+        reset_aliases: Vec::new(),
     }
 }
 
@@ -418,6 +411,56 @@ pub(crate) fn master_cone(
         })
         .collect();
     Some((stmts, marks))
+}
+
+/// `(copy, source)` for each reset of `resets` (by offset) whose value only
+/// copies another of them, the start of its copy chain: a testbench reset
+/// assigned to an interface member, for example.
+pub fn reset_aliases(
+    resets: &HashMap<VarOffset, VarId>,
+    pre_jit_stmts: &[ProtoStatement],
+) -> Vec<(VarId, VarId)> {
+    if resets.len() < 2 {
+        return Vec::new();
+    }
+    let output_to_writer = writers_of(pre_jit_stmts);
+    let mut aliases: Vec<(VarId, VarId)> = resets
+        .iter()
+        .filter_map(|(off, copy)| {
+            let root = copy_root(*off, pre_jit_stmts, &output_to_writer);
+            let source = resets.get(&root)?;
+            (root != *off && source != copy).then_some((*copy, *source))
+        })
+        .collect();
+    aliases.sort();
+    aliases
+}
+
+/// The statements writing each comb offset.  FF outputs go through the
+/// event/commit path.  Every writer, not the last: an offset written by
+/// sibling conditional arms has one fragment per arm, and keeping only the
+/// last drops the others from the closure.
+fn writers_of(pre_jit_stmts: &[ProtoStatement]) -> HashMap<VarOffset, Writers> {
+    let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
+    let mut scratch_in: Vec<VarOffset> = Vec::new();
+    let mut scratch_out: Vec<VarOffset> = Vec::new();
+    for (i, stmt) in pre_jit_stmts.iter().enumerate() {
+        scratch_in.clear();
+        scratch_out.clear();
+        stmt.gather_variable_offsets(&mut scratch_in, &mut scratch_out);
+        for off in &scratch_out {
+            if !off.is_ff() {
+                // A statement holding sibling arms gathers its output once per
+                // arm, and only WHICH statements to run matters below.  Its
+                // pushes are adjacent, so the tail is enough to dedupe.
+                let writers = output_to_writer.entry(*off).or_default();
+                if writers.last() != Some(&i) {
+                    writers.push(i);
+                }
+            }
+        }
+    }
+    output_to_writer
 }
 
 /// The master input clock the copy chain from `offset` reaches, else the

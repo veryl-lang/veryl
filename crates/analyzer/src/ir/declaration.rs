@@ -161,6 +161,42 @@ pub struct ExternalConnect {
     pub token: TokenRange,
 }
 
+/// A reference argument of a component method call
+/// (`tb.probe("x", dut.x)`): the component binds a port to each referenced
+/// variable when the method is called.
+#[derive(Clone)]
+pub struct ComponentRef {
+    /// Position of the argument.
+    pub index: usize,
+    /// The interface and modport of a modport reference; `None` for a
+    /// signal.
+    pub modport: Option<(String, StrId)>,
+    /// One per referenced variable: the signal, or each member of the
+    /// modport.
+    pub members: Vec<ComponentRefMember>,
+}
+
+#[derive(Clone)]
+pub struct ComponentRefMember {
+    /// Member name of a modport reference.
+    pub member: Option<StrId>,
+    /// Reads the variable.
+    pub expr: Expression,
+    /// Present when the component drives the variable.
+    pub output: Option<AssignDestination>,
+    /// The clock variable, when it fires the component's `on_clock`.
+    pub clock: Option<VarId>,
+    /// The reset variable, when it fires the component's `on_reset`.
+    pub reset: Option<VarId>,
+    /// Width of the variable (one element).
+    pub width: u32,
+    /// Packed dimensions, outermost first.
+    pub dims: Vec<u32>,
+    /// Hierarchical path, for the component's diagnostics.
+    pub path: String,
+    pub token: TokenRange,
+}
+
 impl ExternalDeclaration {
     /// Direction is unknown until load time; treat plain-variable
     /// connections like SystemVerilog blackbox ports (may be read or

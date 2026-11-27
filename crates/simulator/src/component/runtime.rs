@@ -8,7 +8,7 @@ use crate::component::host::{ExternalInstance, HostContext, HostValue, PortDir, 
 use crate::component::loader::{ComponentError, lookup_component_backend};
 use crate::ir::external::OutputTarget;
 use crate::ir::variable::{VarOffset, read_payload, write_payload};
-use crate::ir::{Event, Expression, Ir};
+use crate::ir::{ComponentRef, Event, Expression, Ir};
 use num_bigint::BigUint;
 use veryl_analyzer::value::{MaskCache, Value, ValueBigUint, ValueU64};
 use veryl_component_sys as sys;
@@ -41,6 +41,13 @@ pub struct RuntimeComponent {
     /// Reused by `stage_inputs` so staging allocates no words per port/step.
     words_scratch: Vec<u64>,
     mask_scratch: Vec<u64>,
+    /// Ports bound for reference arguments, keyed by their description
+    /// (path, direction and shape), so passing the same reference again
+    /// reuses the port.
+    ref_ports: HashMap<String, u32>,
+    /// Position in `inputs` of each input port bound for a reference, to
+    /// stage the ones a method call passes right before the call.
+    ref_inputs: HashMap<u32, usize>,
 }
 
 /// How an input port's value is produced each step. A direct read of a plain
@@ -83,12 +90,13 @@ struct OutputBinding {
     dest: *mut u8,
     native_bytes: usize,
     width: usize,
-    // The guest's output buffer and its X/Z mask, filled by
+    // The guest's output buffer, its X/Z mask and its dirty flag, filled by
     // `cache_port_buffers` and read in place so the write-back skips the
-    // bounds-checked slice accessors. The `dirty` flag is an embedded field
-    // (moves with `ports` Vec growth), so it stays an index lookup.
+    // bounds-checked slice accessors. The host keeps the flag at a stable
+    // address, so it stays valid when a method call adds reference ports.
     src_words: *const u64,
     src_mask: *const u64,
+    dirty: *mut u8,
     /// The dataflow cells reading `dest`, resolved once the design is built.
     marks: OutputMarks,
 }
@@ -116,6 +124,7 @@ impl OutputBinding {
             width: target.width,
             src_words: std::ptr::null(),
             src_mask: std::ptr::null(),
+            dirty: std::ptr::null_mut(),
             marks: OutputMarks::None,
         }
     }
@@ -151,6 +160,64 @@ impl InputSource {
             }
         }
         InputSource::Expr(expr)
+    }
+}
+
+/// Stages one input port from its source into the host staging buffer.
+#[inline(always)]
+fn stage_input(
+    host: &mut HostContext,
+    words_scratch: &mut Vec<u64>,
+    mask_scratch: &mut Vec<u64>,
+    (idx, source, width): &(u32, InputSource, u32),
+    use_4state: bool,
+    mask_cache: &mut MaskCache,
+) {
+    match source {
+        InputSource::DirectScalar {
+            ptr,
+            native_bytes,
+            dst_words,
+            dst_mask,
+        } => {
+            // Two-state runs leave the mask at its initial zero.
+            let payload = read_payload(*ptr, *native_bytes);
+            unsafe {
+                *(*dst_words) = payload;
+                if use_4state {
+                    *(*dst_mask) = read_payload((*ptr).add(*native_bytes), *native_bytes);
+                }
+            }
+        }
+        InputSource::DirectWide {
+            ptr,
+            native_bytes,
+            dst_words,
+            dst_mask,
+        } => {
+            // Two-state runs leave the mask at its initial zero.
+            unsafe {
+                std::ptr::copy_nonoverlapping(*ptr, *dst_words as *mut u8, *native_bytes);
+                if use_4state {
+                    std::ptr::copy_nonoverlapping(
+                        (*ptr).add(*native_bytes),
+                        *dst_mask as *mut u8,
+                        *native_bytes,
+                    );
+                }
+            }
+        }
+        InputSource::Expr(expr) => {
+            let value = expr.eval(mask_cache);
+            let nwords = (*width as usize).div_ceil(64).max(1);
+            value_to_words_into(&value, nwords, words_scratch);
+            if use_4state {
+                value_to_mask_xz_into(&value, nwords, mask_scratch);
+                host.set_input_masked(*idx, words_scratch, mask_scratch);
+            } else {
+                host.set_input(*idx, words_scratch);
+            }
+        }
     }
 }
 
@@ -622,7 +689,23 @@ pub fn build_components(
         reset_events
             .retain(|(_, in_idx)| host.port_resolved_role(*in_idx) == Some(PortRole::Reset));
 
-        if kind == sys::VRL_KIND_CLOCKED && clock_events.is_empty() {
+        // A clocked component may take its clocks through methods instead
+        // (a `clock` argument, or a `modport` one whose interface has a
+        // clock); it then has none until such a call.
+        let takes_clock_arg = manifest.as_ref().is_some_and(|m| {
+            m.methods.iter().any(|method| {
+                method.args.iter().any(|a| {
+                    matches!(
+                        a.ref_kind(),
+                        Some(
+                            veryl_metadata::ManifestRefKind::Clock
+                                | veryl_metadata::ManifestRefKind::Modport
+                        )
+                    )
+                })
+            })
+        });
+        if kind == sys::VRL_KIND_CLOCKED && clock_events.is_empty() && !takes_clock_arg {
             return Err(ComponentError::NoClockPortResolved {
                 inst: inst_name.clone(),
                 type_name: type_name.clone(),
@@ -719,6 +802,7 @@ pub fn build_components(
             let d = host.svc_port_direct(out.idx).expect("port exists");
             out.src_words = d.words.cast_const();
             out.src_mask = d.mask_xz.cast_const();
+            out.dirty = d.dirty;
         }
 
         // A component output must be the destination's only driver.
@@ -755,12 +839,178 @@ pub fn build_components(
             fire_count: 0,
             words_scratch: Vec::new(),
             mask_scratch: Vec::new(),
+            ref_ports: HashMap::default(),
+            ref_inputs: HashMap::default(),
         });
     }
     Ok(result)
 }
 
 impl RuntimeComponent {
+    /// Storage this component drives through output ports.
+    pub fn output_offsets(&self) -> impl Iterator<Item = VarOffset> + '_ {
+        self.outputs.iter().map(|o| o.offset)
+    }
+
+    /// Binds a port for each member of a reference argument of a method
+    /// call and returns the argument for the component. As with port
+    /// connections, a variable may be read through any number of
+    /// references, which share one port, but driven through one only: an
+    /// output must not be driven yet, by the design (`rtl_driven`), another
+    /// component (`other_drivers`) or this one. An input is staged right
+    /// away, so the method itself reads the current value; an output starts
+    /// from the variable's current value.
+    pub fn bind_ref(
+        &mut self,
+        r: &ComponentRef,
+        rtl_driven: &crate::HashSet<VarOffset>,
+        other_drivers: &HashMap<VarOffset, String>,
+        derived: &crate::ir::DerivedClockSchedule,
+        mask_cache: &mut MaskCache,
+    ) -> Result<HostValue, String> {
+        let use_4state = self.host.use_4state;
+        let path_of = |desc: &str| {
+            desc.split(sys::VRL_PORT_DESC_SEP)
+                .nth(4)
+                .unwrap_or_default()
+                .to_string()
+        };
+        // Check every output before binding anything, so a rejected modport
+        // leaves no member bound.
+        for m in &r.members {
+            let Some(target) = &m.output else {
+                continue;
+            };
+            let path = path_of(&m.desc);
+            if rtl_driven.contains(&target.offset) {
+                return Err(format!(
+                    "component `{}` cannot drive `{path}`: the design drives it",
+                    self.name
+                ));
+            }
+            if let Some(other) = other_drivers.get(&target.offset) {
+                return Err(format!(
+                    "component `{}` cannot drive `{path}`: component `{other}` drives it",
+                    self.name
+                ));
+            }
+            if self.outputs.iter().any(|o| o.offset == target.offset) {
+                return Err(format!("component `{}` already drives `{path}`", self.name));
+            }
+        }
+        let mut ports = Vec::with_capacity(r.members.len());
+        for m in &r.members {
+            if m.output.is_none()
+                && let Some(&idx) = self.ref_ports.get(&m.desc)
+            {
+                ports.push(u64::from(idx));
+                continue;
+            }
+            let idx = match &m.output {
+                None => {
+                    // A clock fires `on_clock` on the event its edges are
+                    // scheduled under. A reset fires `on_reset` on its event:
+                    // its assertion, and the clock edges of a `rst.assert()`
+                    // window; a copy of a reset (an interface member assigned
+                    // from it) hears the events of the reset it copies.
+                    let (role, event) = if let Some(var_id) = m.clock {
+                        (
+                            PortRole::Clock,
+                            Some(Event::clock(derived.source_of(var_id))),
+                        )
+                    } else if let Some(var_id) = m.reset {
+                        (
+                            PortRole::Reset,
+                            Some(Event::reset(derived.reset_source_of(var_id))),
+                        )
+                    } else {
+                        (PortRole::Data, None)
+                    };
+                    // Each reference gets its own port, so it keeps its own
+                    // description. An event already heard through another
+                    // port (connected, passed apart, or a member of another
+                    // modport) still fires the hook once, through that port;
+                    // the new port names it as the port it fires through.
+                    let events = if role == PortRole::Clock {
+                        &self.clock_events
+                    } else {
+                        &self.reset_events
+                    };
+                    let shared = event.as_ref().and_then(|event| {
+                        events.iter().find(|(e, _)| e == event).map(|(_, idx)| *idx)
+                    });
+                    let idx = self.host.add_ref_port(
+                        PortDir::Input,
+                        role,
+                        m.width,
+                        &m.desc,
+                        shared,
+                        None,
+                    );
+                    if let Some(event) = event
+                        && shared.is_none()
+                    {
+                        if role == PortRole::Clock {
+                            self.clock_events.push((event, idx));
+                        } else {
+                            self.reset_events.push((event, idx));
+                        }
+                    }
+                    let mut source = InputSource::classify(m.expr.clone());
+                    if let InputSource::DirectScalar {
+                        dst_words,
+                        dst_mask,
+                        ..
+                    }
+                    | InputSource::DirectWide {
+                        dst_words,
+                        dst_mask,
+                        ..
+                    } = &mut source
+                    {
+                        let d = self.host.svc_port_direct(idx).expect("port exists");
+                        *dst_words = d.words;
+                        *dst_mask = d.mask_xz;
+                    }
+                    self.ref_inputs.insert(idx, self.inputs.len());
+                    self.inputs.push((idx, source, m.width));
+                    self.ref_ports.insert(m.desc.clone(), idx);
+                    idx
+                }
+                Some(target) => {
+                    let nwords = (m.width as usize).div_ceil(64).max(1);
+                    let value = m.expr.eval(mask_cache);
+                    let mut words = Vec::new();
+                    let mut mask_xz = Vec::new();
+                    value_to_words_into(&value, nwords, &mut words);
+                    if use_4state {
+                        value_to_mask_xz_into(&value, nwords, &mut mask_xz);
+                    }
+                    let idx = self.host.add_ref_port(
+                        PortDir::Output,
+                        PortRole::Data,
+                        m.width,
+                        &m.desc,
+                        None,
+                        Some((&words, &mask_xz)),
+                    );
+                    let mut out = OutputBinding::new(idx, target);
+                    let d = self.host.svc_port_direct(idx).expect("port exists");
+                    out.src_words = d.words.cast_const();
+                    out.src_mask = d.mask_xz.cast_const();
+                    out.dirty = d.dirty;
+                    self.outputs.push(out);
+                    idx
+                }
+            };
+            ports.push(u64::from(idx));
+        }
+        Ok(HostValue::Ref {
+            kind: r.kind,
+            ports,
+        })
+    }
+
     /// Moves accumulated `ctx.log` messages into the per-test output
     /// buffer (joining `$display` output).
     pub fn drain_logs(&mut self) {
@@ -774,53 +1024,42 @@ impl RuntimeComponent {
     /// always zero, so its per-step computation and copy are skipped.
     pub fn stage_inputs(&mut self, mask_cache: &mut MaskCache) {
         let use_4state = self.host.use_4state;
-        for (idx, source, width) in &self.inputs {
-            match source {
-                InputSource::DirectScalar {
-                    ptr,
-                    native_bytes,
-                    dst_words,
-                    dst_mask,
-                } => {
-                    // Two-state runs leave the mask at its initial zero.
-                    let payload = read_payload(*ptr, *native_bytes);
-                    unsafe {
-                        *(*dst_words) = payload;
-                        if use_4state {
-                            *(*dst_mask) = read_payload((*ptr).add(*native_bytes), *native_bytes);
-                        }
-                    }
-                }
-                InputSource::DirectWide {
-                    ptr,
-                    native_bytes,
-                    dst_words,
-                    dst_mask,
-                } => {
-                    // Two-state runs leave the mask at its initial zero.
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(*ptr, *dst_words as *mut u8, *native_bytes);
-                        if use_4state {
-                            std::ptr::copy_nonoverlapping(
-                                (*ptr).add(*native_bytes),
-                                *dst_mask as *mut u8,
-                                *native_bytes,
-                            );
-                        }
-                    }
-                }
-                InputSource::Expr(expr) => {
-                    let value = expr.eval(mask_cache);
-                    let nwords = (*width as usize).div_ceil(64).max(1);
-                    value_to_words_into(&value, nwords, &mut self.words_scratch);
-                    if use_4state {
-                        value_to_mask_xz_into(&value, nwords, &mut self.mask_scratch);
-                        self.host
-                            .set_input_masked(*idx, &self.words_scratch, &self.mask_scratch);
-                    } else {
-                        self.host.set_input(*idx, &self.words_scratch);
-                    }
-                }
+        for input in &self.inputs {
+            stage_input(
+                &mut self.host,
+                &mut self.words_scratch,
+                &mut self.mask_scratch,
+                input,
+                use_4state,
+                mask_cache,
+            );
+        }
+    }
+
+    /// Stages the input ports bound for the references among `args`, right
+    /// before a method call: the method reads the current values even when
+    /// it reuses a port bound by an earlier call with no hook since.
+    pub fn stage_ref_inputs(&mut self, args: &[HostValue], mask_cache: &mut MaskCache) {
+        let use_4state = self.host.use_4state;
+        for arg in args {
+            let HostValue::Ref { ports, .. } = arg else {
+                continue;
+            };
+            for idx in ports {
+                let Some(&pos) = u32::try_from(*idx)
+                    .ok()
+                    .and_then(|idx| self.ref_inputs.get(&idx))
+                else {
+                    continue;
+                };
+                stage_input(
+                    &mut self.host,
+                    &mut self.words_scratch,
+                    &mut self.mask_scratch,
+                    &self.inputs[pos],
+                    use_4state,
+                    mask_cache,
+                );
             }
         }
     }
@@ -922,9 +1161,10 @@ impl RuntimeComponent {
     ) -> bool {
         let mut wrote = false;
         for out in &mut self.outputs {
-            if !self.host.output_dirty_idx(out.idx) {
+            if unsafe { *out.dirty } == 0 {
                 continue;
             }
+            unsafe { *out.dirty = 0 };
             // A component may write an output every edge whether or not it
             // changed; only a changed value has to re-settle the design.
             let ptr = out.dest;
@@ -968,7 +1208,6 @@ impl RuntimeComponent {
             }
             wrote |= changed;
         }
-        self.host.clear_output_dirty();
         wrote
     }
 }

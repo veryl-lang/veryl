@@ -7031,122 +7031,144 @@ impl Conv<&air::Module> for ProtoModule {
             .values()
             .any(|v| v.r#type.is_clock() || v.r#type.is_reset())
             || !nested_derived_clock_candidates.is_empty();
-        let (derived_clock_vars, input_clock_offsets, negedge_inputs) = if !has_any_edge_var {
-            (Vec::new(), HashMap::default(), crate::HashSet::default())
-        } else {
-            // O(V+P) port lookup via HashSet.
-            let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
-            let edge_id = |vid: &VarId, elem: usize| -> VarId {
-                edge_elem_ids
-                    .get(&(*vid, elem as u32))
-                    .copied()
-                    .unwrap_or(*vid)
-            };
-            let mut dc_vars: Vec<crate::ir::EdgeCandidate> = src
-                .variables
-                .iter()
-                .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
-                .filter_map(|(vid, var)| Some((vid, var, variable_meta.get(vid)?)))
-                .flat_map(|(vid, var, meta)| {
-                    let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
-                    meta.elements.iter().enumerate().map(move |(i, elem)| {
-                        (
-                            edge_id(vid, i),
-                            elem.current,
-                            elem.native_bytes,
-                            None,
-                            negedge,
-                        )
-                    })
-                })
-                .collect();
-            // The top module's own async resets, for the same reason the
-            // child ones are candidates: nothing else generates their
-            // assertion edge.  Only those an `always_ff` actually resets
-            // on — a reset with no `if_reset` has nothing to fire.
-            let mut top_inst_reset_kinds = None;
-            for (vid, var) in &src.variables {
-                if !var.r#type.is_reset() || port_var_set.contains(vid) {
-                    continue;
-                }
-                let Some(meta) = variable_meta.get(vid) else {
-                    continue;
+        let (derived_clock_vars, input_clock_offsets, negedge_inputs, reset_offsets) =
+            if !has_any_edge_var {
+                (
+                    Vec::new(),
+                    HashMap::default(),
+                    crate::HashSet::default(),
+                    HashMap::default(),
+                )
+            } else {
+                // O(V+P) port lookup via HashSet.
+                let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
+                let edge_id = |vid: &VarId, elem: usize| -> VarId {
+                    edge_elem_ids
+                        .get(&(*vid, elem as u32))
+                        .copied()
+                        .unwrap_or(*vid)
                 };
-                let mut reset_kind = None;
-                for (i, elem) in meta.elements.iter().enumerate() {
-                    let id = edge_id(vid, i);
-                    if !all_event_statements.contains_key(&Event::reset(id)) {
+                let mut dc_vars: Vec<crate::ir::EdgeCandidate> = src
+                    .variables
+                    .iter()
+                    .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
+                    .filter_map(|(vid, var)| Some((vid, var, variable_meta.get(vid)?)))
+                    .flat_map(|(vid, var, meta)| {
+                        let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
+                        meta.elements.iter().enumerate().map(move |(i, elem)| {
+                            (
+                                edge_id(vid, i),
+                                elem.current,
+                                elem.native_bytes,
+                                None,
+                                negedge,
+                            )
+                        })
+                    })
+                    .collect();
+                // The top module's own async resets, for the same reason the
+                // child ones are candidates: nothing else generates their
+                // assertion edge.  Only those an `always_ff` actually resets
+                // on — a reset with no `if_reset` has nothing to fire.
+                let mut top_inst_reset_kinds = None;
+                for (vid, var) in &src.variables {
+                    if !var.r#type.is_reset() || port_var_set.contains(vid) {
                         continue;
                     }
-                    let (active_low, is_async) = *reset_kind.get_or_insert_with(|| {
-                        let inst_kinds = top_inst_reset_kinds
-                            .get_or_insert_with(|| collect_inst_reset_kinds(declarations));
-                        resolved_reset_kind(
-                            &var.r#type.kind,
-                            inst_kinds.get(vid).copied().flatten(),
-                            &context.config,
-                        )
-                    });
-                    if is_async {
-                        dc_vars.push((
-                            id,
-                            elem.current,
-                            elem.native_bytes,
-                            Some(active_low),
-                            false,
-                        ));
-                    }
-                }
-            }
-            // Nested candidates already carry absolute (parent-rebased)
-            // offsets and exclude child ports.  Dedup by (var_id, offset)
-            // so a clock-typed input port re-exported through aliasing
-            // can't be added twice.
-            let mut seen: crate::HashSet<(VarId, VarOffset)> =
-                dc_vars.iter().map(|(v, o, _, _, _)| (*v, *o)).collect();
-            for (vid, off, nb, polarity, negedge) in nested_derived_clock_candidates.drain(..) {
-                if seen.insert((vid, off)) {
-                    dc_vars.push((vid, off, nb, polarity, negedge));
-                }
-            }
-            // "Input clock" candidates: top-module clock-typed variables
-            // whose value the simulator needs to drive directly so the
-            // gated-clock expression sees a rising edge.  Historically
-            // restricted to input ports, but testbench tops drive the
-            // clock through `inst clk: $tb::clock_gen` (a non-port inst
-            // output that's still a clock-typed top-level var), so
-            // collect every clock-typed top var that has a backing
-            // storage entry — `set_input_clock_bit` only walks the
-            // top-level `module_variables.variables` map.
-            let mut pc_offsets: HashMap<VarOffset, VarId> = HashMap::default();
-            let mut negedge_inputs: crate::HashSet<VarId> = crate::HashSet::default();
-            for (vid, var) in &src.variables {
-                if !var.r#type.is_clock() {
-                    continue;
-                }
-                let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
-                if let Some(meta) = variable_meta.get(vid) {
+                    let Some(meta) = variable_meta.get(vid) else {
+                        continue;
+                    };
+                    let mut reset_kind = None;
                     for (i, elem) in meta.elements.iter().enumerate() {
-                        pc_offsets.insert(elem.current, edge_id(vid, i));
-                        if negedge {
-                            negedge_inputs.insert(edge_id(vid, i));
+                        let id = edge_id(vid, i);
+                        if !all_event_statements.contains_key(&Event::reset(id)) {
+                            continue;
+                        }
+                        let (active_low, is_async) = *reset_kind.get_or_insert_with(|| {
+                            let inst_kinds = top_inst_reset_kinds
+                                .get_or_insert_with(|| collect_inst_reset_kinds(declarations));
+                            resolved_reset_kind(
+                                &var.r#type.kind,
+                                inst_kinds.get(vid).copied().flatten(),
+                                &context.config,
+                            )
+                        });
+                        if is_async {
+                            dc_vars.push((
+                                id,
+                                elem.current,
+                                elem.native_bytes,
+                                Some(active_low),
+                                false,
+                            ));
                         }
                     }
                 }
-            }
-            // A nested test module's clock is driven the same way.
-            for (id, meta) in &tb_variables {
-                if meta.r#type.is_clock()
-                    && let Some(elem) = meta.elements.first()
-                {
-                    pc_offsets.insert(elem.current, *id);
-                    if matches!(meta.r#type.kind, air::TypeKind::ClockNegedge) {
-                        negedge_inputs.insert(*id);
+                // Nested candidates already carry absolute (parent-rebased)
+                // offsets and exclude child ports.  Dedup by (var_id, offset)
+                // so a clock-typed input port re-exported through aliasing
+                // can't be added twice.
+                let mut seen: crate::HashSet<(VarId, VarOffset)> =
+                    dc_vars.iter().map(|(v, o, _, _, _)| (*v, *o)).collect();
+                for (vid, off, nb, polarity, negedge) in nested_derived_clock_candidates.drain(..) {
+                    if seen.insert((vid, off)) {
+                        dc_vars.push((vid, off, nb, polarity, negedge));
                     }
                 }
-            }
-            (dc_vars, pc_offsets, negedge_inputs)
-        };
+                // "Input clock" candidates: top-module clock-typed variables
+                // whose value the simulator needs to drive directly so the
+                // gated-clock expression sees a rising edge.  Historically
+                // restricted to input ports, but testbench tops drive the
+                // clock through `inst clk: $tb::clock_gen` (a non-port inst
+                // output that's still a clock-typed top-level var), so
+                // collect every clock-typed top var that has a backing
+                // storage entry — `set_input_clock_bit` only walks the
+                // top-level `module_variables.variables` map.
+                let mut pc_offsets: HashMap<VarOffset, VarId> = HashMap::default();
+                let mut negedge_inputs: crate::HashSet<VarId> = crate::HashSet::default();
+                for (vid, var) in &src.variables {
+                    if !var.r#type.is_clock() {
+                        continue;
+                    }
+                    let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
+                    if let Some(meta) = variable_meta.get(vid) {
+                        for (i, elem) in meta.elements.iter().enumerate() {
+                            pc_offsets.insert(elem.current, edge_id(vid, i));
+                            if negedge {
+                                negedge_inputs.insert(edge_id(vid, i));
+                            }
+                        }
+                    }
+                }
+                // A nested test module's clock is driven the same way.
+                for (id, meta) in &tb_variables {
+                    if meta.r#type.is_clock()
+                        && let Some(elem) = meta.elements.first()
+                    {
+                        pc_offsets.insert(elem.current, *id);
+                        if matches!(meta.r#type.kind, air::TypeKind::ClockNegedge) {
+                            negedge_inputs.insert(*id);
+                        }
+                    }
+                }
+                // Every reset of the top module by offset, kept apart by type so
+                // that a copy is only aliased onto a reset of its own kind: the
+                // copies a component bound to a reset must hear the source of.
+                let mut reset_offsets: HashMap<VarOffset, (VarId, air::TypeKind)> =
+                    HashMap::default();
+                for (vid, var) in &src.variables {
+                    if !var.r#type.is_reset() || var.r#type.is_array() {
+                        continue;
+                    }
+                    if let Some(meta) = variable_meta.get(vid)
+                        && let [elem] = &meta.elements[..]
+                    {
+                        reset_offsets
+                            .insert(elem.current, (edge_id(vid, 0), var.r#type.kind.clone()));
+                    }
+                }
+                (dc_vars, pc_offsets, negedge_inputs, reset_offsets)
+            };
 
         let module_variable_meta = ModuleVariableMeta {
             name: src.name,
@@ -7183,7 +7205,7 @@ impl Conv<&air::Module> for ProtoModule {
             trace_scc_cycles(&pre_jit_stmts, &module_variable_meta);
         }
 
-        let derived_clock_schedule = if derived_clock_vars.is_empty() {
+        let mut derived_clock_schedule = if derived_clock_vars.is_empty() {
             DerivedClockSchedule::default()
         } else {
             build_derived_clock_schedule(
@@ -7226,6 +7248,23 @@ impl Conv<&air::Module> for ProtoModule {
             drop(slot);
             cone.map(|(stmts, marks)| (try_jit(context, stmts), marks))
         };
+        let reset_ids: HashMap<VarOffset, VarId> = reset_offsets
+            .iter()
+            .map(|(off, (vid, _))| (*off, *vid))
+            .collect();
+        derived_clock_schedule.reset_aliases =
+            crate::ir::derived_clock::reset_aliases(&reset_ids, &pre_jit_stmts)
+                .into_iter()
+                .filter(|(copy, source)| {
+                    let kind = |id: &VarId| {
+                        reset_offsets
+                            .values()
+                            .find(|(v, _)| v == id)
+                            .map(|(_, k)| k)
+                    };
+                    kind(copy) == kind(source)
+                })
+                .collect();
         for &(copy, source) in &derived_clock_schedule.aliases {
             if let Some(stmts) = all_event_statements.remove(&Event::clock(copy)) {
                 event_comb_writes.remove(&Event::clock(copy));
