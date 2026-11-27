@@ -9,7 +9,7 @@ use crate::ir::hier::HierInstance;
 use crate::ir::module::{
     BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
 };
-use crate::ir::nested_tb::{self, TbVariable};
+use crate::ir::nested_tb::{self, ResetNet, TbVariable};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
@@ -1482,6 +1482,8 @@ pub struct ProtoDeclaration {
     pub external_components: Vec<ProtoExternalComponent>,
     /// Testbench-facing variables of nested test modules.
     pub tb_variables: Vec<TbVariable>,
+    /// Nested testbench reset nets used to resolve component reference events.
+    pub tb_reset_nets: Vec<ResetNet>,
     /// Template instances whose comb logic the top schedules (see `ir::hier`).
     pub(crate) hier_instances: Vec<HierInstance>,
 }
@@ -1554,6 +1556,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    tb_reset_nets: vec![],
                     hier_instances: vec![],
                 })
             }
@@ -1631,6 +1634,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    tb_reset_nets: vec![],
                     hier_instances: vec![],
                 })
             }
@@ -1665,6 +1669,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    tb_reset_nets: vec![],
                     hier_instances: vec![],
                 })
             }
@@ -1684,6 +1689,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     derived_clock_candidates: vec![],
                     external_components: vec![],
                     tb_variables: vec![],
+                    tb_reset_nets: vec![],
                     hier_instances: vec![],
                 })
             }
@@ -1765,6 +1771,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                         token: x.token,
                     }],
                     tb_variables: vec![],
+                    tb_reset_nets: vec![],
                     hier_instances: vec![],
                 })
             }
@@ -1776,6 +1783,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 derived_clock_candidates: vec![],
                 external_components: vec![],
                 tb_variables: vec![],
+                tb_reset_nets: vec![],
                 hier_instances: vec![],
             }),
         }
@@ -2806,6 +2814,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_derived_clock_candidates: Vec<EdgeCandidate> = vec![];
         let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
         let mut all_tb_variables: Vec<TbVariable> = vec![];
+        let mut all_tb_reset_nets = vec![];
         let mut all_hier_instances: Vec<HierInstance> = vec![];
         let mut hier_instance: Option<HierInstance> = None;
 
@@ -2936,6 +2945,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
                 all_external_components.extend(proto_decl.external_components);
                 all_tb_variables.extend(proto_decl.tb_variables);
+                all_tb_reset_nets.extend(proto_decl.tb_reset_nets);
                 all_hier_instances.extend(proto_decl.hier_instances);
             }
 
@@ -3052,7 +3062,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(nodes) = nodes {
                     all_event_statements = nodes;
                 }
-            } else if !has_reference_aliases {
+            } else if !has_reference_aliases && all_external_components.is_empty() {
+                // Resolve component clock and reset copies before compiling the comb logic.
                 let mut comb = std::mem::take(&mut all_comb_statements).into_vec();
                 try_compile_inst_chunks(
                     context,
@@ -3557,7 +3568,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         }
         // The id each clock and reset is re-keyed to, for the component
         // connections that fire on it.
-        let mut rekeyed: HashMap<air::VarId, air::VarId> = HashMap::default();
+        let mut rekeyed: HashMap<(air::VarId, u32), air::VarId> = HashMap::default();
+        let mut unmonitored_resets = HashMap::default();
+        let track_reference_events = !all_external_components.is_empty();
         for (vid, var) in &child_module.variables {
             let is_clock = var.r#type.is_clock();
             let is_reset = var.r#type.is_reset();
@@ -3576,16 +3589,29 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             if is_reset {
                 let mut reset_kind = None;
                 for (elem_idx, elem) in meta.elements.iter().enumerate() {
-                    let stmts = remapped_events.remove(&Event::Reset(*vid, elem_idx as u32));
-                    if stmts.is_none() && handle.is_none() {
+                    let key = (*vid, elem_idx as u32);
+                    let stmts = remapped_events.remove(&Event::Reset(key.0, key.1));
+                    let has_event = stmts.is_some() || handle.is_some();
+                    if !has_event && !track_reference_events {
                         continue;
                     }
                     let unique_id = context.alloc_internal_event_id();
+                    if track_reference_events {
+                        all_tb_reset_nets.push(ResetNet {
+                            id: unique_id,
+                            offset: elem.current,
+                            kind: var.r#type.kind.clone(),
+                        });
+                    }
+                    if !has_event {
+                        unmonitored_resets.insert(key, unique_id);
+                        continue;
+                    }
+                    if elem_idx == 0 || track_reference_events {
+                        rekeyed.insert(key, unique_id);
+                    }
                     if let Some(stmts) = stmts {
                         remapped_events.insert(Event::reset(unique_id), stmts);
-                    }
-                    if elem_idx == 0 {
-                        rekeyed.insert(*vid, unique_id);
                     }
                     if handle.is_some() {
                         all_tb_variables.push(tb_variable(meta, unique_id, handle));
@@ -3618,8 +3644,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid, elem_idx as u32)) {
                     remapped_events.insert(Event::clock(unique_id), stmts);
                 }
-                if elem_idx == 0 {
-                    rekeyed.insert(*vid, unique_id);
+                if elem_idx == 0 || track_reference_events {
+                    rekeyed.insert((*vid, elem_idx as u32), unique_id);
                 }
                 if handle.is_some() {
                     all_tb_variables.push(tb_variable(meta, unique_id, handle));
@@ -3636,6 +3662,17 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         }
 
         nested_tb::rename_handles(&mut remapped_events, &src.hierarchy, src.name);
+        nested_tb::remap_reference_events(&mut remapped_events, |id, element| {
+            if let Some(&(parent, base)) = child_to_parent_var.get(&id) {
+                (parent, base + element)
+            } else {
+                let key = (id, element);
+                rekeyed
+                    .get(&key)
+                    .or_else(|| unmonitored_resets.get(&key))
+                    .map_or((id, element), |&id| (id, 0))
+            }
+        });
         // A re-keyed id passes through every boundary unchanged.
         let mut returns: HashMap<air::VarId, air::VarId> = HashMap::default();
         nested_tb::remap_returns(&mut remapped_events, |id| {
@@ -3666,7 +3703,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             Some((parent, 0)) => Some(*parent),
                             Some(_) => None,
                             None => rekeyed
-                                .get(&id)
+                                .get(&(id, 0))
                                 .copied()
                                 .or_else(|| Context::is_internal_event_id(id).then_some(id)),
                         });
@@ -3688,6 +3725,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             derived_clock_candidates: all_derived_clock_candidates,
             external_components: all_external_components,
             tb_variables: all_tb_variables,
+            tb_reset_nets: all_tb_reset_nets,
             hier_instances: all_hier_instances,
         })
     }

@@ -6078,6 +6078,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut nested_derived_clock_candidates: Vec<crate::ir::EdgeCandidate> = vec![];
         let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
         let mut tb_variables: HashMap<VarId, VariableMeta> = HashMap::default();
+        let mut nested_reset_nets = vec![];
         let mut hier_instances: Vec<crate::ir::hier::HierInstance> = vec![];
         let mut tb_events: HashMap<StrId, Event> = src
             .tb_handles
@@ -6102,6 +6103,7 @@ impl Conv<&air::Module> for ProtoModule {
             all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
             nested_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
+            nested_reset_nets.extend(proto_decl.tb_reset_nets);
             all_external_components.extend(proto_decl.external_components);
             hier_instances.extend(proto_decl.hier_instances);
             for x in proto_decl.tb_variables {
@@ -6552,6 +6554,9 @@ impl Conv<&air::Module> for ProtoModule {
             for (_, off, _, _, _) in &mut nested_derived_clock_candidates {
                 *off = sched.translate_off(*off);
             }
+            for reset in &mut nested_reset_nets {
+                reset.offset = sched.translate_off(reset.offset);
+            }
             comb_layout::translate_meta_map(&mut tb_variables, &sched);
             for external in &mut all_external_components {
                 for connect in &mut external.connects {
@@ -6995,6 +7000,13 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
+        if !all_external_components.is_empty() {
+            crate::ir::nested_tb::remap_reference_events(
+                &mut all_event_statements,
+                |id, element| (edge_elem_ids.get(&(id, element)).copied().unwrap_or(id), 0),
+            );
+        }
+
         let size_ok = {
             let n = pre_jit_stmts.len()
                 + all_event_statements
@@ -7030,7 +7042,8 @@ impl Conv<&air::Module> for ProtoModule {
             .variables
             .values()
             .any(|v| v.r#type.is_clock() || v.r#type.is_reset())
-            || !nested_derived_clock_candidates.is_empty();
+            || !nested_derived_clock_candidates.is_empty()
+            || !nested_reset_nets.is_empty();
         let (derived_clock_vars, input_clock_offsets, negedge_inputs, reset_offsets) =
             if !has_any_edge_var {
                 (
@@ -7151,20 +7164,24 @@ impl Conv<&air::Module> for ProtoModule {
                         }
                     }
                 }
-                // Every reset of the top module by offset, kept apart by type so
-                // that a copy is only aliased onto a reset of its own kind: the
-                // copies a component bound to a reset must hear the source of.
+                // Resolve reset copies across the flattened testbench by storage.
                 let mut reset_offsets: HashMap<VarOffset, (VarId, air::TypeKind)> =
-                    HashMap::default();
-                for (vid, var) in &src.variables {
-                    if !var.r#type.is_reset() || var.r#type.is_array() {
-                        continue;
-                    }
-                    if let Some(meta) = variable_meta.get(vid)
-                        && let [elem] = &meta.elements[..]
-                    {
-                        reset_offsets
-                            .insert(elem.current, (edge_id(vid, 0), var.r#type.kind.clone()));
+                    nested_reset_nets
+                        .into_iter()
+                        .map(|net| (net.offset, (net.id, net.kind)))
+                        .collect();
+                if !all_external_components.is_empty() {
+                    for (vid, var) in &src.variables {
+                        if var.r#type.is_reset()
+                            && let Some(meta) = variable_meta.get(vid)
+                        {
+                            for (i, elem) in meta.elements.iter().enumerate() {
+                                reset_offsets.insert(
+                                    elem.current,
+                                    (edge_id(vid, i), var.r#type.kind.clone()),
+                                );
+                            }
+                        }
                     }
                 }
                 (dc_vars, pc_offsets, negedge_inputs, reset_offsets)
@@ -7252,17 +7269,29 @@ impl Conv<&air::Module> for ProtoModule {
             .iter()
             .map(|(off, (vid, _))| (*off, *vid))
             .collect();
+        let reset_kinds: HashMap<_, _> = reset_offsets
+            .values()
+            .map(|(id, kind)| (*id, kind))
+            .collect();
+        let reset_event_sources: crate::HashSet<_> = tb_events
+            .values()
+            .filter_map(|event| match event {
+                Event::Reset(id, _) => Some(*id),
+                _ => None,
+            })
+            .chain(
+                derived_clock_schedule
+                    .resets
+                    .iter()
+                    .flat_map(|reset| reset.members.iter().copied()),
+            )
+            .collect();
         derived_clock_schedule.reset_aliases =
             crate::ir::derived_clock::reset_aliases(&reset_ids, &pre_jit_stmts)
                 .into_iter()
                 .filter(|(copy, source)| {
-                    let kind = |id: &VarId| {
-                        reset_offsets
-                            .values()
-                            .find(|(v, _)| v == id)
-                            .map(|(_, k)| k)
-                    };
-                    kind(copy) == kind(source)
+                    reset_event_sources.contains(source)
+                        && reset_kinds.get(copy) == reset_kinds.get(source)
                 })
                 .collect();
         for &(copy, source) in &derived_clock_schedule.aliases {

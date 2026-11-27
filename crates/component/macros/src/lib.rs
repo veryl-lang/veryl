@@ -816,8 +816,8 @@ fn arg_conversion(ty: &Type, idx: usize) -> syn::Result<(String, TokenStream2)> 
     if let Type::Reference(r) = ty {
         let seg = last_segment(&r.elem).unwrap_or_default();
         return match seg.as_str() {
-            "str" => Ok(("str".to_string(), quote!(args[#idx].as_str()?))),
-            "Value" => Ok(("value".to_string(), quote!(&args[#idx]))),
+            "str" => Ok(("str".to_string(), quote!(args[#idx].as_value()?.as_str()?))),
+            "Value" => Ok(("value".to_string(), quote!(args[#idx].as_value()?))),
             _ => Err(syn::Error::new(
                 ty.span(),
                 "unsupported method argument type",
@@ -839,13 +839,13 @@ fn arg_conversion(ty: &Type, idx: usize) -> syn::Result<(String, TokenStream2)> 
         return Ok((ty_str.to_string(), conv));
     }
     let conv = match seg.as_str() {
-        "String" => quote!(args[#idx].as_str()?.to_string()),
-        "u64" => quote!(args[#idx].as_u64()?),
-        "u8" | "u16" | "u32" => quote!(<#ty>::try_from(args[#idx].as_u64()?)?),
-        "i64" => quote!(args[#idx].as_i64()?),
-        "i8" | "i16" | "i32" => quote!(<#ty>::try_from(args[#idx].as_i64()?)?),
-        "bool" => quote!(args[#idx].as_bool_strict()?),
-        "Value" => quote!(args[#idx].clone()),
+        "String" => quote!(args[#idx].as_value()?.as_str()?.to_string()),
+        "u64" => quote!(args[#idx].as_value()?.as_u64()?),
+        "u8" | "u16" | "u32" => quote!(<#ty>::try_from(args[#idx].as_value()?.as_u64()?)?),
+        "i64" => quote!(args[#idx].as_value()?.as_i64()?),
+        "i8" | "i16" | "i32" => quote!(<#ty>::try_from(args[#idx].as_value()?.as_i64()?)?),
+        "bool" => quote!(args[#idx].as_value()?.as_bool_strict()?),
+        "Value" => quote!(args[#idx].as_value()?.clone()),
         _ => {
             return Err(syn::Error::new(
                 ty.span(),
@@ -1128,11 +1128,22 @@ fn method_dispatch(self_ty: &Type, methods: &[MethodSpec]) -> TokenStream2 {
         })
         .collect();
     quote! {
-        #[allow(clippy::needless_question_mark)]
         fn method(
             &mut self,
             name: &str,
             args: &[::veryl_component::Value],
+            ctx: &mut ::veryl_component::SimCtx,
+        ) -> ::veryl_component::Result<::veryl_component::Value> {
+            let args: ::std::vec::Vec<_> = args.iter().cloned()
+                .map(::veryl_component::MethodArg::from).collect();
+            <Self as ::veryl_component::Component>::__method(self, name, &args, ctx)
+        }
+
+        #[allow(clippy::needless_question_mark)]
+        fn __method(
+            &mut self,
+            name: &str,
+            args: &[::veryl_component::MethodArg],
             ctx: &mut ::veryl_component::SimCtx,
         ) -> ::veryl_component::Result<::veryl_component::Value> {
             match name {
