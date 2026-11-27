@@ -1,0 +1,21 @@
+module Module99 (
+    i_clk: input  clock   ,
+    i_rst: input  reset   ,
+    i_a  : input  logic<8>,
+    o_b  : output logic<8>,
+    o_c  : output logic<8>,
+) {
+    #[legacy_always_block]
+    always_comb {
+        o_b = i_a;
+    }
+
+    #[legacy_always_block]
+    always_ff {
+        if_reset {
+            o_c = 0;
+        } else {
+            o_c = i_a;
+        }
+    }
+}

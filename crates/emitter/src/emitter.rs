@@ -5531,7 +5531,10 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         self.in_always_ff = true;
-        if drives_non_portable_variable(arg) {
+        let token = &arg.always_ff.always_ff_token.token;
+        if attribute_table::contains(token, Attr::LegacyAlwaysBlock)
+            || drives_non_portable_variable(arg)
+        {
             self.token(&arg.always_ff.always_ff_token.replace("always"));
         } else {
             self.always_ff(&arg.always_ff);
@@ -5616,7 +5619,12 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AlwaysCombDeclaration'
     fn always_comb_declaration(&mut self, arg: &AlwaysCombDeclaration) {
-        self.always_comb(&arg.always_comb);
+        let token = &arg.always_comb.always_comb_token;
+        if attribute_table::contains(&token.token, Attr::LegacyAlwaysBlock) {
+            self.token(&token.replace("always @*"));
+        } else {
+            self.always_comb(&arg.always_comb);
+        }
         self.space(1);
         self.statement_block(&arg.statement_block);
     }
