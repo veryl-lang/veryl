@@ -152,6 +152,11 @@ fn walk_expr_reads(expr: &ProtoExpression, c: &mut Census) {
                 walk_expr_reads(&d.index_expr, c);
             }
         }
+        ProtoExpression::StringConcat { elements, .. } => {
+            for (x, _) in elements {
+                walk_expr_reads(x, c);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             walk_expr_reads(x, c);
             walk_expr_reads(y, c);

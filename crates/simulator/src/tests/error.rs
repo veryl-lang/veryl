@@ -653,8 +653,8 @@ fn string_operation_the_simulator_cannot_perform() {
     // A `string` stores a handle of its text, read as bits at the width of
     // its longest text. That width is not known for a text from outside the
     // module (a port, a function argument, a hierarchical reference, a
-    // runtime argument), and a concatenation destination has no window for
-    // a text.
+    // runtime argument) or from a concatenation of strings, and a
+    // concatenation destination has no window for a text.
     let cases = [
         (
             "concatenation destination",
@@ -683,6 +683,24 @@ fn string_operation_the_simulator_cannot_perform() {
             #[test(Top)]
             module Top {
                 inst u: Sub (s: "hello");
+            }
+            "#,
+            false,
+        ),
+        (
+            "bits of a concatenation of strings",
+            r#"
+            #[test(Top)]
+            module Top {
+                var s: string;
+                var t: string;
+                var x: logic<8>;
+                initial {
+                    t = "a";
+                    s = {t, "b"};
+                    x = s[7:0];
+                    $display("%h", x);
+                }
             }
             "#,
             false,

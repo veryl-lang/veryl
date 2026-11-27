@@ -6213,6 +6213,8 @@ fn mismatch_type() {
             "s = if x == 0 ? \"a\" : \"bb\";",
             false,
         ),
+        ("concatenation of strings", "s = {t, \"a\"};", false),
+        ("concatenation with bits", "s = {t, x};", true),
         ("read as bits", "x = s;", false),
         ("string output port", "inst u: SubStr (o: x);", false),
         ("string function output", "f_str(x);", false),

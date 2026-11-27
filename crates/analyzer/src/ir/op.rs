@@ -524,6 +524,7 @@ impl Op {
         let mut is_const = true;
         let mut is_global = true;
         let mut kind = TypeKind::Bit;
+        let mut all_string = !x.is_empty();
         for (expr, repeat) in x {
             // Concatenation operands and the replication count are
             // self-determined; an unbased unsized literal can't be sized here.
@@ -550,6 +551,7 @@ impl Op {
             if expr.r#type.is_4state() {
                 kind = TypeKind::Logic;
             }
+            all_string &= expr.r#type.is_string();
 
             is_const &= expr.is_const;
             is_global &= expr.is_global;
@@ -576,6 +578,10 @@ impl Op {
             }
         }
 
+        // A concatenation of strings is a string.
+        if all_string {
+            kind = TypeKind::String;
+        }
         dst.r#type.kind = kind;
         dst.r#type.set_concrete_width(Shape::new(vec![width]));
         dst.is_const = is_const;

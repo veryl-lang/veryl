@@ -223,6 +223,11 @@ pub enum Expression {
         dynamic_select: Option<DynamicBitSelect>,
         signed: bool,
     },
+    /// The handle of the concatenated texts of `string_pool` handles, each
+    /// repeated its count of times.
+    StringConcat {
+        elements: Vec<(Box<Expression>, usize)>,
+    },
 }
 
 // SAFETY: Same as Statement — see statement.rs.
@@ -281,6 +286,17 @@ impl Expression {
                     *use_4state,
                     mask_cache,
                 )
+            }
+            Expression::StringConcat { elements } => {
+                let mut bytes = Vec::new();
+                for (x, repeat) in elements {
+                    let text = crate::string_pool::bytes(x.eval(mask_cache).payload_u64());
+                    for _ in 0..*repeat {
+                        bytes.extend_from_slice(&text);
+                    }
+                }
+                let handle = crate::string_pool::intern_bytes(&bytes);
+                Value::new(handle, crate::string_pool::HANDLE_WIDTH, false)
             }
             Expression::Unary {
                 op,
@@ -433,6 +449,11 @@ impl Expression {
                     dyn_sel.index_expr.gather_variable(inputs, outputs);
                 }
             }
+            Expression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.gather_variable(inputs, outputs);
+                }
+            }
             Expression::Binary { x, y, .. } => {
                 x.gather_variable(inputs, outputs);
                 y.gather_variable(inputs, outputs);
@@ -499,6 +520,11 @@ impl ProtoExpression {
                 x.gather_variable_offsets(inputs);
                 if let Some(d) = dynamic_select {
                     d.index_expr.gather_variable_offsets(inputs);
+                }
+            }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.gather_variable_offsets(inputs);
                 }
             }
             ProtoExpression::Binary { x, y, .. } => {
@@ -589,6 +615,11 @@ impl ProtoExpression {
                 x.gather_reads_expanded_ranged(out);
                 if let Some(d) = dynamic_select {
                     d.index_expr.gather_reads_expanded_ranged(out);
+                }
+            }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.gather_reads_expanded_ranged(out);
                 }
             }
             ProtoExpression::Binary { x, y, .. } => {
@@ -869,6 +900,11 @@ impl ProtoExpression {
                     d.index_expr.gather_reads_with_ranges(out);
                 }
             }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.gather_reads_with_ranges(out);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_reads_with_ranges(out);
                 y.gather_reads_with_ranges(out);
@@ -954,6 +990,11 @@ impl ProtoExpression {
                 x.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(d) = dynamic_select {
                     d.index_expr.gather_variable_offsets_expanded(fold, inputs);
+                }
+            }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.gather_variable_offsets_expanded(fold, inputs);
                 }
             }
             ProtoExpression::Binary { x, y, .. } => {
@@ -1048,6 +1089,11 @@ impl ProtoExpression {
                     d.index_expr.collect_big_arrays(fold);
                 }
             }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.collect_big_arrays(fold);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.collect_big_arrays(fold);
                 y.collect_big_arrays(fold);
@@ -1111,6 +1157,11 @@ impl ProtoExpression {
                 x.gather_dynamic_read_ranges(ranges);
                 if let Some(d) = dynamic_select {
                     d.index_expr.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.gather_dynamic_read_ranges(ranges);
                 }
             }
             ProtoExpression::Binary { x, y, .. } => {
@@ -1325,9 +1376,9 @@ pub enum ProtoExpression {
         width: usize,
         expr_context: ExpressionContext,
     },
-    /// The bytes of the text of a `string_pool` handle, for an operation on the bits of a `string`. Only the interpreter
-    /// evaluates it: the compiled backends decline any statement that
-    /// contains it.
+    /// The bytes of the text of a `string_pool` handle, for an operation on
+    /// the bits of a `string`. Only the interpreter evaluates it: the compiled
+    /// backends decline any statement that contains it.
     ///
     /// `bytes` is the width of the text's bytes; `select`/`dynamic_select`
     /// select from them as from a `bit<bytes>` variable, and `width` is the
@@ -1338,6 +1389,13 @@ pub enum ProtoExpression {
         select: Option<(usize, usize)>,
         dynamic_select: Option<ProtoDynamicBitSelect>,
         width: usize,
+        expr_context: ExpressionContext,
+    },
+    /// A concatenation of strings: the handle of the concatenated texts of
+    /// the handles `elements`, each repeated its count of times. Only the
+    /// interpreter evaluates it, as [`ProtoExpression::StringBytes`].
+    StringConcat {
+        elements: Vec<(Box<ProtoExpression>, usize)>,
         expr_context: ExpressionContext,
     },
     /// Hierarchical testbench reference into a child module instance.
@@ -1615,6 +1673,11 @@ impl ProtoExpression {
                     d.index_expr.adjust_offsets(ff_delta, comb_delta);
                 }
             }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.adjust_offsets(ff_delta, comb_delta);
                 y.adjust_offsets(ff_delta, comb_delta);
@@ -1682,6 +1745,11 @@ impl ProtoExpression {
                     d.index_expr.remap_offsets_with(f);
                 }
             }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    x.remap_offsets_with(f);
+                }
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.remap_offsets_with(f);
                 y.remap_offsets_with(f);
@@ -1713,6 +1781,7 @@ impl ProtoExpression {
             ProtoExpression::Unary { width, .. } | ProtoExpression::StringBytes { width, .. } => {
                 *width
             }
+            ProtoExpression::StringConcat { .. } => crate::string_pool::HANDLE_WIDTH,
             ProtoExpression::Binary { width, .. } => *width,
             ProtoExpression::Concatenation { width, .. }
             | ProtoExpression::Resize { width, .. } => *width,
@@ -1749,6 +1818,7 @@ impl ProtoExpression {
         match self {
             ProtoExpression::HierVariable(x) => x.width,
             ProtoExpression::StringBytes { width, .. } => *width,
+            ProtoExpression::StringConcat { .. } => crate::string_pool::HANDLE_WIDTH,
             ProtoExpression::Variable { width, .. } => *width,
             ProtoExpression::Value {
                 value: Value::U64(v),
@@ -1809,7 +1879,8 @@ impl ProtoExpression {
             ProtoExpression::Value { expr_context, .. } => expr_context,
             ProtoExpression::Unary { expr_context, .. }
             | ProtoExpression::Resize { expr_context, .. }
-            | ProtoExpression::StringBytes { expr_context, .. } => expr_context,
+            | ProtoExpression::StringBytes { expr_context, .. }
+            | ProtoExpression::StringConcat { expr_context, .. } => expr_context,
             ProtoExpression::Binary { expr_context, .. } => expr_context,
             ProtoExpression::Concatenation { expr_context, .. } => expr_context,
             ProtoExpression::Ternary { expr_context, .. } => expr_context,
@@ -1847,7 +1918,9 @@ impl ProtoExpression {
             return is_wide_ptr(ds.window);
         }
         match self {
-            ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => false,
+            ProtoExpression::HierVariable(_)
+            | ProtoExpression::StringBytes { .. }
+            | ProtoExpression::StringConcat { .. } => false,
             // A static bit-select with a ≤128-bit result extracts into a
             // register, so only a >128-bit result is a pointer.  A dynamic
             // select reads its window out of the wide source the same way, so
@@ -1983,7 +2056,9 @@ impl ProtoExpression {
             operand.is_clean_to_width(limit)
         };
         match self {
-            ProtoExpression::HierVariable(_) | ProtoExpression::StringBytes { .. } => false,
+            ProtoExpression::HierVariable(_)
+            | ProtoExpression::StringBytes { .. }
+            | ProtoExpression::StringConcat { .. } => false,
             ProtoExpression::Variable {
                 width,
                 select,
@@ -2181,6 +2256,23 @@ impl ProtoExpression {
                         )
                     }),
                     signed: expr_context.signed,
+                },
+                ProtoExpression::StringConcat { elements, .. } => Expression::StringConcat {
+                    elements: elements
+                        .iter()
+                        .map(|(x, repeat)| {
+                            (
+                                Box::new(x.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )),
+                                *repeat,
+                            )
+                        })
+                        .collect(),
                 },
                 ProtoExpression::HierVariable(_) => {
                     unreachable!(
@@ -3883,11 +3975,32 @@ impl ProtoExpression {
         expr: &air::Expression,
         target: &air::Type,
     ) -> Result<ProtoExpression, SimulatorError> {
-        if target.is_string() && string_type_utils::is_expr(expr) {
-            let expr = string_type_utils::to_handle_expr(context, expr)?;
-            Conv::conv(context, &expr)
-        } else {
-            Conv::conv(context, expr)
+        if !(target.is_string() && string_type_utils::is_expr(expr)) {
+            return Conv::conv(context, expr);
+        }
+        match expr {
+            air::Expression::Concatenation(items, _) => {
+                string_type_utils::conv_concat(context, items)
+            }
+            // A branch may be a concatenation, which has no handle form in
+            // the analyzer's IR.
+            air::Expression::Ternary(cond, x, y, _) => {
+                let width = crate::string_pool::HANDLE_WIDTH;
+                Ok(ProtoExpression::Ternary {
+                    cond: Box::new(Conv::conv(context, cond.as_ref())?),
+                    true_expr: Box::new(Self::conv_for(context, x, target)?),
+                    false_expr: Box::new(Self::conv_for(context, y, target)?),
+                    width,
+                    expr_context: ExpressionContext {
+                        width,
+                        signed: false,
+                    },
+                })
+            }
+            _ => {
+                let expr = string_type_utils::to_handle_expr(context, expr)?;
+                Conv::conv(context, &expr)
+            }
         }
     }
 }
@@ -4196,6 +4309,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                             | ProtoExpression::Value { expr_context, .. }
                             | ProtoExpression::Unary { expr_context, .. }
                             | ProtoExpression::StringBytes { expr_context, .. }
+                            | ProtoExpression::StringConcat { expr_context, .. }
                             | ProtoExpression::Resize { expr_context, .. }
                             | ProtoExpression::Binary { expr_context, .. }
                             | ProtoExpression::Concatenation { expr_context, .. }

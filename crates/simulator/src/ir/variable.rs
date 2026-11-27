@@ -540,6 +540,10 @@ fn string_expr_width(
             let y = string_expr_width(y, widths, functions)?;
             Some(x.max(y))
         }
+        // A concatenation of strings is taken as of unknown length: it can
+        // feed a text back into itself (`s = {s, "x"}`), growing it each time
+        // it runs.
+        air::Expression::Concatenation(_, comptime) if comptime.r#type.is_string() => None,
         _ => Some(comptime_string_width(expr.comptime())),
     }
 }

@@ -4389,6 +4389,11 @@ fn gather_bit_aware_expr_reads(expr: &ProtoExpression, out: &mut Vec<(VarOffset,
                 gather_bit_aware_expr_reads(&d.index_expr, out);
             }
         }
+        ProtoExpression::StringConcat { elements, .. } => {
+            for (x, _) in elements {
+                gather_bit_aware_expr_reads(x, out);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             gather_bit_aware_expr_reads(x, out);
             gather_bit_aware_expr_reads(y, out);
@@ -8479,6 +8484,11 @@ fn collect_dynamic_bases(stmt: &ProtoStatement, out: &mut HashSet<VarOffset>) {
                 expr(x, out);
                 if let Some(d) = dynamic_select {
                     expr(&d.index_expr, out);
+                }
+            }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    expr(x, out);
                 }
             }
             ProtoExpression::Binary { x, y, .. } => {

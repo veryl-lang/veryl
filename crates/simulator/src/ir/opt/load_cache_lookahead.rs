@@ -166,6 +166,11 @@ fn walk_expr(expr: &ProtoExpression, idx: usize, reads: &mut FutureReads) {
                 walk_expr(&d.index_expr, idx, reads);
             }
         }
+        ProtoExpression::StringConcat { elements, .. } => {
+            for (x, _) in elements {
+                walk_expr(x, idx, reads);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             walk_expr(x, idx, reads);
             walk_expr(y, idx, reads);

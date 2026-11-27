@@ -800,6 +800,9 @@ fn children(expr: &ProtoExpression) -> Box<dyn Iterator<Item = &ProtoExpression>
         ProtoExpression::Unary { x, .. }
         | ProtoExpression::Resize { x, .. }
         | ProtoExpression::StringBytes { x, .. } => Box::new(std::iter::once(x.as_ref())),
+        ProtoExpression::StringConcat { elements, .. } => {
+            Box::new(elements.iter().map(|(e, _)| e.as_ref()))
+        }
         ProtoExpression::Binary { x, y, .. } => Box::new([x.as_ref(), y.as_ref()].into_iter()),
         ProtoExpression::Ternary {
             cond,
@@ -819,6 +822,9 @@ fn children_mut(expr: &mut ProtoExpression) -> Vec<&mut ProtoExpression> {
         ProtoExpression::Unary { x, .. }
         | ProtoExpression::Resize { x, .. }
         | ProtoExpression::StringBytes { x, .. } => vec![x.as_mut()],
+        ProtoExpression::StringConcat { elements, .. } => {
+            elements.iter_mut().map(|(e, _)| e.as_mut()).collect()
+        }
         ProtoExpression::Binary { x, y, .. } => vec![x.as_mut(), y.as_mut()],
         ProtoExpression::Ternary {
             cond,

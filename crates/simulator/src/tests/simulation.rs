@@ -35328,8 +35328,9 @@ fn display_string_argument_renders_text() {
 #[test]
 fn string_let_and_var_hold_their_text() {
     // A `string` `let`/`var` holds its text: `%s` prints it, a bare
-    // `$display(a)` prints it as text, and one variable's text copies into
-    // another, including from a `let` into a `var` the testbench writes.
+    // `$display(a)` prints it as text, one variable's text copies into
+    // another, including from a `let` into a `var` the testbench writes, and
+    // a concatenation of strings joins their texts.
     let code = r#"
     #[test(Top)]
     module Top {
@@ -35337,6 +35338,7 @@ fn string_let_and_var_hold_their_text() {
         var b: string;
         var c: string;
         var d: string;
+        var e: string;
         var x: logic<8>;
         initial {
             d = a;
@@ -35352,6 +35354,14 @@ fn string_let_and_var_hold_their_text() {
             }
             c = if x == 8'hab ? "longer text" : "s";
             $write("[%s]", c);
+            d = {a, "-", c};
+            b = {"ab" repeat 2, d};
+            c = if x == 8'hab ? {a, "!"} : "no";
+            $write("[%s][%s][%s][%s]", d, b, c, {a, d});
+            for _i in 0..3 {
+                e = {e, "+"};
+            }
+            $write("[%s]", e);
         }
     }
     "#;
@@ -35363,7 +35373,9 @@ fn string_let_and_var_hold_their_text() {
         sim.step(&Event::Initial);
         let output = output_buffer::take();
         assert_eq!(
-            output, "[hi][hi][hi][hello][   hi]hi ab hello[eq][longer text]",
+            output,
+            "[hi][hi][hi][hello][   hi]hi ab hello[eq][longer text]\
+             [hi-longer text][ababhi-longer text][hi!][hihi-longer text][+++]",
             "config={config:?}"
         );
     }
@@ -35394,7 +35406,7 @@ fn string_bits_read_and_write_as_its_bytes() {
             $display("%b %h %h", u[i], u[i+:8], u[i + 3-:4]);
             s = "AB";
             x = s;
-            $display("%h %h %h %h", x, s, s[7:0], {s, 8'h43});
+            $display("%h %h %h %h %h", x, s, s[7:0], {s, 8'h43}, {s, "C"});
             b = s == 16'h4142;
             $display("%b", b);
             b = s <: "AC";
@@ -35421,7 +35433,8 @@ fn string_bits_read_and_write_as_its_bytes() {
         sim.step(&Event::Initial);
         let output = output_buffer::take();
         assert_eq!(
-            output, "1 43 3\n4142 4142 42 414243\n1\n1\n[DE] 17477\nde\n[DE] 1 0\n[no] 6f\nno\n",
+            output,
+            "1 43 3\n4142 4142 42 414243 414243\n1\n1\n[DE] 17477\nde\n[DE] 1 0\n[no] 6f\nno\n",
             "config={config:?}"
         );
     }
@@ -35545,6 +35558,7 @@ fn string_crosses_ports_functions_and_hierarchy() {
             g = greet("bob", n);
             name_bits(b);
             $display("[%s][%s][%s][%s] %h %h", r, g, n, u.m, w, b);
+            $display("[%s]", {r, "/", n, "/", u.m});
             u.m = "changed";
             $display("[%s][%b]", u.m, u.i == "ping");
         }
@@ -35558,7 +35572,7 @@ fn string_crosses_ports_functions_and_hierarchy() {
         let output = output_buffer::take();
         assert_eq!(result, TestResult::Pass, "config={config:?}");
         assert_eq!(
-            output, "[pong][hi bob][bob][inner] 4344 4142\n[changed][1]\n",
+            output, "[pong][hi bob][bob][inner] 4344 4142\n[pong/bob/inner]\n[changed][1]\n",
             "config={config:?}"
         );
     }

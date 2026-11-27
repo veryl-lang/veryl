@@ -237,6 +237,11 @@ fn census_expr(e: &ProtoExpression, c: &mut Census, poison: bool) {
                 census_expr(&d.index_expr, c, poison);
             }
         }
+        ProtoExpression::StringConcat { elements, .. } => {
+            for (x, _) in elements {
+                census_expr(x, c, poison);
+            }
+        }
         ProtoExpression::Binary { x, y, .. } => {
             census_expr(x, c, poison);
             census_expr(y, c, poison);
@@ -621,6 +626,11 @@ impl Rewriter<'_> {
                 self.expr(x);
                 if let Some(d) = dynamic_select {
                     self.expr(&mut d.index_expr);
+                }
+            }
+            ProtoExpression::StringConcat { elements, .. } => {
+                for (x, _) in elements {
+                    self.expr(x);
                 }
             }
             ProtoExpression::Binary { x, y, .. } => {
