@@ -31,7 +31,7 @@ jobs:
         rustup toolchain install ${{ matrix.rust }} --profile minimal --no-self-update --target wasm32-unknown-unknown
         rustup default ${{ matrix.rust }}
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.1.0
       with:
         submodules: 'true'
         persist-credentials: false
@@ -58,7 +58,7 @@ jobs:
       WARN_PCT: "80"
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.1.0
       with:
         persist-credentials: false
     - name: Setup Rust

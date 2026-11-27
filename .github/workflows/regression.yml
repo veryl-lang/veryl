@@ -51,7 +51,7 @@ jobs:
       # mtimes of their last save.
       VERYL_AOT_C_RETAIN_DAYS: "0"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
       # Windows file I/O is slow on the build outputs. On Windows the build runs
@@ -60,7 +60,7 @@ jobs:
       # nothing behind a junction or mount point. Test scratch files go on the
       # drive too, outside the workspace so a scratch crate is not taken for a
       # workspace member.
-      - uses: samypr100/setup-dev-drive@v4
+      - uses: samypr100/setup-dev-drive@v4.1.0
         if: runner.os == 'Windows'
         with:
           drive-size: 40GB
@@ -87,7 +87,7 @@ jobs:
       # which rust-cache alone cannot reuse across runs (cargo's mtime fingerprints
       # break after checkout). The key is distinct because building under sccache
       # changes every crate's fingerprint. Master saves; PRs restore read-only.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           shared-key: ${{ matrix.target }}-sccache-o1
           workspaces: ${{ env.DEV_DRIVE_WORKSPACE && format('{0} -> target', env.DEV_DRIVE_WORKSPACE) || '. -> target' }}
@@ -100,7 +100,7 @@ jobs:
           # Since 0.17, sccache expands Cargo's `@argfile` and exceeds Windows' command-line limit:
           # https://github.com/mozilla/sccache/issues/2397
           version: ${{ runner.os == 'Windows' && 'v0.16.0' || '' }}
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4.3.0
         continue-on-error: true
         with:
           path: ${{ github.workspace }}/.sccache
@@ -124,7 +124,7 @@ jobs:
           cc_version=$(cc --version 2>&1 || echo "no cc")
           gen=$(printf '%s\n' "${cc_version%%$'\n'*}" | git hash-object --stdin)
           echo "gen=$gen" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4.3.0
         continue-on-error: true
         with:
           path: ${{ steps.aot-c.outputs.dir }}/*.so
@@ -154,7 +154,7 @@ jobs:
       - name: sccache stats
         if: always()
         run: sccache --show-stats
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v4.3.0
         if: github.ref == 'refs/heads/master'
         continue-on-error: true
         with:
@@ -171,7 +171,7 @@ jobs:
           if ! cmp -s .restored .kept; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v4.3.0
         if: steps.aot-c-prune.outputs.changed == 'true'
         continue-on-error: true
         with:
@@ -181,14 +181,14 @@ jobs:
   gen_sv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
       - name: Setup Rust
         run: |
           rustup toolchain install stable --profile minimal --no-self-update --component rustfmt
           rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           shared-key: gen_sv
           save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -200,7 +200,7 @@ jobs:
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
       - name: Setup Rust
@@ -213,14 +213,14 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
       - name: Setup Rust
         run: |
           rustup toolchain install stable --profile minimal --no-self-update --component clippy
           rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -242,7 +242,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       SCCACHE_CACHE_SIZE: "1G"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
       - name: Setup Rust
@@ -251,14 +251,14 @@ jobs:
           rustup default stable
       # Same rust-cache + sccache split as the build job above (deps via
       # rust-cache; workspace crates via sccache, under a distinct -sccache key).
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           shared-key: build-veryl-sccache
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: mozilla-actions/sccache-action@v0.0.10
         with:
           disable_annotations: true
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4.3.0
         continue-on-error: true
         with:
           path: ~/.cache/sccache
@@ -269,13 +269,13 @@ jobs:
       - name: sccache stats
         if: always()
         run: sccache --show-stats
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v4.3.0
         if: github.ref == 'refs/heads/master'
         continue-on-error: true
         with:
           path: ~/.cache/sccache
           key: sccache-build-veryl-${{ github.sha }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4.6.2
         with:
           name: veryl-release-verylup
           path: target/release-verylup/veryl
@@ -285,16 +285,16 @@ jobs:
     needs: build-veryl
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4.3.0
         with:
           name: veryl-release-verylup
           path: target/release-verylup
       - run: chmod +x target/release-verylup/veryl
       - name: Setup verilator
-        uses: veryl-lang/setup-verilator@v2
+        uses: veryl-lang/setup-verilator@v2.1.0
       - name: Format check
         run: ../../../target/release-verylup/veryl fmt --check
         working-directory: crates/std/veryl
@@ -309,11 +309,11 @@ jobs:
     needs: build-veryl
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4.3.0
         with:
           name: veryl-release-verylup
           path: target/release-verylup
@@ -329,11 +329,11 @@ jobs:
     needs: build-veryl
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4.3.0
         with:
           name: veryl-release-verylup
           path: target/release-verylup
@@ -346,16 +346,16 @@ jobs:
     needs: build-veryl
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4.3.0
         with:
           name: veryl-release-verylup
           path: target/release-verylup
       - run: chmod +x target/release-verylup/veryl
       - name: Setup verilator
-        uses: veryl-lang/setup-verilator@v2
+        uses: veryl-lang/setup-verilator@v2.1.0
       - name: Test cocotb 1.9.2
         run: |
           pip install "cocotb==1.9.2"
@@ -368,14 +368,14 @@ jobs:
   wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
       - name: Setup Rust
         run: |
           rustup toolchain install stable --profile minimal --no-self-update --target wasm32-unknown-unknown
           rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         continue-on-error: true
         with:
           shared-key: "${{ runner.os }}-wasm"
@@ -386,7 +386,7 @@ jobs:
   highlightgen:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           submodules: 'true'
           persist-credentials: false
@@ -394,7 +394,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         continue-on-error: true
         with:
           shared-key: "${{ runner.os }}-highlightgen"
@@ -408,10 +408,10 @@ jobs:
       run:
         working-directory: support/highlightjs
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.5.0
         with:
           node-version: '22'
       - run: npm ci

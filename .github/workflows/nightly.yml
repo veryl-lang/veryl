@@ -31,7 +31,7 @@ jobs:
         rustup toolchain install ${{ matrix.rust }} --profile minimal --no-self-update
         rustup default ${{ matrix.rust }}
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.1.0
       with:
         submodules: 'true'
         persist-credentials: false
