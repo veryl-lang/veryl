@@ -4,6 +4,7 @@ mod component;
 pub mod component_manifest;
 mod condition;
 mod doc;
+pub mod export_description;
 mod format;
 mod git;
 mod lint;
@@ -32,6 +33,7 @@ pub use component_manifest::{
 };
 pub use condition::Condition;
 pub use doc::Doc;
+pub use export_description::{EXPORT_DESCRIPTION_FILE, ExportDescription};
 pub use format::{Format, NewlineStyle};
 pub use git::Git;
 pub use lint::{Case, Lint, LintPortability, NonPortableItem};

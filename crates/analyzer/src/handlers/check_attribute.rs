@@ -28,6 +28,9 @@ pub struct CheckAttribute {
     allow_in_dependencies: Vec<NonPortableItem>,
     is_dependency: bool,
     project_name: StrId,
+    /// Whether the attributes being checked belong to a package or an
+    /// interface declaration, the only places `#[export]` is allowed.
+    export_allowed: bool,
 }
 
 impl CheckAttribute {
@@ -81,6 +84,12 @@ impl CheckAttribute {
             match attr {
                 Ok(attr) => {
                     self.check_portability(&attr, arg);
+                    if matches!(attr, Attr::Export(_)) && !self.export_allowed {
+                        self.errors.push(AnalyzerError::invalid_export(
+                            "can be attached to a package or an interface only",
+                            &arg.identifier.as_ref().into(),
+                        ));
+                    }
                     ret.push(Some((attr, arg.range())));
                 }
                 Err(err) => {
@@ -274,6 +283,23 @@ impl CheckAttribute {
             self.restore_ifdef(saved_ifdef);
         }
     }
+}
+
+/// Whether a description group is a single package or interface
+/// declaration.
+fn is_package_or_interface(group: &DescriptionGroup) -> bool {
+    let DescriptionGroupGroup::DescriptionItem(x) = group.description_group_group.as_ref() else {
+        return false;
+    };
+    let DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) = x.description_item.as_ref()
+    else {
+        return false;
+    };
+    matches!(
+        x.public_description_item.as_ref(),
+        PublicDescriptionItem::PackageDeclaration(_)
+            | PublicDescriptionItem::InterfaceDeclaration(_)
+    )
 }
 
 impl Handler for CheckAttribute {
@@ -531,7 +557,9 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
+                self.export_allowed = is_package_or_interface(x);
                 self.attrs(&attrs, x.range(), false);
+                self.export_allowed = false;
             }
         }
         Ok(())

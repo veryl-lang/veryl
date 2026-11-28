@@ -3,7 +3,7 @@ use crate::analyzer_error::{
     MultipleDefaultKind,
 };
 use crate::attribute::Attribute as Attr;
-use crate::attribute::{AllowItem, EnumEncodingItem};
+use crate::attribute::{AllowItem, EnumEncodingItem, ExportItem};
 use crate::attribute_table;
 use crate::definition_table::{self, Definition};
 use crate::generic_inference_table::{self, PendingEntry};
@@ -290,6 +290,8 @@ impl CreateSymbolTable {
         if attribute_table::contains(token, Attr::Allow(AllowItem::UnusedVariable)) {
             symbol.allow_unused = true;
         }
+        // The attribute covers the whole package or interface.
+        symbol.exported = attribute_table::is_export(token, ExportItem::Rust);
 
         let id = symbol_table::insert(token, symbol);
         if let Some(id) = id {

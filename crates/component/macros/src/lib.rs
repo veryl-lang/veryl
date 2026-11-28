@@ -33,6 +33,10 @@
 //! }
 //! ```
 
+mod case;
+mod import;
+mod modport;
+
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
@@ -258,8 +262,9 @@ fn value_conversion(ty: &Type) -> syn::Result<(String, TokenStream2)> {
     };
     let ty_str = match seg.as_str() {
         "String" => "str".to_string(),
-        "Value" => "value".to_string(),
-        other => other.to_string(),
+        "u64" | "u8" | "u16" | "u32" | "i64" | "i8" | "i16" | "i32" | "bool" => seg,
+        // The width of the argument is taken from the call site.
+        _ => "value".to_string(),
     };
     Ok((ty_str, conv))
 }
@@ -682,6 +687,68 @@ fn expand_interface(input: DeriveInput) -> syn::Result<TokenStream2> {
 }
 
 // ---------------------------------------------------------------------------
+// #[modport] / import!
+// ---------------------------------------------------------------------------
+
+/// Declares the members of an interface's modport as the fields of a
+/// struct: an `#[input]` field is read by `Modport::load`, an `#[output]`
+/// field is driven by `Modport::store` when it changed. A field binds to the
+/// member of its name, or of `#[input(name = "..")]`. Its type implements
+/// `Packed` and `Default`, which the field starts at.
+///
+/// ```ignore
+/// #[modport]
+/// struct BusMaster {
+///     #[output]
+///     valid: bool,
+///     #[output]
+///     addr: u8,
+///     #[input]
+///     ready: bool,
+/// }
+///
+/// let mut bus = BusMaster::bind(&modport_ref)?;
+/// bus.load(ctx)?;
+/// bus.valid = true;
+/// bus.store(ctx);
+/// ```
+#[proc_macro_attribute]
+pub fn modport(attr: TokenStream, item: TokenStream) -> TokenStream {
+    modport::expand_attribute(attr.into(), item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Expands a package or an interface marked `#[export(rust)]` as a public
+/// module named after it in `snake_case`, from the description `veryl build`
+/// writes next to the crate's `Cargo.toml` (`veryl.types.json`).
+///
+/// - A package gives its constants, type aliases, enums and structs, which
+///   implement `Packed` (and `FixedWidth`, enums and structs) to convert to
+///   and from Veryl's packed bits.
+/// - An interface gives a `Modport` struct per modport, as `#[modport]`
+///   declares it; clock and reset members are left out.
+///
+/// Names follow Rust's conventions: types and variants in
+/// `UpperCamelCase`, fields in `snake_case`, constants in
+/// `SCREAMING_SNAKE_CASE`.
+///
+/// A type of another package is named through where that package is
+/// imported, given with `use(..)`:
+///
+/// ```ignore
+/// veryl_component::import!(bus_vip_pkg);
+/// veryl_component::import!(regblock_pkg, use(bus_vip_pkg = vip_bus_tb::bus_vip_pkg));
+/// ```
+#[proc_macro]
+pub fn import(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as import::ImportInput);
+    import::expand(input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+// ---------------------------------------------------------------------------
 // #[component_impl]
 // ---------------------------------------------------------------------------
 
@@ -846,13 +913,9 @@ fn arg_conversion(ty: &Type, idx: usize) -> syn::Result<(String, TokenStream2)> 
         "i8" | "i16" | "i32" => quote!(<#ty>::try_from(args[#idx].as_value()?.as_i64()?)?),
         "bool" => quote!(args[#idx].as_value()?.as_bool_strict()?),
         "Value" => quote!(args[#idx].as_value()?.clone()),
-        _ => {
-            return Err(syn::Error::new(
-                ty.span(),
-                "unsupported method argument type; use &str, String, an integer, bool, Value, \
-                 ClockPort, ResetPort, InputPort, OutputPort or ModportRef",
-            ));
-        }
+        // Any other type converts from the argument's bits: a type
+        // `import!` generates, `BigUint`, an array, ..
+        _ => quote!(<#ty as ::veryl_component::Packed>::from_value(args[#idx].as_value()?)?),
     };
     let ty_str = match seg.as_str() {
         "String" => "str".to_string(),

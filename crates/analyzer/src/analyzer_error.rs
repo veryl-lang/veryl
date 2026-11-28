@@ -569,6 +569,24 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_export),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("#[export] {reason}")]
+    InvalidExport {
+        reason: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_factor),
         help("remove {kind} from expression"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2833,6 +2851,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbed { input, .. } => input,
             AnalyzerError::InvalidEmbedIdentifier { input, .. } => input,
             AnalyzerError::InvalidEnumVariant { input, .. } => input,
+            AnalyzerError::InvalidExport { input, .. } => input,
             AnalyzerError::InvalidFactor { input, .. } => input,
             AnalyzerError::InvalidForRange { input, .. } => input,
             AnalyzerError::InvalidForStep { input, .. } => input,
@@ -2969,6 +2988,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbed { input, .. } => input,
             AnalyzerError::InvalidEmbedIdentifier { input, .. } => input,
             AnalyzerError::InvalidEnumVariant { input, .. } => input,
+            AnalyzerError::InvalidExport { input, .. } => input,
             AnalyzerError::InvalidFactor { input, .. } => input,
             AnalyzerError::InvalidForRange { input, .. } => input,
             AnalyzerError::InvalidForStep { input, .. } => input,
@@ -3112,6 +3132,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbed { instance, .. } => instance,
             AnalyzerError::InvalidEmbedIdentifier { instance, .. } => instance,
             AnalyzerError::InvalidEnumVariant { instance, .. } => instance,
+            AnalyzerError::InvalidExport { instance, .. } => instance,
             AnalyzerError::InvalidFactor { instance, .. } => instance,
             AnalyzerError::InvalidIdentifier { instance, .. } => instance,
             AnalyzerError::InvalidImport { instance, .. } => instance,
@@ -3248,6 +3269,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbed { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidEmbedIdentifier { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidEnumVariant { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidExport { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidFactor { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidIdentifier { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidImport { instance, .. } => instance.as_ref(),
@@ -3384,6 +3406,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbed { token_source, .. } => *token_source,
             AnalyzerError::InvalidEmbedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidEnumVariant { token_source, .. } => *token_source,
+            AnalyzerError::InvalidExport { token_source, .. } => *token_source,
             AnalyzerError::InvalidFactor { token_source, .. } => *token_source,
             AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidImport { token_source, .. } => *token_source,
@@ -3811,6 +3834,15 @@ impl AnalyzerError {
         AnalyzerError::InvalidEnumVariant {
             identifier: identifier.to_string(),
             encoding: encoding.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn invalid_export(reason: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidExport {
+            reason: reason.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

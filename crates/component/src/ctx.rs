@@ -654,6 +654,23 @@ impl SimCtx {
         };
     }
 
+    /// Reads a port's payload words (LSB-first) into `out` as two-state
+    /// bits: X and Z read as 0, as SystemVerilog converts four-state values
+    /// to two-state types.
+    pub(crate) fn read_two_state(&mut self, port: InputPort, out: &mut [u64]) {
+        if self.four_state {
+            let value = self.read(port);
+            let mask = value.mask_xz();
+            for (i, (out, word)) in out.iter_mut().zip(value.as_slice()).enumerate() {
+                *out = word & !mask.get(i).copied().unwrap_or(0);
+            }
+        } else if port.width <= 64 {
+            out[0] = self.read_u64(port);
+        } else {
+            self.read_words(port, out);
+        }
+    }
+
     /// True when the simulation is four-state, so input X/Z masks are
     /// meaningful and driven X/Z propagates. A component gates its X/Z checks
     /// on this: under a two-state simulation there is nothing to check.

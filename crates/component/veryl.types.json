@@ -1,0 +1,330 @@
+{
+  "version": 1,
+  "packages": {
+    "test_pkg": {
+      "consts": [
+        {
+          "name": "REGS",
+          "type": {
+            "bits": {
+              "width": 32,
+              "signed": false
+            }
+          },
+          "value": {
+            "bits": {
+              "width": 32,
+              "signed": false,
+              "value": "8"
+            }
+          }
+        },
+        {
+          "name": "negValue",
+          "type": {
+            "bits": {
+              "width": 8,
+              "signed": true
+            }
+          },
+          "value": {
+            "bits": {
+              "width": 8,
+              "signed": true,
+              "value": "-2"
+            }
+          }
+        },
+        {
+          "name": "ENABLE",
+          "type": {
+            "bits": {
+              "width": 1,
+              "signed": false
+            }
+          },
+          "value": {
+            "bits": {
+              "width": 1,
+              "signed": false,
+              "value": "1"
+            }
+          }
+        },
+        {
+          "name": "busName",
+          "type": "string",
+          "value": {
+            "string": "bus \"vip\""
+          }
+        },
+        {
+          "name": "DEFAULT_MODE",
+          "type": {
+            "user": {
+              "package": "test_pkg",
+              "name": "Mode"
+            }
+          },
+          "value": {
+            "variant": {
+              "package": "test_pkg",
+              "enum": "Mode",
+              "variant": "BUSY"
+            }
+          }
+        },
+        {
+          "name": "DEFAULT_CONFIG",
+          "type": {
+            "user": {
+              "package": "test_pkg",
+              "name": "BusConfig"
+            }
+          },
+          "value": {
+            "struct": {
+              "package": "test_pkg",
+              "name": "BusConfig",
+              "fields": [
+                {
+                  "name": "mode",
+                  "value": {
+                    "variant": {
+                      "package": "test_pkg",
+                      "enum": "Mode",
+                      "variant": "IDLE"
+                    }
+                  }
+                },
+                {
+                  "name": "regs",
+                  "value": {
+                    "bits": {
+                      "width": 8,
+                      "signed": false,
+                      "value": "16"
+                    }
+                  }
+                },
+                {
+                  "name": "nibbles",
+                  "value": {
+                    "array": [
+                      {
+                        "bits": {
+                          "width": 4,
+                          "signed": false,
+                          "value": "1"
+                        }
+                      },
+                      {
+                        "bits": {
+                          "width": 4,
+                          "signed": false,
+                          "value": "2"
+                        }
+                      },
+                      {
+                        "bits": {
+                          "width": 4,
+                          "signed": false,
+                          "value": "3"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "delta",
+                  "value": {
+                    "bits": {
+                      "width": 4,
+                      "signed": true,
+                      "value": "-1"
+                    }
+                  }
+                },
+                {
+                  "name": "wideValue",
+                  "value": {
+                    "bits": {
+                      "width": 70,
+                      "signed": false,
+                      "value": "5"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "types": [
+        {
+          "name": "Word",
+          "type": {
+            "bits": {
+              "width": 16,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "enums": [
+        {
+          "name": "Mode",
+          "width": 2,
+          "variants": [
+            {
+              "name": "IDLE",
+              "value": "1"
+            },
+            {
+              "name": "BUSY",
+              "value": "2"
+            }
+          ]
+        }
+      ],
+      "structs": [
+        {
+          "name": "BusConfig",
+          "fields": [
+            {
+              "name": "mode",
+              "type": {
+                "user": {
+                  "package": "test_pkg",
+                  "name": "Mode"
+                }
+              }
+            },
+            {
+              "name": "regs",
+              "type": {
+                "bits": {
+                  "width": 8,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "nibbles",
+              "type": {
+                "array": {
+                  "len": 3,
+                  "elem": {
+                    "bits": {
+                      "width": 4,
+                      "signed": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "delta",
+              "type": {
+                "bits": {
+                  "width": 4,
+                  "signed": true
+                }
+              }
+            },
+            {
+              "name": "wideValue",
+              "type": {
+                "bits": {
+                  "width": 70,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "interfaces": {
+    "test_if": {
+      "modports": [
+        {
+          "name": "master",
+          "members": [
+            {
+              "name": "clk",
+              "direction": "input",
+              "type": "clock"
+            },
+            {
+              "name": "valid",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "cfg",
+              "direction": "output",
+              "type": {
+                "user": {
+                  "package": "test_pkg",
+                  "name": "BusConfig"
+                }
+              }
+            },
+            {
+              "name": "ready",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "dataOut",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 8,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "monitor",
+          "members": [
+            {
+              "name": "valid",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "ready",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

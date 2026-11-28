@@ -18,14 +18,16 @@ use veryl_parser::veryl_grammar_trait::{
     FunctionDeclaration, Statement, StatementBlockGroupGroup, StatementBlockItem,
 };
 
-pub fn resolve_function(list: &[Symbol]) -> Vec<AnalyzerError> {
+/// Resolves the functions of `list`, and the side effects of `effects`
+/// (`list`, or more where callees outside it propagate theirs).
+pub fn resolve_function(list: &[Symbol], effects: &[Symbol]) -> Vec<AnalyzerError> {
     let mut errors = Vec::new();
     for symbol in list {
         resolve_constantable(symbol, &mut Vec::new());
         // `symbol` keeps `reference_paths` though `resolve_constantable` clears them in the symbol table
         check_inline_function(symbol, &mut errors);
     }
-    resolve_side_effects(list);
+    resolve_side_effects(effects);
     errors
 }
 

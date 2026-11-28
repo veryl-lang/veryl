@@ -8,6 +8,7 @@ use crate::analyzer_error::DuplicatedIdentifierKind;
 use crate::attribute::IfdefCondition;
 use crate::attribute_table;
 use crate::namespace::{DefineContext, Namespace};
+use crate::post_pass1_scope::{self, PostPass1Scope};
 use crate::scope;
 use crate::sv_system_function;
 use crate::symbol::{
@@ -2044,8 +2045,12 @@ impl SymbolTable {
         self.import_list.push(import);
     }
 
-    pub fn apply_import(&mut self) {
-        let imports = std::mem::take(&mut self.import_list);
+    pub fn apply_import(&mut self, scope: PostPass1Scope) {
+        let mut list = std::mem::take(&mut self.import_list);
+        let imports = scope.take(&mut list, |x| {
+            post_pass1_scope::in_exported_namespace_by(&x.namespace, &|id| self.is_exported(id))
+        });
+        self.import_list = list;
         self.apply_imports(&imports);
     }
 
@@ -2209,15 +2214,25 @@ impl SymbolTable {
         None
     }
 
-    pub fn resolve_interfaces(&mut self) -> Vec<AnalyzerError> {
+    pub fn resolve_interfaces(&mut self, scope: PostPass1Scope) -> Vec<AnalyzerError> {
         let mut errors = Vec::new();
-        let mut visited = Vec::new();
+        // An interface resolved by the export run is not resolved again,
+        // even as the mixin source of another.
+        let mut visited: Vec<_> = if scope == PostPass1Scope::Rest {
+            self.symbol_table
+                .values()
+                .filter(|x| matches!(x.kind, SymbolKind::Interface(_)) && x.exported)
+                .map(|x| x.id)
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let interface_list: Vec<_> = self
             .symbol_table
             .values()
             .filter_map(|x| {
-                if matches!(x.kind, SymbolKind::Interface(_)) {
+                if matches!(x.kind, SymbolKind::Interface(_)) && scope.includes_symbol(x) {
                     Some(x.id)
                 } else {
                     None
@@ -2590,7 +2605,9 @@ impl SymbolTable {
                         generated_from,
                     })
                 };
-                let symbol = Symbol::new(&token, kind, &namespace, false, DocComment::default());
+                let mut symbol =
+                    Symbol::new(&token, kind, &namespace, false, DocComment::default());
+                symbol.exported = modport_symbol.exported;
                 if let Some(id) = symbol_table.insert(&token, symbol) {
                     ret.push(id);
                 }
@@ -2653,10 +2670,14 @@ impl SymbolTable {
         self.bind_list.push(bind);
     }
 
-    pub fn apply_bind(&mut self) -> Vec<AnalyzerError> {
+    pub fn apply_bind(&mut self, scope: PostPass1Scope) -> Vec<AnalyzerError> {
         let mut errors = Vec::new();
 
-        let bind_list: Vec<Bind> = std::mem::take(&mut self.bind_list);
+        let mut list = std::mem::take(&mut self.bind_list);
+        let bind_list: Vec<Bind> = scope.take(&mut list, |x| {
+            post_pass1_scope::in_exported_namespace_by(&x.target.1, &|id| self.is_exported(id))
+        });
+        self.bind_list = list;
         for bind in bind_list {
             let Ok(target) = self.resolve_generic_path(&bind.target.0, &bind.target.1) else {
                 continue;
@@ -2700,16 +2721,35 @@ impl SymbolTable {
         self.msb_list.push(msb);
     }
 
-    fn get_msb(&mut self) -> Vec<Msb> {
-        std::mem::take(&mut self.msb_list)
+    fn get_msb(&mut self, scope: PostPass1Scope) -> Vec<Msb> {
+        let mut list = std::mem::take(&mut self.msb_list);
+        let ret = scope.take(&mut list, |x| {
+            post_pass1_scope::in_exported_namespace_by(&x.path.1, &|id| self.is_exported(id))
+        });
+        self.msb_list = list;
+        ret
+    }
+
+    /// Whether a symbol is declared in an exported package or interface.
+    fn is_exported(&self, id: SymbolId) -> bool {
+        self.symbol_table.get(&id).is_some_and(|x| x.exported)
     }
 
     fn add_connect(&mut self, connect: Connect) {
         self.connect_list.push(connect);
     }
 
-    fn get_connect(&mut self) -> Vec<Connect> {
-        std::mem::take(&mut self.connect_list)
+    fn get_connect(&mut self, scope: PostPass1Scope) -> Vec<Connect> {
+        let mut list = std::mem::take(&mut self.connect_list);
+        let ret = scope.take(&mut list, |x| {
+            let token = match x {
+                Connect::Statement(x, _) => x.scoped_identifier.identifier().token,
+                Connect::Declaration(x, _) => x.identifier.identifier_token.token,
+            };
+            post_pass1_scope::in_exported_token_by(&token, &|id| self.is_exported(id))
+        });
+        self.connect_list = list;
+        ret
     }
 
     fn resolve_generic_path(
@@ -2754,10 +2794,11 @@ impl SymbolTable {
         }
     }
 
-    pub fn resolve_user_defined(&self) -> Vec<(SymbolId, SymbolId)> {
+    pub fn resolve_user_defined(&self, scope: PostPass1Scope) -> Vec<(SymbolId, SymbolId)> {
         let mut resolved = Vec::new();
         for symbol in self.symbol_table.values() {
-            if let Some(x) = symbol.kind.get_type()
+            if scope.includes_symbol(symbol)
+                && let Some(x) = symbol.kind.get_type()
                 && let TypeKind::UserDefined(x) = &x.kind
             {
                 let context = ResolveContext::new(&symbol.namespace);
@@ -3705,9 +3746,9 @@ pub fn add_import(import: Import) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_import(import))
 }
 
-pub fn apply_import() {
+pub fn apply_import(scope: PostPass1Scope) {
     clear_resolve_caches();
-    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import());
+    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import(scope));
 }
 
 fn import_tokens_by_scope<'a>(
@@ -3742,9 +3783,9 @@ pub fn export_imports_since(watermark: PendingWatermark) -> Vec<Import> {
     SYMBOL_TABLE.with(|table| table.borrow().import_list[watermark.import..].to_vec())
 }
 
-pub fn resolve_interfaces() -> Vec<AnalyzerError> {
+pub fn resolve_interfaces(scope: PostPass1Scope) -> Vec<AnalyzerError> {
     clear_resolve_caches();
-    SYMBOL_TABLE.with(|f| f.borrow_mut().resolve_interfaces())
+    SYMBOL_TABLE.with(|f| f.borrow_mut().resolve_interfaces(scope))
 }
 
 pub fn add_bind(bind: Bind) {
@@ -3752,17 +3793,17 @@ pub fn add_bind(bind: Bind) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_bind(bind))
 }
 
-pub fn apply_bind() -> Vec<AnalyzerError> {
+pub fn apply_bind(scope: PostPass1Scope) -> Vec<AnalyzerError> {
     clear_resolve_caches();
-    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_bind())
+    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_bind(scope))
 }
 
 pub fn add_msb(msb: Msb) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_msb(msb))
 }
 
-pub fn apply_msb() -> Vec<AnalyzerError> {
-    let msb_list = SYMBOL_TABLE.with(|f| f.borrow_mut().get_msb());
+pub fn apply_msb(scope: PostPass1Scope) -> Vec<AnalyzerError> {
+    let msb_list = SYMBOL_TABLE.with(|f| f.borrow_mut().get_msb(scope));
     check_msb(msb_list)
 }
 
@@ -3770,24 +3811,37 @@ pub fn add_connect(connect: Connect) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_connect(connect))
 }
 
-pub fn apply_connect() -> Vec<AnalyzerError> {
-    let connect_list = SYMBOL_TABLE.with(|f| f.borrow_mut().get_connect());
+pub fn apply_connect(scope: PostPass1Scope) -> Vec<AnalyzerError> {
+    let connect_list = SYMBOL_TABLE.with(|f| f.borrow_mut().get_connect(scope));
     check_connect(connect_list)
 }
 
-pub fn resolve_user_defined() {
+pub fn resolve_user_defined(scope: PostPass1Scope) {
     clear_resolve_caches();
-    let resolved = SYMBOL_TABLE.with(|f| f.borrow().resolve_user_defined());
+    let resolved = SYMBOL_TABLE.with(|f| f.borrow().resolve_user_defined(scope));
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
 }
 
-pub fn resolve_function() -> Vec<AnalyzerError> {
-    let list = SYMBOL_TABLE.with(|f| f.borrow().get_function_symbols());
-    function::resolve_function(&list)
+pub fn resolve_function(scope: PostPass1Scope) -> Vec<AnalyzerError> {
+    let all = SYMBOL_TABLE.with(|f| f.borrow().get_function_symbols());
+    let list: Vec<_> = all
+        .iter()
+        .filter(|x| scope.includes_symbol(x))
+        .cloned()
+        .collect();
+    // Side effects propagate from callees, which the rest may find among
+    // the exported functions; the exported ones call no others.
+    let effects = if scope == PostPass1Scope::Export {
+        &list
+    } else {
+        &all
+    };
+    function::resolve_function(&list, effects)
 }
 
-pub fn resolve_enum() -> Vec<AnalyzerError> {
-    let list = SYMBOL_TABLE.with(|f| f.borrow().get_enum_symbols());
+pub fn resolve_enum(scope: PostPass1Scope) -> Vec<AnalyzerError> {
+    let mut list = SYMBOL_TABLE.with(|f| f.borrow().get_enum_symbols());
+    list.retain(|x| scope.includes_symbol(x));
     r#enum::resolve_enum(&list)
 }
 

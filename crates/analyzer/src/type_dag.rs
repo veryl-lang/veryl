@@ -1,5 +1,6 @@
 use crate::AnalyzerError;
 use crate::namespace::Namespace;
+use crate::post_pass1_scope::{self, PostPass1Scope};
 use crate::symbol::{ParameterKind, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath};
 use crate::symbol_table;
@@ -131,9 +132,16 @@ impl TypeDag {
         self.candidates.push(cand);
     }
 
-    fn apply(&mut self) -> Vec<AnalyzerError> {
+    fn apply(&mut self, scope: PostPass1Scope) -> Vec<AnalyzerError> {
         symbol_table::suppress_cache_clear();
-        let candidates: Vec<_> = std::mem::take(&mut self.candidates);
+        let candidates: Vec<_> = scope.take(&mut self.candidates, |x| match x {
+            TypeDagCandidate::Path { namespace, .. } => {
+                post_pass1_scope::in_exported_namespace(namespace)
+            }
+            TypeDagCandidate::Symbol { id, .. } => {
+                symbol_table::get_rc(*id).is_some_and(|x| x.exported)
+            }
+        });
 
         // Process symbol declarations at first to construct dag_owned
         for cand in &candidates {
@@ -772,8 +780,8 @@ pub fn export_candidates_since(watermark: usize) -> Vec<TypeDagCandidate> {
     TYPE_DAG.with(|f| f.borrow().candidates[watermark..].to_vec())
 }
 
-pub fn apply() -> Vec<AnalyzerError> {
-    TYPE_DAG.with(|f| f.borrow_mut().apply())
+pub fn apply(scope: PostPass1Scope) -> Vec<AnalyzerError> {
+    TYPE_DAG.with(|f| f.borrow_mut().apply(scope))
 }
 
 pub fn toposort_file() -> Vec<PathId> {

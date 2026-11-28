@@ -416,6 +416,21 @@ impl Lockfile {
     /// Collects `[[components]]` declared by direct (visible) dependencies.
     /// Transitive dependencies are skipped, matching the visibility of
     /// dependency symbols.
+    /// The dependencies given by a path, which are local projects: each with
+    /// its name, as the namespace of its symbols, and its metadata.
+    pub fn collect_path_dependencies(&self) -> Result<Vec<(String, Metadata)>, MetadataError> {
+        let mut ret = Vec::new();
+        for locks in self.lock_table.values() {
+            for lock in locks {
+                if matches!(lock.source, LockSource::Path(_)) {
+                    ret.push((lock.name.clone(), self.get_metadata(&lock.source)?));
+                }
+            }
+        }
+        ret.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(ret)
+    }
+
     pub fn collect_components(&self) -> Result<Vec<DependencyComponents>, MetadataError> {
         let mut ret = Vec::new();
 
@@ -425,7 +440,9 @@ impl Lockfile {
                     continue;
                 }
                 let metadata = self.get_metadata(&lock.source)?;
-                if metadata.components.is_empty() {
+                // A library exports no component.
+                let components: Vec<_> = metadata.component_packages().cloned().collect();
+                if components.is_empty() {
                     continue;
                 }
                 let root = metadata.project_path();
@@ -441,7 +458,7 @@ impl Lockfile {
                     project: lock.name.clone(),
                     root,
                     target_dir,
-                    components: metadata.components.clone(),
+                    components,
                 });
             }
         }

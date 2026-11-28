@@ -8,6 +8,7 @@ use crate::ir::{WidthExpr, WidthOp};
 use crate::literal::Literal;
 use crate::literal_table;
 use crate::namespace::Namespace;
+use crate::post_pass1_scope::{self, PostPass1Scope};
 use crate::symbol::{GenericParameterProperty, Symbol, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table;
@@ -103,8 +104,12 @@ pub fn clear() {
     INFERRED.with(|f| f.borrow_mut().clear());
 }
 
-pub fn resolve_pending() {
-    let entries = drain_pending();
+pub fn resolve_pending(scope: PostPass1Scope) {
+    let entries = PENDING.with(|f| {
+        scope.take(&mut f.borrow_mut(), |x| {
+            post_pass1_scope::in_exported_namespace(&x.namespace)
+        })
+    });
     for entry in entries {
         if let Some(args) = try_infer_entry(&entry) {
             insert_inferred(entry.call_token_id, args);

@@ -116,20 +116,6 @@ fn main() -> Result<ExitCode> {
 
     let mut stopwatch = StopWatch::new();
 
-    // `veryl test` builds its own components; the other analyzing
-    // commands freshen their manifests here.
-    if matches!(
-        command,
-        Commands::Check(_)
-            | Commands::Build(_)
-            | Commands::Doc(_)
-            | Commands::Dump(_)
-            | Commands::Synth(_)
-            | Commands::Publish(_)
-    ) {
-        cmd_test::build_component_manifests(&metadata);
-    }
-
     let ret = match command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec(),
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec(),
@@ -137,15 +123,19 @@ fn main() -> Result<ExitCode> {
         // check emits nothing, so it writes no info.toml.
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata),
         Commands::Build(x) => {
-            let ret = cmd_build::CmdBuild::new(x).exec(
-                &mut metadata,
-                false,
-                opt.quiet,
-                None,
-                None,
-                &[],
-                cmd_build::EmitPolicy::Always,
-            );
+            // The components' manifests are freshened during the analysis,
+            // after the description they are built from is written.
+            let ret = cmd_build::CmdBuild::new(x)
+                .with_component_build(cmd_test::build_component_manifests)
+                .exec(
+                    &mut metadata,
+                    false,
+                    opt.quiet,
+                    None,
+                    None,
+                    &[],
+                    cmd_build::EmitPolicy::Always,
+                );
             metadata.save_build_info()?;
             ret
         }

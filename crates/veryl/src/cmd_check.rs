@@ -21,6 +21,11 @@ impl CmdCheck {
             output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
+            export: pipeline::ExportStep::Write {
+                check: false,
+                quiet: false,
+                build: Some(&crate::cmd_test::build_component_manifests),
+            },
         };
         let AnalyzeOutput {
             incremental,

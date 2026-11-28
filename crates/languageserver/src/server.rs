@@ -917,7 +917,7 @@ impl Server {
     }
 
     fn apply_project_imports(&self) {
-        symbol_table::apply_import();
+        symbol_table::apply_import(veryl_analyzer::post_pass1_scope::PostPass1Scope::All);
         let imports = self
             .document_inputs
             .values()

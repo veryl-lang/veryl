@@ -524,6 +524,7 @@ mod committed_manifest_tests {
         let entry = crate::Component {
             path: ".".into(),
             wasm: None,
+            library: false,
         };
         let manifests = entry.collect_manifests(&dir, Path::new("/no/such/target"));
         assert_eq!(manifests.len(), 1);

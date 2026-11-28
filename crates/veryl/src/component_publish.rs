@@ -140,7 +140,7 @@ pub fn update_prebuilt_wasm(metadata: &Metadata) -> Result<Vec<PathBuf>> {
 
     let veryl_version = env!("CARGO_PKG_VERSION");
     let mut written = Vec::new();
-    for def in &metadata.components {
+    for def in metadata.component_packages() {
         let Some(wasm_rel) = &def.wasm else {
             continue;
         };
@@ -224,7 +224,7 @@ pub fn update_committed_manifests(metadata: &Metadata) -> Result<Vec<PathBuf>> {
     let target_dir = root.join("target/veryl-components");
 
     let mut written = Vec::new();
-    for def in &metadata.components {
+    for def in metadata.component_packages() {
         let name = def.path.display();
         let crate_dir = root.join(&def.path);
         let manifest_path = crate_dir.join(COMMITTED_MANIFEST_FILE);

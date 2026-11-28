@@ -26,6 +26,7 @@ pub enum Attribute {
     Expand(Vec<ExpandItem>),
     Ignore,
     Inline,
+    Export(Vec<ExportItem>),
 }
 
 impl Attribute {
@@ -39,6 +40,14 @@ impl Attribute {
 
     pub fn is_format(&self, item: FormatItem) -> bool {
         if let Attribute::Format(x) = self {
+            x.contains(&item)
+        } else {
+            false
+        }
+    }
+
+    pub fn is_export(&self, item: ExportItem) -> bool {
+        if let Attribute::Export(x) = self {
             x.contains(&item)
         } else {
             false
@@ -100,6 +109,10 @@ impl fmt::Display for Attribute {
             }
             Attribute::Ignore => String::from("ignore"),
             Attribute::Inline => String::from("inline"),
+            Attribute::Export(x) => {
+                let arg: Vec<_> = x.iter().map(|x| x.to_string()).collect();
+                format!("export({})", arg.join(", "))
+            }
         };
         text.fmt(f)
     }
@@ -264,6 +277,8 @@ struct Pattern {
     pub modport: StrId,
     pub ignore: StrId,
     pub inline: StrId,
+    pub export: StrId,
+    pub rust: StrId,
 }
 
 impl Pattern {
@@ -302,6 +317,8 @@ impl Pattern {
             modport: resource_table::insert_str("modport"),
             ignore: resource_table::insert_str("ignore"),
             inline: resource_table::insert_str("inline"),
+            export: resource_table::insert_str("export"),
+            rust: resource_table::insert_str("rust"),
         }
     }
 }
@@ -589,6 +606,28 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Ok(Attribute::Inline)
                 }
             }
+            x if x == pat.export => {
+                let args = get_args_ident(&value.attribute_opt);
+                let err = AttributeError::MismatchArgs(format!(
+                    "target language: ({})",
+                    ExportItem::available()
+                ));
+                if args.is_empty() || has_non_ident_arg(&args, &value.attribute_opt) {
+                    return Err(err);
+                }
+
+                let mut items = Vec::new();
+                for arg in &args {
+                    let item = match arg.text {
+                        x if x == pat.rust => ExportItem::Rust,
+                        _ => return Err(err),
+                    };
+                    if !items.contains(&item) {
+                        items.push(item);
+                    }
+                }
+                Ok(Attribute::Export(items))
+            }
             _ => Err(AttributeError::UnknownAttribute),
         })
     }
@@ -761,6 +800,34 @@ impl fmt::Display for FormatItem {
         let text = match self {
             FormatItem::Compact => "compact",
             FormatItem::Skip => "skip",
+        };
+        text.fmt(f)
+    }
+}
+
+/// A language `#[export(..)]` describes a package or an interface for.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, Serialize, Deserialize)]
+pub enum ExportItem {
+    Rust,
+}
+
+impl ExportItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
+}
+
+impl fmt::Display for ExportItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            ExportItem::Rust => "rust",
         };
         text.fmt(f)
     }

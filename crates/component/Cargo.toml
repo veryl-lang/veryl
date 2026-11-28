@@ -9,6 +9,8 @@ license.workspace     = true
 readme.workspace      = true
 description.workspace = true
 edition.workspace     = true
+# The description `tests/import.rs` expands; a component crate has its own.
+exclude               = ["veryl.types.json"]
 
 [package.metadata.release]
 # Block the release if the public API broke without a version bump.

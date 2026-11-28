@@ -102,6 +102,11 @@ impl CmdSynth {
             output_intent: OutputIntent::Never,
             incremental: false,
             fail_fast: true,
+            export: pipeline::ExportStep::Write {
+                check: false,
+                quiet: false,
+                build: Some(&crate::cmd_test::build_component_manifests),
+            },
         };
         let mut ir = Ir::default();
         let timed = env::var_os("VERYL_SYNTH_TIME").is_some();

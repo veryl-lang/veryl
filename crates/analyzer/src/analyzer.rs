@@ -9,6 +9,7 @@ use crate::handlers::*;
 use crate::ir::{Ir, IrResult};
 use crate::msb_table;
 use crate::namespace::Namespace;
+use crate::post_pass1_scope::PostPass1Scope;
 use crate::reference_table;
 use crate::reset_value_table;
 use crate::resolved_type_table;
@@ -18,6 +19,7 @@ use crate::symbol_table;
 use crate::type_dag;
 use crate::unsafe_table;
 use std::collections::BTreeMap;
+use veryl_metadata::export_description::ExportDescription;
 use veryl_metadata::{Build, Lint, Metadata, ProjectProperty};
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, PathId, StrId};
@@ -113,29 +115,18 @@ fn create_prop_namespace_symbol(project_name: StrId) -> Symbol {
 
 impl Analyzer {
     pub fn new(metadata: &Metadata) -> Self {
+        let ret = Self::new_without_components(metadata);
+        Self::register_components(metadata);
+        ret
+    }
+
+    /// Like [`Self::new`], leaving the user-defined components to
+    /// [`Self::register_components`]: they are built after the exported
+    /// packages and interfaces are described, which needs pass1 and
+    /// [`PostPass1Scope::Export`] but no component.
+    pub fn new_without_components(metadata: &Metadata) -> Self {
         let prj = insert_namespace_symbol(&metadata.project.name, true);
         insert_project_property_symbols(prj, &metadata.properties);
-        // A package whose manifest is not available (never built nor
-        // published) contributes no symbols; references then fail to
-        // resolve as usual. Export names are validated to be identifiers
-        // during collection, so a `::` can only be a dependency prefix.
-        let manifests = metadata.collect_component_manifests();
-        let mut own_names: Vec<&str> = vec![];
-        let mut dep_names: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for (key, _) in &manifests {
-            match key.split_once("::") {
-                None => own_names.push(key),
-                Some((project, name)) => dep_names.entry(project).or_default().push(name),
-            }
-        }
-        crate::tb_component::insert_external_components(&own_names);
-        for (project, names) in &dep_names {
-            crate::tb_component::insert_dependency_components(project, names);
-        }
-        for (key, manifest) in manifests {
-            let key = resource_table::insert_str(&key);
-            crate::component_manifest_table::insert(key, manifest);
-        }
         for locks in metadata.lockfile.lock_table.values() {
             for lock in locks {
                 let prj = insert_namespace_symbol(&lock.name, lock.visible);
@@ -164,6 +155,33 @@ impl Analyzer {
         }
     }
 
+    /// Registers the user-defined components (`$comp::<name>`) and their
+    /// manifests, as built or published. Called before post pass1 resolves
+    /// the references to them ([`PostPass1Scope::Rest`]).
+    pub fn register_components(metadata: &Metadata) {
+        // A package whose manifest is not available (never built nor
+        // published) contributes no symbols; references then fail to
+        // resolve as usual. Export names are validated to be identifiers
+        // during collection, so a `::` can only be a dependency prefix.
+        let manifests = metadata.collect_component_manifests();
+        let mut own_names: Vec<&str> = vec![];
+        let mut dep_names: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (key, _) in &manifests {
+            match key.split_once("::") {
+                None => own_names.push(key),
+                Some((project, name)) => dep_names.entry(project).or_default().push(name),
+            }
+        }
+        crate::tb_component::insert_external_components(&own_names);
+        for (project, names) in &dep_names {
+            crate::tb_component::insert_dependency_components(project, names);
+        }
+        for (key, manifest) in manifests {
+            let key = resource_table::insert_str(&key);
+            crate::component_manifest_table::insert(key, manifest);
+        }
+    }
+
     pub fn analyze_pass1(&self, project_name: &str, input: &Veryl) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
@@ -178,22 +196,36 @@ impl Analyzer {
     }
 
     pub fn analyze_post_pass1() -> Vec<AnalyzerError> {
+        Self::analyze_post_pass1_scoped(PostPass1Scope::All, None)
+    }
+
+    /// Runs post pass1 over a part of the design (see [`PostPass1Scope`]):
+    /// the exported packages and interfaces first, so that their description
+    /// is put into `export` (when given) before the rest is resolved.
+    pub fn analyze_post_pass1_scoped(
+        scope: PostPass1Scope,
+        export: Option<&mut std::collections::HashMap<String, ExportDescription>>,
+    ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        symbol_table::apply_import();
-        symbol_table::resolve_user_defined();
-        ret.append(&mut symbol_table::resolve_interfaces());
-        ret.append(&mut symbol_table::resolve_enum());
-        ret.append(&mut symbol_table::apply_bind());
-        ret.append(&mut symbol_table::apply_msb());
-        ret.append(&mut symbol_table::apply_connect());
+        symbol_table::apply_import(scope);
+        symbol_table::resolve_user_defined(scope);
+        ret.append(&mut symbol_table::resolve_interfaces(scope));
+        ret.append(&mut symbol_table::resolve_enum(scope));
+        ret.append(&mut symbol_table::apply_bind(scope));
+        ret.append(&mut symbol_table::apply_msb(scope));
+        ret.append(&mut symbol_table::apply_connect(scope));
         // Function effects for diamond connections depend on the linked
         // modports and validated connection pairs produced above.
-        ret.append(&mut symbol_table::resolve_function());
-        generic_inference_table::resolve_pending();
-        ret.append(&mut reference_table::apply());
-        ret.append(&mut type_dag::apply());
-        ret.append(&mut reset_value_table::apply());
+        ret.append(&mut symbol_table::resolve_function(scope));
+        generic_inference_table::resolve_pending(scope);
+        ret.append(&mut reference_table::apply(scope));
+        ret.append(&mut type_dag::apply(scope));
+        ret.append(&mut reset_value_table::apply(scope));
+
+        if scope != PostPass1Scope::Rest {
+            ret.append(&mut crate::export_description::describe(export));
+        }
 
         ret
     }

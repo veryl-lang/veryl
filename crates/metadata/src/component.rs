@@ -9,6 +9,11 @@ use std::time::SystemTime;
 /// declared as a `[[components]]` entry. Every name the package exports
 /// with `veryl_component_export!` becomes available as `$comp::<name>`
 /// in `#[test]` modules.
+///
+/// With `library = true`, the package exports no component: it is a library
+/// the components use, which receives the description of the packages and
+/// interfaces marked `#[export(rust)]` (`veryl.types.json`) but is neither
+/// built nor loaded as a component library.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Component {
@@ -18,6 +23,9 @@ pub struct Component {
     /// Optional committed prebuilt wasm binary.
     #[serde(default)]
     pub wasm: Option<PathBuf>,
+    /// A library the components use, exporting no component.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub library: bool,
 }
 
 impl Component {
@@ -133,6 +141,7 @@ mod tests {
         Component {
             path: "crate".into(),
             wasm: None,
+            library: false,
         }
     }
 

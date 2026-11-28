@@ -66,6 +66,13 @@ pub enum MetadataError {
     InvalidPropertyName(String),
 
     #[diagnostic(
+        code(MetadataError::LibraryWithWasm),
+        help("a library exports no component; remove `wasm` or `library`")
+    )]
+    #[error("component package \"{0}\" is a library with a prebuilt wasm")]
+    LibraryWithWasm(PathBuf),
+
+    #[diagnostic(
         code(MetadataError::InvalidLicense),
         help("license text should follow SPDX expression")
     )]

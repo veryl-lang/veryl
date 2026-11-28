@@ -43,6 +43,7 @@ impl Project {
             output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
+            export: crate::pipeline::ExportStep::None,
         };
         let mut output =
             pipeline::analyze(&self.metadata, &self.paths, options, None, None).unwrap();
@@ -70,6 +71,7 @@ impl Project {
             output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
+            export: crate::pipeline::ExportStep::None,
         };
         pipeline::analyze(&self.metadata, &self.paths, options, None, None).is_err()
     }

@@ -60,6 +60,38 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     errors
 }
 
+/// Like [`analyze`], returning the descriptions of the exported packages and
+/// interfaces as well.
+#[track_caller]
+fn analyze_export(
+    code: &str,
+) -> (
+    Vec<AnalyzerError>,
+    HashMap<String, veryl_metadata::ExportDescription>,
+) {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut descriptions = HashMap::new();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1_scoped(
+        crate::post_pass1_scope::PostPass1Scope::All,
+        Some(&mut descriptions),
+    ));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    (errors, descriptions)
+}
+
 #[test]
 fn a_long_const_chain_is_not_a_function_instantiation() {
     // A `const` that refers to another `const` costs one level of
@@ -10690,6 +10722,495 @@ fn unknown_attribute() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownAttribute { .. }));
+}
+
+#[test]
+fn invalid_export() {
+    let code = r#"
+    #[export(rust)]
+    module ModuleA {}
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    module ModuleA {
+        #[export(rust)]
+        const a: u32 = 1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    #[export]
+    package PackageA {}
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAttributeArgs { .. }
+    ));
+
+    let code = r#"
+    #[export(python)]
+    package PackageA {}
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAttributeArgs { .. }
+    ));
+
+    let code = r#"
+    #[export(rust)]
+    package PackageA::<W: u32> {
+        struct StructA {
+            a: logic<W>,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    #[export(rust)]
+    package PackageA {
+        union UnionA {
+            a: logic<8>,
+            b: logic<8>,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    package PackageA {
+        struct StructA {
+            a: logic<8>,
+        }
+    }
+    #[export(rust)]
+    package PackageB {
+        struct StructB {
+            a: PackageA::StructA,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 8;
+    }
+    #[export(rust)]
+    package PackageB {
+        struct StructB {
+            a: logic<PackageA::W>,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    package PackageA {
+        type Word = logic<8>;
+    }
+    #[export(rust)]
+    package PackageB {
+        import PackageA::*;
+        struct StructB {
+            a: Word,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    package PackageA {
+        const W: u32 = 8;
+    }
+    #[export(rust)]
+    interface InterfaceA {
+        var a: logic<PackageA::W>;
+        modport mp {
+            a: input,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    #[export(rust)]
+    package PackageA {
+        enum EnumA: logic<2> {
+            A = 2'bx0,
+            B = 2'b01,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    #[export(rust)]
+    package PackageA {
+        const A: logic<200> = 1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    #[export(rust)]
+    interface InterfaceA #(
+        param W: u32 = 8,
+    ) {
+        var a: logic<W>;
+        modport mp {
+            a: input,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    #[export(rust)]
+    interface InterfaceA {
+        var a: logic<8>;
+        modport mp {
+            a: inout,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+
+    let code = r#"
+    #[export(rust)]
+    interface InterfaceA {
+        var a: logic<8> [2];
+        modport mp {
+            a: input,
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidExport { .. }));
+}
+
+#[test]
+fn export_description() {
+    use veryl_metadata::export_description::*;
+
+    let code = r#"
+    #[export(rust)]
+    package PackageA {
+        const REGS: u32 = 8;
+        const NEG: i8 = -2;
+        const WIDTH: u32 = REGS * 2;
+        type Word = logic<WIDTH>;
+        enum Mode: logic<2> {
+            Master,
+            Slave = 2,
+        }
+        struct Config {
+            mode: Mode,
+            regs: logic<REGS>,
+            words: Word<3>,
+            delta: signed logic<4>,
+        }
+        const DEFAULT_MODE: Mode = Mode::Slave;
+        const NAME: string = "bus\tvip";
+        const DEFAULT_CONFIG: Config = Config'{
+            mode : Mode::Master,
+            regs : 3,
+            words: {16'd1, 16'd2, 16'd3},
+            delta: -1,
+        };
+        function f() -> u32 {
+            return 1;
+        }
+    }
+    #[export(rust)]
+    package PackageB {
+        struct Outer {
+            cfg: PackageA::Config,
+            flag: logic,
+        }
+    }
+    #[export(rust)]
+    interface InterfaceA {
+        var clk: clock;
+        var valid: logic;
+        var cfg: PackageA::Config;
+        modport master {
+            clk: input,
+            valid: output,
+            cfg: output,
+        }
+        modport slave {
+            ..converse(master)
+        }
+    }
+    "#;
+    let (errors, descriptions) = analyze_export(code);
+    assert!(errors.is_empty());
+
+    let bits = |width, signed| ExportType::Bits { width, signed };
+    let value = |width, signed, value: &str| ExportValue::Bits {
+        width,
+        signed,
+        value: value.to_string(),
+    };
+    let variant = |name: &str| ExportValue::Variant {
+        package: "PackageA".to_string(),
+        r#enum: "Mode".to_string(),
+        variant: name.to_string(),
+    };
+    let user = |package: &str, name: &str| ExportType::User {
+        package: package.to_string(),
+        name: name.to_string(),
+    };
+
+    let description = &descriptions["prj"];
+    let package = &description.packages["PackageA"];
+    assert_eq!(
+        package.consts,
+        vec![
+            ExportConst {
+                name: "REGS".to_string(),
+                r#type: bits(32, false),
+                value: value(32, false, "8"),
+            },
+            ExportConst {
+                name: "NEG".to_string(),
+                r#type: bits(8, true),
+                value: value(8, true, "-2"),
+            },
+            ExportConst {
+                name: "WIDTH".to_string(),
+                r#type: bits(32, false),
+                value: value(32, false, "16"),
+            },
+            ExportConst {
+                name: "DEFAULT_MODE".to_string(),
+                r#type: user("PackageA", "Mode"),
+                value: variant("Slave"),
+            },
+            ExportConst {
+                name: "NAME".to_string(),
+                r#type: ExportType::String,
+                value: ExportValue::String("bus\tvip".to_string()),
+            },
+            ExportConst {
+                name: "DEFAULT_CONFIG".to_string(),
+                r#type: user("PackageA", "Config"),
+                value: ExportValue::Struct {
+                    package: "PackageA".to_string(),
+                    name: "Config".to_string(),
+                    fields: vec![
+                        ExportFieldValue {
+                            name: "mode".to_string(),
+                            value: variant("Master"),
+                        },
+                        ExportFieldValue {
+                            name: "regs".to_string(),
+                            value: value(8, false, "3"),
+                        },
+                        ExportFieldValue {
+                            name: "words".to_string(),
+                            value: ExportValue::Array(vec![
+                                value(16, false, "1"),
+                                value(16, false, "2"),
+                                value(16, false, "3"),
+                            ]),
+                        },
+                        ExportFieldValue {
+                            name: "delta".to_string(),
+                            value: value(4, true, "-1"),
+                        },
+                    ],
+                },
+            },
+        ]
+    );
+    assert_eq!(
+        package.types,
+        vec![ExportTypeAlias {
+            name: "Word".to_string(),
+            r#type: bits(16, false),
+        }]
+    );
+    assert_eq!(
+        package.enums,
+        vec![ExportEnum {
+            name: "Mode".to_string(),
+            width: 2,
+            variants: vec![
+                ExportVariant {
+                    name: "Master".to_string(),
+                    value: "0".to_string(),
+                },
+                ExportVariant {
+                    name: "Slave".to_string(),
+                    value: "2".to_string(),
+                },
+            ],
+        }]
+    );
+    assert_eq!(
+        package.structs,
+        vec![ExportStruct {
+            name: "Config".to_string(),
+            fields: vec![
+                ExportField {
+                    name: "mode".to_string(),
+                    r#type: user("PackageA", "Mode"),
+                },
+                ExportField {
+                    name: "regs".to_string(),
+                    r#type: bits(8, false),
+                },
+                ExportField {
+                    name: "words".to_string(),
+                    r#type: ExportType::Array {
+                        len: 3,
+                        elem: Box::new(bits(16, false)),
+                    },
+                },
+                ExportField {
+                    name: "delta".to_string(),
+                    r#type: bits(4, true),
+                },
+            ],
+        }]
+    );
+
+    let package = &description.packages["PackageB"];
+    assert_eq!(
+        package.structs[0].fields[0].r#type,
+        user("PackageA", "Config")
+    );
+    assert_eq!(package.structs[0].fields[1].r#type, bits(1, false));
+
+    let interface = &description.interfaces["InterfaceA"];
+    let master = &interface.modports[0];
+    assert_eq!(master.name, "master");
+    assert_eq!(
+        master.members,
+        vec![
+            ExportMember {
+                name: "clk".to_string(),
+                direction: ExportDirection::Input,
+                r#type: ExportType::Clock,
+            },
+            ExportMember {
+                name: "valid".to_string(),
+                direction: ExportDirection::Output,
+                r#type: bits(1, false),
+            },
+            ExportMember {
+                name: "cfg".to_string(),
+                direction: ExportDirection::Output,
+                r#type: user("PackageA", "Config"),
+            },
+        ]
+    );
+    let slave = &interface.modports[1];
+    assert_eq!(slave.name, "slave");
+    let directions: Vec<_> = slave.members.iter().map(|x| x.direction).collect();
+    assert_eq!(
+        directions,
+        vec![
+            ExportDirection::Output,
+            ExportDirection::Input,
+            ExportDirection::Input
+        ]
+    );
+}
+
+#[test]
+fn export_description_before_the_rest() {
+    use crate::post_pass1_scope::PostPass1Scope;
+
+    let code = r#"
+    #[export(rust)]
+    package PackageA {
+        const W: u32 = 8;
+        enum Mode {
+            A,
+            B,
+        }
+        struct Config {
+            mode: Mode,
+            data: logic<W>,
+        }
+        function f(a: input logic<W>) -> logic<W> {
+            return a;
+        }
+    }
+    #[export(rust)]
+    interface InterfaceA {
+        var cfg: PackageA::Config;
+        modport mp {
+            cfg: output,
+        }
+        modport mon {
+            ..converse(mp)
+        }
+    }
+    module ModuleA (
+        bus: modport InterfaceA::mon,
+        o  : output logic<PackageA::W>,
+    ) {
+        import PackageA::*;
+        assign o = f(bus.cfg.data);
+    }
+    "#;
+
+    // At once.
+    let (errors, mut descriptions) = analyze_export(code);
+    assert!(errors.is_empty());
+    let expected = descriptions.remove("prj").unwrap();
+    assert_eq!(expected.packages.len(), 1);
+    assert_eq!(
+        expected.interfaces["InterfaceA"].modports[1].members.len(),
+        1
+    );
+
+    // The exported part first.
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut descriptions = HashMap::new();
+    let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+    errors.append(&mut Analyzer::analyze_post_pass1_scoped(
+        PostPass1Scope::Export,
+        Some(&mut descriptions),
+    ));
+    assert!(errors.is_empty());
+    assert_eq!(descriptions["prj"], expected);
+
+    errors.append(&mut Analyzer::analyze_post_pass1_scoped(
+        PostPass1Scope::Rest,
+        None,
+    ));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    assert!(errors.is_empty());
 }
 
 #[test]

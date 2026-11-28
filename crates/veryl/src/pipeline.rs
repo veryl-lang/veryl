@@ -19,6 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
 use veryl_analyzer::conv::unit_cache;
+use veryl_analyzer::post_pass1_scope::PostPass1Scope;
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
 use veryl_analyzer::{Analyzer, AnalyzerError, CachedDiagnostic};
@@ -203,6 +204,27 @@ pub struct AnalyzeOutput {
     pub check_error: CheckError,
     /// Files skipped from emit by the `--test` filter; the filelist omits them.
     pub filelist_excluded: HashSet<PathBuf>,
+    /// Whether every `veryl.types.json` is up to date
+    /// ([`ExportStep::Write`] with `check`).
+    pub export_up_to_date: bool,
+    /// The `veryl.types.json` files written.
+    pub export_written: Vec<PathBuf>,
+}
+
+/// What [`analyze`] does with the description of the packages and
+/// interfaces marked `#[export(rust)]`, between the analysis of those and
+/// that of the rest, which refers to the components built from it.
+#[derive(Clone, Copy)]
+pub enum ExportStep<'a> {
+    /// Nothing: the components are taken as they are.
+    None,
+    /// Writes it into the component crates (with `check`, compares it
+    /// instead), then calls `build`, which builds the components.
+    Write {
+        check: bool,
+        quiet: bool,
+        build: Option<&'a dyn Fn(&Metadata)>,
+    },
 }
 
 pub struct AnalyzeOptions<'a> {
@@ -213,6 +235,7 @@ pub struct AnalyzeOptions<'a> {
     pub incremental: bool,
     /// `false` only for `dump`, which analyzes a broken tree best-effort.
     pub fail_fast: bool,
+    pub export: ExportStep<'a>,
 }
 
 /// Requires a populated symbol table, i.e. call after pass1.
@@ -224,12 +247,22 @@ pub fn tests_are_all_native(project_name: &str) -> bool {
             .all(|(_, property)| matches!(property.r#type, TestType::Native))
 }
 
+/// Whether any package or interface is marked `#[export(rust)]`; call
+/// after pass1.
+fn has_exported_items() -> bool {
+    symbol_table::get_all()
+        .iter()
+        .any(veryl_analyzer::post_pass1_scope::is_exported_item)
+}
+
 /// Split out so [`analyze`] can redo it after a wrong `SkipIfNativeOnly`
 /// guess, while `ir` is still untouched.
 struct Pass1Phase {
     contexts: Vec<Context>,
     incremental: Option<Incremental>,
     check_error: CheckError,
+    export_up_to_date: bool,
+    export_written: Vec<PathBuf>,
 }
 
 fn pass1_phase(
@@ -259,7 +292,9 @@ fn pass1_phase(
         })
         .flatten();
 
-    let analyzer = Analyzer::new(metadata);
+    // The components are registered after the exported part is analyzed:
+    // they may be built from its description.
+    let analyzer = Analyzer::new_without_components(metadata);
     // Name resolution from pass1 on picks among ifdef variants by the defines.
     veryl_analyzer::symbol_table::set_defines(
         &opts
@@ -321,7 +356,45 @@ fn pass1_phase(
         paths.len(),
     );
 
-    let mut errors = Analyzer::analyze_post_pass1();
+    // The exported part is analyzed apart when its description is written
+    // before the rest, which refers to the components built from it.
+    let split = matches!(opts.export, ExportStep::Write { .. }) && has_exported_items();
+    let mut export_valid = true;
+    let mut descriptions = HashMap::new();
+    if split {
+        let mut errors =
+            Analyzer::analyze_post_pass1_scoped(PostPass1Scope::Export, Some(&mut descriptions));
+        export_valid = !errors.iter().any(|x| x.is_error());
+        check_error = check_error
+            .append(&mut errors)
+            .check_err_if(opts.fail_fast)?;
+    }
+
+    let mut export_up_to_date = true;
+    let mut export_written = Vec::new();
+    if let ExportStep::Write {
+        check,
+        quiet,
+        build,
+    } = opts.export
+    {
+        // With nothing exported, an earlier description is removed.
+        if export_valid {
+            (export_up_to_date, export_written) =
+                crate::export_types::write(metadata, &descriptions, check, quiet)?;
+        }
+        if let Some(build) = build {
+            build(metadata);
+        }
+    }
+    Analyzer::register_components(metadata);
+
+    let scope = if split {
+        PostPass1Scope::Rest
+    } else {
+        PostPass1Scope::All
+    };
+    let mut errors = Analyzer::analyze_post_pass1_scoped(scope, None);
     check_error = check_error
         .append(&mut errors)
         .check_err_if(opts.fail_fast)?;
@@ -335,6 +408,8 @@ fn pass1_phase(
         contexts,
         incremental,
         check_error,
+        export_up_to_date,
+        export_written,
     })
 }
 
@@ -358,6 +433,8 @@ pub fn analyze(
         mut contexts,
         incremental,
         mut check_error,
+        export_up_to_date,
+        export_written,
     } = loop {
         let mut phase = pass1_phase(metadata, paths, &opts, selected_tests, intent, &forced_miss)?;
         // The guess came from the store, and files were restored on it. If a
@@ -520,6 +597,8 @@ pub fn analyze(
         incremental,
         check_error,
         filelist_excluded,
+        export_up_to_date,
+        export_written,
     })
 }
 

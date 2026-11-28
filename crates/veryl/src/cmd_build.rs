@@ -17,8 +17,15 @@ use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target, sv};
 use veryl_parser::resource_table;
 use veryl_path::PathSet;
 
+/// Builds the components during the analysis (see [`CmdBuild::with_component_build`]).
+type ComponentBuild = Box<dyn Fn(&Metadata)>;
+
 pub struct CmdBuild {
     opt: OptBuild,
+    /// Builds the components, between the analysis of the exported
+    /// packages and interfaces, whose description they are built from, and
+    /// that of the rest, which refers to them.
+    component_build: Option<ComponentBuild>,
 }
 
 /// Whether [`CmdBuild::exec`] may skip SystemVerilog emission and the filelist.
@@ -32,7 +39,17 @@ pub enum EmitPolicy {
 
 impl CmdBuild {
     pub fn new(opt: OptBuild) -> Self {
-        Self { opt }
+        Self {
+            opt,
+            component_build: None,
+        }
+    }
+
+    /// Builds the components with `build` during the analysis (see
+    /// [`pipeline::ExportStep::Write`]).
+    pub fn with_component_build(mut self, build: impl Fn(&Metadata) + 'static) -> Self {
+        self.component_build = Some(Box::new(build));
+        self
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -70,12 +87,19 @@ impl CmdBuild {
             },
             incremental: true,
             fail_fast: true,
+            export: pipeline::ExportStep::Write {
+                check: self.opt.check,
+                quiet,
+                build: self.component_build.as_deref(),
+            },
         };
         let AnalyzeOutput {
             mut contexts,
             incremental,
             check_error,
             filelist_excluded,
+            export_up_to_date,
+            ..
         } = pipeline::analyze(metadata, &paths, options, ir, test_filter)?;
 
         let mut stopwatch = StopWatch::new();
@@ -91,7 +115,7 @@ impl CmdBuild {
             None
         };
 
-        let mut all_pass = true;
+        let mut all_pass = export_up_to_date;
         if skip_emit {
             contexts.clear();
         }
@@ -1626,6 +1650,7 @@ dep = {path = "../dep"}
             output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
+            export: pipeline::ExportStep::None,
         };
         let AnalyzeOutput {
             incremental,

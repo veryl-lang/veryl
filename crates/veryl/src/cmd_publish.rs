@@ -45,10 +45,16 @@ impl CmdPublish {
             output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
+            export: pipeline::ExportStep::Write {
+                check: false,
+                quiet: false,
+                build: Some(&crate::cmd_test::build_component_manifests),
+            },
         };
         let AnalyzeOutput {
             incremental,
             check_error,
+            export_written,
             ..
         } = pipeline::analyze(metadata, &paths, options, None, None)?;
         if let Some(mut inc) = incremental {
@@ -61,7 +67,10 @@ impl CmdPublish {
         // `bump_commit` they are committed (before the version bump, so the
         // bump stays HEAD) and publish continues; otherwise they are left for
         // the user and the single gate below stops before publish.
-        let mut component_paths = crate::component_publish::update_prebuilt_wasm(metadata)?;
+        // The description of the exported packages and interfaces, written
+        // by the analysis: the components are built from it.
+        let mut component_paths = export_written;
+        component_paths.extend(crate::component_publish::update_prebuilt_wasm(metadata)?);
         component_paths.extend(crate::component_publish::update_committed_manifests(
             metadata,
         )?);
