@@ -148,10 +148,14 @@ pub struct OptFmt {
 }
 
 /// Analyze the current project
-#[derive(Args)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct OptCheck {
     /// Target files
     pub files: Vec<PathBuf>,
+
+    /// Automatically apply fixes for supported diagnostics (e.g. unused variables and wrong separators)
+    #[arg(long)]
+    pub fix: bool,
 }
 
 /// Build the target codes corresponding to the current project
