@@ -41,7 +41,7 @@ pub enum Diag {
 type DiagKey = (Option<PathBuf>, Option<String>, String, Vec<(usize, usize)>);
 
 impl Diag {
-    fn is_error(&self) -> bool {
+    pub fn is_error(&self) -> bool {
         match self {
             Diag::Analyzer(x) => x.is_error(),
             Diag::Cached(x) => x.is_error(),
@@ -49,7 +49,7 @@ impl Diag {
     }
 
     /// The source file owning this diagnostic, for cache attribution.
-    fn path(&self) -> Option<PathBuf> {
+    pub fn path(&self) -> Option<PathBuf> {
         match self {
             Diag::Analyzer(x) => x
                 .token_source()

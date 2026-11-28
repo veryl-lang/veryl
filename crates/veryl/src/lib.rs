@@ -148,10 +148,19 @@ pub struct OptFmt {
 }
 
 /// Analyze the current project
-#[derive(Args)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct OptCheck {
     /// Target files
     pub files: Vec<PathBuf>,
+
+    /// Output format: `pretty` (human-readable summary, default) or `json`
+    /// (machine-readable report on stdout)
+    #[arg(long, value_enum, default_value_t)]
+    pub format: Format,
+
+    /// Report format version (only with `--format json`; currently 1)
+    #[arg(long = "format-version")]
+    pub format_version: Option<u32>,
 }
 
 /// Build the target codes corresponding to the current project
