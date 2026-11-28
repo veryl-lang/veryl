@@ -603,25 +603,19 @@ This project is written in [Veryl](https://doc.veryl-lang.org), a modern hardwar
 
 - `Veryl.toml`: Main project manifest and dependency configuration.
 - `src/`: Veryl source files (`*.veryl`).
-- `.gitignore`: Ignored build and simulation artifacts.
 
 ## Development Commands
 
-Always run these standard Veryl commands during the development loop:
+Use these commands during development:
 
-- **Check diagnostics**: `veryl check` (or `veryl check --json` for machine-readable output)
+- **Check diagnostics**: `veryl check` (or `veryl check --format json` for machine-readable output)
 - **Formatting**: `veryl fmt` (or `veryl fmt --check` to verify)
 - **Run tests**: `veryl test`
 - **Build SystemVerilog**: `veryl build`
 
-## Initial Setup & Toolchain Configuration
+## Initial Setup
 
-This project is service-agnostic and does not mandate a specific CI or synthesis vendor by default.
-
-When beginning work on this project, please converse with the user in an interactive dialogue to determine:
-1. Target EDA toolchain (e.g. Verilator, Vivado, Quartus, Yosys) if hardware simulation or synthesis is needed.
-2. Desired CI platform (e.g. GitHub Actions, GitLab CI, local scripts) if automated testing is desired.
-3. Coding standards or naming conventions specific to their team or organization.
+If the project is not configured yet, read the [Development Environment](https://doc.veryl-lang.org/book/06_development_environment.html) and [Project Configuration](https://doc.veryl-lang.org/book/06_development_environment/01_project_configuration.html) chapters of the Veryl book and settle the configuration with the user.
 "#
         )
     }

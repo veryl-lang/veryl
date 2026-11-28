@@ -415,6 +415,8 @@ mod tests {
         assert!(content.contains("veryl check"));
         assert!(content.contains("veryl fmt"));
         assert!(content.contains("Initial Setup"));
+        assert!(content.contains("06_development_environment.html"));
+        assert!(!content.contains(".gitignore"));
 
         let _ = fs::remove_dir_all(&root);
     }
