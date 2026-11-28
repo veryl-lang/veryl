@@ -5,8 +5,14 @@ on:
   - cron: 0 0 * * *
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CHANNEL: -nightly
+  # rust-toolchain exported these two to the steps that followed it
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
 
 jobs:
   build:
@@ -20,13 +26,15 @@ jobs:
 
     steps:
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: ${{ matrix.rust }}
+      shell: bash
+      run: |
+        rustup toolchain install ${{ matrix.rust }} --profile minimal --no-self-update
+        rustup default ${{ matrix.rust }}
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.1.0
       with:
         submodules: 'true'
+        persist-credentials: false
     - name: Setup aarch64 mac
       if: matrix.os == 'macOS-latest'
       run: |
@@ -77,7 +85,7 @@ jobs:
         mv *.zip upload
         mv version upload
     - name: Upload
-      uses: ryand56/r2-upload-action@latest
+      uses: ryand56/r2-upload-action@v1.5
       with:
         r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
         r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}

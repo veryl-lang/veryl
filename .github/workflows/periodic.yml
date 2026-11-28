@@ -4,6 +4,14 @@ on:
   schedule:
   - cron: 0 0 * * SUN
 
+permissions:
+  contents: read
+
+env:
+  # rust-toolchain exported these two to the steps that followed it
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
 jobs:
   build:
 
@@ -17,16 +25,16 @@ jobs:
 
     steps:
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: ${{ matrix.rust }}
-        # wasm32 std lets the wasm component transport tests build their
-        # guest fixture; without it they skip silently.
-        targets: wasm32-unknown-unknown
+      # wasm32 std lets the wasm component transport tests build their
+      # guest fixture; without it they skip silently.
+      run: |
+        rustup toolchain install ${{ matrix.rust }} --profile minimal --no-self-update --target wasm32-unknown-unknown
+        rustup default ${{ matrix.rust }}
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.1.0
       with:
         submodules: 'true'
+        persist-credentials: false
     - name: Run tests
       run: |
         cargo update
@@ -50,9 +58,13 @@ jobs:
       WARN_PCT: "80"
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.1.0
+      with:
+        persist-credentials: false
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
+      run: |
+        rustup toolchain install stable --profile minimal --no-self-update
+        rustup default stable
     - name: Setup sccache
       uses: mozilla-actions/sccache-action@v0.0.10
       with:

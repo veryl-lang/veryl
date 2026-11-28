@@ -3,14 +3,18 @@ name: Commit Check
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   ai-coauthor:
     name: No AI co-authors
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Check commits for AI co-authors
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
