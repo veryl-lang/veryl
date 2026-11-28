@@ -111,9 +111,8 @@ pub struct Context {
     /// boundary is de-aliased — the DUT's internals stay aliased (they relocate
     /// uniformly with it, no per-cycle boundary copies on hot paths).
     pub in_reuse_dut: bool,
-    /// True while converting a hierarchy template's subtree, so templates
-    /// do not nest.
-    pub in_hier_template: bool,
+    /// The groups of the templates whose conversions enclose the current one.
+    pub hier_open: Vec<usize>,
     /// The parameters read from storage instead of folded while converting
     /// a template of several specializations (`TemplateSet::lifted`).
     pub hier_lifted: Option<Arc<HashSet<veryl_parser::resource_table::StrId>>>,

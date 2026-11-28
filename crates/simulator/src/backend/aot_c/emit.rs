@@ -6572,10 +6572,10 @@ const TEV_CB_C: &str = "typedef struct { unsigned w; unsigned long long m; } ver
      __attribute__((visibility(\"default\"))) void veryl_set_tev_resolve_cb(void *p) { veryl_tev_resolve_cb = (veryl_tev_resolve_t)p; }\n";
 /// Declares the callback a dataflow cell runs a hierarchy template class
 /// through, for a plan that holds one.
-const HIER_CB_C: &str = "typedef void (*veryl_hier_t)(unsigned, long long, unsigned long long);\n\
+const HIER_CB_C: &str = "typedef void (*veryl_hier_t)(unsigned);\n\
      __attribute__((visibility(\"default\"))) veryl_hier_t veryl_hier_cb;\n\
      __attribute__((visibility(\"default\"))) void veryl_set_hier_cb(void *p) { veryl_hier_cb = (veryl_hier_t)p; }\n\
-     typedef void (*veryl_hier_batch_t)(unsigned, const unsigned *, const long long *, const unsigned long long *);\n\
+     typedef void (*veryl_hier_batch_t)(unsigned, const unsigned *);\n\
      __attribute__((visibility(\"default\"))) veryl_hier_batch_t veryl_hier_batch_cb;\n\
      __attribute__((visibility(\"default\"))) void veryl_set_hier_batch_cb(void *p) { veryl_hier_batch_cb = (veryl_hier_batch_t)p; }\n";
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
@@ -6851,7 +6851,7 @@ fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
     if let Ok(setter) =
         unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_hier_cb\0") }
     {
-        let cb: unsafe extern "C" fn(u32, i64, u64) = crate::ir::hier_cells::veryl_aot_hier_run;
+        let cb: unsafe extern "C" fn(u32) = crate::ir::hier_cells::veryl_aot_hier_run;
         unsafe { setter(cb as *mut c_void) };
     }
     if let Ok(setter) =
@@ -6863,7 +6863,7 @@ fn load_module(so_path: &Path) -> Result<EmittedModule, String> {
     if let Ok(setter) =
         unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_hier_batch_cb\0") }
     {
-        let cb: unsafe extern "C" fn(u32, *const u32, *const i64, *const u64) =
+        let cb: unsafe extern "C" fn(u32, *const u32) =
             crate::ir::hier_cells::veryl_aot_hier_run_batch;
         unsafe { setter(cb as *mut c_void) };
     }
@@ -9194,8 +9194,8 @@ fn emit_stmt_shape(stmt: &ProtoStatement) -> Option<String> {
             // pointers, so nothing may be cached in registers across it.
             let h = cb.hier.as_ref().unwrap();
             Some(format!(
-                "__asm__ volatile(\"\" ::: \"memory\"); veryl_hier_cb({}u, {}LL, {:#x}ULL); __asm__ volatile(\"\" ::: \"memory\");",
-                h.class, cb.comb_delta_bytes, h.cells.fingerprint
+                "__asm__ volatile(\"\" ::: \"memory\"); veryl_hier_cb({}u); __asm__ volatile(\"\" ::: \"memory\");",
+                h.run
             ))
         }
         ProtoStatement::CompiledBlock(cb) => {
@@ -12163,17 +12163,17 @@ fn emit_dataflow_cells(
             // members that will run join.
             let n = members.len();
             let mut b = format!(
-                "    {{ unsigned _bc[{n}]; long long _bd[{n}]; unsigned long long _bt[{n}]; unsigned _bn = 0;\n      _bc[_bn] = {}u; _bd[_bn] = {}LL; _bt[_bn] = {:#x}ULL; _bn++;\n",
-                members[0].1, members[0].2, members[0].3
+                "    {{ unsigned _br[{n}]; unsigned _bn = 0;\n      _br[_bn++] = {}u;\n",
+                members[0].4
             );
-            for &(cell, class, delta, template) in &members[1..] {
+            for &(cell, _, _, _, run) in &members[1..] {
                 b.push_str(&format!(
-                    "      if ((dirty[{}] >> {}) & 1) {{ _bc[_bn] = {class}u; _bd[_bn] = {delta}LL; _bt[_bn] = {template:#x}ULL; _bn++; }}\n",
+                    "      if ((dirty[{}] >> {}) & 1) _br[_bn++] = {run}u;\n",
                     cell / 64,
                     cell % 64
                 ));
             }
-            b.push_str("      if (_bn > 1) { __asm__ volatile(\"\" ::: \"memory\"); veryl_hier_batch_cb(_bn, _bc, _bd, _bt); __asm__ volatile(\"\" ::: \"memory\"); } }\n");
+            b.push_str("      if (_bn > 1) { __asm__ volatile(\"\" ::: \"memory\"); veryl_hier_batch_cb(_bn, _br); __asm__ volatile(\"\" ::: \"memory\"); } }\n");
             c.push_str(&b);
         }
         let watch = &plan.boundary[k];
@@ -12359,7 +12359,7 @@ fn hier_call_batches(
             .hier
             .as_ref()
             .filter(|h| !h.cells.effects)
-            .map(|h| (k, h.class, cb.comb_delta_bytes, h.cells.fingerprint)),
+            .map(|h| (k, h.class, cb.comb_delta_bytes, h.cells.fingerprint, h.run)),
         _ => None,
     };
     let calls: Vec<BatchCall> = (0..cells.len()).filter_map(call).collect();
@@ -12393,7 +12393,7 @@ fn hier_call_batches(
                 .is_some_and(|m| m.iter().any(|&c| leader <= c && c < k))
                 || calls
                     .iter()
-                    .any(|&(c, _, d, t)| leader <= c && c < k && (d, t) == (member.2, member.3));
+                    .any(|&(c, _, d, t, _)| leader <= c && c < k && (d, t) == (member.2, member.3));
             if marked {
                 if members.len() > 1 {
                     out.insert(leader, std::mem::take(&mut members));
@@ -12410,9 +12410,9 @@ fn hier_call_batches(
     out
 }
 
-/// A class call batched with others: its cell, class, comb delta and
-/// template fingerprint.
-type BatchCall = (usize, u32, isize, u64);
+/// A class call batched with others: its cell, class, comb delta, template
+/// fingerprint and run number.
+type BatchCall = (usize, u32, isize, u64, u32);
 
 /// One cell of a hierarchy template, in template coordinates.
 pub struct TemplateCell<'a> {

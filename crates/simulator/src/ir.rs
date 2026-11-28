@@ -144,10 +144,8 @@ pub struct Ir {
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::CellSpace>>,
     /// See `Module::dataflow_interp`.
     dataflow_interp: HashMap<(usize, usize), Vec<Statement>>,
-    /// The hierarchy class runs the root cells call, by `(class, instance
-    /// comb delta)`.
-    pub(crate) hier_runs:
-        HashMap<crate::ir::hier_cells::RunKey, crate::ir::hier_cells::HierClassRun>,
+    /// The hierarchy class runs the root cells call, by run number.
+    pub(crate) hier_runs: crate::ir::hier_cells::Runs,
     /// Cells whose inputs changed since they last ran.
     pub(crate) dataflow_dirty: std::cell::RefCell<Vec<u64>>,
     /// Whether the dirty words record everything that moved since the last
@@ -348,7 +346,7 @@ impl Ir {
             dataflow_check_mismatches: std::cell::Cell::new(0),
             dataflow: module.dataflow,
             dataflow_interp: module.dataflow_interp.into_iter().collect(),
-            hier_runs: HashMap::default(),
+            hier_runs: Vec::new(),
             aot_c_validate: config.aot_c_validate,
             aot_c_validate_stride: config.aot_c_validate_stride,
             whole_events: module.whole_events,
@@ -400,9 +398,9 @@ impl Ir {
                     patch.apply(s);
                 }
             }
-            let mut runs = HashMap::default();
+            let mut runs = Vec::new();
             for s in &ir.comb_statements {
-                collect_hier_runs(s, ir.comb_values.as_ptr(), &mut runs);
+                collect_hier_runs(s, &mut runs);
             }
             ir.hier_runs = runs;
         }
@@ -2020,24 +2018,21 @@ fn collect_partitions(s: &Statement, comb: *const u8, out: &mut HashMap<(u64, is
     }
 }
 
-fn collect_hier_runs(
-    s: &Statement,
-    comb: *const u8,
-    out: &mut HashMap<crate::ir::hier_cells::RunKey, crate::ir::hier_cells::HierClassRun>,
-) {
+fn collect_hier_runs(s: &Statement, out: &mut crate::ir::hier_cells::Runs) {
     match s {
         Statement::HierClass(c) => {
-            let delta = (c.comb as isize).wrapping_sub(comb as isize);
-            let key = (c.class, delta, c.cells.fingerprint);
-            let clash = out.insert(key, (**c).clone());
+            let at = c.run as usize;
+            if out.len() <= at {
+                out.resize_with(at + 1, || None);
+            }
             assert!(
-                clash.is_none(),
-                "two template class runs share the key {key:?}"
+                out[at].replace((**c).clone()).is_none(),
+                "two template class runs share the number {at}"
             );
         }
         Statement::SequentialBlock(body) => {
             for s in body {
-                collect_hier_runs(s, comb, out);
+                collect_hier_runs(s, out);
             }
         }
         _ => {}

@@ -1426,6 +1426,7 @@ fn hier_raw_fingerprint(
     comb: &CombList,
     post_comb_fns: &[ProtoStatement],
     events: &HashMap<Event, Vec<ProtoStatement>>,
+    nested: &[HierInstance],
 ) -> u128 {
     use std::hash::{Hash, Hasher};
     let relative = |stmts: &mut dyn Iterator<Item = &ProtoStatement>| -> u128 {
@@ -1453,6 +1454,12 @@ fn hier_raw_fingerprint(
     h.write_u128(relative(&mut comb.iter()));
     h.write_u128(relative(&mut post_comb_fns.iter()));
     per_event.hash(&mut h);
+    // A nested template's statements are not in the lists above.
+    for inst in nested {
+        h.write_u128(inst.template.fingerprint());
+        h.write_isize(inst.ff_delta - ff_start);
+        h.write_isize(inst.comb_delta - comb_start);
+    }
     h.finish_128()
 }
 
@@ -2686,8 +2693,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let reusable = context.config.dut_reuse
             && !has_reference_aliases
             && !nested_tb::has_testbench(context, &src.component);
-        let hier_template = context.dut_reuse.is_hier_template(component_key)
-            && !context.in_hier_template
+        let hier_template = context
+            .dut_reuse
+            .is_hier_template_in(component_key, &context.hier_open)
             && !has_reference_aliases
             && !nested_tb::has_testbench(context, &src.component);
         let alias_enabled = !hier_template
@@ -2923,12 +2931,22 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // de-aliased; internals relocate uniformly with the DUT).
             let prev_in_reuse_dut = context.in_reuse_dut;
             context.in_reuse_dut = prev_in_reuse_dut || !alias_enabled;
-            let prev_in_hier_template = context.in_hier_template;
-            context.in_hier_template = prev_in_hier_template || hier_template;
-            let lifted = if hier_template {
-                context.dut_reuse.hier_lifted(component_key)
-            } else {
-                context.hier_lifted.clone()
+            if hier_template {
+                context
+                    .hier_open
+                    .push(context.dut_reuse.hier_group(component_key));
+            }
+            // A template nested in another reads what either lifts.
+            let lifted = match (
+                hier_template
+                    .then(|| context.dut_reuse.hier_lifted(component_key))
+                    .flatten(),
+                context.hier_lifted.clone(),
+            ) {
+                (Some(own), Some(outer)) => {
+                    Some(Arc::new(own.union(&outer).copied().collect::<HashSet<_>>()))
+                }
+                (own, outer) => own.or(outer),
             };
             let prev_hier_lifted = std::mem::replace(&mut context.hier_lifted, lifted);
 
@@ -2967,7 +2985,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             )?;
 
             context.in_reuse_dut = prev_in_reuse_dut;
-            context.in_hier_template = prev_in_hier_template;
+            if hier_template {
+                context.hier_open.pop();
+            }
             let lifted = std::mem::replace(&mut context.hier_lifted, prev_hier_lifted);
             context.scope_contexts.pop();
 
@@ -2979,6 +2999,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     &all_comb_statements,
                     &all_post_comb_fns,
                     &all_event_statements,
+                    &all_hier_instances,
                 )
             });
             let verifying = hier_verify.is_some();
@@ -3009,6 +3030,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 all_event_statements = reused.event_statements;
                 all_comb_statements = reused.comb_statements;
                 all_post_comb_fns = reused.post_comb_fns;
+                all_hier_instances = reused.hier_instances;
                 hier_instance = inst;
             } else if hier_template && !verifying {
                 let mut stmts = std::mem::take(&mut all_comb_statements).into_vec();
@@ -3033,7 +3055,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         &child_module.name.to_string(),
                         &child_variable_meta,
                         &all_child_modules,
-                        &all_event_statements,
+                        &crate::ir::statement::flat_events(&all_event_statements),
                         &context.comb_reloc[comb_reloc_start..],
                         context.config.use_4state,
                     );
@@ -3043,6 +3065,13 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     ff_delta: 0,
                     comb_delta: 0,
                 });
+                // Nested templates' events stay their own nodes, beside the
+                // ones over this template's statements.
+                let nested_events = if template.is_some() {
+                    crate::ir::hier::take_nested_events(&mut all_event_statements)
+                } else {
+                    HashMap::default()
+                };
                 let comb = Arc::new(std::mem::take(&mut all_comb_statements).into_vec());
                 all_comb_statements = CombList::shared(Arc::clone(&comb));
                 let nodes = context.dut_reuse.hier_store(
@@ -3058,9 +3087,14 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     &context.comb_reloc[comb_reloc_start..],
                     template,
                     raw_fingerprint,
+                    &all_hier_instances,
+                    &nested_events,
                 );
                 if let Some(nodes) = nodes {
                     all_event_statements = nodes;
+                }
+                for (event, stmts) in nested_events {
+                    all_event_statements.entry(event).or_default().extend(stmts);
                 }
             } else if !has_reference_aliases && all_external_components.is_empty() {
                 // Resolve component clock and reset copies before compiling the comb logic.
@@ -3482,16 +3516,17 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // the remap; a reused DUT's are already compiled chunks.
         if hier_template {
             let map = clock_reset_inputs(context, src, child_module, &child_variable_meta);
-            if !map.is_empty() {
-                let mut inputs: Vec<(VarOffset, VarOffset)> =
-                    map.iter().map(|(a, b)| (*a, *b)).collect();
-                inputs.sort_unstable_by_key(|(a, _)| (a.is_ff(), a.raw()));
-                for stmts in all_event_statements.values_mut() {
-                    for s in stmts {
-                        match s {
-                            ProtoStatement::HierEvents(h) => h.inputs = inputs.clone(),
-                            other => other.remap_offsets(&map),
+            let mut inputs: Vec<(VarOffset, VarOffset)> =
+                map.iter().map(|(a, b)| (*a, *b)).collect();
+            inputs.sort_unstable_by_key(|(a, _)| (a.is_ff(), a.raw()));
+            for stmts in all_event_statements.values_mut() {
+                for s in stmts {
+                    match s {
+                        ProtoStatement::HierEvents(h) => {
+                            crate::ir::hier::read_from_parent(h, &map, &inputs)
                         }
+                        other if !map.is_empty() => other.remap_offsets(&map),
+                        _ => {}
                     }
                 }
             }

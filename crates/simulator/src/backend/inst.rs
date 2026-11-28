@@ -49,6 +49,8 @@ pub(crate) struct DutReuseCache {
     ready: Condvar,
     /// Hierarchy templates (see `ir::hier`) and their first conversion.
     hier_templates: HashSet<usize>,
+    /// See `TemplateSet::named`.
+    hier_named: HashSet<usize>,
     /// See `TemplateSet::groups` and `TemplateSet::lifted`.
     hier_groups: HashMap<usize, usize>,
     hier_lifted: HashMap<usize, Arc<HashSet<veryl_parser::resource_table::StrId>>>,
@@ -78,6 +80,7 @@ impl Default for DutReuseCache {
             statements: Mutex::default(),
             ready: Condvar::new(),
             hier_templates: HashSet::default(),
+            hier_named: HashSet::default(),
             hier_groups: HashMap::default(),
             hier_lifted: HashMap::default(),
             unmatched_shared_modules: Vec::new(),
@@ -109,6 +112,7 @@ impl DutReuseCache {
                 HashSet::default()
             },
             hier_templates: set.templates,
+            hier_named: set.named,
             hier_groups: set.groups,
             hier_lifted: set.lifted,
             unmatched_shared_modules: set.unmatched,
@@ -120,7 +124,21 @@ impl DutReuseCache {
         self.hier_templates.contains(&(component_key as usize))
     }
 
-    fn hier_group(&self, component_key: *const air::Component) -> usize {
+    /// Whether `component_key` becomes a template where its conversion is
+    /// inside the templates of the groups in `open`: below a template only a
+    /// named one is, and not one of a group still converting there.
+    pub(crate) fn is_hier_template_in(
+        &self,
+        component_key: *const air::Component,
+        open: &[usize],
+    ) -> bool {
+        self.is_hier_template(component_key)
+            && (open.is_empty()
+                || (self.hier_named.contains(&(component_key as usize))
+                    && !open.contains(&self.hier_group(component_key))))
+    }
+
+    pub(crate) fn hier_group(&self, component_key: *const air::Component) -> usize {
         let key = component_key as usize;
         self.hier_groups.get(&key).copied().unwrap_or(key)
     }
@@ -190,6 +208,8 @@ impl DutReuseCache {
         comb_reloc: &[(isize, isize, usize)],
         template: Option<Arc<HierTemplate>>,
         raw_fingerprint: Option<u128>,
+        nested: &[HierInstance],
+        nested_events: &HashMap<Event, Vec<ProtoStatement>>,
     ) -> Option<HashMap<Event, Vec<ProtoStatement>>> {
         let events: HashMap<Event, Arc<Vec<ProtoStatement>>> = if template.is_some() {
             event_statements
@@ -205,8 +225,10 @@ impl DutReuseCache {
             ref_comb_start: comb_start,
             ff_size,
             comb_size,
+            // With a template, only the nested templates' nodes: the rest
+            // are the template's own nodes, made per instance.
             event_statements: if template.is_some() {
-                HashMap::default()
+                nested_events.clone()
             } else {
                 event_statements.clone()
             },
@@ -215,7 +237,7 @@ impl DutReuseCache {
             child_modules: child_modules.to_vec(),
             derived_clock_candidates: derived_clock_candidates.to_vec(),
             comb_reloc: comb_reloc.to_vec(),
-            hier_instances: Vec::new(),
+            hier_instances: nested.to_vec(),
         };
         #[cfg(test)]
         self.hier_conversions
@@ -387,9 +409,17 @@ pub(crate) fn hier_relocate(
         ff_delta: ff_start - entry.conv.ref_ff_start,
         comb_delta: comb_start - entry.conv.ref_comb_start,
     });
-    let mut reused = relocate_entry(&entry.conv, ff_start, comb_start, inst.is_none());
+    let mut reused = relocate_entry(&entry.conv, ff_start, comb_start, true);
     if let Some(inst) = &inst {
+        let nested = std::mem::take(&mut reused.event_statements);
         reused.event_statements = event_nodes(&entry.events, inst.ff_delta, inst.comb_delta);
+        for (event, stmts) in nested {
+            reused
+                .event_statements
+                .entry(event)
+                .or_default()
+                .extend(stmts);
+        }
     }
     (reused, inst)
 }
@@ -405,6 +435,7 @@ fn event_nodes(
         .iter()
         .map(|(event, stmts)| {
             let node = crate::ir::ProtoHierEvents {
+                at_boundary: false,
                 stmts: Arc::clone(stmts),
                 ff_delta,
                 comb_delta,

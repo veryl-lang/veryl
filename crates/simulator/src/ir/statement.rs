@@ -1407,6 +1407,9 @@ pub struct HierRef {
     /// The instance's partition in the dataflow cell layout; numbered once
     /// the comb list is final.
     pub(crate) partition: u32,
+    /// This class block's index among the class runs of its module, which
+    /// compiled code passes to name it.
+    pub(crate) run: u32,
     /// The class's reads and writes, standing in for walking `original_stmts`.
     pub(crate) summary: Arc<crate::ir::hier::HierSummary>,
     /// The template's comb bytes in the reference instance's offsets.
@@ -1491,7 +1494,7 @@ impl std::fmt::Debug for CompiledBlockStatement {
                 "hier",
                 &hier
                     .as_ref()
-                    .map(|h| (h.cells.fingerprint, h.class, h.partition)),
+                    .map(|h| (h.cells.fingerprint, h.class, h.partition, h.run)),
             )
             .field("artifact", &hier.is_none().then_some(artifact))
             .field("ff_delta_bytes", ff_delta_bytes)
@@ -1519,7 +1522,7 @@ impl std::hash::Hash for CompiledBlockStatement {
         } = self;
         shared.hash(state);
         hier.as_ref()
-            .map(|h| (h.cells.fingerprint, h.class, h.partition))
+            .map(|h| (h.cells.fingerprint, h.class, h.partition, h.run))
             .hash(state);
         // A template class runs through its cells; its artifact's address
         // would only make the hash differ between runs.
@@ -1724,8 +1727,11 @@ pub struct ProtoHierEvents {
     pub(crate) ff_delta: isize,
     pub(crate) comb_delta: isize,
     /// Port storage the instance reads from its parent instead, in the
-    /// instance's coordinates (see `read_clock_reset_from_parent`).
+    /// instance's coordinates (see `clock_reset_inputs`).
     pub(crate) inputs: Vec<(VarOffset, VarOffset)>,
+    /// `inputs` already name its template's boundary: an enclosing template
+    /// only redirects them (see `hier::read_from_parent`).
+    pub(crate) at_boundary: bool,
 }
 
 impl ProtoHierEvents {
@@ -3307,6 +3313,8 @@ impl ProtoStatement {
                     Statement::HierClass(Box::new(crate::ir::hier_cells::HierClassRun {
                         cells: Arc::clone(&h.cells),
                         class: h.class,
+                        run: h.run,
+                        pre_ran: std::cell::Cell::new(false),
                         partition: h.partition,
                         ff: (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes),
                         comb: (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes),
