@@ -262,6 +262,13 @@ impl Metadata {
     pub fn check(&self) -> Result<(), MetadataError> {
         check_project_name(&self.project.name)?;
 
+        // A library exports no component to prebuild.
+        for component in &self.components {
+            if component.library && component.wasm.is_some() {
+                return Err(MetadataError::LibraryWithWasm(component.path.clone()));
+            }
+        }
+
         // Properties are referred from Veryl sources as `$prop::name`
         for name in self.properties.keys() {
             if !VALID_IDENTIFIER.is_match(name) {
@@ -643,6 +650,13 @@ obj_dir/
         self.metadata_path.parent().unwrap().join(&self.doc.path)
     }
 
+    /// The dependencies given by a path (see
+    /// [`crate::Lockfile::collect_path_dependencies`]). Requires a loaded
+    /// lockfile.
+    pub fn collect_path_dependencies(&self) -> Result<Vec<(String, Metadata)>, MetadataError> {
+        self.lockfile.collect_path_dependencies()
+    }
+
     /// Collects `[[components]]` declared by direct dependencies. Requires a
     /// loaded lockfile; the dependency checkouts are already present when
     /// this is called from the build/test flow.
@@ -658,6 +672,12 @@ obj_dir/
     /// `veryl_component_export!` export names, enumerated per
     /// `[[components]]` entry (see [`Component::collect_manifests`] for
     /// the source priority). On a name collision the earlier entry wins.
+    /// The `[[components]]` packages exporting components, i.e. those not
+    /// marked `library`.
+    pub fn component_packages(&self) -> impl Iterator<Item = &crate::Component> {
+        self.components.iter().filter(|x| !x.library)
+    }
+
     pub fn collect_component_manifests(
         &self,
     ) -> Vec<(String, crate::component_manifest::ComponentManifest)> {
@@ -700,7 +720,8 @@ obj_dir/
         }
         let root = self.project_path();
         let target_dir = root.join("target/veryl-components");
-        collect_project(&self.components, &root, &target_dir, None, &mut ret);
+        let own: Vec<_> = self.component_packages().cloned().collect();
+        collect_project(&own, &root, &target_dir, None, &mut ret);
         if let Ok(deps) = self.collect_dependency_components() {
             for dep in &deps {
                 collect_project(

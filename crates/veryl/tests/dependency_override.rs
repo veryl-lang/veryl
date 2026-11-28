@@ -112,6 +112,7 @@ fn local_override_resolves_transitive_namespace() {
         output_intent: veryl::incremental::OutputIntent::Never,
         incremental: false,
         fail_fast: true,
+        export: veryl::pipeline::ExportStep::None,
     };
     let output = pipeline::analyze(&metadata, &paths, options, None, None).unwrap();
     output.check_error.check_all().unwrap();

@@ -3,7 +3,9 @@ use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
 use crate::{Format, OptBuild, OptTest, check_format_version};
 use log::{error, info, warn};
 use miette::Result;
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
 use veryl_metadata::WaveFormFormat;
@@ -324,10 +326,13 @@ impl CmdTest {
         // metadata, so the winning runtime arguments ride along as plusargs.
         add_runtime_plusargs(metadata, &runtime_args);
 
-        // `[[components]]` cargo packages build before analysis: the analyzer
-        // reads their interface manifests, so building afterwards would
-        // leave the checks one edit behind — and a stale-manifest error
-        // would then block the very run that refreshes the manifest.
+        // `[[components]]` cargo packages build during the analysis, before
+        // the references to them are resolved: the analyzer reads their
+        // interface manifests, so building afterwards would leave the checks
+        // one edit behind — and a stale-manifest error would then block the
+        // very run that refreshes the manifest. They build after the
+        // packages and interfaces marked `#[export(rust)]` are analyzed,
+        // whose description (`veryl.types.json`) they expand.
         // Dependency components live behind the lockfile, which `Metadata`
         // loads lazily; resolve it now (the later build reuses the result).
         if let Err(e) = metadata.update_lockfile() {
@@ -340,12 +345,21 @@ impl CmdTest {
                 vec![]
             }
         };
-        let component_libraries =
-            if !metadata.components.is_empty() || !dependency_components.is_empty() {
-                Some(build_component_libraries(metadata, &dependency_components))
-            } else {
-                None
-            };
+        let built_libraries = Rc::new(RefCell::new(None));
+        let build = if metadata.component_packages().next().is_some()
+            || !dependency_components.is_empty()
+        {
+            let built_libraries = built_libraries.clone();
+            build.with_component_build(move |metadata| {
+                // The analysis may start over; the components build once.
+                if built_libraries.borrow().is_none() {
+                    *built_libraries.borrow_mut() =
+                        Some(build_component_libraries(metadata, &dependency_components));
+                }
+            })
+        } else {
+            build
+        };
 
         // Freeing the design's IR and the simulation builds one node at a
         // time takes seconds on a large design.
@@ -360,6 +374,8 @@ impl CmdTest {
             &combined_defines,
             EmitPolicy::SkipIfNativeOnly,
         )?;
+
+        let component_libraries = built_libraries.borrow_mut().take();
 
         let tests = symbol_table::get_tests(&metadata.project.name);
         let doc_tests = symbol_table::get_doc_tests(&metadata.project.name);
@@ -925,33 +941,52 @@ impl CmdTest {
     }
 }
 
-/// Freshens the project's own `[[components]]` interface manifests before
-/// analysis, so `$comp` names resolve on the first run of any analyzing
-/// command. Dependencies are left to their committed manifests, which
-/// match the locked sources by construction. A failed build drops the
-/// package's stale sidecar, so analysis falls back to the committed
-/// manifest rather than pre-edit interface data.
+/// Freshens the `[[components]]` interface manifests before analysis, so
+/// `$comp` names resolve on the first run of any analyzing command: the
+/// project's own, and those of the dependencies given by a path, which are
+/// local projects edited together with it. Dependencies from a repository
+/// are left to their committed manifests, which match the locked sources by
+/// construction. A failed build drops the package's stale sidecar, so
+/// analysis falls back to the committed manifest rather than pre-edit
+/// interface data.
 pub fn build_component_manifests(metadata: &Metadata) {
-    if metadata.components.is_empty()
-        || metadata.test.component_backend == Some(ComponentBackendKind::Wasm)
-    {
+    if metadata.test.component_backend == Some(ComponentBackendKind::Wasm) {
         return;
     }
-    let project_root = metadata.project_path();
+    let mut projects = vec![(None, metadata.clone())];
+    match metadata.collect_path_dependencies() {
+        Ok(dependencies) => {
+            projects.extend(dependencies.into_iter().map(|(name, x)| (Some(name), x)));
+        }
+        Err(e) => warn!("Failed to collect path dependencies: {e}"),
+    }
+    projects.retain(|(_, x)| x.component_packages().next().is_some());
+    if projects.is_empty() {
+        return;
+    }
+    let label = |project: &Option<String>, def: &veryl_metadata::Component| match project {
+        Some(project) => format!("{project}::{}", def.path.display()),
+        None => def.path.display().to_string(),
+    };
+
     // With no way to read the interface out of a freshly built library, the
     // committed manifest and the prebuilt wasm are the only sources left.
     // Reporting anything wider would fire on every command of a project that
     // works fine.
     if !native_loading_supported() {
-        for def in &metadata.components {
-            let crate_dir = project_root.join(&def.path);
-            if def.wasm.is_none() && veryl_metadata::read_committed_manifests(&crate_dir).is_none()
-            {
-                warn!(
-                    "Component package ({}): {}; its components are unavailable",
-                    def.path.display(),
-                    static_build_reason()
-                );
+        for (project, metadata) in &projects {
+            let project_root = metadata.project_path();
+            for def in metadata.component_packages() {
+                let crate_dir = project_root.join(&def.path);
+                if def.wasm.is_none()
+                    && veryl_metadata::read_committed_manifests(&crate_dir).is_none()
+                {
+                    warn!(
+                        "Component package ({}): {}; its components are unavailable",
+                        label(project, def),
+                        static_build_reason()
+                    );
+                }
             }
         }
         return;
@@ -959,18 +994,23 @@ pub fn build_component_manifests(metadata: &Metadata) {
     if !cargo_available() {
         return;
     }
-    let target_dir = project_root.join("target/veryl-components");
-    for def in &metadata.components {
-        let crate_dir = project_root.join(&def.path);
-        if !crate_dir.is_dir() {
-            continue;
-        }
-        let label = def.path.display().to_string();
-        if build_component_artifact(&label, &crate_dir, &target_dir, false).is_none()
-            && let Some(sidecar) = veryl_metadata::component_crate_name(&crate_dir)
-                .map(|n| veryl_metadata::sidecar_manifest_path(&target_dir, &n))
-        {
-            let _ = std::fs::remove_file(&sidecar);
+    for (project, metadata) in &projects {
+        let project_root = metadata.project_path();
+        // A path dependency's sidecars live in its own target directory, where
+        // the manifest collection reads them.
+        let target_dir = project_root.join("target/veryl-components");
+        for def in metadata.component_packages() {
+            let crate_dir = project_root.join(&def.path);
+            if !crate_dir.is_dir() {
+                continue;
+            }
+            if build_component_artifact(&label(project, def), &crate_dir, &target_dir, false)
+                .is_none()
+                && let Some(sidecar) = veryl_metadata::component_crate_name(&crate_dir)
+                    .map(|n| veryl_metadata::sidecar_manifest_path(&target_dir, &n))
+            {
+                let _ = std::fs::remove_file(&sidecar);
+            }
         }
     }
 }
@@ -1022,7 +1062,7 @@ fn build_component_libraries(
     }
 
     let mut jobs: Vec<ComponentJob> = Vec::new();
-    for def in &metadata.components {
+    for def in metadata.component_packages() {
         jobs.push(ComponentJob {
             label: def.path.display().to_string(),
             prefix: String::new(),

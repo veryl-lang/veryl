@@ -1,6 +1,7 @@
 use crate::AnalyzerError;
 use crate::generic_inference_table;
 use crate::namespace::{DefineContext, Namespace};
+use crate::post_pass1_scope::{self, PostPass1Scope};
 use crate::scope;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind, TbComponentKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
@@ -58,6 +59,26 @@ pub enum ReferenceCandidate {
         arg: ExpressionIdentifier,
         function: ExpressionIdentifier,
     },
+}
+
+impl ReferenceCandidate {
+    /// The first token of the reference, where it is written.
+    fn location(&self) -> Token {
+        let range: TokenRange = match self {
+            ReferenceCandidate::Identifier { arg } => arg.into(),
+            ReferenceCandidate::HierarchicalIdentifier { arg } => arg.into(),
+            ReferenceCandidate::ScopedIdentifier { arg, .. } => arg.into(),
+            ReferenceCandidate::ExpressionIdentifier { arg } => arg.into(),
+            ReferenceCandidate::GenericArgIdentifier { arg } => arg.into(),
+            ReferenceCandidate::ImportItem { arg, .. } => arg.into(),
+            ReferenceCandidate::ModportItem { arg } => arg.into(),
+            ReferenceCandidate::InstParameterItem { arg } => arg.into(),
+            ReferenceCandidate::InstPortItem { arg } => arg.into(),
+            ReferenceCandidate::StructConstructorItem { arg, .. } => arg.into(),
+            ReferenceCandidate::NamedArgument { arg, .. } => arg.into(),
+        };
+        range.beg
+    }
 }
 
 impl From<&Identifier> for ReferenceCandidate {
@@ -238,7 +259,37 @@ impl ReferenceTable {
         if let Some(references) = self.collected_references.as_mut() {
             references.push((id, token));
         } else {
+            self.check_exported_reference(id, &token);
             symbol_table::add_reference(id, &token);
+        }
+    }
+
+    /// A package or an interface marked `#[export(rust)]` refers to exported
+    /// packages only. Its members are reached through the package (a path
+    /// or an import), so a reference to a package, an interface or a module
+    /// not exported is the breach to report.
+    fn check_exported_reference(&mut self, id: SymbolId, token: &Token) {
+        let Some(target) = symbol_table::get(id) else {
+            return;
+        };
+        let item = target.namespace.depth() == 1
+            && matches!(
+                target.kind,
+                SymbolKind::Package(_)
+                    | SymbolKind::Interface(_)
+                    | SymbolKind::Module(_)
+                    | SymbolKind::AliasPackage(_)
+                    | SymbolKind::AliasInterface(_)
+                    | SymbolKind::AliasModule(_)
+            );
+        if item && !target.exported && post_pass1_scope::in_exported_token(token) {
+            self.errors.push(AnalyzerError::invalid_export(
+                &format!(
+                    "package or interface can refer to packages with #[export(rust)] only, but refers to \"{}\"",
+                    target.token
+                ),
+                &token.into(),
+            ));
         }
     }
 
@@ -980,8 +1031,10 @@ impl ReferenceTable {
         self.declaration_order_root = None;
     }
 
-    pub fn apply(&mut self) -> Vec<AnalyzerError> {
-        let candidates = std::mem::take(&mut self.candidates);
+    pub fn apply(&mut self, scope: PostPass1Scope) -> Vec<AnalyzerError> {
+        let candidates = scope.take(&mut self.candidates, |x| {
+            post_pass1_scope::in_exported_token(&x.location())
+        });
         self.apply_candidates(&candidates)
     }
 
@@ -1166,8 +1219,8 @@ pub fn export_candidates_since(watermark: usize) -> Vec<ReferenceCandidate> {
     REFERENCE_TABLE.with(|f| f.borrow().candidates[watermark..].to_vec())
 }
 
-pub fn apply() -> Vec<AnalyzerError> {
-    REFERENCE_TABLE.with(|f| f.borrow_mut().apply())
+pub fn apply(scope: PostPass1Scope) -> Vec<AnalyzerError> {
+    REFERENCE_TABLE.with(|f| f.borrow_mut().apply(scope))
 }
 
 /// Resolves the candidates against current declarations without replacing analyzed references.

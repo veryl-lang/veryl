@@ -32,6 +32,10 @@ path = "models/rv_iss"
 path = "models/golden"
 wasm = "prebuilt/golden.wasm"
 
+[[components]]
+path = "models/types"
+library = true
+
 [test]
 seed = 42
 component_backend = "wasm"
@@ -430,13 +434,49 @@ fn check_toml() {
     assert_eq!(metadata.build.reset_low_suffix.unwrap(), "_n");
     assert_eq!(metadata.format.indent_width, 4);
     assert_eq!(metadata.test.seed, Some(42));
-    assert_eq!(metadata.components.len(), 2);
+    assert_eq!(metadata.components.len(), 3);
     let rv_iss = &metadata.components[0];
     assert_eq!(rv_iss.path, PathBuf::from("models/rv_iss"));
     assert!(rv_iss.wasm.is_none());
+    assert!(!rv_iss.library);
     let golden = &metadata.components[1];
     assert_eq!(golden.path, PathBuf::from("models/golden"));
     assert_eq!(golden.wasm, Some(PathBuf::from("prebuilt/golden.wasm")));
+    let types = &metadata.components[2];
+    assert!(types.library);
+}
+
+#[test]
+fn component_packages_leave_libraries_out() {
+    let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
+    // A library exports no component.
+    let packages: Vec<_> = metadata.component_packages().map(|x| &x.path).collect();
+    assert_eq!(
+        packages,
+        vec![
+            &PathBuf::from("models/rv_iss"),
+            &PathBuf::from("models/golden")
+        ]
+    );
+}
+
+#[test]
+fn library_component_with_wasm_is_error() {
+    let toml = r#"
+[project]
+name = "prj"
+version = "0.1.0"
+
+[[components]]
+path = "types"
+library = true
+wasm = "prebuilt/types.wasm"
+"#;
+    let metadata: Metadata = toml::from_str(toml).unwrap();
+    assert!(matches!(
+        metadata.check(),
+        Err(MetadataError::LibraryWithWasm(_))
+    ));
 }
 
 #[test]
@@ -905,6 +945,10 @@ publish_commit = true
 [[components]]
 path = "models/mirror"
 
+[[components]]
+path = "models/types"
+library = true
+
 [dependencies]
 trans = {git = "file://{}/trans", version = "0.1.0"}
 "#;
@@ -942,7 +986,8 @@ the_vip = {git = "file://{}/vip", project = "vip", version = "0.1.0"}
     let deps = metadata.collect_dependency_components().unwrap();
 
     // Only the direct dependency's components are collected, under its
-    // alias name; the transitive `trans` component stays hidden.
+    // alias name; the transitive `trans` component stays hidden, and so does
+    // the library, which exports no component.
     assert_eq!(deps.len(), 1);
     let dep = &deps[0];
     assert_eq!(dep.project, "the_vip");

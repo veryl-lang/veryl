@@ -23,6 +23,11 @@ impl CmdDump {
             output_intent: OutputIntent::Never,
             incremental: false,
             fail_fast: false,
+            export: pipeline::ExportStep::Write {
+                check: false,
+                quiet: false,
+                build: Some(&crate::cmd_test::build_component_manifests),
+            },
         };
         let mut ir = Ir::default();
         let _ = pipeline::analyze(metadata, &paths, options, Some(&mut ir), None)?;

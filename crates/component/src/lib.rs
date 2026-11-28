@@ -16,6 +16,7 @@ extern crate self as veryl_component;
 mod ctx;
 mod reference;
 mod runtime_arg;
+pub mod signal;
 pub mod testing;
 mod value;
 
@@ -25,8 +26,13 @@ pub mod export;
 pub use ctx::{BuildCtx, ClockPort, CtxFile, InputPort, OutputPort, ResetPort, SimCtx, TraceVar};
 pub use reference::{MemberPort, MethodArg, ModportMember, ModportRef};
 pub use runtime_arg::{ArgError, ArgValue, RuntimeArg};
+pub use signal::{FixedWidth, InputOnly, InputSignal, MemberSource, Modport, OutputSignal, Packed};
 pub use value::Value;
-pub use veryl_component_macros::{Component, VerylInterface, component_impl};
+// The generated code names these through `::veryl_component`, so that a
+// component crate needs no dependency of its own on them.
+#[doc(hidden)]
+pub use num_bigint;
+pub use veryl_component_macros::{Component, VerylInterface, component_impl, import, modport};
 
 /// Declared shape of a component, carried in the vtable for diagnostics.
 /// `Unspecified` defers the inst/var form check to load-time inference.

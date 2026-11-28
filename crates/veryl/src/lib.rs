@@ -22,6 +22,7 @@ pub mod component_publish;
 pub mod context;
 pub mod diff;
 pub mod doc;
+pub mod export_types;
 pub mod external_subcommand;
 pub mod incremental;
 pub mod pipeline;

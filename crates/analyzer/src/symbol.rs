@@ -296,6 +296,10 @@ pub struct Symbol {
     pub allow_unused: bool,
     pub public: bool,
     pub doc_comment: DocComment,
+    /// Declared in a package or an interface marked `#[export(rust)]`, or
+    /// that package or interface itself. Exported ones refer to nothing but
+    /// symbols so marked.
+    pub exported: bool,
 }
 
 impl Symbol {
@@ -316,6 +320,7 @@ impl Symbol {
             allow_unused: false,
             public,
             doc_comment,
+            exported: false,
         }
     }
 

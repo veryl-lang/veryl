@@ -1,5 +1,6 @@
 use crate::AnalyzerError;
 use crate::HashMap;
+use crate::post_pass1_scope::{self, PostPass1Scope};
 use crate::symbol::{Direction, SymbolKind, Type, TypeKind};
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -54,9 +55,11 @@ impl ResetValueTable {
         self.candidates.push(candidate);
     }
 
-    pub fn apply(&mut self) -> Vec<AnalyzerError> {
+    pub fn apply(&mut self, scope: PostPass1Scope) -> Vec<AnalyzerError> {
         let mut errors = Vec::new();
-        let candidates = std::mem::take(&mut self.candidates);
+        let candidates = scope.take(&mut self.candidates, |x| {
+            post_pass1_scope::in_exported_token(&x.token)
+        });
 
         for candidate in &candidates {
             let resolved = match &candidate.target {
@@ -169,8 +172,8 @@ pub fn export_candidates_since(watermark: usize) -> Vec<ResetValueCandidate> {
     RESET_VALUE_TABLE.with(|f| f.borrow().candidates[watermark..].to_vec())
 }
 
-pub fn apply() -> Vec<AnalyzerError> {
-    RESET_VALUE_TABLE.with(|f| f.borrow_mut().apply())
+pub fn apply(scope: PostPass1Scope) -> Vec<AnalyzerError> {
+    RESET_VALUE_TABLE.with(|f| f.borrow_mut().apply(scope))
 }
 
 /// Returns the reset type of the counterpart of the given reset value literal token.

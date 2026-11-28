@@ -29,6 +29,11 @@ impl CmdDoc {
             output_intent: OutputIntent::Never,
             incremental: false,
             fail_fast: true,
+            export: pipeline::ExportStep::Write {
+                check: false,
+                quiet: false,
+                build: Some(&crate::cmd_test::build_component_manifests),
+            },
         };
         let _ = pipeline::analyze(metadata, &paths, options, None, None)?;
 
@@ -108,13 +113,13 @@ impl CmdDoc {
 /// interface manifests. A package with no manifest yet (never built nor
 /// published) contributes no pages, so its exports are unknown here.
 fn gather_components(metadata: &Metadata) -> Vec<ComponentItem> {
-    if metadata.components.is_empty() {
+    if metadata.component_packages().next().is_none() {
         return vec![];
     }
     let root = metadata.project_path();
     let target_dir = root.join("target/veryl-components");
     let mut ret = BTreeMap::new();
-    for def in &metadata.components {
+    for def in metadata.component_packages() {
         let manifests = def.collect_manifests(&root, &target_dir);
         if manifests.is_empty() {
             warn!(
