@@ -603,6 +603,33 @@ obj_dir/
 "#
     }
 
+    pub fn create_default_agents_md(name: &str) -> String {
+        format!(
+            r#"# AGENTS.md - Instructions for {name}
+
+This project is written in [Veryl](https://doc.veryl-lang.org), a modern hardware description language.
+
+## Project Layout
+
+- `Veryl.toml`: Main project manifest and dependency configuration.
+- `src/`: Veryl source files (`*.veryl`).
+
+## Development Commands
+
+Use these commands during development:
+
+- **Check diagnostics**: `veryl check` (or `veryl check --format json` for machine-readable output)
+- **Formatting**: `veryl fmt` (or `veryl fmt --check` to verify)
+- **Run tests**: `veryl test`
+- **Build SystemVerilog**: `veryl build`
+
+## Initial Setup
+
+If the project is not configured yet, read the [Development Environment](https://doc.veryl-lang.org/book/06_development_environment.html) and [Project Configuration](https://doc.veryl-lang.org/book/06_development_environment/01_project_configuration.html) chapters of the Veryl book and settle the configuration with the user.
+"#
+        )
+    }
+
     pub fn project_path(&self) -> PathBuf {
         self.metadata_path.parent().unwrap().to_path_buf()
     }
