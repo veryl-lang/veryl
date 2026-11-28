@@ -141,7 +141,7 @@ fn eval_enum_member_value(
         if value.is_xz() {
             if matches!(
                 &r#enum.encoding,
-                EnumEncodingItem::OneHot | EnumEncodingItem::Gray
+                EnumEncodingItem::Onehot | EnumEncodingItem::Gray
             ) {
                 EnumMemberValue::UnevaluableValue
             } else {
@@ -184,7 +184,7 @@ fn eval_enum_member_value(
         } else {
             let value = value.payload().into_owned();
             let is_valid = match r#enum.encoding {
-                EnumEncodingItem::OneHot => value.count_ones() == 1,
+                EnumEncodingItem::Onehot => value.count_ones() == 1,
                 EnumEncodingItem::Gray => get_enum_member_next_value(r#enum.encoding, pre_value)
                     .map(|x| value == x)
                     .unwrap_or(true),
@@ -221,7 +221,7 @@ fn get_enum_member_next_value(
     {
         match encoding {
             EnumEncodingItem::Sequential => Some(value + 1u32),
-            EnumEncodingItem::OneHot => Some(value << 1u32),
+            EnumEncodingItem::Onehot => Some(value << 1u32),
             EnumEncodingItem::Gray => {
                 // `value` is the previous member's gray-encoded value, not its
                 // ordinal index. Recover the ordinal by gray-decoding, then
@@ -239,7 +239,7 @@ fn get_enum_member_next_value(
             }
         }
     } else if pre_value.is_none() {
-        if matches!(encoding, EnumEncodingItem::OneHot) {
+        if matches!(encoding, EnumEncodingItem::Onehot) {
             Some(BigUint::from(1u32))
         } else {
             Some(BigUint::from(0u32))

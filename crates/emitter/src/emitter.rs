@@ -5884,7 +5884,7 @@ impl VerylWalker for Emitter {
         self.enum_width = r#enum.width;
         self.emit_enum_implicit_valiant = matches!(
             r#enum.encoding,
-            EnumEncodingItem::OneHot | EnumEncodingItem::Gray
+            EnumEncodingItem::Onehot | EnumEncodingItem::Gray
         ) || enum_list_has_conditional_attribute(&arg.enum_list);
 
         self.token(
