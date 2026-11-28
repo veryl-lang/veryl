@@ -27950,3 +27950,24 @@ fn op_assign_on_multidimensional_struct_array_element() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn enum_encoding_onehot() {
+    let code = r#"
+    package PkgA {
+        #[enum_encoding(onehot)]
+        enum EnumA: logic<3> {
+            A,
+            B,
+            C,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(
+        crate::attribute::EnumEncodingItem::Onehot.to_string(),
+        "onehot"
+    );
+}

@@ -426,7 +426,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                             Ok(Attribute::EnumEncoding(EnumEncodingItem::Sequential))
                         }
                         x if x == pat.onehot => {
-                            Ok(Attribute::EnumEncoding(EnumEncodingItem::OneHot))
+                            Ok(Attribute::EnumEncoding(EnumEncodingItem::Onehot))
                         }
                         x if x == pat.gray => Ok(Attribute::EnumEncoding(EnumEncodingItem::Gray)),
                         _ => Err(err),
@@ -647,7 +647,7 @@ impl fmt::Display for AllowItem {
 pub enum EnumEncodingItem {
     #[default]
     Sequential,
-    OneHot,
+    Onehot,
     Gray,
 }
 
@@ -668,7 +668,7 @@ impl fmt::Display for EnumEncodingItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
             EnumEncodingItem::Sequential => "sequential",
-            EnumEncodingItem::OneHot => "one_hot",
+            EnumEncodingItem::Onehot => "onehot",
             EnumEncodingItem::Gray => "gray",
         };
         text.fmt(f)

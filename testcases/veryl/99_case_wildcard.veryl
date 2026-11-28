@@ -1,0 +1,23 @@
+module Module99 (
+    i_a: input  logic<8>,
+    o_b: output logic<8>,
+    o_c: output logic<8>,
+) {
+    // Statement case with wildcard 'x' and range
+    always_comb {
+        case i_a {
+            8'b0000_00xx   : o_b = 8'd1;
+            8'b0001_xxxx   : o_b = 8'd2;
+            8'd100..=8'd200: o_b = 8'd3;
+            default        : o_b = 8'd0;
+        }
+    }
+
+    // Expression case with wildcard 'x' and range
+    assign o_c = case i_a {
+        8'b0000_00xx   : 8'd1,
+        8'b0001_xxxx   : 8'd2,
+        8'd100..=8'd200: 8'd3,
+        default        : 8'd0,
+    };
+}
