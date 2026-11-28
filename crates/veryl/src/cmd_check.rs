@@ -82,9 +82,10 @@ fn collect_patches(check_error: &CheckError) -> HashMap<PathBuf, Vec<Patch>> {
                     token_source,
                     ..
                 } => {
-                    if let Some(path) = token_source
-                        .get_path()
-                        .and_then(veryl_parser::resource_table::get_path_value)
+                    if can_rename_unused_variable(identifier, error_location, token_source)
+                        && let Some(path) = token_source
+                            .get_path()
+                            .and_then(veryl_parser::resource_table::get_path_value)
                     {
                         patches.entry(path).or_default().push(Patch {
                             offset: error_location.offset(),
@@ -192,4 +193,64 @@ module ModuleUnused {
             "content was: {fixed_content}"
         );
     }
+
+    #[test]
+    fn check_fix_skips_unused_variable_when_renamed_symbol_visible() {
+        let (mut metadata, _tempdir) = setup_test_project();
+        let src_file = metadata.project_path().join("src").join("collision.veryl");
+        fs::write(
+            &src_file,
+            r#"
+module ModuleA (
+    _a: input  logic,
+    o : output logic,
+) {
+    always_comb {
+        let a: logic = 0;
+        o = _a;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let opt = OptCheck {
+            files: Vec::new(),
+            fix: true,
+        };
+        let cmd = CmdCheck::new(opt);
+        let ret = cmd.exec(&mut metadata);
+        assert!(
+            ret.is_err(),
+            "unfixed unused warning should still fail check"
+        );
+
+        let content = fs::read_to_string(&src_file).unwrap();
+        assert!(
+            content.contains("let a: logic = 0;"),
+            "colliding rename should be skipped, content was: {content}"
+        );
+    }
+}
+
+fn can_rename_unused_variable(
+    identifier: &str,
+    error_location: &miette::SourceSpan,
+    token_source: &veryl_parser::veryl_token::TokenSource,
+) -> bool {
+    let renamed = format!("_{identifier}");
+    let renamed_id = veryl_parser::resource_table::insert_str(&renamed);
+    let path = veryl_analyzer::symbol_path::SymbolPath::new(&[renamed_id]);
+    let offset = error_location.offset() as u32;
+
+    let all_symbols = veryl_analyzer::symbol_table::get_all();
+    let Some(symbol) = all_symbols
+        .iter()
+        .find(|s| s.token.source == *token_source && s.token.pos == offset)
+    else {
+        return true;
+    };
+
+    // Reject the rename if `_<identifier>` is already visible in this scope.
+    veryl_analyzer::symbol_table::resolve((&path, &symbol.namespace)).is_err()
 }
