@@ -153,24 +153,14 @@ pub struct OptCheck {
     /// Target files
     pub files: Vec<PathBuf>,
 
-    /// Emit diagnostics in JSON format
-    #[arg(long)]
-    pub json: bool,
-
     /// Output format: `pretty` (human-readable summary, default) or `json`
     /// (machine-readable report on stdout)
     #[arg(long, value_enum, default_value_t)]
     pub format: Format,
 
-    /// Report format version (only with `--format json` or `--json`; currently 1)
+    /// Report format version (only with `--format json`; currently 1)
     #[arg(long = "format-version")]
     pub format_version: Option<u32>,
-}
-
-impl OptCheck {
-    pub fn is_json(&self) -> bool {
-        self.json || matches!(self.format, Format::Json)
-    }
 }
 
 /// Build the target codes corresponding to the current project

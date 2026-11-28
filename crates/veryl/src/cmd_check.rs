@@ -126,13 +126,8 @@ impl CmdCheck {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let is_json = self.opt.is_json();
-        let format = if is_json {
-            Format::Json
-        } else {
-            self.opt.format
-        };
-        check_format_version(format, self.opt.format_version)?;
+        let is_json = matches!(self.opt.format, Format::Json);
+        check_format_version(self.opt.format, self.opt.format_version)?;
 
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
@@ -204,8 +199,7 @@ module ModuleA {
 
         let opt = OptCheck {
             files: Vec::new(),
-            json: true,
-            format: Format::Pretty,
+            format: Format::Json,
             format_version: None,
         };
         let cmd = CmdCheck::new(opt);
@@ -230,8 +224,7 @@ module ModuleInvalid {
 
         let opt = OptCheck {
             files: Vec::new(),
-            json: true,
-            format: Format::Pretty,
+            format: Format::Json,
             format_version: None,
         };
         let cmd = CmdCheck::new(opt);
@@ -245,8 +238,7 @@ module ModuleInvalid {
         let (mut metadata, _tempdir) = setup_test_project();
         let opt_bad_ver = OptCheck {
             files: Vec::new(),
-            json: true,
-            format: Format::Pretty,
+            format: Format::Json,
             format_version: Some(2),
         };
         let cmd = CmdCheck::new(opt_bad_ver);
@@ -255,7 +247,6 @@ module ModuleInvalid {
 
         let opt_pretty_ver = OptCheck {
             files: Vec::new(),
-            json: false,
             format: Format::Pretty,
             format_version: Some(1),
         };
@@ -266,32 +257,5 @@ module ModuleInvalid {
                 .to_string()
                 .contains("--format-version is only supported with --format json")
         );
-    }
-
-    #[test]
-    fn check_is_json_helper() {
-        let opt1 = OptCheck {
-            files: Vec::new(),
-            json: true,
-            format: Format::Pretty,
-            format_version: None,
-        };
-        assert!(opt1.is_json());
-
-        let opt2 = OptCheck {
-            files: Vec::new(),
-            json: false,
-            format: Format::Json,
-            format_version: None,
-        };
-        assert!(opt2.is_json());
-
-        let opt3 = OptCheck {
-            files: Vec::new(),
-            json: false,
-            format: Format::Pretty,
-            format_version: None,
-        };
-        assert!(!opt3.is_json());
     }
 }
